@@ -6,6 +6,13 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Explicit permissions: release job creates a GitHub Release and build job
+# uploads artifacts. Without 'contents: write', tag-triggered workflows get a
+# read-only GITHUB_TOKEN and softprops/action-gh-release fails with 403.
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   build:
     strategy:
@@ -56,7 +63,10 @@ jobs:
         run: npm run build
 
       - name: Build Electron (${{ matrix.target }})
-        run: npx electron-builder --${{ matrix.target }}
+        # --publish never: the release job (softprops/action-gh-release) owns
+        # release creation. electron-builder would otherwise try to publish to
+        # GitHub Releases itself when a tag is present.
+        run: npx electron-builder --${{ matrix.target }} --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -82,4 +92,7 @@ jobs:
         with:
           files: artifacts/*
           draft: false
-          generate_release_notes: true
+          # generate_release_notes requires a PAT (the generate-notes API is
+          # not available to the auto GITHUB_TOKEN) — keep it off so releases
+          # can be created with the default token.
+          generate_release_notes: false
