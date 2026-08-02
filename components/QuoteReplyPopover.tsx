@@ -30,7 +30,6 @@ export function QuoteReplyPopover({ segments, onPick, onOpenFile, cwd, innerRef 
   // Show every segment: closed questions get option buttons, the rest get a
   // fallback quote button. (Any paragraph is quoteable.)
   const questions = segments;
-  if (questions.length === 0) return null;
 
   // Inline file paths mentioned in the text (assistant often lists files as
   // plain text, not links). Verify each against the backend before offering
@@ -56,6 +55,8 @@ export function QuoteReplyPopover({ segments, onPick, onOpenFile, cwd, innerRef 
     });
     return () => { cancelled = true; };
   }, [questions, cwd]);
+
+  if (questions.length === 0) return null;
 
   return (
     <span

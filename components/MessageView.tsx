@@ -704,7 +704,6 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
 function TextBlock({ block, isStreaming, cwd, onOpenFile, sessionId, onQuoteReply }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string) => void; sessionId?: string; onQuoteReply?: (quote: string) => void }) {
   return <MarkdownBody isStreaming={isStreaming} cwd={cwd} sessionId={sessionId} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply}>{block.text}</MarkdownBody>;
 }
-}
 
 function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
   block: ThinkingContent;

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { resolveLocalFileHref } from "@/lib/file-links";
 import { encodeFilePathForApi, getFileName } from "@/lib/file-paths";
@@ -109,9 +109,8 @@ export function MarkdownBody({ children, className, isStreaming, cwd, sessionId,
       // eslint-disable-next-line @next/next/no-img-element
       return <img src={imageSrc} alt={alt ?? ""} loading="lazy" {...props} />;
     },
-    p({ children, ...props }) {
-      delete props.node;
-      const pid = useId();
+    p({ children, node, ...props }) {
+      const pid = `p-${node?.position?.start?.offset ?? 0}`;
       if (!onQuoteReply) return <p {...props}>{children}</p>;
       return (
         <QuoteableParagraph pid={pid} onQuoteReply={onQuoteReply} onOpenFile={onOpenFile} cwd={cwd}>
@@ -119,9 +118,8 @@ export function MarkdownBody({ children, className, isStreaming, cwd, sessionId,
         </QuoteableParagraph>
       );
     },
-    li({ children, ...props }) {
-      delete props.node;
-      const pid = useId();
+    li({ children, node, ...props }) {
+      const pid = `li-${node?.position?.start?.offset ?? 0}`;
       if (!onQuoteReply) return <li {...props}>{children}</li>;
       return (
         <QuoteableParagraph as="li" pid={pid} onQuoteReply={onQuoteReply} onOpenFile={onOpenFile} cwd={cwd}>
@@ -136,9 +134,8 @@ export function MarkdownBody({ children, className, isStreaming, cwd, sessionId,
         </div>
       );
     },
-    tr({ children, ...props }) {
-      delete props.node;
-      const pid = useId();
+    tr({ children, node, ...props }) {
+      const pid = `tr-${node?.position?.start?.offset ?? 0}`;
       if (!onQuoteReply) return <tr {...props}>{children}</tr>;
       return (
         <QuoteableParagraph as="tr" pid={pid} onQuoteReply={onQuoteReply} onOpenFile={onOpenFile} cwd={cwd}>

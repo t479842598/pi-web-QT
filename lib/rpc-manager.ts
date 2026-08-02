@@ -223,7 +223,6 @@ export class AgentSessionWrapper {
           (event as { followUp?: string[] }).followUp,
         );
       }
-      }
       if (IDLE_RESET_EVENT_TYPES.has(event.type)) this.resetIdleTimer();
       this.emit(event);
       if (RUNNING_STATE_EVENT_TYPES.has(event.type)) notifyRunningChange();
