@@ -719,6 +719,19 @@ pre, code {
   }
 }
 
+/* iOS Safari auto-zooms the page when an input/textarea with font-size below
+   16px gains focus. Force 16px on all editable fields on mobile so tapping a
+   field never zooms the viewport. (Inline styles still win, hence the
+   per-component isMobile bump in ChatInput; this is the safety net for any
+   other input/textarea across the app.) */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 @media (max-width: 380px) {
   .file-viewer-toolbar {
     gap: 6px !important;

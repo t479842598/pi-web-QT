@@ -1669,7 +1669,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               outline: "none",
               resize: "none",
               color: "var(--text)",
-              fontSize: 14,
+              // iOS Safari auto-zooms the page when an input with font-size
+              // below 16px gains focus, so use 16px on mobile to prevent it.
+              fontSize: isMobile ? 16 : 14,
               lineHeight: 1.6,
               fontFamily: "inherit",
               minHeight: 24,
