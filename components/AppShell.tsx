@@ -12,7 +12,7 @@ import { SkillsConfig } from "./SkillsConfig";
 import { PluginsConfig } from "./PluginsConfig";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
-import { useTheme } from "@/hooks/useTheme";
+import { useTheme, THEMES } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
@@ -51,7 +51,7 @@ export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
-  const { isDark, toggleTheme } = useTheme();
+  const { isDark, toggleTheme, setTheme, theme: currentTheme } = useTheme();
   const { locale, setLocale, t: translate, supportedLocales } = useI18n();
   const isMobile = useIsMobile();
   useViewportHeight();
@@ -145,6 +145,7 @@ export function AppShell() {
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
   const languageBtnRef = useRef<HTMLButtonElement>(null);
+  const themeBtnRef = useRef<HTMLButtonElement>(null);
 
   // Branch navigator state — populated by ChatWindow via onBranchDataChange
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
@@ -201,10 +202,10 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | "language" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | "language" | "theme" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
-  const toggleTopPanel = useCallback((panel: "branches" | "system" | "session" | "language") => {
+  const toggleTopPanel = useCallback((panel: "branches" | "system" | "session" | "language" | "theme") => {
     if (isMobile) setSidebarOpen(false);
     setActiveTopPanel((cur) => cur === panel ? null : panel);
   }, [isMobile]);
@@ -223,8 +224,10 @@ export function AppShell() {
     if (!activeTopPanel || !topBarRef.current) return;
     const update = () => {
       const topBarRect = topBarRef.current!.getBoundingClientRect();
-      if (activeTopPanel === "language" && !isMobile && languageBtnRef.current) {
-        const buttonRect = languageBtnRef.current.getBoundingClientRect();
+      const targetBtn = activeTopPanel === "language" ? languageBtnRef.current
+        : activeTopPanel === "theme" ? themeBtnRef.current : null;
+      if (targetBtn && !isMobile) {
+        const buttonRect = targetBtn.getBoundingClientRect();
         const width = Math.min(LANGUAGE_MENU_WIDTH, topBarRect.width);
         const left = Math.min(
           buttonRect.left - 1,
@@ -239,6 +242,7 @@ export function AppShell() {
     const ro = new ResizeObserver(update);
     ro.observe(topBarRef.current);
     if (languageBtnRef.current) ro.observe(languageBtnRef.current);
+    if (themeBtnRef.current) ro.observe(themeBtnRef.current);
     return () => ro.disconnect();
   }, [activeTopPanel, isMobile]);
 
@@ -856,35 +860,34 @@ export function AppShell() {
             )}
           </button>
           <button
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              toggleTheme({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
-            }}
-             title={isDark ? translate("theme.light") : translate("theme.dark")}
-             aria-label={isDark ? translate("theme.light") : translate("theme.dark")}
-            aria-pressed={isDark}
+            ref={themeBtnRef}
+            onClick={() => toggleTopPanel("theme")}
+             title={translate("theme.title")}
+             aria-label={translate("theme.title")}
+            aria-haspopup="menu"
+            aria-expanded={activeTopPanel === "theme"}
+            aria-pressed={activeTopPanel === "theme"}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
-              background: "none", border: "none", borderRight: "1px solid var(--border)",
-              color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
+              background: activeTopPanel === "theme" ? "var(--bg-selected)" : "none",
+              border: "none", borderRight: "1px solid var(--border)",
+              color: activeTopPanel === "theme" ? "var(--text)" : "var(--text-muted)",
+              cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
             }}
             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = activeTopPanel === "theme" ? "var(--text)" : "var(--text-muted)";
+            }}
           >
-            {isDark ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="5" />
-                <line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-              </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </svg>
-            )}
+            {/* Palette icon */}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 22a10 10 0 1 1 10-10c0 2.2-1.8 4-4 4h-2.5a2.5 2.5 0 0 0-1.9 4.1c.4.5.4 1.2.4 1.9z" />
+              <circle cx="7.5" cy="11.5" r="1" fill="currentColor" />
+              <circle cx="10.5" cy="7.5" r="1" fill="currentColor" />
+              <circle cx="15.5" cy="7.5" r="1" fill="currentColor" />
+              <circle cx="18" cy="11" r="1" fill="currentColor" />
+            </svg>
            </button>
            <button
              ref={languageBtnRef}
@@ -1248,6 +1251,106 @@ export function AppShell() {
               overflowY: "auto",
               zIndex: 500,
             }}>
+              {activeTopPanel === "theme" && (
+                <div
+                  role="menu"
+                  aria-label={translate("theme.title")}
+                  style={{
+                    background: "var(--bg-panel)",
+                    borderLeft: "1px solid var(--border)",
+                    borderRight: "1px solid var(--border)",
+                    borderBottom: "1px solid var(--border)",
+                    overflow: "hidden",
+                    padding: 4,
+                  }}
+                >
+                  <div style={{
+                    padding: "6px 10px 2px",
+                    fontSize: 10,
+                    fontWeight: 650,
+                    color: "var(--text-dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}>
+                    {translate("theme.title")}
+                  </div>
+                  {THEMES.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => {
+                        setTheme(name, { x: 0, y: 0 });
+                        setActiveTopPanel(null);
+                      }}
+                      role="menuitemradio"
+                      aria-checked={currentTheme === name}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        width: "100%", height: 32, padding: "0 10px",
+                        border: "none", borderRadius: 4,
+                        background: currentTheme === name ? "var(--bg-selected)" : "transparent",
+                        color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12,
+                        textTransform: "capitalize",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (currentTheme !== name) e.currentTarget.style.background = "var(--bg-hover)";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (currentTheme !== name) e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      {/* Theme swatch */}
+                      <span style={{
+                        width: 12, height: 12, borderRadius: 3, flexShrink: 0,
+                        border: "1px solid var(--border)",
+                        background: `var(--bg)`,
+                        boxShadow: `inset 0 0 0 3px var(--bg-panel), inset 0 0 0 4px var(--accent)`,
+                      }} />
+                      <span style={{ flex: 1, minWidth: 0 }}>{name}</span>
+                      {currentTheme === name && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                  <div style={{ height: 1, background: "var(--border)", margin: "4px 6px" }} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toggleTheme({ x: 0, y: 0 });
+                      setActiveTopPanel(null);
+                    }}
+                    role="menuitem"
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      width: "100%", height: 32, padding: "0 10px",
+                      border: "none", borderRadius: 4,
+                      background: "transparent",
+                      color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12,
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      {isDark ? (
+                        <>
+                          <circle cx="12" cy="12" r="5" />
+                          <line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
+                          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                          <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
+                          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                        </>
+                      ) : (
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                      )}
+                    </svg>
+                    <span>{isDark ? translate("theme.light") : translate("theme.dark")}</span>
+                  </button>
+                </div>
+              )}
               {activeTopPanel === "language" && (
                 <div
                   role="menu"

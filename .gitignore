@@ -21,6 +21,12 @@
 # production
 /build
 
+# electron-builder output
+/release
+
+# Reasonix tool metadata (not part of the app)
+/.reasonix
+
 # CI workaround home dir
 /.ci-home
 

@@ -54,6 +54,217 @@ html.dark {
   --font-mono: var(--font-noto-mono), 'JetBrains Mono', 'Fira Code', 'Consolas', ui-monospace, 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
+/* ============ Multi-theme support ============
+   Default (:root / html.dark) is gruvbox.
+   Each additional theme overrides the CSS variables via
+   html[data-theme="name"]. Light mode uses the plain selector,
+   dark mode requires html.dark[data-theme="name"] (higher specificity). */
+
+/* --- Nord --- */
+html[data-theme="nord"] {
+  --bg: #e5e9f0;
+  --bg-panel: #eceff4;
+  --bg-hover: #d8dee9;
+  --bg-selected: #c8d0dd;
+  --border: #b6c2d2;
+  --text: #2e3440;
+  --text-muted: #4c566a;
+  --text-dim: #6c7890;
+  --accent: #5e81ac;
+  --accent-hover: #81a1c1;
+  --user-bg: #d8dee9;
+  --assistant-bg: #e5e9f0;
+  --tool-bg: #eceff4;
+  --bg-subtle: rgba(46,52,64,0.05);
+}
+html.dark[data-theme="nord"] {
+  --bg: #2e3440;
+  --bg-panel: #3b4252;
+  --bg-hover: #434c5e;
+  --bg-selected: #4c566a;
+  --border: #5e6680;
+  --text: #eceff4;
+  --text-muted: #a0aec4;
+  --text-dim: #7c88a0;
+  --accent: #88c0d0;
+  --accent-hover: #81a1c1;
+  --user-bg: #434c5e;
+  --assistant-bg: #3b4252;
+  --tool-bg: #3a4252;
+  --bg-subtle: rgba(236,239,244,0.05);
+}
+
+/* --- Tokyo Night --- */
+html[data-theme="tokyo"] {
+  --bg: #d5d6db;
+  --bg-panel: #e3e4e9;
+  --bg-hover: #c9cad1;
+  --bg-selected: #b8b9c2;
+  --border: #a6a7b5;
+  --text: #343b59;
+  --text-muted: #4f5670;
+  --text-dim: #6f7691;
+  --accent: #565f89;
+  --accent-hover: #7aa2f7;
+  --user-bg: #c9cad1;
+  --assistant-bg: #d5d6db;
+  --tool-bg: #e3e4e9;
+  --bg-subtle: rgba(52,59,89,0.05);
+}
+html.dark[data-theme="tokyo"] {
+  --bg: #1a1b26;
+  --bg-panel: #24283b;
+  --bg-hover: #2f3549;
+  --bg-selected: #3b4261;
+  --border: #414868;
+  --text: #c0caf5;
+  --text-muted: #7c83b3;
+  --text-dim: #565f89;
+  --accent: #7aa2f7;
+  --accent-hover: #89ddff;
+  --user-bg: #2f3549;
+  --assistant-bg: #24283b;
+  --tool-bg: #1f2335;
+  --bg-subtle: rgba(192,202,245,0.05);
+}
+
+/* --- Solarized --- */
+html[data-theme="solarized"] {
+  --bg: #fdf6e3;
+  --bg-panel: #eee8d5;
+  --bg-hover: #e4ddc7;
+  --bg-selected: #d9d2b8;
+  --border: #c3bda8;
+  --text: #586e75;
+  --text-muted: #7a8a8a;
+  --text-dim: #93a1a1;
+  --accent: #268bd2;
+  --accent-hover: #2aa198;
+  --user-bg: #eee8d5;
+  --assistant-bg: #fdf6e3;
+  --tool-bg: #eee8d5;
+  --bg-subtle: rgba(88,110,117,0.06);
+}
+html.dark[data-theme="solarized"] {
+  --bg: #002b36;
+  --bg-panel: #073642;
+  --bg-hover: #0e4250;
+  --bg-selected: #14505e;
+  --border: #2c5c66;
+  --text: #839496;
+  --text-muted: #6d8284;
+  --text-dim: #586e75;
+  --accent: #268bd2;
+  --accent-hover: #2aa198;
+  --user-bg: #0e4250;
+  --assistant-bg: #073642;
+  --tool-bg: #05313c;
+  --bg-subtle: rgba(131,148,150,0.08);
+}
+
+/* --- One Dark --- */
+html[data-theme="onedark"] {
+  --bg: #fafafa;
+  --bg-panel: #f0f0f0;
+  --bg-hover: #e5e5e5;
+  --bg-selected: #d8d8d8;
+  --border: #c8c8c8;
+  --text: #383a42;
+  --text-muted: #7f848e;
+  --text-dim: #a0a1a7;
+  --accent: #4078f2;
+  --accent-hover: #005cc5;
+  --user-bg: #e8e8f0;
+  --assistant-bg: #fafafa;
+  --tool-bg: #f0f0f0;
+  --bg-subtle: rgba(56,58,66,0.04);
+}
+html.dark[data-theme="onedark"] {
+  --bg: #282c34;
+  --bg-panel: #21252b;
+  --bg-hover: #2c313a;
+  --bg-selected: #3b4048;
+  --border: #4b5263;
+  --text: #abb2bf;
+  --text-muted: #7d8799;
+  --text-dim: #5c6370;
+  --accent: #61afef;
+  --accent-hover: #528bff;
+  --user-bg: #2c313a;
+  --assistant-bg: #21252b;
+  --tool-bg: #1e2227;
+  --bg-subtle: rgba(171,178,191,0.06);
+}
+
+/* --- Dracula --- */
+html[data-theme="dracula"] {
+  --bg: #f8f8f2;
+  --bg-panel: #f0f0ea;
+  --bg-hover: #e6e6de;
+  --bg-selected: #d8d8cf;
+  --border: #c6c6bb;
+  --text: #282a36;
+  --text-muted: #5f6380;
+  --text-dim: #8a8fae;
+  --accent: #6272a4;
+  --accent-hover: #44475a;
+  --user-bg: #e6e6de;
+  --assistant-bg: #f8f8f2;
+  --tool-bg: #f0f0ea;
+  --bg-subtle: rgba(40,42,54,0.05);
+}
+html.dark[data-theme="dracula"] {
+  --bg: #282a36;
+  --bg-panel: #21222c;
+  --bg-hover: #343746;
+  --bg-selected: #44475a;
+  --border: #4a4d63;
+  --text: #f8f8f2;
+  --text-muted: #9094ad;
+  --text-dim: #6272a4;
+  --accent: #bd93f9;
+  --accent-hover: #ff79c6;
+  --user-bg: #343746;
+  --assistant-bg: #21222c;
+  --tool-bg: #1e1f29;
+  --bg-subtle: rgba(248,248,242,0.05);
+}
+
+/* --- Catppuccin --- */
+html[data-theme="catppuccin"] {
+  --bg: #eff1f5;
+  --bg-panel: #e6e9ef;
+  --bg-hover: #dce0e8;
+  --bg-selected: #ccd0da;
+  --border: #bcc0cc;
+  --text: #4c4f69;
+  --text-muted: #6c6f85;
+  --text-dim: #8c8fa1;
+  --accent: #1e66f5;
+  --accent-hover: #7287fd;
+  --user-bg: #dce0e8;
+  --assistant-bg: #eff1f5;
+  --tool-bg: #e6e9ef;
+  --bg-subtle: rgba(76,79,105,0.05);
+}
+html.dark[data-theme="catppuccin"] {
+  --bg: #1e1e2e;
+  --bg-panel: #181825;
+  --bg-hover: #313244;
+  --bg-selected: #45475a;
+  --border: #585b70;
+  --text: #cdd6f4;
+  --text-muted: #8f93b2;
+  --text-dim: #6c7086;
+  --accent: #89b4fa;
+  --accent-hover: #b4befe;
+  --user-bg: #313244;
+  --assistant-bg: #181825;
+  --tool-bg: #14141f;
+  --bg-subtle: rgba(205,214,244,0.05);
+}
+
+
 /* Theme toggle: circular wipe via View Transitions API.
    Disable the UA cross-fade; the actual clip-path animation is driven by
    Element.animate() in hooks/useTheme.ts after transition.ready resolves. */

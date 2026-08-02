@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>xyz.274747.pi-web</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>node</string>
+        <string>/Volumes/1T 原装/项目研发/pi-web-QT/bin/pi-web.js</string>
+        <string>-H</string>
+        <string>0.0.0.0</string>
+        <string>-p</string>
+        <string>30141</string>
+        <string>--no-open</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Volumes/1T 原装/项目研发/pi-web-QT</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PI_WEB_PASSWORD</key>
+        <string>TANGlidong24ban@</string>
+        <key>PI_WEB_ALLOWED_HOSTS</key>
+        <string>piweb.274747.xyz</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/pi-web.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/pi-web.log</string>
+</dict>
+</plist>
