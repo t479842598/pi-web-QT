@@ -1,8 +1,10 @@
-# Pi Web
+# Pi Web (pi-web-QT)
 
 [中文文档](./README.zh-CN.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
 
 Local web UI for the [pi coding agent](https://github.com/badlogic/pi-mono). Pi Web reads your local pi session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
+
+This fork is based on [agegr/pi-web](https://github.com/agegr/pi-web) **v0.8.6** and adds a set of UX fixes and enhancements (scroll behavior, mobile usability, math/Mermaid rendering, file handling, queue persistence, usage statistics, quote-reply, and more). See [Changes in this fork](#changes-in-this-fork) below for the full list.
 
 ![Pi Web shows the same pi session with structured Markdown, tool calls, and project navigation beside the CLI](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
 
@@ -79,6 +81,39 @@ npx @agegr/pi-web@latest
 - **Configure less from the terminal**: manage models, login/API keys, model tests, and skill switches from the web UI.
 - **Use the interface in your language**: switch between the supported UI languages from the top bar.
 
+## Changes in this fork
+
+Based on upstream `agegr/pi-web` v0.8.6, with the following fixes and enhancements merged and verified locally:
+
+### Core UX fixes
+
+- **Scroll-to-bottom blank space fixed** — the full-viewport blank spacer that was inserted at the bottom of the message list while the agent runs is replaced with a compact 52px spacer (input area height). Scrolling to the bottom now lands on the actual latest message instead of a full screen of blank space.
+- **Live-follow streaming output** — while the agent is streaming, the view auto-scrolls to follow new output only when you are already near the bottom (within 150px). If you scrolled up to read history, the view stays put and is never yanked back down.
+- **Mobile input zoom fixed** — iOS Safari auto-zooms the page when an input with a font-size below 16px gains focus. The chat textarea now uses 16px on mobile, and a global `@media (max-width: 640px)` rule forces 16px on all `input`/`textarea`/`select` elements as a safety net.
+
+### Message & Markdown rendering
+
+- **Slash-command / skill messages collapse** — `/skill:name` and template messages that pi expands into full skill instructions are now shown as a compact clickable command chip (command name + your arguments), with the expanded body hidden behind a toggle. `lib/slash-display.ts` reverse-matches skill expansions in both live SSE events and loaded session history without mutating SDK-shared message objects.
+- **Display math `$$...$$` no longer swallows following text** — `normalizeDisplayMath` keeps content lines indented together with their `$$` fences so formulas nested in list items or glued to surrounding text parse correctly (remark-math "lazy continuation" guard).
+- **Math formulas render in the chat minimap outline** — headings containing KaTeX formulas no longer show raw LaTeX in the minimap outline.
+- **Mermaid diagrams render with zoom & pan** — mermaid code blocks render as an interactive preview by default; the new `ZoomPanViewer` supports zoom in/out, drag-pan, select-text mode, and full reset. Works on desktop and mobile.
+
+### File handling
+
+- **AI-generated local file links are actionable** — local file paths in assistant messages render as clickable file links with a file-type icon; clicking downloads or opens the file. Supports relative paths, Windows paths, `file:///` URLs, Chinese filenames, and `path:line` references.
+- **Drop any file into the chat input** — previously only images could be dragged in (other files silently did nothing). Now any file dropped into the chat input inserts a path/`@` reference to the file.
+- **FileViewer unified @mention button** — a single @ mention button in the file viewer toolbar: with lines selected in source mode it inserts a line-range mention (`@path#Lstart-Lend`), otherwise a whole-file mention.
+
+### Queue & session reliability
+
+- **Queued messages persist across restarts** — steer/follow-up queues (which pi keeps in memory only) are mirrored to a per-session sidecar file (`<session>.jsonl.queue.json`, atomic write). After a server restart, orphaned entries surface in a recovery dialog where you decide to re-queue, discard, or export — nothing is delivered automatically.
+- **Queue management & export** — the queued-message banner gains export (Markdown/JSON) and import, with `QueueRecoveryDialog` for reviewing pending entries. Streaming model/compact operations are supported from the queue.
+
+### Statistics & QoL
+
+- **Per-model token usage & cost statistics** — aggregates token usage and estimated cost across sessions, broken down per model, accessible from the sidebar. Answers "how much have I spent per model this week/month?" (`app/api/usage/route.ts` + `lib/usage-store.ts` + `components/UsageStats.tsx`).
+- **Quote-reply popover** — hover (desktop) or click (mobile) any assistant paragraph, list item, or table row to pop a quote-reply popover. Closed questions get quick answer buttons (yes/no, A/B), and every block is quoteable via a fallback "quote reply" button that fills the input with a `> quote` (never sends — you pick prompt / steer / followUp).
+
 ## Notes
 
 - **Data directory**: Pi Web reads `~/.pi/agent/sessions` by default. Set `PI_CODING_AGENT_DIR` to point at another pi agent directory.
@@ -103,6 +138,7 @@ Common checks:
 ```bash
 node_modules/.bin/tsc --noEmit
 npm run lint
+npm test
 ```
 
 Avoid running `next build` / `npm run build` during local development. It writes to `.next/` and can interfere with the dev server; leave builds for release work.
@@ -123,6 +159,7 @@ app/
     models-config/  # read/write models.json and test models
     sessions/       # session reads, rename, delete, context, HTML export
     skills/         # skill listing, search, install, enable/disable
+    usage/          # per-model token usage & cost aggregation
 components/
   AppShell.tsx        # main layout, URL state, top panels, file tabs
   SessionSidebar.tsx  # project selector, session tree, Explorer
@@ -134,6 +171,10 @@ components/
   SkillsConfig.tsx    # skill management panel
   FileExplorer.tsx    # file tree
   FileViewer.tsx      # source, diff, image, audio, PDF, DOCX preview
+  UsageStats.tsx      # per-model usage/cost statistics panel
+  QueueRecoveryDialog.tsx # queued-message recovery/export/import dialog
+  QuoteReplyPopover.tsx   # quote-reply popover on assistant messages
+  ZoomPanViewer.tsx       # zoom/pan viewer (Mermaid previews)
 lib/
   directory-browser.ts # directory normalization and safe listing helpers
   http-dispatcher.ts  # HTTP(S) proxy setup for server-side fetch
@@ -144,10 +185,16 @@ lib/
   file-paths.ts       # path encoding and relative path helpers
   markdown.ts         # Markdown/Mermaid/KaTeX plugin configuration
   pi-types.ts         # pi-related types
+  slash-display.ts    # slash-command/skill expansion reverse-matching
+  queue-store.ts      # durable queue sidecar (persist/recover steer & follow-up)
+  queue-export.ts     # queue export (Markdown/JSON) and import parsing
+  usage-store.ts      # per-model token usage & cost store
+  quote-reply.ts      # quote-reply parsing/formatting helpers
+  dropped-files.ts    # dropped-file path/reference helpers
 hooks/
   useAgentSession.ts  # session loading, command sending, SSE state machine
   useAudio.ts         # completion sound
-  useDragDrop.ts      # image drag/drop
+  useDragDrop.ts      # image/file drag/drop
   useTheme.ts         # theme switching
 bin/
   pi-web.js           # npm CLI entrypoint
