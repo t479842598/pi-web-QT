@@ -81,6 +81,7 @@
   "build": {
     "appId": "xyz.274747.pi-web",
     "productName": "Pi Web",
+    "executableName": "pi-web",
     "directories": {
       "output": "release"
     },
@@ -97,15 +98,16 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": ["dmg"],
-      "icon": "public/favicon.ico"
+      "icon": "public/icons/icon-512.png"
     },
     "win": {
       "target": ["nsis"],
-      "icon": "public/favicon.ico"
+      "icon": "public/icons/icon-512.png"
     },
     "linux": {
       "target": ["AppImage"],
-      "icon": "public/favicon.ico"
+      "icon": "public/icons/icon-512.png",
+      "category": "Development"
     }
   }
 }
