@@ -4,11 +4,13 @@
 
 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
 
-本分支基于 [agegr/pi-web](https://github.com/agegr/pi-web) **v0.8.6**，合并了一系列体验修复与增强（滚动行为、移动端可用性、数学公式/Mermaid 渲染、文件处理、队列持久化、用量统计、引用回复等）。完整清单见下文 [本分支的改动](#本分支的改动)。
+本分支基于 [agegr/pi-web](https://github.com/agegr/pi-web) **v0.8.6**，合并了一系列体验修复与增强（滚动行为、移动端可用性、数学公式/Mermaid 渲染、文件处理、队列持久化、用量统计、引用回复等），并新增 **Gruvbox 主题**和 **Electron 桌面端** 支持。
 
 中文微信群：请查看 [GitHub Discussions 帖子](https://github.com/agegr/pi-web/discussions/271)。
 
 ## 快速开始
+
+### 命令行模式
 
 Pi Web 要求 Node.js 22.19.0 或更高版本。可通过 `node --version` 检查当前版本。
 
@@ -27,7 +29,54 @@ pi-web
 
 启动后打开 [http://127.0.0.1:30141](http://127.0.0.1:30141)。命令行版本会在服务就绪后尝试自动打开浏览器。Pi Web 默认仅监听 `127.0.0.1`。
 
-**可选参数：**
+**外网访问（带密码保护）：**
+
+```bash
+PI_WEB_PASSWORD='你的密码' PI_WEB_ALLOWED_HOSTS='your-domain.com' pi-web -H 0.0.0.0 -p 30141
+```
+
+### 桌面端模式（macOS / Windows / Linux）
+
+**从 GitHub Releases 下载**
+前往 [Releases](https://github.com/t479842598/pi-web-QT/releases) 下载对应平台的安装包。
+
+**GitHub Actions 自动打包**：推送 `v*` 标签触发三平台构建，产物自动发布到 Release。也可在 Actions 页面手动触发。
+
+**本地打包：**
+
+```bash
+npm install
+npm run build              # 构建 Next.js 产物
+npm run build:desktop      # 打包为 macOS .dmg / Windows .exe / Linux AppImage
+```
+
+**开发模式（不打包）：**
+
+```bash
+npm run desktop
+```
+
+**首次启动**会弹出设置窗口，填写访问密码、允许域名和端口。配置保存在 `~/.pi/agent/pi-web-desktop.json`，后续启动直接载入。
+
+桌面端和命令行模式共享同一 `~/.pi/agent/` 数据目录，对话历史、项目配置完全互通——无需迁移。
+
+打包产物：
+- macOS: `release/Pi Web-<version>.dmg`
+- Windows: `release/Pi Web Setup <version>.exe`
+- Linux: `release/Pi Web-<version>.AppImage`
+
+## 主题
+
+本分支使用 **Gruvbox** 配色，支持亮色/暗色自动切换（跟随系统或手动切换）。
+
+| 模式 | 底色 | 文字色 | 强调色 |
+|------|------|--------|--------|
+| 亮色 | `#fbf1c7` | `#3c3836` | `#458588` |
+| 暗色 | `#1d2021` | `#ebdbb2` | `#83a598` |
+
+颜色变量定义在 `app/globals.css`，可通过 CSS 变量自行覆盖。
+
+## 完整命令行参数
 
 ```bash
 pi-web --port 8080              # 自定义端口
@@ -78,10 +127,28 @@ npx @agegr/pi-web@latest
 - **会话状态一目了然**：顶栏显示上下文用量、费用、压缩状态和系统提示详情。
 - **少用终端做配置**：在网页里管理模型、登录/API Key、模型测试和技能开关。
 - **界面语言可切换**：顶栏在支持的 UI 语言之间切换。
+- **桌面端原生体验**：独立窗口、Dock 图标、系统通知、首次配置引导。
+- **Gruvbox 双模式主题**：亮色/暗色自动跟随系统，平滑过渡动画。
+
+## 运行模式对比
+
+| 特性 | 命令行 `pi-web` | 桌面端 `.app` |
+|------|:---:|:---:|
+| 端口/密码/域名 | 环境变量或 CLI 参数 | 首次设置界面 |
+| 配置持久化 | `~/.pi/agent/` | `~/.pi/agent/pi-web-desktop.json` |
+| 自动启动 | 需自行配置 | ✅ 双击即用 |
+| 对话数据 | 共享 | 共享 |
+| 系统托盘 | ❌ | 未来支持 |
+| 自动更新 | ❌ | 未来支持 |
 
 ## 本分支的改动
 
 基于上游 `agegr/pi-web` v0.8.6，以下修复与增强已合并并在本地验证：
+
+### 主题与桌面端
+
+- **Gruvbox 主题** — 使用 gruvbox 经典配色替换默认主题，`app/globals.css` 中 `:root`（亮色）和 `html.dark`（暗色）变量全覆盖，font-mono 去重合并。
+- **Electron 桌面端** — `electron/main.js` 主进程 + `electron/setup.html` 设置界面 + `electron/preload.js` 安全桥接。首次运行弹设置窗，配置保存到 `~/.pi/agent/pi-web-desktop.json`。macOS 支持 Dock 激活恢复窗口。打包为 `.dmg` / `.exe` / `.AppImage`。
 
 ### 核心体验修复
 
@@ -173,6 +240,10 @@ components/
   QueueRecoveryDialog.tsx # 排队消息恢复/导出/导入对话框
   QuoteReplyPopover.tsx   # 助手消息上的引用回复浮层
   ZoomPanViewer.tsx       # 缩放/平移查看器（Mermaid 预览）
+electron/
+  main.js            # Electron 主进程：设置窗、Next.js 启动、窗口管理
+  preload.js         # contextBridge 安全桥接（piDesktop API）
+  setup.html         # 首次运行设置界面（密码、域名、端口）
 lib/
   directory-browser.ts # 目录归一化与安全列出辅助函数
   http-dispatcher.ts  # 服务端 fetch 的 HTTP(S) 代理配置

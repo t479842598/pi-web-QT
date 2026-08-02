@@ -2,6 +2,7 @@
   "name": "@agegr/pi-web",
   "version": "0.8.6",
   "description": "Web UI for the pi coding agent",
+  "main": "electron/main.js",
   "homepage": "https://github.com/agegr/pi-web#readme",
   "repository": {
     "type": "git",
@@ -35,7 +36,9 @@
     "start:lan": "next start -H 0.0.0.0 -p 30141",
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test",
-    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
+    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
+    "desktop": "electron .",
+    "build:desktop": "npm run build && electron-builder"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.83.0",
@@ -56,6 +59,8 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-syntax-highlighter": "^15.5.13",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "jiti": "^2.7.0",
@@ -72,5 +77,35 @@
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.2.2",
     "typescript": "^5"
+  },
+  "build": {
+    "appId": "xyz.274747.pi-web",
+    "productName": "Pi Web",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      ".next/**/*",
+      "!.next/cache",
+      "!.next/**/*.js.map",
+      "public/**/*",
+      "next.config.ts",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": ["dmg"],
+      "icon": "public/favicon.ico"
+    },
+    "win": {
+      "target": ["nsis"],
+      "icon": "public/favicon.ico"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "public/favicon.ico"
+    }
   }
 }
