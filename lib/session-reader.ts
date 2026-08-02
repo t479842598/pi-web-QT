@@ -6,9 +6,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { closeSync, openSync, readSync } from "fs";
 import { normalize as normalizePath } from "path";
-import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
+import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext, UserMessage } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
+import { resolveSlashDisplayText, userMessagePlainText } from "./slash-display";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
 
@@ -226,6 +227,20 @@ export function buildSessionContext(
     const localEntry = entry as unknown as SessionEntry;
     const m = entryToUiMessage(localEntry, options);
     if (m) {
+      // 斜杠命令展开消息（/skill:name /模板名）：还原紧凑命令形式供界面展示。
+      // prompt 模板展开文本无特征标记，无法还原，保持全文（已知局限）。
+      // 注意用展开运算符新建消息对象注入 originalText，不改写 SDK 返回的原始对象
+      //（该对象可能被 SDK 后续持久化复用，直接赋值会污染存储）。
+      if (m.role === "user") {
+        const userMessage = m as UserMessage;
+        const text = userMessagePlainText(userMessage.content);
+        const originalText = resolveSlashDisplayText(text);
+        if (originalText && originalText !== text) {
+          messages.push({ ...userMessage, originalText });
+          entryIds.push(localEntry.id);
+          continue;
+        }
+      }
       messages.push(m);
       entryIds.push(localEntry.id);
     }

@@ -151,6 +151,14 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
+  // 斜杠命令消息：默认折叠为命令 chip，点击展开 SDK 展开后的完整文本
+  const [expanded, setExpanded] = useState(false);
+  const originalText = message.originalText;
+  // 拆分命令名与参数：/skill:web-access 验证参数 → 命令名 + 参数（无空格则为纯命令）
+  const rawCommand = originalText ?? "";
+  const spaceIndex = rawCommand.indexOf(" ");
+  const commandName = spaceIndex === -1 ? rawCommand : rawCommand.slice(0, spaceIndex);
+  const commandArgs = spaceIndex === -1 ? "" : rawCommand.slice(spaceIndex + 1).trim();
 
   const content =
     typeof message.content === "string"
@@ -167,10 +175,39 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   const time = formatTime(message.timestamp);
   const canFork = !!entryId && !!onFork;
+  // 复制/编辑使用命令原文（界面所见即所得），展开全文仅用于展示
+  const copyTarget = originalText ?? content;
+
+  // 图片渲染（originalText 折叠分支与原分支共用，避免斜杠命令+图片时图片消失）
+  const imageBlocksNode = imageBlocks.length > 0 && (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: content ? 8 : 0 }}>
+      {imageBlocks.map((img, i) => {
+        // lib/types.ts ImageContent uses {source:{type,data,media_type,url}}
+        // pi-ai on-disk format uses flat {data, mimeType} — handle both
+        const flat = img as unknown as { data?: string; mimeType?: string };
+        const src = img.source
+          ? img.source.type === "base64"
+            ? `data:${img.source.media_type};base64,${img.source.data}`
+            : img.source.url ?? ""
+          : flat.data
+            ? `data:${flat.mimeType};base64,${flat.data}`
+            : "";
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={i}
+            src={src}
+            alt=""
+            style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid rgba(59,130,246,0.15)" }}
+          />
+        );
+      })}
+    </div>
+  );
   const canNavigate = !!prevAssistantEntryId && !!onNavigate;
 
   const copyContent = () => {
-    copyText(content).then(() => {
+    copyText(copyTarget).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -197,32 +234,73 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             wordBreak: "break-word",
           }}
         >
-          {imageBlocks.length > 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: content ? 8 : 0 }}>
-              {imageBlocks.map((img, i) => {
-                // lib/types.ts ImageContent uses {source:{type,data,media_type,url}}
-                // pi-ai on-disk format uses flat {data, mimeType} — handle both
-                const flat = img as unknown as { data?: string; mimeType?: string };
-                const src = img.source
-                  ? img.source.type === "base64"
-                    ? `data:${img.source.media_type};base64,${img.source.data}`
-                    : img.source.url ?? ""
-                  : flat.data
-                    ? `data:${flat.mimeType};base64,${flat.data}`
-                    : "";
-                return (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={i}
-                    src={src}
-                    alt=""
-                    style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid rgba(59,130,246,0.15)" }}
-                  />
-                );
-              })}
+          {originalText ? (
+            // 斜杠命令消息：命令名紧凑展示（accent 色，点击展开/折叠全文），
+            // 用户输入的参数部分原文完整展示，不折叠；无 hover 背景反馈
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+              {imageBlocksNode}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => setExpanded((prev) => !prev)}
+                  title={expanded ? t("i18n.collapse") : t("i18n.expand")}
+                  aria-expanded={expanded}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    flexShrink: 0,
+                    padding: 0,
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "var(--accent)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 13,
+                    textAlign: "left",
+                  }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {commandName}
+                  </span>
+                  <svg
+                    width="11"
+                    height="11"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ flexShrink: 0, opacity: 0.75, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}
+                    aria-hidden="true"
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+                {commandArgs && (
+                  <span style={{
+                    color: "var(--text)",
+                    fontSize: 14,
+                    lineHeight: 1.6,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    minWidth: 0,
+                    flex: 1,
+                  }}>
+                    {commandArgs}
+                  </span>
+                )}
+              </div>
+              {expanded && (
+                <MarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</MarkdownBody>
+              )}
             </div>
-          )}
+          ) : (
+          <>
+          {imageBlocksNode}
           {content && <MarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</MarkdownBody>}
+          </>
+          )}
         </div>
 
       </div>
@@ -278,7 +356,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             }}>
               {canNavigate && (
                 <button
-                  onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(content); }}
+                  onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(copyTarget); }}
                    title={t("i18n.editFromHereTitle")}
                   style={{
                     display: "flex", alignItems: "center", gap: 4,

@@ -8,6 +8,7 @@ import { validateAgentImages } from "./image-attachments";
 import { invalidateModelsCache } from "./models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
+import { parseSlashCommandName, resolveSlashDisplayText, SlashOriginalTracker, userMessagePlainText } from "./slash-display";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
@@ -151,6 +152,8 @@ export class AgentSessionWrapper {
   private onDestroyCallback: (() => void) | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private _alive = true;
+  /** FIFO: 已发送且确定会被 SDK 展开的斜杠命令原文，user 消息回传时消费注入 */
+  private slashOriginals = new SlashOriginalTracker();
 
   constructor(public readonly inner: AgentSessionLike) {}
 
@@ -178,6 +181,23 @@ export class AgentSessionWrapper {
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       if (event.type === "agent_end") {
         invalidateSessionListCache();
+      }
+      // 斜杠命令（/skill:name /模板名）由 SDK 展开后回传：在 message_end 的 user
+      // 消息上注入原始命令，供界面紧凑展示。
+      // 注意：SDK 的 _emit 同步分发后会用同一 message 对象 appendMessage 落盘并进入
+      // 模型上下文，因此绝不能改写原对象 —— 用展开运算符构造新对象注入展示层字段。
+      // 仅在 message_end 处理 —— message_start/update 的 user 消息被前端忽略。
+      if (event.type === "message_end" && (event.message as { role?: string } | undefined)?.role === "user") {
+        const message = event.message as { content?: string | Array<{ type: string; text?: string }> };
+        const text = userMessagePlainText(message.content ?? "");
+        // 每条 user message_end 固定消费一条 FIFO（无论特征识别是否命中），
+        // 避免记录残留导致下一条消息错注入；特征识别结果优先（skill 展开文本可自证）
+        const fromQueue = this.slashOriginals.consumeFor(text);
+        const originalText = resolveSlashDisplayText(text) ?? fromQueue;
+        if (originalText && originalText !== text) {
+          this.emit({ ...event, message: { ...(event.message as Record<string, unknown>), originalText } });
+          return;
+        }
       }
       if (IDLE_RESET_EVENT_TYPES.has(event.type)) this.resetIdleTimer();
       this.emit(event);
@@ -280,6 +300,22 @@ export class AgentSessionWrapper {
     }
   }
 
+  /**
+   * 记录确定会被 SDK 展开的斜杠命令原文（命中 prompt 模板或 skill）。
+   * 只记录这两类：扩展命令由 SDK 立即执行、不产生 user 消息，记录会造成 FIFO 残留。
+   */
+  private trackSlashOriginal(message: string): void {
+    if (typeof message !== "string") return;
+    const name = parseSlashCommandName(message);
+    if (!name) return;
+    const isPromptTemplate = this.inner.promptTemplates.some((template) => template.name === name);
+    const isSkill = name.startsWith("skill:")
+      && this.inner.resourceLoader.getSkills().skills.some((skill) => `skill:${skill.name}` === name);
+    if (isPromptTemplate || isSkill) {
+      this.slashOriginals.push(message.trim());
+    }
+  }
+
   private applyForcedEmptySystemPrompt(): void {
     if (this.forceEmptySystemPrompt && this.inner.agent.state) {
       this.inner.agent.state.systemPrompt = "";
@@ -344,11 +380,16 @@ export class AgentSessionWrapper {
     if (type === "prompt" || type === "steer" || type === "follow_up") {
       const imageError = validateAgentImages(command.images);
       if (imageError) throw new Error(imageError);
+      // 记录确定会被 SDK 展开的斜杠命令（命中 prompt 模板或 skill）原文，
+      // 供 message_end 回传时注入展示。扩展命令不产生 user 消息，不记录。
+      this.trackSlashOriginal(command.message as string);
     }
 
     switch (type) {
       case "prompt": {
         if (this.inner.isBashRunning) {
+          // prompt 未发出，刚 push 的斜杠命令记录不会再有 message_end 消费，立即清空
+          this.slashOriginals.clear();
           throw new Error("Cannot send a prompt while a shell command is running");
         }
         // Fire and forget — events come via subscribe
@@ -367,6 +408,9 @@ export class AgentSessionWrapper {
           notifyRunningChange();
         }).catch((error) => {
           this.promptRunning = false;
+          // prompt 发送失败（无 model / auth 校验失败等）不会产生 message_end，
+          // 清理队列避免残留记录错注入后续消息
+          this.slashOriginals.clear();
           this.resetIdleTimer();
           invalidateSessionListCache();
           this.emit({
@@ -526,13 +570,25 @@ export class AgentSessionWrapper {
 
       case "steer": {
         const steerImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
+        try {
+          await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
+        } catch (error) {
+          // steer 入队失败不会产生 message_end，清理本次记录避免残留
+          this.slashOriginals.clear();
+          throw error;
+        }
         return null;
       }
 
       case "follow_up": {
         const followImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
+        try {
+          await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
+        } catch (error) {
+          // followUp 入队失败不会产生 message_end，清理本次记录避免残留
+          this.slashOriginals.clear();
+          throw error;
+        }
         return null;
       }
 
