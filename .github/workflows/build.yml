@@ -34,7 +34,25 @@ jobs:
 
       - run: npm ci
 
-      - name: Build Next.js
+      - name: Prepare clean CI home (Windows junction workaround)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: mkdir -p "${{ github.workspace }}/.ci-home"
+
+      # Windows junction directories (C:\Users\runneradmin\Cookies etc.) are
+      # unreadable (EPERM) and break next build's outputFileTracing when it
+      # follows os.homedir(). Point home at a clean dir inside the repo so the
+      # trace never scans the real Windows user profile. Other OSes build with
+      # their normal home.
+      - name: Build Next.js (Windows)
+        if: runner.os == 'Windows'
+        run: npm run build
+        env:
+          USERPROFILE: ${{ github.workspace }}/.ci-home
+          HOME: ${{ github.workspace }}/.ci-home
+
+      - name: Build Next.js (macOS/Linux)
+        if: runner.os != 'Windows'
         run: npm run build
 
       - name: Build Electron (${{ matrix.target }})

@@ -21,6 +21,9 @@
 # production
 /build
 
+# CI workaround home dir
+/.ci-home
+
 # misc
 .DS_Store
 *.pem
