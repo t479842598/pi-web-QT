@@ -594,6 +594,32 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [modelFilter, setModelFilter] = useState("");
+  // Tracks the visual viewport height so the model dropdown re-anchors when the
+  // mobile keyboard opens (search input autoFocus) — otherwise the fixed panel
+  // computes `bottom` from a stale rect and ends up off-screen at the very bottom.
+  const [viewportH, setViewportH] = useState<number>(() =>
+    typeof window !== "undefined" ? (window.visualViewport?.height ?? window.innerHeight) : 0,
+  );
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const update = () => {
+      const nextH = vv?.height ?? window.innerHeight;
+      setViewportH(nextH);
+      // Keyboard popped open while the model dropdown is showing: re-measure the
+      // trigger button so the panel re-anchors to its current position.
+      if (modelDropdownOpen && dropdownRef.current) {
+        const r = dropdownRef.current.getBoundingClientRect();
+        setModelDropdownRect({ top: r.top, left: r.left, width: r.width });
+      }
+    };
+    update();
+    vv?.addEventListener("resize", update);
+    window.addEventListener("resize", update);
+    return () => {
+      vv?.removeEventListener("resize", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [modelDropdownOpen]);
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [controlsMenuOpen, setControlsMenuOpen] = useState(false);
@@ -2685,9 +2711,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     )}
                   </button>
                   {modelDropdownOpen && modelDropdownRect && (() => {
-                    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-                    const bottom = viewportHeight - modelDropdownRect.top + 6;
-                    const maxH = Math.max(120, Math.min(modelDropdownRect.top - 8, viewportHeight * 0.6));
+                    const vh = viewportH > 0 ? viewportH : (window.visualViewport?.height ?? window.innerHeight);
+                    // Anchor the panel to the visible viewport bottom. `rect.top`
+                    // is captured at click time; with the keyboard open the button
+                    // may have moved, so clamp so the panel never goes off-screen.
+                    const topInViewport = Math.min(modelDropdownRect.top, vh - 48);
+                    const bottom = Math.max(6, vh - topInViewport + 6);
+                    const maxH = Math.max(120, Math.min(topInViewport - 8, vh * 0.6));
                     // On mobile, pin to a small left margin and cap width to the
                     // viewport so long model names never push the panel off-screen.
                     const panelPos: React.CSSProperties = isMobile
@@ -3226,7 +3256,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </button>
             )}
             </div>
-            {isMobile && <BottomModeBar mode={bottomMode} onClick={() => cycleBottomMode()} />}
+            {/* The collapse-chevron bar was removed on mobile: tapping it near the
+                controls collapsed the whole input and made model selection/search
+                impossible. Collapse now happens only via the swipe gesture. */}
           </div>
         </div>
         )}
