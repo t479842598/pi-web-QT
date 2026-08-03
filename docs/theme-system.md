@@ -1,41 +1,33 @@
-# Pi TUI 主题系统
+# Pi Web 主题系统
 
-## 默认与切换
+## 默认、固定主题与外观模式
 
-Pi Web 的首次加载回退与默认偏好使用 Pi TUI 官方内置主题：浅色为 `pi:light`，深色为 `pi:dark`。显示设置可以分别选择浅色主题、深色主题，或设为“跟随系统”；切换外观时会恢复对应亮/暗偏好的主题。
+显示设置提供“默认”配色，以及从 QT 旧界面恢复的七套固定主题：`gruvbox`、`nord`、`tokyo`（Tokyo Night）、`solarized`、`onedark`（One Dark）、`dracula` 和 `catppuccin`。每套固定主题都提供浅色与深色变量。
 
-旧版 Web 配色（Gruvbox、Nord、Tokyo、Solarized、One Dark、Dracula、Catppuccin）保留在“Web 兼容配色”中，保存过的旧偏好会自动迁移为 `legacy:<name>`，不丢失用户设置。
+外观模式可独立选择“浅色”“深色”或“跟随系统”。主题切换会请求所选主题与当前外观模式对应的变量；边框可见度仍在客户端基于该主题的原始边框色计算。
 
-## 主题来源
+## Pi JSON 自定义主题
 
-`GET /api/themes?cwd=<cwd>` 返回当前可用 Pi TUI 主题的安全描述信息；`GET /api/themes/<id>?cwd=<cwd>` 返回 CSS token 映射。发现顺序和来源如下：
+固定主题不会替代 Pi JSON 主题。`GET /api/themes?cwd=<cwd>` 按以下顺序返回可选主题：
 
-1. Pi TUI 内置 `light`、`dark`；
-2. 用户目录 `~/.pi/agent/themes/`；
-3. 当前项目及扩展通过 Pi `DefaultResourceLoader` 加载到的主题。
+1. 七套固定 QT 主题（`builtin: true`）；
+2. `~/.pi/agent/themes/` 中发现的 JSON 主题；
+3. 传入项目工作目录下 `.pi/themes/` 中发现的 JSON 主题。
 
-主题 ID 始终为 `pi:<theme-name>`。项目路径会先经过既有文件访问白名单校验；接口不会返回主题文件原文或其他用户目录内容。
+`GET /api/themes/<name>?mode=light|dark&cwd=<cwd>` 返回应用该主题所需的 CSS token。固定主题名称优先于同名 JSON 文件；自定义主题继续按照 `-light.json`、`-dark.json` 或单文件回退规则解析。
 
-## 映射与维护
+## CSS token 映射
 
-服务端解析 Pi Theme JSON 的 `vars`、`colors`、`export` 字段，支持变量引用和 ANSI 256 色值，并映射为当前 Web 表面使用的 CSS 变量，例如 `--bg`、`--text`、`--accent`、消息/工具/Markdown/Syntax/Diff/Git 状态 token。
-
-客户端只将映射结果写入 `document.documentElement.style`；切到内置回退或旧版兼容配色时会先清理动态 token，避免上一个主题残留。主题发现结果有 3 秒内存缓存，以减少设置弹窗重复打开时的资源扫描。
-
-## 兼容接口
-
-`/api/theme-sets` 继续保留给旧调用方，但内容已改为从真实 Pi 主题描述派生。新界面和新调用方应使用 `/api/themes`。
+服务端返回当前 Web 表面使用的 CSS 变量，包括 `--bg`、`--text`、`--accent`、消息/工具背景、Diff/Git 状态色和边框变量。客户端仅将返回的变量写入 `document.documentElement.style`；切回“默认”会清除动态变量，避免上一套主题残留。
 
 ## 验证
-
-主题改动后至少验证：
 
 ```bash
 node_modules/.bin/tsc --noEmit
 npm run lint
-node --experimental-strip-types --test app/api/theme-sets/theme-sets.test.mjs
-curl -sS 'http://127.0.0.1:30141/api/themes/pi%3Alight'
-curl -sS 'http://127.0.0.1:30141/api/themes/pi%3Adark'
+npm test
+curl -u 'pi:<password>' 'http://127.0.0.1:30141/api/themes'
+curl -u 'pi:<password>' 'http://127.0.0.1:30141/api/themes/nord?mode=dark'
 ```
 
-当使用自定义项目主题时，调用 API 时传入已允许访问的 `cwd`，并确认主题在对应的浅色或深色列表中出现、切换后 `html[data-pi-theme]` 和动态 CSS 变量同步更新。
+确认 API 列出七套 `builtin: true` 主题，并在切换后检查 `html[data-theme]` 及 `--bg`、`--accent` 等变量已同步更新。

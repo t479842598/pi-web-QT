@@ -604,3 +604,33 @@
 - `progress.md`：追加本轮文档、推送和验证记录。
 
 回滚方式：文档提交后执行 `git revert HEAD`；已推送的上一轮 Web 基线提交可使用 `git revert 658b96d` 回退。
+
+## 2026-08-03 - Task: 恢复 QT 固定主题并优化移动端输入区
+
+### What was done
+- 恢复 QT 原有的 Gruvbox、Nord、Tokyo Night、Solarized、One Dark、Dracula 与 Catppuccin 七套固定主题；保持 Pi JSON 自定义主题、浅色/深色/跟随系统模式和边框可见度功能。
+- 将移动端聊天输入框最小高度提升至 52px，并以更紧凑的行高、字距降低文字视觉密度；保留 16px 实际字号，避免 iOS Safari 聚焦自动缩放。
+- 将当前行为、部署验证入口和更新日志同步至根 README、英文 README、CHANGELOG 与主题/移动端文档。
+
+### Testing
+- `/Volumes/1T 原装/项目研发/pi-web-desktop`：`npm run build` 通过；仅有既有 `next.config.ts` NFT 全项目追踪的非阻断警告。
+- `/Volumes/1T 原装/项目研发/pi-web-desktop`：生产服务的 `/api/themes` 返回七套 `builtin: true` 主题；`/api/themes/nord?mode=dark` 返回 `#2e3440` 背景与 `#88c0d0` 强调色；无认证请求返回 401。
+- Playwright（390×844、生产服务）：页面有内容、无框架错误覆盖层、无横向溢出；输入框高度 52px、计算字号 16px、行高 23.2px；选择 Nord 后 `data-theme=nord` 且 CSS 变量正确更新。
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm run lint`：通过。
+- `npm test`：227/227 通过。
+- `git diff --check`：通过。
+
+### Notes
+改动文件清单：
+- `app/globals.css`：增加移动端聊天输入框高度及紧凑文本规则。
+- `lib/theme.ts`：新增七套 QT 内置主题，列出并解析其亮暗 CSS token，同时保留 JSON 主题扫描。
+- `lib/theme.test.mjs`：覆盖内置主题列表及 Nord 亮暗变量解析。
+- `README.md`：补充中文最新更新说明。
+- `README.en.md`：补充英文最新更新说明。
+- `CHANGELOG.md`：记录固定主题恢复和移动端输入区改动。
+- `docs/theme-system.md`：更新当前主题来源、API 与验证说明。
+- `docs/mobile-layout.md`：记录移动端输入区高度与 Safari 缩放约束。
+- `progress.md`：追加本轮施工、验证和回滚记录。
+
+回滚方式：提交后执行 `git revert HEAD`；若只撤销未提交工作区，执行 `git restore -- app/globals.css lib/theme.ts README.md README.en.md CHANGELOG.md docs/theme-system.md docs/mobile-layout.md progress.md && rm lib/theme.test.mjs`。

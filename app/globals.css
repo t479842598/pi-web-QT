@@ -1833,6 +1833,11 @@ span.linenumber {
   .chat-input-model-dropdown button {
     font-size: 16px !important;
   }
+  .chat-input-textarea {
+    min-height: 52px !important;
+    line-height: 1.45;
+    letter-spacing: -0.01em;
+  }
 
   .chat-stats-center {
     display: none !important;

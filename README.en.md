@@ -25,6 +25,8 @@
 - **Choose folder** opens a browsable directory picker instead of asking for a manually typed path.
 - On mobile, project and Git worktree labels are smaller and truncate safely; the model selector and send action remain visible.
 - Expanding a provider in the model selector keeps the dropdown frame fixed and scrolls only the result list.
+- Display settings again include the fixed QT palettes: Gruvbox, Nord, Tokyo Night, Solarized, One Dark, Dracula, and Catppuccin. They coexist with Pi JSON themes and support light, dark, and system modes.
+- The mobile composer is now 52px high. It keeps a 16px input font to prevent iOS Safari zoom, while tighter line height and letter spacing make the text read smaller.
 - Production serving no longer relies on Turbopack development chunks, and quoteable Markdown table rows render with valid table DOM.
 
 ## Requirements

@@ -57,6 +57,110 @@ export interface ResolvedTheme {
 
 export type ThemeVariant = "dark" | "light";
 
+
+type BuiltinThemeVariant = {
+  bg: string;
+  panel: string;
+  hover: string;
+  selected: string;
+  border: string;
+  text: string;
+  muted: string;
+  dim: string;
+  accent: string;
+  accentHover: string;
+  userBg: string;
+  assistantBg: string;
+  toolBg: string;
+  subtle: string;
+  red: string;
+  green: string;
+  orange: string;
+};
+
+type BuiltinThemeSet = {
+  displayName: string;
+  light: BuiltinThemeVariant;
+  dark: BuiltinThemeVariant;
+};
+
+/** Fixed themes retained from the original QT interface. */
+const BUILTIN_THEME_SETS: Record<string, BuiltinThemeSet> = {
+  gruvbox: {
+    displayName: "Gruvbox",
+    light: { bg: "#fbf1c7", panel: "#f2e5bc", hover: "#ebdbb2", selected: "#d5c4a1", border: "#bdae93", text: "#3c3836", muted: "#7c6f64", dim: "#a89984", accent: "#458588", accentHover: "#076678", userBg: "#ebdbb2", assistantBg: "#fbf1c7", toolBg: "#f2e5bc", subtle: "rgba(0,0,0,0.04)", red: "#cc241d", green: "#689d6a", orange: "#d65d0e" },
+    dark: { bg: "#1d2021", panel: "#282828", hover: "#3c3836", selected: "#504945", border: "#665c54", text: "#ebdbb2", muted: "#a89984", dim: "#7c6f64", accent: "#83a598", accentHover: "#8ec07c", userBg: "#3c3836", assistantBg: "#282828", toolBg: "#32302f", subtle: "rgba(255,255,255,0.04)", red: "#fb4934", green: "#b8bb26", orange: "#d65d0e" },
+  },
+  nord: {
+    displayName: "Nord",
+    light: { bg: "#e5e9f0", panel: "#eceff4", hover: "#d8dee9", selected: "#c8d0dd", border: "#b6c2d2", text: "#2e3440", muted: "#4c566a", dim: "#6c7890", accent: "#5e81ac", accentHover: "#81a1c1", userBg: "#d8dee9", assistantBg: "#e5e9f0", toolBg: "#eceff4", subtle: "rgba(46,52,64,0.05)", red: "#bf616a", green: "#a3be8c", orange: "#d08770" },
+    dark: { bg: "#2e3440", panel: "#3b4252", hover: "#434c5e", selected: "#4c566a", border: "#5e6680", text: "#eceff4", muted: "#a0aec4", dim: "#7c88a0", accent: "#88c0d0", accentHover: "#81a1c1", userBg: "#434c5e", assistantBg: "#3b4252", toolBg: "#3a4252", subtle: "rgba(236,239,244,0.05)", red: "#bf616a", green: "#a3be8c", orange: "#d08770" },
+  },
+  tokyo: {
+    displayName: "Tokyo Night",
+    light: { bg: "#d5d6db", panel: "#e3e4e9", hover: "#c9cad1", selected: "#b8b9c2", border: "#a6a7b5", text: "#343b59", muted: "#4f5670", dim: "#6f7691", accent: "#565f89", accentHover: "#7aa2f7", userBg: "#c9cad1", assistantBg: "#d5d6db", toolBg: "#e3e4e9", subtle: "rgba(52,59,89,0.05)", red: "#f7768e", green: "#9ece6a", orange: "#e0af68" },
+    dark: { bg: "#1a1b26", panel: "#24283b", hover: "#2f3549", selected: "#3b4261", border: "#414868", text: "#c0caf5", muted: "#7c83b3", dim: "#565f89", accent: "#7aa2f7", accentHover: "#89ddff", userBg: "#2f3549", assistantBg: "#24283b", toolBg: "#1f2335", subtle: "rgba(192,202,245,0.05)", red: "#f7768e", green: "#9ece6a", orange: "#e0af68" },
+  },
+  solarized: {
+    displayName: "Solarized",
+    light: { bg: "#fdf6e3", panel: "#eee8d5", hover: "#e4ddc7", selected: "#d9d2b8", border: "#c3bda8", text: "#586e75", muted: "#7a8a8a", dim: "#93a1a1", accent: "#268bd2", accentHover: "#2aa198", userBg: "#eee8d5", assistantBg: "#fdf6e3", toolBg: "#eee8d5", subtle: "rgba(88,110,117,0.06)", red: "#dc322f", green: "#859900", orange: "#b58900" },
+    dark: { bg: "#002b36", panel: "#073642", hover: "#0e4250", selected: "#14505e", border: "#2c5c66", text: "#839496", muted: "#6d8284", dim: "#586e75", accent: "#268bd2", accentHover: "#2aa198", userBg: "#0e4250", assistantBg: "#073642", toolBg: "#05313c", subtle: "rgba(131,148,150,0.08)", red: "#dc322f", green: "#859900", orange: "#b58900" },
+  },
+  onedark: {
+    displayName: "One Dark",
+    light: { bg: "#fafafa", panel: "#f0f0f0", hover: "#e5e5e5", selected: "#d8d8d8", border: "#c8c8c8", text: "#383a42", muted: "#7f848e", dim: "#a0a1a7", accent: "#4078f2", accentHover: "#005cc5", userBg: "#e8e8f0", assistantBg: "#fafafa", toolBg: "#f0f0f0", subtle: "rgba(56,58,66,0.04)", red: "#e06c75", green: "#98c379", orange: "#d19a66" },
+    dark: { bg: "#282c34", panel: "#21252b", hover: "#2c313a", selected: "#3b4048", border: "#4b5263", text: "#abb2bf", muted: "#7d8799", dim: "#5c6370", accent: "#61afef", accentHover: "#528bff", userBg: "#2c313a", assistantBg: "#21252b", toolBg: "#1e2227", subtle: "rgba(171,178,191,0.06)", red: "#e06c75", green: "#98c379", orange: "#d19a66" },
+  },
+  dracula: {
+    displayName: "Dracula",
+    light: { bg: "#f8f8f2", panel: "#f0f0ea", hover: "#e6e6de", selected: "#d8d8cf", border: "#c6c6bb", text: "#282a36", muted: "#5f6380", dim: "#8a8fae", accent: "#6272a4", accentHover: "#44475a", userBg: "#e6e6de", assistantBg: "#f8f8f2", toolBg: "#f0f0ea", subtle: "rgba(40,42,54,0.05)", red: "#ff5555", green: "#50fa7b", orange: "#ffb86c" },
+    dark: { bg: "#282a36", panel: "#21222c", hover: "#343746", selected: "#44475a", border: "#4a4d63", text: "#f8f8f2", muted: "#9094ad", dim: "#6272a4", accent: "#bd93f9", accentHover: "#ff79c6", userBg: "#343746", assistantBg: "#21222c", toolBg: "#1e1f29", subtle: "rgba(248,248,242,0.05)", red: "#ff5555", green: "#50fa7b", orange: "#ffb86c" },
+  },
+  catppuccin: {
+    displayName: "Catppuccin",
+    light: { bg: "#eff1f5", panel: "#e6e9ef", hover: "#dce0e8", selected: "#ccd0da", border: "#bcc0cc", text: "#4c4f69", muted: "#6c6f85", dim: "#8c8fa1", accent: "#1e66f5", accentHover: "#7287fd", userBg: "#dce0e8", assistantBg: "#eff1f5", toolBg: "#e6e9ef", subtle: "rgba(76,79,105,0.05)", red: "#d20f39", green: "#40a02b", orange: "#df8e1d" },
+    dark: { bg: "#1e1e2e", panel: "#181825", hover: "#313244", selected: "#45475a", border: "#585b70", text: "#cdd6f4", muted: "#8f93b2", dim: "#6c7086", accent: "#89b4fa", accentHover: "#b4befe", userBg: "#313244", assistantBg: "#181825", toolBg: "#14141f", subtle: "rgba(205,214,244,0.05)", red: "#f38ba8", green: "#a6e3a1", orange: "#fab387" },
+  },
+};
+
+function resolveBuiltinTheme(name: string, variant: ThemeVariant): ResolvedTheme | null {
+  const theme = BUILTIN_THEME_SETS[name];
+  if (!theme) return null;
+  const colors = theme[variant];
+  const cssVars: Record<string, string> = {
+    "--bg": colors.bg,
+    "--bg-panel": colors.panel,
+    "--bg-secondary": colors.panel,
+    "--bg-card": colors.panel,
+    "--bg-hover": colors.hover,
+    "--bg-selected": colors.selected,
+    "--bg-card-hover": colors.hover,
+    "--bg-subtle": colors.subtle,
+    "--border": colors.border,
+    "--border-hover": colors.accentHover,
+    "--text": colors.text,
+    "--text-muted": colors.muted,
+    "--text-dim": colors.dim,
+    "--accent": colors.accent,
+    "--accent-hover": colors.accentHover,
+    "--accent-blue": colors.accent,
+    "--accent-red": colors.red,
+    "--accent-green": colors.green,
+    "--accent-orange": colors.orange,
+    "--git-status-added": colors.green,
+    "--git-status-modified": colors.orange,
+    "--git-status-deleted": colors.red,
+    "--git-status-added-bg": colors.userBg,
+    "--git-status-modified-bg": colors.hover,
+    "--git-status-deleted-bg": colors.hover,
+    "--user-bg": colors.userBg,
+    "--assistant-bg": colors.assistantBg,
+    "--tool-bg": colors.toolBg,
+    "--hatch-color": colors.subtle,
+  };
+  return { name, isDark: variant === "dark", cssVars };
+}
+
 // ─── 256-color palette → hex ────────────────────────────────────────────────
 
 // Standard xterm 256-color palette. 0-15: ANSI, 16-231: 6x6x6 cube, 232-255: grayscale.
@@ -447,8 +551,14 @@ function scanThemeDir(dir: string): ScannedFile[] {
 
 /** List all available theme sets (global + project). */
 export function listThemeSets(projectCwd?: string): ThemeSetInfo[] {
-  const result: ThemeSetInfo[] = [];
-  const seen = new Set<string>();
+  const result: ThemeSetInfo[] = Object.entries(BUILTIN_THEME_SETS).map(([name, theme]) => ({
+    name,
+    displayName: theme.displayName,
+    hasDark: true,
+    hasLight: true,
+    builtin: true,
+  }));
+  const seen = new Set(Object.keys(BUILTIN_THEME_SETS));
 
   // Collect all scanned files
   const allFiles: ScannedFile[] = [];
@@ -521,6 +631,9 @@ export function resolveTheme(
   projectCwd?: string,
 ): ResolvedTheme | null {
   if (!name) return null;
+
+  const builtin = resolveBuiltinTheme(name, variant);
+  if (builtin) return builtin;
 
   const dirs: string[] = [
     join(homedir(), ".pi", "agent", "themes"),
