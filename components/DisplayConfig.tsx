@@ -1,14 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Moon, PaintBrush, Sun, ArrowSquareOut } from "@phosphor-icons/react";
+import { Moon, PaintBrush, Sun, Monitor, ArrowSquareOut, Link } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
-import { useTheme } from "@/hooks/useTheme";
-
-interface ThemeSetInfo {
-  name: string;
-  variants: Array<{ variant: "dark" | "light" | "base"; file: string }>;
-}
+import { useTheme, type ThemeMode } from "@/hooks/useTheme";
+import type { ThemeSetInfo } from "@/lib/theme";
 
 // ── Tag / chip helpers ───────────────────────────────────────────────────────
 
@@ -69,6 +65,7 @@ const textActionButtonStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+/** Underline the label while hovering a text action button. */
 const underlineOnHover = {
   onMouseEnter: (e: React.MouseEvent<HTMLButtonElement>) => {
     e.currentTarget.style.textDecoration = "underline";
@@ -88,6 +85,32 @@ function ConfigSection({ title, description, children }: { title: string; descri
   );
 }
 
+// ── Border depth icon ───────────────────────────────────────────────────────
+
+function BorderIcon({ depth }: { depth: number }) {
+  const n = depth / 100;
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" style={{ flexShrink: 0 }}>
+      <rect
+        x={1.5} y={1.5} width={11} height={11} rx={2.5}
+        style={{
+          fill: "none",
+          stroke: "var(--text-dim)",
+          strokeWidth: 1 + n * 2,
+          opacity: 0.2 + n * 0.8,
+        }}
+      />
+      <rect
+        x={4} y={4} width={6} height={6} rx={1}
+        style={{
+          fill: "var(--text-dim)",
+          opacity: 0.05 + n * 0.35,
+        }}
+      />
+    </svg>
+  );
+}
+
 // ── Variant availability dots ───────────────────────────────────────────────
 
 function VariantDots({ hasDark, hasLight, t }: { hasDark: boolean; hasLight: boolean; t: (key: string) => string }) {
@@ -97,7 +120,7 @@ function VariantDots({ hasDark, hasLight, t }: { hasDark: boolean; hasLight: boo
         <span title={t("desktop.darkVariant")} style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#7c6f64" }} />
       )}
       {hasLight && (
-        <span title={t("desktop.lightVariant")} style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#f2e5bc", border: "1px solid var(--border)" }} />
+        <span title={t("desktop.lightVariant")} style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#d5c4a1", border: "1px solid rgba(0,0,0,0.1)" }} />
       )}
     </span>
   );
@@ -106,15 +129,16 @@ function VariantDots({ hasDark, hasLight, t }: { hasDark: boolean; hasLight: boo
 // ── Main ────────────────────────────────────────────────────────────────────
 
 export function DisplayConfig() {
-  const { theme: themeName, isDark, setTheme, toggleTheme } = useTheme();
+  const { mode, resolvedMode, themeName, setMode, setTheme, borderDepth, setBorderDepth } = useTheme();
   const { locale: language, setLocale: setLanguage, t } = useI18n();
   const [themeSets, setThemeSets] = useState<ThemeSetInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState<string | null>(null);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/theme-sets")
+    fetch("/api/themes")
       .then((r) => r.ok ? r.json() : null)
       .then((data: { themeSets: ThemeSetInfo[] } | null) => {
         if (cancelled || !data) return;
@@ -126,10 +150,23 @@ export function DisplayConfig() {
   }, []);
 
   const handleThemeChange = useCallback((name: string) => {
-    setTheme(name as typeof themeName);
+    setApplying(name);
+    setTheme(name).finally(() => setApplying(null));
   }, [setTheme]);
 
+  const handleModeChange = useCallback((m: ThemeMode) => {
+    setMode(m);
+  }, [setMode]);
+
+  const openThemeFolder = useCallback(() => {
+    window.piDesktop?.openThemeFolder();
+  }, []);
+
   const openThemeDocs = useCallback(() => {
+    if (window.piDesktop) {
+      window.piDesktop.openThemeDocs();
+      return;
+    }
     window.open("https://pi.dev/docs/latest/themes", "_blank", "noopener,noreferrer");
   }, []);
 
@@ -141,19 +178,31 @@ export function DisplayConfig() {
 
       {/* ── Theme ── */}
       <ConfigSection title={t("desktop.theme")} description={t("desktop.themeDescription")}>
+        {/* Color Scheme */}
         <SectionLabel
           icon={<PaintBrush size={14} weight="fill" />}
           label={t("desktop.colorScheme")}
           actions={
-            <button
-              type="button"
-              onClick={openThemeDocs}
-              style={textActionButtonStyle}
-              {...underlineOnHover}
-            >
-              <ArrowSquareOut size={12} weight="regular" aria-hidden="true" />
-              {t("desktop.learnPiThemes")}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={openThemeFolder}
+                style={textActionButtonStyle}
+                {...underlineOnHover}
+              >
+                <Link size={12} weight="regular" aria-hidden="true" />
+                {t("desktop.openThemeFolder")}
+              </button>
+              <button
+                type="button"
+                onClick={openThemeDocs}
+                style={textActionButtonStyle}
+                {...underlineOnHover}
+              >
+                <ArrowSquareOut size={12} weight="regular" aria-hidden="true" />
+                {t("desktop.learnPiThemes")}
+              </button>
+            </>
           }
         />
         {loading ? (
@@ -161,8 +210,8 @@ export function DisplayConfig() {
         ) : (
           <div style={tagGroupStyle}>
             <button
-              type="button" onClick={() => handleThemeChange("gruvbox")}
-              style={tagStyle(themeName === "gruvbox", hoveredTag === "__default__")}
+              type="button" onClick={() => handleThemeChange("")} disabled={applying !== null}
+              style={tagStyle(themeName === "", hoveredTag === "__default__", applying !== null)}
               onMouseEnter={() => setHoveredTag("__default__")}
               onMouseLeave={() => setHoveredTag(null)}
             >
@@ -172,48 +221,91 @@ export function DisplayConfig() {
             {themeSets.map((ts) => (
               <button
                 key={ts.name} type="button"
-                onClick={() => handleThemeChange(ts.name)}
-                style={tagStyle(themeName === ts.name, hoveredTag === ts.name)}
+                onClick={() => handleThemeChange(ts.name)} disabled={applying !== null}
+                style={tagStyle(themeName === ts.name, hoveredTag === ts.name, applying === ts.name)}
                 onMouseEnter={() => setHoveredTag(ts.name)}
                 onMouseLeave={() => setHoveredTag(null)}
               >
-                {ts.name}
-                <VariantDots
-                  hasDark={ts.variants.some((v) => v.variant === "dark")}
-                  hasLight={ts.variants.some((v) => v.variant === "light")}
-                  t={t}
-                />
+                {ts.displayName}
+                <VariantDots hasDark={ts.hasDark} hasLight={ts.hasLight} t={t} />
               </button>
             ))}
           </div>
         )}
 
-        {/* Appearance Mode — light / dark toggle */}
+        {/* Border depth */}
         <div style={{ marginTop: 20 }}>
           <SectionLabel
-            icon={isDark ? <Moon size={14} weight="fill" /> : <Sun size={14} weight="fill" />}
+            icon={<BorderIcon depth={borderDepth} />}
+            label={`${t("desktop.borderVisibility")} (${borderDepth})`}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>{t("desktop.borderSubtle")}</span>
+            <input
+              type="range"
+              min={0} max={100} step={1}
+              value={borderDepth}
+              onChange={(e) => setBorderDepth(Number(e.target.value))}
+              style={{
+                flex: 1,
+                accentColor: "var(--accent)",
+                height: 6,
+                cursor: "pointer",
+              }}
+            />
+            <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>{t("desktop.borderBold")}</span>
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
+            {[0, 25, 50, 75, 100].map((d) => {
+              const active = borderDepth === d;
+              const previewBorder = d <= 50
+                ? `color-mix(in srgb, var(--border-orig) ${d * 2}%, var(--bg) ${100 - d * 2}%)`
+                : `color-mix(in srgb, var(--border-orig) ${100 - (d - 50) * 2}%, var(--text) ${(d - 50) * 2}%)`;
+              return (
+                <div
+                  key={d}
+                  onClick={() => setBorderDepth(d)}
+                  style={{
+                    width: 28, height: 20,
+                    border: `2px solid ${active ? "var(--accent)" : previewBorder}`,
+                    borderRadius: 5,
+                    background: "var(--bg-card)",
+                    cursor: "pointer",
+                    transition: "border-color 0.1s",
+                  }}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Appearance Mode */}
+        <div style={{ marginTop: 20 }}>
+          <SectionLabel
+            icon={resolvedMode === "dark" ? <Moon size={14} weight="fill" /> : <Sun size={14} weight="fill" />}
             label={t("desktop.appearanceMode")}
           />
           <div style={tagGroupStyle}>
-            <button
-              type="button" onClick={() => { if (isDark) toggleTheme(); }}
-              style={tagStyle(!isDark, hoveredTag === "mode:light")}
-              onMouseEnter={() => setHoveredTag("mode:light")}
-              onMouseLeave={() => setHoveredTag(null)}
-            >
-              <Sun size={15} aria-hidden="true" />
-              {t("desktop.lightVariant")}
-            </button>
-            <button
-              type="button" onClick={() => { if (!isDark) toggleTheme(); }}
-              style={tagStyle(isDark, hoveredTag === "mode:dark")}
-              onMouseEnter={() => setHoveredTag("mode:dark")}
-              onMouseLeave={() => setHoveredTag(null)}
-            >
-              <Moon size={15} aria-hidden="true" />
-              {t("desktop.darkVariant")}
-            </button>
+            {([
+              { value: "light" as ThemeMode, icon: <Sun size={15} weight={mode === "light" ? "fill" : "regular"} /> },
+              { value: "dark" as ThemeMode, icon: <Moon size={15} weight={mode === "dark" ? "fill" : "regular"} /> },
+              { value: "system" as ThemeMode, icon: <Monitor size={15} weight={mode === "system" ? "fill" : "regular"} /> },
+            ]).map((opt) => {
+              const active = mode === opt.value;
+              return (
+                <button
+                  key={opt.value} type="button" onClick={() => handleModeChange(opt.value)}
+                  style={tagStyle(active, hoveredTag === `mode:${opt.value}`)}
+                  onMouseEnter={() => setHoveredTag(`mode:${opt.value}`)}
+                  onMouseLeave={() => setHoveredTag(null)}
+                >
+                  {opt.icon}
+                  {t(`desktop.${opt.value}`)}
+                </button>
+              );
+            })}
           </div>
+
         </div>
 
         {!loading && themeSets.length === 0 && (

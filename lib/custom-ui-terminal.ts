@@ -12,6 +12,10 @@ export interface HeadlessCustomUiTui {
   requestRender(force?: boolean): void;
 }
 
+/**
+ * Provides the terminal properties extension custom UIs expect without exposing
+ * a terminal backend in the browser-hosted renderer.
+ */
 export function createHeadlessCustomUiTui(
   requestRender: (force?: boolean) => void,
   columns = DEFAULT_CUSTOM_UI_COLUMNS,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { CaretDown, GitBranch } from "@phosphor-icons/react";
 import type { SessionEntry, SessionTreeNode } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -10,8 +11,6 @@ interface Props {
   onLeafChange: (leafId: string | null) => void;
   /** When true, renders as a compact inline button for embedding in a top bar */
   inline?: boolean;
-  /** Alias of inline, used by SessionInfoBar's embedded popover. */
-  embedded?: boolean;
   /** When inline, use this ref's bounding rect to size/position the dropdown */
   containerRef?: React.RefObject<HTMLElement | null>;
   /** Controlled open state for inline mode */
@@ -20,8 +19,8 @@ interface Props {
   onToggle?: () => void;
   /** Whether a session is currently active (used to show appropriate empty reason) */
   hasSession?: boolean;
-  /** When inline, render icon-only (no text label) to save horizontal space */
-  compact?: boolean;
+  /** When true, renders just the tree content without header or border */
+  embedded?: boolean;
 }
 
 // Find the visible entry IDs on the path from root to activeLeafId.
@@ -54,7 +53,7 @@ function compress(node: SessionTreeNode): { node: SessionTreeNode; skipped: numb
   return { node: current, skipped };
 }
 
-function getLabel(entry: SessionEntry): string {
+function getLabel(entry: SessionEntry, assistantLabel: string): string {
   if (entry.type === "message" && "message" in entry) {
     const msg = entry.message as { role: string; content: unknown };
     const content = msg.content;
@@ -69,7 +68,7 @@ function getLabel(entry: SessionEntry): string {
     }
     if (text.length > 40) text = text.slice(0, 40) + "…";
     if (text) return text;
-    if (msg.role === "assistant") return "[assistant]";
+    if (msg.role === "assistant") return `[${assistantLabel}]`;
   }
   return entry.type;
 }
@@ -85,6 +84,7 @@ function hasBranch(nodes: SessionTreeNode[]): boolean {
 
 interface TreeNodeProps {
   node: SessionTreeNode;
+  assistantLabel: string;
   activePathIds: Set<string>;
   depth: number;
   isLast: boolean;
@@ -92,11 +92,11 @@ interface TreeNodeProps {
   onSelect: (id: string) => void;
 }
 
-function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelect }: TreeNodeProps) {
+function TreeNodeView({ node, assistantLabel, activePathIds, depth, isLast, parentLines, onSelect }: TreeNodeProps) {
   const { node: rep, skipped } = compress(node);
   const isActive = activePathIds.has(rep.entry.id);
   const isOnPath = activePathIds.has(node.entry.id) || activePathIds.has(rep.entry.id);
-  const label = getLabel(rep.entry);
+  const label = getLabel(rep.entry, assistantLabel);
   const role = rep.entry.type === "message" && "message" in rep.entry
     ? (rep.entry.message as { role: string }).role
     : null;
@@ -208,6 +208,7 @@ function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelec
         <TreeNodeView
           key={child.entry.id}
           node={child}
+          assistantLabel={assistantLabel}
           activePathIds={activePathIds}
           depth={depth + 1}
           isLast={idx === rep.children.length - 1}
@@ -219,14 +220,12 @@ function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelec
   );
 }
 
-export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, embedded, containerRef, open: openProp, onToggle, hasSession, compact }: Props) {
+export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession, embedded }: Props) {
   const { t } = useI18n();
   const [openInternal, setOpenInternal] = useState(false);
   const open = openProp !== undefined ? openProp : openInternal;
   const btnRef = useRef<HTMLButtonElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
-  // embedded is an alias of inline (used by SessionInfoBar popover).
-  inline = inline || embedded;
 
   useEffect(() => {
     if (!open || !inline) return;
@@ -252,9 +251,9 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, embe
   }, [onLeafChange]);
 
   const noBranchReason = !hasSession
-    ? t("i18n.noActiveSession")
+    ? t("desktop.noActiveSession")
     : !hasBranch(tree)
-      ? t("i18n.noBranches")
+      ? t("desktop.sessionHasNoBranches")
       : null;
 
   // Find first meaningful node (skip pure linear prefix)
@@ -262,19 +261,15 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, embe
   const firstNode = compressed?.node ?? null;
   const hasContent = !noBranchReason && firstNode && firstNode.children.length > 1;
 
-  const branchIcon = (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: hasContent ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }}>
-      <line x1="6" y1="3" x2="6" y2="15" />
-      <circle cx="18" cy="6" r="3" />
-      <circle cx="6" cy="18" r="3" />
-      <path d="M18 9a9 9 0 0 1-9 9" />
-    </svg>
-  );
+  const branchIcon = <GitBranch size={16} aria-hidden="true" style={{ flexShrink: 0 }} />;
 
   const chevron = (
-    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 2, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
-      <polyline points="2 3.5 5 6.5 8 3.5" />
-    </svg>
+    <CaretDown
+      size={8}
+      color="var(--text-dim)"
+      aria-hidden="true"
+      style={{ marginLeft: 1, transition: "transform 0.15s", transform: open ? "rotate(180deg)" : "none" }}
+    />
   );
 
 
@@ -283,34 +278,32 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, embe
       <div style={{ height: "100%", display: "flex", alignItems: "stretch" }}>
         <button
           ref={btnRef}
+          className="app-no-drag"
           onClick={() => onToggle ? onToggle() : setOpenInternal((v) => !v)}
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 6,
-            height: "100%",
-            padding: "0 12px",
+            justifyContent: "center",
+            width: 36,
+            height: 36,
+            padding: 0,
             background: open ? "var(--bg-selected)" : "none",
             border: "none",
-            borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
-            borderRight: "1px solid var(--border)",
             cursor: "pointer",
             color: open ? "var(--text)" : "var(--text-muted)",
-            fontSize: 11,
-            whiteSpace: "nowrap",
-            transition: "color 0.1s, background 0.1s",
+            flexShrink: 0,
+            transition: "background 0.12s, color 0.12s",
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)"; }}
-           title={t("i18n.branches")}
-           aria-label={t("i18n.branches")}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = open ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)"; }}
+          title={t("desktop.branches")}
+          aria-label={t("desktop.branches")}
           aria-pressed={open}
         >
           {branchIcon}
-           {!compact && <span>{t("i18n.branches")}</span>}
         </button>
         {open && dropdownPos && (
-          <div style={{
+          <div className="app-no-drag" style={{
             position: "fixed",
             top: dropdownPos.top,
             left: dropdownPos.left,
@@ -325,6 +318,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, embe
                   <TreeNodeView
                     key={child.entry.id}
                     node={child}
+                    assistantLabel={t("desktop.assistant")}
                     activePathIds={activePathIds}
                     depth={0}
                     isLast={idx === firstNode.children.length - 1}
@@ -340,6 +334,33 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, embe
             )}
           </div>
         )}
+      </div>
+    );
+  }
+
+  // Embedded mode: just the tree content, no header/border/toggle
+  if (embedded) {
+    if (!hasContent || !firstNode) {
+      return (
+        <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+          {noBranchReason ?? t("desktop.sessionHasNoBranches")}
+        </div>
+      );
+    }
+    return (
+      <div style={{ padding: "4px 8px 8px 8px" }}>
+        {firstNode.children.map((child, idx) => (
+          <TreeNodeView
+            key={child.entry.id}
+            node={child}
+            assistantLabel={t("desktop.assistant")}
+            activePathIds={activePathIds}
+            depth={0}
+            isLast={idx === firstNode.children.length - 1}
+            parentLines={[]}
+            onSelect={handleSelect}
+          />
+        ))}
       </div>
     );
   }
@@ -364,7 +385,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, embe
         }}
       >
         {branchIcon}
-         <span style={{ color: "var(--text-muted)" }}>{t("i18n.branches")}</span>
+        <span style={{ color: "var(--text-muted)" }}>{t("desktop.branches")}</span>
         {chevron}
       </button>
 
@@ -386,6 +407,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, embe
                 <TreeNodeView
                   key={child.entry.id}
                   node={child}
+                  assistantLabel={t("desktop.assistant")}
                   activePathIds={activePathIds}
                   depth={0}
                   isLast={idx === firstNode.children.length - 1}
@@ -396,7 +418,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, embe
             </div>
           ) : (
             <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-              {noBranchReason ?? t("i18n.noBranches")}
+              {noBranchReason ?? t("desktop.sessionHasNoBranches")}
             </div>
           )}
         </div>

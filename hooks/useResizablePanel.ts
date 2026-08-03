@@ -88,7 +88,11 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
 
   const applyLiveWidth = useCallback((nextWidth: number) => {
     widthRef.current = nextWidth;
-    panelRef.current?.style.setProperty(cssVariable, `${nextWidth}px`);
+    const value = `${nextWidth}px`;
+    panelRef.current?.style.setProperty(cssVariable, value);
+    // Splitters are siblings of their panels, so mirror the variable onto the
+    // workspace container to keep an overlay splitter aligned while dragging.
+    panelRef.current?.parentElement?.style.setProperty(cssVariable, value);
   }, [cssVariable, widthRef]);
 
   const commitWidth = useCallback((candidate: number, commitOptions: CommitOptions = {}) => {
@@ -119,7 +123,7 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
         drag.target.releasePointerCapture(pointerId);
       }
     } catch {
-      // The browser may have already released capture after pointer cancellation.
+      // The browser may already have released capture after cancellation.
     }
   }, [commitWidth, restoreBodyState, widthRef]);
 
@@ -247,20 +251,17 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     };
   }, [finishResize, isResizing]);
 
-  useEffect(() => {
-    return () => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      dragRef.current = null;
-      restoreBodyState(drag);
-    };
+  useEffect(() => () => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    dragRef.current = null;
+    restoreBodyState(drag);
   }, [restoreBodyState]);
 
   return {
     isResizing,
     panelRef,
     reclampWidth,
-    resetWidth,
     separatorProps: {
       "aria-label": ariaLabel,
       "aria-orientation": "vertical" as const,

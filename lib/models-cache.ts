@@ -4,10 +4,9 @@ export interface ModelsData {
   defaultModel: { provider: string; modelId: string } | null;
   thinkingLevels: Record<string, string[]>;
   thinkingLevelMaps: Record<string, Record<string, string | null>>;
-  /** `provider/modelId` → thinking level pinned by an `enabledModels` `:level` suffix. */
+  /** `provider/modelId` → thinking level pinned by an enabledModels suffix. */
   thinkingLevelPins: Record<string, string>;
-  modelError?: string;
-  /** Warnings from resolving the `enabledModels` scope (e.g. a pattern matched nothing). */
+  /** Resolver diagnostics when an enabledModels pattern matched no model. */
   modelScopeWarnings?: string[];
 }
 
@@ -40,10 +39,6 @@ export function invalidateModelsCache(): void {
   state.generation += 1;
   state.entries.clear();
   state.inFlight.clear();
-}
-
-export function withModelRuntimeError(data: ModelsData, modelError: string | undefined): ModelsData {
-  return modelError ? { ...data, modelError } : data;
 }
 
 export function loadModelsWithCache(cwd: string, loader: () => Promise<ModelsData>): Promise<ModelsData> {

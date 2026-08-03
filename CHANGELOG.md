@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Web-only
+- 移除 Electron 主进程、桌面端打包依赖、安装向导和 tag 驱动的三平台 Release 工作流。
+- 保留并完善浏览器部署路径；部署示例见 [`docs/deployment.md`](./docs/deployment.md)。
+
 ## 0.9.1 — 2026-08-03
 
 ### UI/UX：多步骤过程分组（移植自 pi-web-desktop v0.7.16）

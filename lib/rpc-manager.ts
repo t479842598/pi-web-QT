@@ -1,26 +1,15 @@
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
-import {
-  createQueueEntry,
-  loadQueue,
-  removeQueue,
-  saveQueue,
-  type PendingRecoveryItem,
-  type QueueEntry,
-  type QueueEntryInput,
-  type QueueImage,
-  type QueueKind,
-} from "./queue-store";
+import { createQueueEntry, loadQueue, removeQueue, saveQueue, type PendingRecoveryItem, type QueueEntry, type QueueEntryInput, type QueueImage, type QueueKind } from "./queue-store";
 import { invalidateModelsCache } from "./models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
-import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
-import { parseSlashCommandName, resolveSlashDisplayText, SlashOriginalTracker, userMessagePlainText } from "./slash-display";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
+import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
@@ -75,23 +64,6 @@ type ExtensionCommandContextActionsLike = {
 type ExtensionBindingOptions = {
   forceEmptySystemPrompt?: boolean;
 };
-
-const RUNNING_STATE_EVENT_TYPES = new Set([
-  "agent_start",
-  "agent_end",
-  "agent_settled",
-  "auto_compaction_start",
-  "auto_compaction_end",
-  "compaction_start",
-  "compaction_end",
-]);
-
-const IDLE_RESET_EVENT_TYPES = new Set([
-  "agent_end",
-  "agent_settled",
-  "auto_compaction_end",
-  "compaction_end",
-]);
 
 export interface RpcSessionStartOptions {
   toolNames?: string[];
@@ -160,20 +132,15 @@ export class AgentSessionWrapper {
   private forceEmptySystemPrompt = false;
   private unsubscribe: (() => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  // Queue persistence & crash recovery — see lib/queue-store.ts.
-  // queueMirror mirrors pi's live steer/follow-up queue (with images).
-  // queueRecovery holds sidecar entries orphaned by a previous wrapper
-  // lifetime; they are surfaced to the UI and never auto-delivered.
   private queueMirror: QueueEntry[] = [];
   private queueRecovery: QueueEntry[] = [];
   private pendingQueueHints: Record<QueueKind, QueueImage[][]> = { steer: [], followUp: [] };
+  private queueMutationTail: Promise<void> = Promise.resolve();
   private onDestroyCallback: (() => void) | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private _alive = true;
-  /** FIFO: 已发送且确定会被 SDK 展开的斜杠命令原文，user 消息回传时消费注入 */
-  private slashOriginals = new SlashOriginalTracker();
 
-  constructor(public readonly inner: AgentSessionLike) {}
+  constructor(public readonly inner: AgentSessionLike, public readonly cwd: string) {}
 
   get sessionId(): string {
     return this.inner.sessionId;
@@ -181,10 +148,6 @@ export class AgentSessionWrapper {
 
   get sessionFile(): string {
     return this.inner.sessionFile ?? "";
-  }
-
-  get cwd(): string {
-    return this.inner.sessionManager.getCwd();
   }
 
   isAlive(): boolean {
@@ -200,115 +163,44 @@ export class AgentSessionWrapper {
       if (event.type === "agent_end") {
         invalidateSessionListCache();
       }
-      // 斜杠命令（/skill:name /模板名）由 SDK 展开后回传：在 message_end 的 user
-      // 消息上注入原始命令，供界面紧凑展示。
-      // 注意：SDK 的 _emit 同步分发后会用同一 message 对象 appendMessage 落盘并进入
-      // 模型上下文，因此绝不能改写原对象 —— 用展开运算符构造新对象注入展示层字段。
-      // 仅在 message_end 处理 —— message_start/update 的 user 消息被前端忽略。
-      if (event.type === "message_end" && (event.message as { role?: string } | undefined)?.role === "user") {
-        const message = event.message as { content?: string | Array<{ type: string; text?: string }> };
-        const text = userMessagePlainText(message.content ?? "");
-        // 每条 user message_end 固定消费一条 FIFO（无论特征识别是否命中），
-        // 避免记录残留导致下一条消息错注入；特征识别结果优先（skill 展开文本可自证）
-        const fromQueue = this.slashOriginals.consumeFor(text);
-        const originalText = resolveSlashDisplayText(text) ?? fromQueue;
-        if (originalText && originalText !== text) {
-          this.emit({ ...event, message: { ...(event.message as Record<string, unknown>), originalText } });
-          return;
-        }
+      if (event.type === "agent_end" || event.type === "agent_settled" || event.type === "auto_compaction_end" || event.type === "compaction_end") {
+        this.resetIdleTimer();
       }
       if (event.type === "queue_update") {
-        this.reconcileQueue(
-          (event as { steering?: string[] }).steering,
-          (event as { followUp?: string[] }).followUp,
-        );
+        this.reconcileQueue(event.steering as string[] | undefined, event.followUp as string[] | undefined);
       }
-      if (IDLE_RESET_EVENT_TYPES.has(event.type)) this.resetIdleTimer();
       this.emit(event);
-      if (RUNNING_STATE_EVENT_TYPES.has(event.type)) notifyRunningChange();
     });
     this.resetIdleTimer();
-    notifyRunningChange();
   }
 
-  // ==========================================================================
-  // Queue persistence & crash recovery
-  //
-  // pi keeps its steering/follow-up queues in memory only. We mirror every
-  // queue mutation to a per-session sidecar file so that after a server
-  // restart the messages can be offered for manual recovery instead of being
-  // lost. Recovery is NEVER automatic: sidecar entries are surfaced to the UI
-  // (pendingRecovery) and the user decides to re-queue, discard, or export.
-  // ==========================================================================
-
-  /**
-   * Load entries the sidecar inherited from a previous process (or a previous
-   * wrapper lifetime after the 10-minute idle timeout).
-   */
   loadQueueRecovery(): void {
-    const file = this.sessionFile;
-    if (!file) return;
-    // Defensive consistency check: pi's steering/follow-up queues live in the
-    // same process as this wrapper, and a brand-new AgentSession always starts
-    // with empty queues. If pi already has queued messages here, the queue
-    // survived (hot reload reused the runtime, future architecture change, …)
-    // and the sidecar is just an older mirror. In that case skip recovery and
-    // resync the mirror from pi instead of offering duplicate entries.
-    const liveSteering = this.inner.getSteeringMessages();
-    const liveFollowUp = this.inner.getFollowUpMessages();
-    if (liveSteering.length > 0 || liveFollowUp.length > 0) {
+    if (!this.sessionFile) return;
+    const steering = this.inner.getSteeringMessages();
+    const followUp = this.inner.getFollowUpMessages();
+    if (steering.length || followUp.length) {
       this.queueRecovery = [];
-      this.reconcileQueue([...liveSteering], [...liveFollowUp]);
+      this.reconcileQueue([...steering], [...followUp]);
       return;
     }
-    const persisted = loadQueue(file);
-    if (persisted.length > 0) {
-      this.queueRecovery = persisted;
-      console.log(
-        `[pi-web] ${persisted.length} queued message(s) pending recovery for session ${this.sessionId}`,
-      );
-    }
+    this.queueRecovery = loadQueue(this.sessionFile);
   }
 
-  private getSidecarEntries(): QueueEntry[] {
-    return [...this.queueRecovery, ...this.queueMirror];
+  private pendingRecoveryView(): PendingRecoveryItem[] {
+    return this.queueRecovery.map(({ id, kind, text, images, queuedAt }) => ({ id, kind, text, hasImages: Boolean(images?.length), queuedAt }));
   }
 
   private persistQueue(): void {
-    const file = this.sessionFile;
-    if (!file) return;
-    const entries = this.getSidecarEntries();
-    if (entries.length === 0) {
-      removeQueue(file);
-      return;
-    }
-    saveQueue(file, entries);
+    if (!this.sessionFile) return;
+    const entries = [...this.queueRecovery, ...this.queueMirror];
+    if (entries.length) saveQueue(this.sessionFile, entries); else removeQueue(this.sessionFile);
   }
 
-  private getPendingRecoveryView(): PendingRecoveryItem[] {
-    return this.queueRecovery.map((entry) => ({
-      id: entry.id,
-      kind: entry.kind,
-      text: entry.text,
-      hasImages: Boolean(entry.images?.length),
-      queuedAt: entry.queuedAt,
-    }));
-  }
-
-  /**
-   * Record an incoming queueable message so its image attachments survive
-   * mirroring. pi reports queued messages by text only and template expansion
-   * may rewrite the text, so hints are consumed FIFO per kind.
-   */
   private hintQueueImages(kind: QueueKind, images: QueueImage[] | undefined): void {
-    this.pendingQueueHints[kind].push(images && images.length > 0 ? images : []);
+    this.pendingQueueHints[kind].push(images?.length ? images : []);
   }
 
-  /**
-   * Sync the mirror with pi's authoritative queue (text-only). Bare entries pi
-   * reports that we have never mirrored consume image hints FIFO.
-   */
-  private reconcileQueue(steering: string[] | undefined, followUp: string[] | undefined): void {
+  private reconcileQueue(steering?: string[], followUp?: string[]): void {
     const rebuild = (kind: QueueKind, texts: string[] | undefined): QueueEntry[] => {
       if (!texts) return this.queueMirror.filter((entry) => entry.kind === kind);
       const used = new Set<QueueEntry>();
@@ -325,90 +217,100 @@ export class AgentSessionWrapper {
         return entry;
       });
     };
-    this.queueMirror = [
-      ...rebuild("steer", steering),
-      ...rebuild("followUp", followUp),
-    ];
+    this.queueMirror = [...rebuild("steer", steering), ...rebuild("followUp", followUp)];
     this.persistQueue();
   }
 
-  /** Re-queue a recovered or imported entry into the live queue. */
   private async requeueEntry(entry: QueueEntry): Promise<void> {
+    const imageError = validateAgentImages(entry.images);
+    if (imageError) throw new Error(imageError);
     this.hintQueueImages(entry.kind, entry.images);
-    if (entry.kind === "steer") {
-      await this.inner.steer(entry.text, entry.images);
-    } else {
-      await this.inner.followUp(entry.text, entry.images);
-    }
+    if (entry.kind === "steer") await this.inner.steer(entry.text, entry.images);
+    else await this.inner.followUp(entry.text, entry.images);
   }
 
-  /**
-   * Ensure the entry is present in the mirror (queue_update may race). Called
-   * after requeue/import so the sidecar is never missing a re-queued message.
-   */
   private ensureMirrored(entry: QueueEntry): void {
-    const existing = this.queueMirror.find(
-      (e) => e.kind === entry.kind && e.text === entry.text,
-    );
+    const existing = this.queueMirror.find((candidate) => candidate.kind === entry.kind && candidate.text === entry.text);
     if (existing) return;
     this.queueMirror.push({ ...entry });
-    // No queue_update consumed the image hint (yet) — drop the one we pushed in
-    // requeueEntry so it cannot attach to an unrelated future entry.
     this.pendingQueueHints[entry.kind].pop();
   }
 
-  /**
-   * Continue the transcript so queued messages get processed. AgentSession has
-   * no public continue(); invoke the raw agent loop like AgentSession does
-   * internally — events/persistence still flow through its subscriptions.
-   */
+  /** pi exposes only clear-all queue APIs. Rebuild both queues in one wrapper
+   * command so per-item UI edits preserve ordering and image attachments. */
+  private async replaceLiveQueue(steeringEntries: QueueEntry[], followUpEntries: QueueEntry[]) {
+    this.inner.clearQueue();
+    this.pendingQueueHints = { steer: [], followUp: [] };
+    for (const entry of steeringEntries) await this.requeueEntry(entry);
+    for (const entry of followUpEntries) await this.requeueEntry(entry);
+    // The agent may consume an entry while the live queue is being rebuilt.
+    // Reconcile from pi's actual queue instead of restoring the old snapshot.
+    const queues = {
+      steering: [...this.inner.getSteeringMessages()],
+      followUp: [...this.inner.getFollowUpMessages()],
+    };
+    this.reconcileQueue(queues.steering, queues.followUp);
+    return queues;
+  }
+
+  private async withQueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.queueMutationTail;
+    let release!: () => void;
+    this.queueMutationTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  private async mutateLiveQueue<T>(kind: QueueKind, mutate: (entries: QueueEntry[]) => T) {
+    return this.withQueueMutation(async () => {
+      const steering = this.queueMirror.filter((entry) => entry.kind === "steer");
+      const followUp = this.queueMirror.filter((entry) => entry.kind === "followUp");
+      const value = mutate(kind === "steer" ? steering : followUp);
+      const queues = await this.replaceLiveQueue(steering, followUp);
+      return { value, queues };
+    });
+  }
+
+  private validateQueueEntries(entries: QueueEntryInput[]): void {
+    for (const entry of entries) {
+      if ((entry.kind !== "steer" && entry.kind !== "followUp") || typeof entry.text !== "string") continue;
+      const imageError = validateAgentImages(entry.images);
+      if (imageError) throw new Error(imageError);
+    }
+  }
+
   private runAgentContinue(): void {
-    // pi has no public API to resume an idle agent's queue (agent.continue()
-    // only works inside an active _runAgentPrompt loop). So bootstrap a run
-    // by prompting each queued message in series. Capture the entries BEFORE
-    // clearQueue (which fires queue_update and would empty the mirror).
     if (this.inner.isStreaming || this.inner.isBashRunning || this.promptRunning) return;
-    const all = [...this.queueMirror];
-    if (all.length === 0) return;
+    const entries = [...this.queueMirror];
+    if (entries.length === 0) return;
     this.queueMirror = [];
     this.persistQueue();
     this.promptRunning = true;
-    notifyRunningChange();
-    void this.bootstrapQueuedRun(all);
+    void this.bootstrapQueuedRun(entries);
   }
 
-  private async bootstrapQueuedRun(all: QueueEntry[]): Promise<void> {
-    // Sequentially prompt each queued message as its own turn. pi's followUp/
-    // steer queues are NOT drained by a prompt-bootstrapped loop (the internal
-    // agent.continue() continuation stalls), so prompting each entry in series
-    // is the robust way to run them all. AgentSession.prompt() awaits its
-    // _runAgentPrompt, so each prompt settles before the next starts.
+  private async bootstrapQueuedRun(entries: QueueEntry[]): Promise<void> {
     this.inner.clearQueue();
     this.pendingQueueHints = { steer: [], followUp: [] };
-    for (let i = 0; i < all.length; i++) {
-      const entry = all[i];
+    for (const entry of entries) {
       try {
-        await this.inner.prompt(
-          entry.text,
-          entry.images?.length ? { images: entry.images } : undefined,
-        );
-      } catch (error: unknown) {
+        await this.inner.prompt(entry.text, entry.images?.length ? { images: entry.images } : undefined);
+      } catch (error) {
         this.promptRunning = false;
         this.resetIdleTimer();
         invalidateSessionListCache();
-        this.emit({
-          type: "prompt_error",
-          errorMessage: error instanceof Error ? error.message : String(error),
-        });
+        this.emit({ type: "prompt_error", errorMessage: error instanceof Error ? error.message : String(error) });
         this.emit({ type: "prompt_done" });
-        notifyRunningChange();
         return;
       }
     }
     this.promptRunning = false;
     this.resetIdleTimer();
     this.emit({ type: "prompt_done" });
-    notifyRunningChange();
   }
 
   setForceEmptySystemPrompt(force: boolean): void {
@@ -420,10 +322,6 @@ export class AgentSessionWrapper {
     void this.ensureExtensionsBound(options).catch((err) => {
       console.error("[pi-web] failed to dispatch session_start to extensions:", err instanceof Error ? err.message : err);
     });
-  }
-
-  async waitUntilReady(): Promise<void> {
-    await this.waitForExtensionsBound();
   }
 
   private ensureExtensionsBound(options: ExtensionBindingOptions = {}): Promise<void> {
@@ -455,7 +353,7 @@ export class AgentSessionWrapper {
             id: randomUUID(),
             method: "notify",
             notifyType: "warning",
-            message: "Extension requested shutdown, but shutdown is not supported in Pi Web.",
+            message: "Extension requested shutdown, but shutdown is not supported in pi-web.",
           } as ExtensionUiRequest as AgentEvent),
           onError: (error) => this.emit({
             type: "extension_error",
@@ -493,31 +391,6 @@ export class AgentSessionWrapper {
 
   private shouldWaitForExtensions(type: string): boolean {
     return type === "prompt" || type === "steer" || type === "follow_up" || type === "get_commands";
-  }
-
-  private async withFinalRunningNotification<T>(operation: () => Promise<T>): Promise<T> {
-    try {
-      return await operation();
-    } finally {
-      this.resetIdleTimer();
-      notifyRunningChange();
-    }
-  }
-
-  /**
-   * 记录确定会被 SDK 展开的斜杠命令原文（命中 prompt 模板或 skill）。
-   * 只记录这两类：扩展命令由 SDK 立即执行、不产生 user 消息，记录会造成 FIFO 残留。
-   */
-  private trackSlashOriginal(message: string): void {
-    if (typeof message !== "string") return;
-    const name = parseSlashCommandName(message);
-    if (!name) return;
-    const isPromptTemplate = this.inner.promptTemplates.some((template) => template.name === name);
-    const isSkill = name.startsWith("skill:")
-      && this.inner.resourceLoader.getSkills().skills.some((skill) => `skill:${skill.name}` === name);
-    if (isPromptTemplate || isSkill) {
-      this.slashOriginals.push(message.trim());
-    }
   }
 
   private applyForcedEmptySystemPrompt(): void {
@@ -579,33 +452,24 @@ export class AgentSessionWrapper {
   async send(command: Record<string, unknown>): Promise<unknown> {
     this.resetIdleTimer();
     const type = command.type as string;
-    if (this.shouldWaitForExtensions(type)) await this.waitForExtensionsBound();
-
-    if (type === "prompt" || type === "steer" || type === "follow_up") {
+    if (type === "prompt" || type === "steer" || type === "follow_up" || type === "requeue_at") {
       const imageError = validateAgentImages(command.images);
       if (imageError) throw new Error(imageError);
-      // 记录确定会被 SDK 展开的斜杠命令（命中 prompt 模板或 skill）原文，
-      // 供 message_end 回传时注入展示。扩展命令不产生 user 消息，不记录。
-      this.trackSlashOriginal(command.message as string);
     }
+    if (this.shouldWaitForExtensions(type)) await this.waitForExtensionsBound();
 
     switch (type) {
       case "prompt": {
         if (this.inner.isBashRunning) {
-          // prompt 未发出，刚 push 的斜杠命令记录不会再有 message_end 消费，立即清空
-          this.slashOriginals.clear();
           throw new Error("Cannot send a prompt while a shell command is running");
         }
         // Fire and forget — events come via subscribe
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
-        const queuesMessage = Boolean(streamingBehavior) && this.inner.isStreaming;
-        if (queuesMessage) {
-          // Record image attachments so they survive queue mirroring.
+        if (streamingBehavior && this.inner.isStreaming) {
           this.hintQueueImages(streamingBehavior === "followUp" ? "followUp" : "steer", promptImages);
         }
         this.promptRunning = true;
-        notifyRunningChange();
         this.inner.prompt(command.message as string, {
           ...(promptImages?.length ? { images: promptImages } : {}),
           ...(streamingBehavior ? { streamingBehavior } : {}),
@@ -614,12 +478,8 @@ export class AgentSessionWrapper {
           this.promptRunning = false;
           this.resetIdleTimer();
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
-          notifyRunningChange();
         }).catch((error) => {
           this.promptRunning = false;
-          // prompt 发送失败（无 model / auth 校验失败等）不会产生 message_end，
-          // 清理队列避免残留记录错注入后续消息
-          this.slashOriginals.clear();
           this.resetIdleTimer();
           invalidateSessionListCache();
           this.emit({
@@ -627,13 +487,12 @@ export class AgentSessionWrapper {
             errorMessage: error instanceof Error ? error.message : String(error),
           });
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
-          notifyRunningChange();
         });
         return null;
       }
 
       case "abort":
-        await this.withFinalRunningNotification(() => this.inner.abort());
+        await this.inner.abort();
         return null;
 
       case "get_state": {
@@ -646,8 +505,6 @@ export class AgentSessionWrapper {
           isPromptRunning: this.promptRunning,
           isBashRunning: this.inner.isBashRunning,
           isCompacting: this.inner.isCompacting,
-          autoCompactionEnabled: this.inner.autoCompactionEnabled,
-          autoRetryEnabled: this.inner.autoRetryEnabled,
           model: model ? { id: model.id, provider: model.provider } : undefined,
           messageCount: 0,
           pendingMessageCount: this.inner.pendingMessageCount,
@@ -655,7 +512,7 @@ export class AgentSessionWrapper {
             steering: [...this.inner.getSteeringMessages()],
             followUp: [...this.inner.getFollowUpMessages()],
           },
-          pendingRecovery: this.getPendingRecoveryView(),
+          pendingRecovery: this.pendingRecoveryView(),
           contextUsage: contextUsage
             ? { percent: contextUsage.percent, contextWindow: contextUsage.contextWindow, tokens: contextUsage.tokens }
             : null,
@@ -668,11 +525,7 @@ export class AgentSessionWrapper {
 
       case "set_model": {
         const { provider, modelId } = command as { provider: string; modelId: string };
-        let model = this.inner.modelRuntime.getModel(provider, modelId);
-        if (!model) {
-          await this.inner.modelRuntime.refresh({ allowNetwork: false });
-          model = this.inner.modelRuntime.getModel(provider, modelId);
-        }
+        const model = this.inner.modelRuntime.getModel(provider, modelId);
         if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
         await this.inner.setModel(model);
         invalidateModelsCache();
@@ -681,9 +534,6 @@ export class AgentSessionWrapper {
       }
 
       case "fork": {
-        if (this.inner.isBashRunning) {
-          throw new Error("Cannot fork while a shell command is running");
-        }
         const entryId = command.entryId as string;
         const sessionManager = this.inner.sessionManager;
         const currentSessionFile = this.inner.sessionFile;
@@ -718,9 +568,6 @@ export class AgentSessionWrapper {
       }
 
       case "navigate_tree": {
-        if (this.inner.isBashRunning) {
-          throw new Error("Cannot navigate while a shell command is running");
-        }
         const result = await this.inner.navigateTree(command.targetId as string, {});
         return { cancelled: result.cancelled };
       }
@@ -740,9 +587,7 @@ export class AgentSessionWrapper {
 
       case "compact": {
         try {
-          return await this.withFinalRunningNotification(() =>
-            this.inner.compact(command.customInstructions as string | undefined)
-          );
+          return await this.inner.compact(command.customInstructions as string | undefined);
         } finally {
           invalidateSessionListCache();
         }
@@ -767,11 +612,6 @@ export class AgentSessionWrapper {
         return { text: this.inner.getLastAssistantText() ?? "" };
       }
 
-      case "set_auto_compaction": {
-        this.inner.setAutoCompactionEnabled(command.enabled as boolean);
-        return null;
-      }
-
       case "clear_queue": {
         // Full clear only: pi has no single-item dequeue, and clear+requeue
         // races against the agent loop pulling messages mid-flight.
@@ -782,197 +622,79 @@ export class AgentSessionWrapper {
       }
 
       case "move_queue": {
-        // pi has no reorder/single-dequeue API, so reordering is implemented
-        // as clear-all + re-enqueue in the target order. Like pi's own
-        // clearQueue(), this is allowed while the agent runs: the loop only
-        // pulls entries between turns, and clear+requeue within one request is
-        // atomic enough that the queue is repopulated before the next pull.
         const kind = command.kind as QueueKind | undefined;
-        if (kind !== "steer" && kind !== "followUp") {
-          throw new Error("move_queue requires kind \"steer\" or \"followUp\"");
-        }
         const fromIndex = Number(command.fromIndex);
         const toIndex = Number(command.toIndex);
-        if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)) {
-          throw new Error("move_queue requires integer indexes");
+        if ((kind !== "steer" && kind !== "followUp") || !Number.isInteger(fromIndex) || !Number.isInteger(toIndex)) {
+          throw new Error("move_queue requires a queue kind and integer indexes");
         }
-        const steeringEntries = this.queueMirror.filter((e) => e.kind === "steer");
-        const followUpEntries = this.queueMirror.filter((e) => e.kind === "followUp");
-        const moving = kind === "steer" ? steeringEntries : followUpEntries;
-        if (fromIndex < 0 || fromIndex >= moving.length || toIndex < 0 || toIndex >= moving.length) {
-          throw new Error("move_queue index out of range");
-        }
-        const [entry] = moving.splice(fromIndex, 1);
-        moving.splice(toIndex, 0, entry);
-        const newSteering = kind === "steer" ? moving : steeringEntries;
-        const newFollowUp = kind === "followUp" ? moving : followUpEntries;
-        // Clear the live pi queue entirely, then re-enqueue both queues in the
-        // new order. Image hints are pushed per entry FIFO so reconcileQueue
-        // can reattach them after each queue_update event.
-        this.inner.clearQueue();
-        this.pendingQueueHints = { steer: [], followUp: [] };
-        for (const e of newSteering) {
-          this.hintQueueImages("steer", e.images);
-          await this.inner.steer(e.text, e.images?.length ? e.images : undefined);
-        }
-        for (const e of newFollowUp) {
-          this.hintQueueImages("followUp", e.images);
-          await this.inner.followUp(e.text, e.images?.length ? e.images : undefined);
-        }
-        this.queueMirror = [...newSteering, ...newFollowUp];
-        this.persistQueue();
-        return { steering: [...this.inner.getSteeringMessages()], followUp: [...this.inner.getFollowUpMessages()] };
+        const { queues } = await this.mutateLiveQueue(kind, (entries) => {
+          if (fromIndex < 0 || fromIndex >= entries.length || toIndex < 0 || toIndex >= entries.length) {
+            throw new Error("move_queue index out of range");
+          }
+          const [entry] = entries.splice(fromIndex, 1);
+          entries.splice(toIndex, 0, entry);
+        });
+        return queues;
       }
 
       case "recall_queue_item": {
-        // pi has no single-item dequeue — same clear-all + re-enqueue strategy
-        // as move_queue, minus the recalled entry. Allowed while running, like
-        // pi's own clearQueue().
         const kind = command.kind as QueueKind | undefined;
-        if (kind !== "steer" && kind !== "followUp") {
-          throw new Error("recall_queue_item requires kind \"steer\" or \"followUp\"");
-        }
         const index = Number(command.index);
-        if (!Number.isInteger(index)) {
-          throw new Error("recall_queue_item requires an integer index");
+        if ((kind !== "steer" && kind !== "followUp") || !Number.isInteger(index)) {
+          throw new Error("recall_queue_item requires a queue kind and integer index");
         }
-        const steeringEntries = this.queueMirror.filter((e) => e.kind === "steer");
-        const followUpEntries = this.queueMirror.filter((e) => e.kind === "followUp");
-        const entries = kind === "steer" ? steeringEntries : followUpEntries;
-        if (index < 0 || index >= entries.length) {
-          throw new Error("recall_queue_item index out of range");
-        }
-        const [removed] = entries.splice(index, 1);
-        const newSteering = kind === "steer" ? entries : steeringEntries;
-        const newFollowUp = kind === "followUp" ? entries : followUpEntries;
-        this.inner.clearQueue();
-        this.pendingQueueHints = { steer: [], followUp: [] };
-        for (const e of newSteering) {
-          this.hintQueueImages("steer", e.images);
-          await this.inner.steer(e.text, e.images?.length ? e.images : undefined);
-        }
-        for (const e of newFollowUp) {
-          this.hintQueueImages("followUp", e.images);
-          await this.inner.followUp(e.text, e.images?.length ? e.images : undefined);
-        }
-        this.queueMirror = [...newSteering, ...newFollowUp];
-        this.persistQueue();
-        return {
-          entry: { text: removed.text, images: removed.images ?? [] },
-          steering: [...this.inner.getSteeringMessages()],
-          followUp: [...this.inner.getFollowUpMessages()],
-        };
+        const { value: entry, queues } = await this.mutateLiveQueue(kind, (entries) => {
+          if (index < 0 || index >= entries.length) throw new Error("recall_queue_item index out of range");
+          const [removed] = entries.splice(index, 1);
+          return removed;
+        });
+        return { entry: { text: entry.text, images: entry.images ?? [] }, ...queues };
       }
 
       case "requeue_at": {
-        // Put an edited message back into the queue at its original position.
-        // Same clear-all + re-enqueue strategy; the edited entry is inserted at
-        // the given index. Allowed while running, like pi's own clearQueue().
         const kind = command.kind as QueueKind | undefined;
-        if (kind !== "steer" && kind !== "followUp") {
-          throw new Error("requeue_at requires kind \"steer\" or \"followUp\"");
-        }
         const index = Number(command.index);
-        if (!Number.isInteger(index)) {
-          throw new Error("requeue_at requires an integer index");
-        }
         const text = command.text as string | undefined;
-        if (typeof text !== "string" || !text.trim()) {
-          throw new Error("requeue_at requires text");
+        if ((kind !== "steer" && kind !== "followUp") || !Number.isInteger(index) || !text?.trim()) {
+          throw new Error("requeue_at requires a queue kind, integer index, and text");
         }
-        const rawImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        const steeringEntries = this.queueMirror.filter((e) => e.kind === "steer");
-        const followUpEntries = this.queueMirror.filter((e) => e.kind === "followUp");
-        const entries = kind === "steer" ? steeringEntries : followUpEntries;
-        if (index < 0 || index > entries.length) {
-          throw new Error("requeue_at index out of range");
-        }
-        const edited = createQueueEntry(kind, text, rawImages);
-        entries.splice(index, 0, edited);
-        const newSteering = kind === "steer" ? entries : steeringEntries;
-        const newFollowUp = kind === "followUp" ? entries : followUpEntries;
-        this.inner.clearQueue();
-        this.pendingQueueHints = { steer: [], followUp: [] };
-        for (const e of newSteering) {
-          this.hintQueueImages("steer", e.images);
-          await this.inner.steer(e.text, e.images?.length ? e.images : undefined);
-        }
-        for (const e of newFollowUp) {
-          this.hintQueueImages("followUp", e.images);
-          await this.inner.followUp(e.text, e.images?.length ? e.images : undefined);
-        }
-        this.queueMirror = [...newSteering, ...newFollowUp];
-        this.persistQueue();
-        return {
-          steering: [...this.inner.getSteeringMessages()],
-          followUp: [...this.inner.getFollowUpMessages()],
-        };
+        const images = command.images as QueueImage[] | undefined;
+        const { queues } = await this.mutateLiveQueue(kind, (entries) => {
+          if (index < 0 || index > entries.length) throw new Error("requeue_at index out of range");
+          entries.splice(index, 0, createQueueEntry(kind, text, images));
+        });
+        return queues;
       }
 
       case "remove_queue_item": {
-        // pi has no single-dequeue API either; drop the entry from the mirror
-        // and rebuild the live queue via clear-all + re-enqueue (same strategy
-        // as move_queue).
         const kind = command.kind as QueueKind | undefined;
-        if (kind !== "steer" && kind !== "followUp") {
-          throw new Error("remove_queue_item requires kind \"steer\" or \"followUp\"");
-        }
         const index = Number(command.index);
-        if (!Number.isInteger(index)) {
-          throw new Error("remove_queue_item requires integer index");
+        if ((kind !== "steer" && kind !== "followUp") || !Number.isInteger(index)) {
+          throw new Error("remove_queue_item requires a queue kind and integer index");
         }
-        const steeringEntries = this.queueMirror.filter((e) => e.kind === "steer");
-        const followUpEntries = this.queueMirror.filter((e) => e.kind === "followUp");
-        const entries = kind === "steer" ? steeringEntries : followUpEntries;
-        if (index < 0 || index >= entries.length) {
-          throw new Error("remove_queue_item index out of range");
-        }
-        entries.splice(index, 1);
-        const newSteering = kind === "steer" ? entries : steeringEntries;
-        const newFollowUp = kind === "followUp" ? entries : followUpEntries;
-        this.inner.clearQueue();
-        this.pendingQueueHints = { steer: [], followUp: [] };
-        for (const e of newSteering) {
-          this.hintQueueImages("steer", e.images);
-          await this.inner.steer(e.text, e.images?.length ? e.images : undefined);
-        }
-        for (const e of newFollowUp) {
-          this.hintQueueImages("followUp", e.images);
-          await this.inner.followUp(e.text, e.images?.length ? e.images : undefined);
-        }
-        this.queueMirror = [...newSteering, ...newFollowUp];
-        this.persistQueue();
-        return {
-          steering: [...this.inner.getSteeringMessages()],
-          followUp: [...this.inner.getFollowUpMessages()],
-        };
+        const { queues } = await this.mutateLiveQueue(kind, (entries) => {
+          if (index < 0 || index >= entries.length) throw new Error("remove_queue_item index out of range");
+          entries.splice(index, 1);
+        });
+        return queues;
       }
 
       case "resolve_recovery": {
-        const keptIds = new Set((command.keep as string[] | undefined) ?? []);
-        const discardIds = new Set((command.discard as string[] | undefined) ?? []);
+        const keep = new Set((command.keep as string[] | undefined) ?? []);
+        const discard = new Set((command.discard as string[] | undefined) ?? []);
         const continueRun = command.continueRun === true;
-        let keptCount = 0;
+        let kept = 0;
         for (const entry of this.queueRecovery) {
-          if (!keptIds.has(entry.id)) continue;
+          if (!keep.has(entry.id)) continue;
           await this.requeueEntry(entry);
           this.ensureMirrored(entry);
-          keptCount += 1;
+          kept += 1;
         }
-        const remaining = this.queueRecovery.filter(
-          (entry) => !keptIds.has(entry.id) && !discardIds.has(entry.id),
-        );
-        const resolved = this.queueRecovery.length - remaining.length;
-        this.queueRecovery = remaining;
+        this.queueRecovery = this.queueRecovery.filter((entry) => !keep.has(entry.id) && !discard.has(entry.id));
         this.persistQueue();
-        if (continueRun && keptCount > 0) {
-          this.runAgentContinue();
-        }
-        return {
-          resolved,
-          kept: keptCount,
-          remaining: this.getPendingRecoveryView(),
-        };
+        if (continueRun && kept > 0) this.runAgentContinue();
+        return { remaining: this.pendingRecoveryView(), kept };
       }
 
       case "export_queue": {
@@ -983,19 +705,15 @@ export class AgentSessionWrapper {
       }
 
       case "import_queue": {
-        const rawEntries = command.entries as QueueEntryInput[] | undefined;
-        if (!Array.isArray(rawEntries)) throw new Error("import_queue requires entries[]");
+        const entries = command.entries as QueueEntryInput[] | undefined;
+        if (!Array.isArray(entries)) throw new Error("import_queue requires entries[]");
+        this.validateQueueEntries(entries);
         let imported = 0;
-        for (const input of rawEntries) {
-          if (
-            (input.kind !== "steer" && input.kind !== "followUp")
-            || typeof input.text !== "string"
-          ) {
-            continue;
-          }
-          const entry = createQueueEntry(input.kind, input.text, input.images);
-          await this.requeueEntry(entry);
-          this.ensureMirrored(entry);
+        for (const entry of entries) {
+          if ((entry.kind !== "steer" && entry.kind !== "followUp") || typeof entry.text !== "string") continue;
+          const queued = createQueueEntry(entry.kind, entry.text, entry.images);
+          await this.requeueEntry(queued);
+          this.ensureMirrored(queued);
           imported += 1;
         }
         this.persistQueue();
@@ -1007,55 +725,30 @@ export class AgentSessionWrapper {
       }
 
       case "stage_recovery": {
-        // Stage imported entries as pending recovery (NOT into the live pi
-        // queue) so the QueueRecoveryDialog pops up and the user can choose:
-        // re-queue / re-queue & continue / discard — same flow as crash
-        // recovery. Lets the user decide whether to run an imported queue
-        // instead of auto-executing it.
-        const rawEntries = command.entries as QueueEntryInput[] | undefined;
-        if (!Array.isArray(rawEntries)) throw new Error("stage_recovery requires entries[]");
+        const entries = command.entries as QueueEntryInput[] | undefined;
+        if (!Array.isArray(entries)) throw new Error("stage_recovery requires entries[]");
+        this.validateQueueEntries(entries);
         let staged = 0;
-        for (const input of rawEntries) {
-          if (
-            (input.kind !== "steer" && input.kind !== "followUp")
-            || typeof input.text !== "string"
-          ) {
-            continue;
-          }
-          const entry = createQueueEntry(input.kind, input.text, input.images);
-          this.queueRecovery.push(entry);
+        for (const entry of entries) {
+          if ((entry.kind !== "steer" && entry.kind !== "followUp") || typeof entry.text !== "string") continue;
+          this.queueRecovery.push(createQueueEntry(entry.kind, entry.text, entry.images));
           staged += 1;
         }
         this.persistQueue();
-        return {
-          staged,
-          pendingRecovery: this.getPendingRecoveryView(),
-        };
+        return { staged, pendingRecovery: this.pendingRecoveryView() };
       }
 
       case "steer": {
         const steerImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         this.hintQueueImages("steer", steerImages);
-        try {
-          await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
-        } catch (error) {
-          // steer 入队失败不会产生 message_end，清理本次记录避免残留
-          this.slashOriginals.clear();
-          throw error;
-        }
+        await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
         return null;
       }
 
       case "follow_up": {
         const followImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         this.hintQueueImages("followUp", followImages);
-        try {
-          await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
-        } catch (error) {
-          // followUp 入队失败不会产生 message_end，清理本次记录避免残留
-          this.slashOriginals.clear();
-          throw error;
-        }
+        await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
         return null;
       }
 
@@ -1116,7 +809,6 @@ export class AgentSessionWrapper {
           this.inner.extensionRunner.setUIContext?.(this.createExtensionUiContext(), "rpc");
         }
         this.applyForcedEmptySystemPrompt();
-        invalidateModelsCache();
         return { success: true };
       }
 
@@ -1135,11 +827,6 @@ export class AgentSessionWrapper {
         return null;
       }
 
-      case "set_auto_retry": {
-        this.inner.setAutoRetryEnabled(command.enabled as boolean);
-        return null;
-      }
-
       case "bash": {
         if (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning) {
           throw new Error("Cannot run a shell command while the session is busy");
@@ -1149,7 +836,6 @@ export class AgentSessionWrapper {
           undefined,
           { excludeFromContext: command.excludeFromContext as boolean | undefined },
         );
-        notifyRunningChange();
         try {
           const result = await execution;
           this.persistBashOnlySession();
@@ -1157,7 +843,6 @@ export class AgentSessionWrapper {
         } finally {
           this.resetIdleTimer();
           invalidateSessionListCache();
-          notifyRunningChange();
         }
       }
 
@@ -1184,11 +869,7 @@ export class AgentSessionWrapper {
     try {
       this.inner.dispose();
     } finally {
-      try {
-        this.onDestroyCallback?.();
-      } finally {
-        notifyRunningChange();
-      }
+      this.onDestroyCallback?.();
     }
   }
 
@@ -1236,7 +917,7 @@ export class AgentSessionWrapper {
     const width = (resolved as { width?: unknown }).width;
     return typeof width === "number" && Number.isFinite(width)
       ? Math.max(40, Math.min(140, Math.round(width)))
-      : 92;
+      : DEFAULT_CUSTOM_UI_COLUMNS;
   }
 
   private emitCustomUiRender(id: string, custom: ActiveCustomUi): void {
@@ -1514,10 +1195,14 @@ export class AgentSessionWrapper {
       get theme() { return PLAIN_TEXT_THEME; },
       getAllThemes: () => [],
       getTheme: () => undefined,
-      setTheme: () => ({ success: false, error: "Theme switching is not supported in Pi Web extension UI yet" }),
+      setTheme: () => ({ success: false, error: "Theme switching is not supported in pi-web extension UI yet" }),
       getToolsExpanded: () => false,
       setToolsExpanded: () => {},
     };
+  }
+
+  private syncProjectTrust(): void {
+    this.inner.settingsManager.setProjectTrusted(getProjectTrustStatus(this.cwd, getAgentDir()).trusted);
   }
 
   private createExtensionCommandContextActions(): ExtensionCommandContextActionsLike {
@@ -1546,11 +1231,6 @@ export class AgentSessionWrapper {
       },
     };
   }
-
-  private syncProjectTrust(): void {
-    const status = getProjectTrustStatus(this.cwd, getAgentDir());
-    this.inner.settingsManager.setProjectTrusted(status.trusted);
-  }
 }
 
 // ============================================================================
@@ -1567,10 +1247,15 @@ declare global {
 function getRegistry(): Map<string, AgentSessionWrapper> {
   if (!globalThis.__piSessions) {
     globalThis.__piSessions = new Map();
-    const cleanup = () => globalThis.__piSessions?.forEach((s) => s.destroy());
-    process.once("exit", cleanup);
-    process.once("SIGINT", cleanup);
-    process.once("SIGTERM", cleanup);
+    const shutdownAll = () => Promise.allSettled(
+      Array.from(globalThis.__piSessions?.values() ?? [], (session) => session.shutdown()),
+    );
+    // `exit` handlers cannot await promises, so use the synchronous fallback
+    // only there. Signal handlers are graceful: wait for extension shutdown
+    // and SDK disposal before preserving Node's normal signal exit status.
+    process.once("exit", () => globalThis.__piSessions?.forEach((session) => session.destroy()));
+    process.once("SIGINT", () => { void shutdownAll().finally(() => process.exit(130)); });
+    process.once("SIGTERM", () => { void shutdownAll().finally(() => process.exit(143)); });
   }
   return globalThis.__piSessions;
 }
@@ -1634,56 +1319,11 @@ export function getRunningRpcSessionIds(): string[] {
   return [...ids];
 }
 
-// ----------------------------------------------------------------------------
-// Running-status broadcaster
-//
-// Pushes the current set of running session ids to subscribers whenever any
-// session's running state may have changed. This lets the sidebar receive live
-// updates over SSE instead of polling. Listeners live on globalThis so they
-// survive Next.js hot-reload.
-// ----------------------------------------------------------------------------
-
-function getRunningListeners(): Set<(ids: string[]) => void> {
-  if (!globalThis.__piRunningListeners) globalThis.__piRunningListeners = new Set();
-  return globalThis.__piRunningListeners;
-}
-
-/** Subscribe to running-session-id changes. Returns an unsubscribe function. */
-export function subscribeRunningSessions(listener: (ids: string[]) => void): () => void {
-  const listeners = getRunningListeners();
-  listeners.add(listener);
-  return () => { listeners.delete(listener); };
-}
-
-let lastRunningSnapshot = "";
-
-/**
- * Recompute the running-session-id set and, if it changed since the last
- * notification, broadcast it to subscribers.
- */
-export function notifyRunningChange(): void {
-  const listeners = getRunningListeners();
-  if (listeners.size === 0) {
-    // A future subscriber receives its own initial snapshot. Clear this one so
-    // its first state transition cannot match stale state from an old listener.
-    lastRunningSnapshot = "";
-    return;
-  }
-  const ids = getRunningRpcSessionIds();
-  const snapshot = JSON.stringify([...ids].sort());
-  if (snapshot === lastRunningSnapshot) return;
-  lastRunningSnapshot = snapshot;
-  for (const listener of listeners) {
-    try { listener(ids); } catch { /* ignore listener errors */ }
-  }
-}
-
 /**
  * Get or create an AgentSession for the given session.
  * For new sessions (sessionFile === ""), pi generates its own id.
- * New sessions resolve enabledModels before construction so the initial model,
- * thinking pin, and SDK scopedModels share one settings snapshot.
- * Pass options.toolNames to pre-configure active tools (empty = all disabled).
+ * The initial model, thinking level, and enabled-model scope are supplied during
+ * construction so a prompt cannot observe an intermediate configuration.
  */
 export async function startRpcSession(
   sessionId: string,
@@ -1723,7 +1363,7 @@ export async function startRpcSession(
       // Otherwise DO NOT pass a builtin-only allow-list: passing CODING_TOOL_NAMES
       // set allowedToolNames to coding builtins only, which filtered every
       // extension/package-provided tool (e.g. subagents, web access) out of the
-      // tool registry — so they were unavailable in Pi Web sessions even though the
+      // tool registry — so they were unavailable in pi-web sessions even though the
       // `pi` CLI keeps them. Leaving the allow-list unset lets the SDK register all
       // tools (and activate extension tools); we narrow the ACTIVE set below.
       toolsOption = toolNames.length === 0 ? [] : undefined;
@@ -1731,8 +1371,8 @@ export async function startRpcSession(
 
     // Build services first so extension-registered providers are available
     // before the SDK restores the saved model from the session file.
-    // Gate untrusted project extensions so opening a repository does not run
-    // its .pi/extensions code automatically (see lib/project-trust.ts, #236).
+    // Creating services imports project extensions for provider discovery, so
+    // gate project resources before repository-controlled code can run.
     const trustReloadOptions = projectTrustReloadOptions(sessionCwd, agentDir);
     const services = await createAgentSessionServices({
       cwd: sessionCwd,
@@ -1771,10 +1411,8 @@ export async function startRpcSession(
         ...(thinkingLevel ? { thinkingLevel } : {}),
       },
       {
-        ...(inner.model
-          ? { model: { provider: inner.model.provider, modelId: inner.model.id } }
-          : {}),
-        thinkingLevel: inner.thinkingLevel,
+        ...(inner.model ? { model: { provider: inner.model.provider, modelId: inner.model.id } } : {}),
+        thinkingLevel: inner.agent.state?.thinkingLevel as ThinkingLevel ?? "off",
         supportsThinking: inner.supportsThinking(),
       },
     );
@@ -1782,20 +1420,20 @@ export async function startRpcSession(
 
     // If specific tool names were requested (non-empty), set the active tools to the
     // requested builtin coding tools PLUS all extension/package tools, so installed
-    // extensions stay usable in Pi Web just like in the `pi` CLI.
+    // extensions stay usable in pi-web just like in the `pi` CLI.
     if (toolNames && toolNames.length > 0) {
       inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
     }
 
-    const wrapper = new AgentSessionWrapper(inner);
+    const wrapper = new AgentSessionWrapper(inner, sessionCwd);
     // When all tools are disabled, clear the system prompt entirely.
     // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
     // keep this forced after extension resource discovery and reloads as well.
     if (toolNames?.length === 0) {
       wrapper.setForceEmptySystemPrompt(true);
     }
-    wrapper.loadQueueRecovery();
     wrapper.start();
+    wrapper.loadQueueRecovery();
 
     const realSessionId = inner.sessionId as string;
     const realSessionFile = inner.sessionFile as string | undefined;

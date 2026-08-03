@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { runNpx } from "@/lib/npx";
-import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
+import { getAllowedFileRoots, isFilePathAllowed } from "@/lib/file-access";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { getProjectTrustStatus } from "@/lib/project-trust";
 
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     if (!isGlobal) {
       if (!cwd) return NextResponse.json({ error: "cwd required for project install" }, { status: 400 });
       const allowedRoots = await getAllowedFileRoots();
-      if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
+      if (!isFilePathAllowed(cwd, allowedRoots)) {
         return NextResponse.json({ error: "Access denied" }, { status: 403 });
       }
       if (!getProjectTrustStatus(cwd, getAgentDir()).trusted) {

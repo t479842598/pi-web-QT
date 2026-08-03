@@ -70,7 +70,7 @@ interface ExtensionRunnerLike {
     description?: string;
     sourceInfo: SlashCommandInfo["sourceInfo"];
   }>;
-  emit?(event: { type: "session_shutdown"; reason: "quit" }): Promise<unknown>;
+  emit?(event: { type: "session_shutdown"; reason: "quit" }): Promise<void>;
   setUIContext?(uiContext?: unknown, mode?: "tui" | "rpc" | "json" | "print"): void;
 }
 
@@ -119,25 +119,16 @@ export interface AgentSessionLike {
   readonly sessionFile: string | undefined;
   readonly isStreaming: boolean;
   readonly isCompacting: boolean;
-  readonly autoCompactionEnabled: boolean;
-  readonly autoRetryEnabled: boolean;
   readonly model: ModelLike | undefined;
-  readonly modelRuntime: {
-    getModel: (provider: string, modelId: string) => ModelLike | undefined;
-    refresh: (options?: { allowNetwork?: boolean }) => Promise<unknown>;
-  };
+  readonly modelRuntime: { getModel: (provider: string, modelId: string) => ModelLike | undefined };
   readonly sessionManager: SessionManager;
   readonly settingsManager: SettingsManager;
-  readonly agent: {
-    state?: { systemPrompt?: string; thinkingLevel?: string };
-    continue?: () => Promise<void>;
-  };
+  readonly agent: { state?: { systemPrompt?: string; thinkingLevel?: string } };
   readonly extensionRunner: ExtensionRunnerLike;
   readonly promptTemplates: readonly PromptTemplateLike[];
   readonly resourceLoader: ResourceLoaderLike;
 
   readonly bindExtensions?: unknown;
-  dispose(): void;
   reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void>;
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
   prompt(text: string, options?: {
@@ -146,18 +137,24 @@ export interface AgentSessionLike {
     source?: "interactive" | "rpc";
   }): Promise<void>;
   abort(): Promise<void>;
-  executeBash(command: string, onChunk?: (chunk: string) => void, options?: { excludeFromContext?: boolean }): Promise<{ output: string; exitCode?: number; cancelled?: boolean; truncated?: boolean; fullOutputPath?: string }>;
+  executeBash(command: string, onChunk?: (chunk: string) => void, options?: { excludeFromContext?: boolean }): Promise<{
+    output: string;
+    exitCode?: number;
+    cancelled?: boolean;
+    truncated?: boolean;
+    fullOutputPath?: string;
+  }>;
   abortBash(): void;
   readonly isBashRunning: boolean;
   setModel(model: ModelLike): Promise<void>;
   navigateTree(targetId: string, options?: { summarize?: boolean }): Promise<NavigateTreeResult>;
   setThinkingLevel(level: string): void;
   compact(customInstructions?: string): Promise<unknown>;
+  supportsThinking(): boolean;
+  dispose(): void;
   setSessionName(name: string): void;
   getSessionStats(): Omit<SessionStatsInfo, "sessionName">;
   getLastAssistantText(): string | undefined;
-  setAutoCompactionEnabled(enabled: boolean): void;
-  setAutoRetryEnabled(enabled: boolean): void;
   steer(text: string, images?: Array<{ type: "image"; data: string; mimeType: string }>): Promise<void>;
   followUp(text: string, images?: Array<{ type: "image"; data: string; mimeType: string }>): Promise<void>;
   readonly pendingMessageCount: number;

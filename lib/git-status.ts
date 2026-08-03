@@ -11,22 +11,23 @@ function usesRenamePath(indexStatus: string, worktreeStatus: string): boolean {
   return indexStatus === "R" || indexStatus === "C" || worktreeStatus === "R" || worktreeStatus === "C";
 }
 
+/** Parse `git status --porcelain=v1 -z` without relying on locale-specific text. */
 export function parseGitPorcelainV1(output: string): GitPorcelainEntry[] {
   const records = output.split("\0");
   const entries: GitPorcelainEntry[] = [];
 
-  for (let i = 0; i < records.length; i++) {
-    const record = records[i];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
     if (!record || record.length < 4 || record[2] !== " ") continue;
-    const indexStatus = record[0];
-    const worktreeStatus = record[1];
+
     const entry: GitPorcelainEntry = {
       path: record.slice(3),
-      indexStatus,
-      worktreeStatus,
+      indexStatus: record[0],
+      worktreeStatus: record[1],
     };
-    if (usesRenamePath(indexStatus, worktreeStatus)) {
-      entry.originalPath = records[++i] || undefined;
+    if (usesRenamePath(entry.indexStatus, entry.worktreeStatus)) {
+      entry.originalPath = records[index + 1] || undefined;
+      index += 1;
     }
     entries.push(entry);
   }

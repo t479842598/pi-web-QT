@@ -1,32 +1,29 @@
 import { NextResponse, type NextRequest } from "next/server";
-import {
-  isApiRequestAllowed,
-  isApiRequestHostAllowed,
-} from "@/lib/request-security";
-import {
-  isValidBasicAuthorization,
-  isWebPasswordEnabled,
-} from "@/lib/web-auth";
+import { isApiRequestAllowed, isApiRequestHostAllowed } from "@/lib/request-security";
+import { isValidBasicAuthorization, isWebPasswordEnabled } from "@/lib/web-auth";
 
 export function proxy(request: NextRequest) {
+  const isDevelopmentChunk = request.nextUrl.pathname.startsWith("/_next/static/");
+  if (isDevelopmentChunk) {
+    return NextResponse.next({
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
   const isApiRequest = request.nextUrl.pathname === "/api"
     || request.nextUrl.pathname.startsWith("/api/");
-  const isTrustedRequest = isApiRequest
+  const trusted = isApiRequest
     ? isApiRequestAllowed(request)
     : isApiRequestHostAllowed(request);
 
-  if (!isTrustedRequest) {
-    if (!isApiRequest) {
-      return new NextResponse("Untrusted request", { status: 403 });
-    }
-    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  if (!trusted) {
+    return isApiRequest
+      ? NextResponse.json({ error: "Untrusted API request" }, { status: 403 })
+      : new NextResponse("Untrusted request", { status: 403 });
   }
 
   const password = process.env.PI_WEB_PASSWORD;
-  if (
-    isWebPasswordEnabled(password)
-    && !isValidBasicAuthorization(request.headers.get("authorization"), password)
-  ) {
+  if (isWebPasswordEnabled(password) && !isValidBasicAuthorization(request.headers.get("authorization"), password)) {
     return new NextResponse("Authentication required", {
       status: 401,
       headers: {
@@ -39,4 +36,4 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/", "/api/:path*"] };
+export const config = { matcher: ["/", "/api/:path*", "/_next/static/:path*"] };

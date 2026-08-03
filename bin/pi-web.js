@@ -2,46 +2,11 @@
 "use strict";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const fs = require("fs");
+const { spawn } = require("child_process");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const path = require("path");
-
-// Load a project-local .env file (if present) as *defaults* — explicit
-// environment variables always win. The .env file is gitignored so secrets
-// like PI_WEB_PASSWORD never land in the repository.
-const envFilePath = path.join(__dirname, "..", ".env");
-if (fs.existsSync(envFilePath)) {
-  const lines = fs.readFileSync(envFilePath, "utf8").split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq <= 0) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let value = trimmed.slice(eq + 1).trim();
-    // Strip an inline ` #comment` tail first (dotenv convention) so a quoted
-    // value followed by a comment still gets its quotes stripped below.
-    const hash = value.indexOf(" #");
-    if (hash >= 0) value = value.slice(0, hash).trim();
-    // Strip surrounding single/double quotes.
-    if (value.length >= 2 && ((value[0] === "'" && value.endsWith("'")) || (value[0] === '"' && value.endsWith('"')))) {
-      value = value.slice(1, -1);
-    }
-    // Only apply when the user has not already exported the variable.
-    if (!(key in process.env)) process.env[key] = value;
-  }
-}
-
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { getUnsupportedNodeVersionMessage, isNodeVersionSupported } = require("./node-version");
-
-if (!isNodeVersionSupported(process.versions.node)) {
-  console.error(getUnsupportedNodeVersionMessage(process.versions.node));
-  process.exit(1);
-}
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { spawn } = require("child_process");
+const fs = require("fs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { parseLaunchOptions } = require("./pi-web-options");
 
@@ -64,28 +29,13 @@ try {
 }
 
 const { port, hostname, openBrowser } = parseLaunchOptions();
-const loopbackHostnames = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-const passwordEnabled = Boolean(process.env.PI_WEB_PASSWORD);
 
 if (!fs.existsSync(nextDir)) {
   console.error("Build artifacts not found. Please report this issue.");
   process.exit(1);
 }
 
-if (!loopbackHostnames.has(hostname)) {
-  if (passwordEnabled) {
-    console.warn(
-      `Warning: pi-web is listening on ${hostname} with Basic Auth over HTTP. Use HTTPS or a trusted VPN to protect the password in transit.`,
-    );
-  } else {
-    console.warn(
-      `Warning: pi-web is listening on ${hostname} without authentication. Only use this on a trusted network.`,
-    );
-  }
-}
-
-const nextArgs = ["start", "-p", port];
-nextArgs.push("-H", hostname);
+const nextArgs = ["start", "-p", port, "-H", hostname];
 
 // Always run next's JS entry with node directly — avoids .bin symlink issues
 // and path-with-spaces problems on Windows when shell: true is used.
@@ -94,6 +44,14 @@ const child = spawn(process.execPath, [nextBin, ...nextArgs], {
   stdio: ["inherit", "pipe", "inherit"],
   env: { ...process.env, PI_WEB_HOSTNAME: hostname },
 });
+
+if (hostname !== "127.0.0.1" && hostname !== "localhost" && hostname !== "::1") {
+  if (process.env.PI_WEB_PASSWORD) {
+    console.warn("Pi Web is exposed beyond loopback. HTTP Basic Auth does not encrypt credentials; use HTTPS or a trusted VPN.");
+  } else {
+    console.warn("Pi Web is exposed beyond loopback without authentication. Use only on a trusted network.");
+  }
+}
 
 let browserOpened = false;
 const url = `http://${hostname}:${port}`;

@@ -1,22 +1,15 @@
-import { execFile } from "child_process";
-import fs from "fs";
+import { execFile, spawn } from "child_process";
+import { lstatSync, readFileSync, realpathSync } from "fs";
 import path from "path";
 import { promisify } from "util";
 import { TEXT_PREVIEW_MAX_BYTES } from "./file-types";
-import type {
-  GitFileDiffResponse,
-  GitFileStatus,
-  GitStatusResponse,
-} from "./git-types";
-import {
-  classifyGitStatus,
-  parseGitPorcelainV1,
-  type GitPorcelainEntry,
-} from "./git-status";
+import type { GitFileDiffResponse, GitFileStatus, GitStatusResponse } from "./git-types";
+import { classifyGitStatus, parseGitPorcelainV1, type GitPorcelainEntry } from "./git-status";
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 10_000;
 const GIT_STATUS_MAX_BUFFER = 8 * 1024 * 1024;
+
 
 async function git(cwd: string, args: string[], maxBuffer = GIT_STATUS_MAX_BUFFER): Promise<string> {
   const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], {
@@ -40,36 +33,28 @@ function isWithinPath(parent: string, target: string): boolean {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
+function resolveExistingPath(filePath: string): string {
+  try {
+    return realpathSync(filePath);
+  } catch {
+    return path.resolve(filePath);
+  }
+}
+
 function toGitPath(filePath: string): string {
   return filePath.split(path.sep).join("/");
 }
 
 async function readStatusEntries(repositoryRoot: string): Promise<GitPorcelainEntry[]> {
-  const output = await git(repositoryRoot, [
-    "status",
-    "--porcelain=v1",
-    "-z",
-    "--untracked-files=all",
-  ]);
+  const output = await git(repositoryRoot, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   return parseGitPorcelainV1(output);
 }
 
-async function readTrackedLineStats(
-  repositoryRoot: string,
-  cwd: string,
-): Promise<{ additions: number; deletions: number }> {
+async function readTrackedLineStats(repositoryRoot: string, cwd: string): Promise<{ additions: number; deletions: number }> {
   const relativeCwd = toGitPath(path.relative(repositoryRoot, cwd));
   const pathspec = relativeCwd || ".";
   try {
-    const output = await git(repositoryRoot, [
-      "diff",
-      "--no-color",
-      "--no-ext-diff",
-      "--numstat",
-      "HEAD",
-      "--",
-      pathspec,
-    ]);
+    const output = await git(repositoryRoot, ["diff", "--no-color", "--no-ext-diff", "--numstat", "HEAD", "--", pathspec]);
     let additions = 0;
     let deletions = 0;
     for (const line of output.split(/\r?\n/)) {
@@ -86,11 +71,15 @@ async function readTrackedLineStats(
   }
 }
 
+function hasNullByte(content: Buffer): boolean {
+  return content.includes(0);
+}
+
 function countUntrackedTextLines(filePath: string): number {
   try {
-    const stat = fs.lstatSync(filePath);
+    const stat = lstatSync(filePath);
     if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES) return 0;
-    const content = fs.readFileSync(filePath);
+    const content = readFileSync(filePath);
     if (hasNullByte(content) || content.length === 0) return 0;
     const text = content.toString("utf8");
     return text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
@@ -99,8 +88,79 @@ function countUntrackedTextLines(filePath: string): number {
   }
 }
 
+function splitNullDelimited(output: string): string[] {
+  return output.split("\0").filter(Boolean);
+}
+
+function trackedDirectoryPaths(filePaths: string[]): string[] {
+  const directories = new Set<string>();
+  for (const filePath of filePaths) {
+    let directory = path.posix.dirname(filePath);
+    while (directory && directory !== ".") {
+      directories.add(directory);
+      directory = path.posix.dirname(directory);
+    }
+  }
+  return [...directories];
+}
+
+/**
+ * Match paths against ignore rules without Git's usual tracked-file exemption.
+ * The Explorer uses this to visually de-emphasize every path covered by a
+ * .gitignore rule, including files and directories that were tracked before
+ * the rule was added.
+ */
+async function checkIgnoredPaths(repositoryRoot: string, paths: string[]): Promise<string[]> {
+  if (paths.length === 0) return [];
+
+  return new Promise((resolve) => {
+    const child = spawn("git", ["-C", repositoryRoot, "check-ignore", "--no-index", "--stdin", "-z"], {
+      env: { ...process.env, LC_ALL: "C" },
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    let output = "";
+    let settled = false;
+    const finish = (matched: string[]) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(matched);
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish([]);
+    }, GIT_TIMEOUT_MS);
+
+    child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    child.once("error", () => finish([]));
+    // Exit code 1 only means none of the submitted paths matched an ignore rule.
+    child.once("close", () => finish(splitNullDelimited(output)));
+    child.stdin.end(`${paths.join("\0")}\0`);
+  });
+}
+
+async function readIgnoredPaths(repositoryRoot: string): Promise<string[]> {
+  try {
+    const [trackedOutput, ignoredOutput] = await Promise.all([
+      git(repositoryRoot, ["ls-files", "--cached", "-z"]),
+      git(repositoryRoot, ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"]),
+    ]);
+    const trackedPaths = splitNullDelimited(trackedOutput);
+    const candidates = new Set([
+      ...trackedPaths,
+      ...trackedDirectoryPaths(trackedPaths),
+      ...splitNullDelimited(ignoredOutput).map((filePath) => filePath.replace(/\/+$/, "")),
+    ]);
+    const ignoredPaths = await checkIgnoredPaths(repositoryRoot, [...candidates]);
+    return ignoredPaths.map((relative) => path.resolve(repositoryRoot, relative));
+  } catch {
+    return [];
+  }
+}
+
 export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
-  const repositoryRoot = await findRepositoryRoot(cwd);
+  const resolvedCwd = resolveExistingPath(cwd);
+  const repositoryRoot = await findRepositoryRoot(resolvedCwd);
   if (!repositoryRoot) {
     return {
       isGitRepository: false,
@@ -108,20 +168,21 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
       files: [],
       additions: 0,
       deletions: 0,
+      ignoredPaths: [],
     };
   }
 
-  const [entries, trackedLineStats] = await Promise.all([
+  const [entries, trackedLineStats, ignoredPaths] = await Promise.all([
     readStatusEntries(repositoryRoot),
-    readTrackedLineStats(repositoryRoot, cwd),
+    readTrackedLineStats(repositoryRoot, resolvedCwd),
+    readIgnoredPaths(repositoryRoot),
   ]);
   const files = entries.flatMap((entry): GitFileStatus[] => {
     const filePath = path.resolve(repositoryRoot, entry.path);
-    if (!isWithinPath(cwd, filePath)) return [];
-    const classified = classifyGitStatus(entry);
+    if (!isWithinPath(resolvedCwd, filePath)) return [];
     return [{
       filePath,
-      ...classified,
+      ...classifyGitStatus(entry),
       indexStatus: entry.indexStatus,
       worktreeStatus: entry.worktreeStatus,
     }];
@@ -131,17 +192,15 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
     0,
   );
 
+
   return {
     isGitRepository: true,
     repositoryRoot,
     files,
     additions: trackedLineStats.additions + untrackedAdditions,
     deletions: trackedLineStats.deletions,
+    ignoredPaths: ignoredPaths.filter((ignoredPath) => isWithinPath(resolvedCwd, ignoredPath)),
   };
-}
-
-function hasNullByte(content: Buffer): boolean {
-  return content.includes(0);
 }
 
 function createAddedFilePatch(gitPath: string, content: string): string {
@@ -149,9 +208,7 @@ function createAddedFilePatch(gitPath: string, content: string): string {
   const lines = content.split("\n");
   if (hasTrailingNewline) lines.pop();
   const body = lines.map((line) => `+${line}`).join("\n");
-  const noNewlineMarker = !hasTrailingNewline && lines.length > 0
-    ? "\n\\ No newline at end of file"
-    : "";
+  const noNewlineMarker = !hasTrailingNewline && lines.length > 0 ? "\n\\ No newline at end of file" : "";
   return [
     `diff --git a/${gitPath} b/${gitPath}`,
     "new file mode 100644",
@@ -162,71 +219,46 @@ function createAddedFilePatch(gitPath: string, content: string): string {
   ].join("\n");
 }
 
-async function createTrackedFilePatch(
-  repositoryRoot: string,
-  relativePath: string,
-  originalPath?: string,
-): Promise<string | null> {
-  const paths = originalPath && originalPath !== relativePath
-    ? [originalPath, relativePath]
-    : [relativePath];
+async function createTrackedFilePatch(repositoryRoot: string, relativePath: string, originalPath?: string): Promise<string | null> {
+  const paths = originalPath && originalPath !== relativePath ? [originalPath, relativePath] : [relativePath];
   try {
-    return await git(repositoryRoot, [
-      "diff",
-      "--no-color",
-      "--no-ext-diff",
-      "--unified=3",
-      "HEAD",
-      "--",
-      ...paths,
-    ], TEXT_PREVIEW_MAX_BYTES * 4);
+    return await git(repositoryRoot, ["diff", "--no-color", "--no-ext-diff", "--unified=3", "HEAD", "--", ...paths], TEXT_PREVIEW_MAX_BYTES * 4);
   } catch {
     return null;
   }
 }
 
 export async function getGitFileDiff(cwd: string, filePath: string): Promise<GitFileDiffResponse> {
-  const repositoryRoot = await findRepositoryRoot(cwd);
-  if (!repositoryRoot || !isWithinPath(repositoryRoot, filePath)) return { supported: false };
+  const resolvedCwd = resolveExistingPath(cwd);
+  const repositoryRoot = await findRepositoryRoot(resolvedCwd);
+  const resolvedFilePath = path.resolve(resolvedCwd, path.relative(path.resolve(cwd), path.resolve(filePath)));
+  if (!repositoryRoot || !isWithinPath(repositoryRoot, resolvedFilePath)) return { supported: false };
 
-  const resolvedFilePath = path.resolve(filePath);
   const relativePath = toGitPath(path.relative(repositoryRoot, resolvedFilePath));
-  const entries = await readStatusEntries(repositoryRoot);
-  const entry = entries.find((candidate) => candidate.path === relativePath);
+  const entry = (await readStatusEntries(repositoryRoot)).find((candidate) => candidate.path === relativePath);
   if (!entry) return { supported: false };
 
   const { status } = classifyGitStatus(entry);
   if (status === "deleted") {
     const patch = await createTrackedFilePatch(repositoryRoot, relativePath, entry.originalPath);
-    if (!patch?.includes("\n@@ ")) return { supported: false };
-    return { supported: true, status, patch };
+    return patch?.includes("\n@@ ") ? { supported: true, status, patch } : { supported: false };
   }
 
-  let stat: fs.Stats;
+  let stat: ReturnType<typeof lstatSync>;
   try {
-    stat = fs.lstatSync(resolvedFilePath);
+    stat = lstatSync(resolvedFilePath);
   } catch {
     return { supported: false };
   }
   if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES) return { supported: false };
 
-  const currentBuffer = fs.readFileSync(resolvedFilePath);
-  if (hasNullByte(currentBuffer)) return { supported: false };
-  const newContent = currentBuffer.toString("utf8");
+  const content = readFileSync(resolvedFilePath);
+  if (hasNullByte(content)) return { supported: false };
+  const newContent = content.toString("utf8");
+  const patch = status === "untracked"
+    ? createAddedFilePatch(relativePath, newContent)
+    : await createTrackedFilePatch(repositoryRoot, relativePath, entry.originalPath)
+      ?? (status === "added" ? createAddedFilePatch(relativePath, newContent) : null);
 
-  let patch: string;
-  if (status === "untracked") {
-    patch = createAddedFilePatch(relativePath, newContent);
-  } else {
-    const trackedPatch = await createTrackedFilePatch(repositoryRoot, relativePath, entry.originalPath);
-    if (trackedPatch === null) {
-      if (status !== "added") return { supported: false };
-      patch = createAddedFilePatch(relativePath, newContent);
-    } else {
-      patch = trackedPatch;
-    }
-  }
-
-  if (!patch.includes("\n@@ ")) return { supported: false };
-  return { supported: true, status, patch };
+  return patch?.includes("\n@@ ") ? { supported: true, status, patch } : { supported: false };
 }

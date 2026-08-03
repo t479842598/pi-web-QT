@@ -26,10 +26,6 @@ function normalizeConfiguredHostname(value: string | undefined): string | null {
   return isIP(trimmed) ? normalizeHostname(trimmed) : hostnameFromAuthority(trimmed);
 }
 
-function isLoopbackHostname(hostname: string): boolean {
-  return hostname === "localhost" || hostname.endsWith(".localhost");
-}
-
 function configuredHostnamesFromEnvironment(): string[] {
   return [
     process.env.PI_WEB_HOSTNAME,
@@ -57,9 +53,7 @@ function isUserInitiatedSessionExportNavigation(request: Request): boolean {
     || request.headers.get("sec-fetch-mode") !== "navigate"
     || request.headers.get("sec-fetch-dest") !== "document"
     || request.headers.get("sec-fetch-user") !== "?1"
-  ) {
-    return false;
-  }
+  ) return false;
 
   try {
     return /^\/api\/sessions\/[^/]+\/export$/.test(new URL(request.url).pathname);
@@ -68,11 +62,7 @@ function isUserInitiatedSessionExportNavigation(request: Request): boolean {
   }
 }
 
-/**
- * Only trust local names, IP literals, or the hostname explicitly selected by
- * the operator. IP literals preserve LAN access but cannot be DNS-rebound
- * because the browser keeps the literal address in the Host header.
- */
+/** Accept local names, IP literals, and hostnames explicitly selected by the operator. */
 export function isApiRequestHostAllowed(
   request: Request,
   configuredHostnames = configuredHostnamesFromEnvironment(),
@@ -80,20 +70,15 @@ export function isApiRequestHostAllowed(
   const host = request.headers.get("host");
   const hostname = host ? hostnameFromAuthority(host) : null;
   if (!hostname) return false;
-  if (isLoopbackHostname(hostname) || isIP(hostname)) return true;
-
-  return configuredHostnames.some(
-    (configured) => normalizeConfiguredHostname(configured) === hostname,
-  );
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || isIP(hostname)) return true;
+  return configuredHostnames.some((configured) => normalizeConfiguredHostname(configured) === hostname);
 }
 
-/** Reject browser cross-site API requests while preserving non-browser clients. */
+/** Reject browser cross-site API requests while allowing non-browser clients. */
 export function isApiRequestOriginAllowed(request: Request): boolean {
+  if (request.headers.get("sec-fetch-site") === "cross-site") return false;
   const origin = request.headers.get("origin");
-  const fetchSite = request.headers.get("sec-fetch-site");
-  if (fetchSite === "cross-site") return false;
   if (!origin) return true;
-
   const requestOrigin = getRequestOrigin(request);
   return requestOrigin !== null && canonicalOrigin(origin) === requestOrigin;
 }

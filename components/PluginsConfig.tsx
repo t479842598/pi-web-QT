@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PlusIcon } from "@phosphor-icons/react";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import type { PluginPackageInfo, PluginsResponse } from "@/lib/api-types";
 import { useI18n } from "@/hooks/useI18n";
+import type { PluginPackageInfo, PluginsResponse } from "@/lib/api-types";
+
+type Translate = ReturnType<typeof useI18n>["t"];
 
 type PluginScope = PluginPackageInfo["scope"];
 type PluginAction = "install" | "remove" | "update" | "disable" | "enable";
@@ -13,7 +16,7 @@ function shortenPath(path: string): string {
   return path.replace(/^\/(?:Users|home)\/[^/]+/, "~");
 }
 
-function normalizePluginSourceInput(value: string): string {
+export function normalizePluginSourceInput(value: string): string {
   const match = value.trim().match(/^\$?\s*pi\s+install\s+(\S+)\s*$/);
   return match?.[1] ?? value;
 }
@@ -22,22 +25,22 @@ function packageKey(pkg: Pick<PluginPackageInfo, "source" | "scope">): string {
   return `${pkg.scope}\0${pkg.source}`;
 }
 
-function resourceSummary(pkg: PluginPackageInfo, t: ReturnType<typeof useI18n>["t"]): string {
-  if (pkg.disabled) return t("i18n.disabled");
+function resourceSummary(pkg: PluginPackageInfo, t: Translate): string {
+  if (pkg.disabled) return t("desktop.disabled");
   const parts = [
-    pkg.counts.extensions ? t("i18n.resourceCount", { count: pkg.counts.extensions, label: t("i18n.extensionShort") }) : "",
-    pkg.counts.skills ? t("i18n.resourceCount", { count: pkg.counts.skills, label: t("i18n.skillShort") }) : "",
-    pkg.counts.prompts ? t("i18n.resourceCount", { count: pkg.counts.prompts, label: t("i18n.promptShort") }) : "",
-    pkg.counts.themes ? t("i18n.resourceCount", { count: pkg.counts.themes, label: t("i18n.themeShort") }) : "",
+    pkg.counts.extensions ? t("desktop.extensionsCount", { count: pkg.counts.extensions }) : "",
+    pkg.counts.skills ? t("desktop.skillsCount", { count: pkg.counts.skills }) : "",
+    pkg.counts.prompts ? t("desktop.promptsCount", { count: pkg.counts.prompts }) : "",
+    pkg.counts.themes ? t("desktop.themesCount", { count: pkg.counts.themes }) : "",
   ].filter(Boolean);
-  return parts.length ? parts.join(" · ") : t("i18n.noResources");
+  return parts.length ? parts.join(" · ") : t("desktop.noResources");
 }
 
-function versionSummary(pkg: PluginPackageInfo, t: ReturnType<typeof useI18n>["t"]): string {
+function versionSummary(pkg: PluginPackageInfo, t: Translate): string {
   const parts = [];
-  if (pkg.version) parts.push(t("i18n.installedVersion", { version: pkg.version }));
-  if (pkg.configuredVersion) parts.push(t("i18n.configuredVersion", { version: pkg.configuredVersion }));
-  return parts.length ? parts.join(" · ") : t("i18n.unknown");
+  if (pkg.version) parts.push(t("desktop.installedVersion", { version: pkg.version }));
+  if (pkg.configuredVersion) parts.push(t("desktop.configuredVersion", { version: pkg.configuredVersion }));
+  return parts.length ? parts.join(" · ") : t("desktop.unknown");
 }
 
 function installLocation(scope: PluginScope, cwd: string): string {
@@ -68,10 +71,10 @@ function statusColor(status: PluginPackageInfo["status"]): string {
 function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
   const { t } = useI18n();
   const groups = ([
-    ["extension", t("i18n.extensions")],
-    ["skill", t("i18n.skills")],
-    ["prompt", t("i18n.prompts")],
-    ["theme", t("i18n.themes")],
+    ["extension", t("desktop.extensions")],
+    ["skill", t("desktop.skills")],
+    ["prompt", t("desktop.prompts")],
+    ["theme", t("desktop.themes")],
   ] as const)
     .map(([kind, label]) => ({
       kind,
@@ -83,7 +86,7 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
   if (groups.length === 0) {
     return (
       <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-        {pkg.disabled ? t("i18n.packageDisabled") : t("i18n.noResolvedResources")}
+        {pkg.disabled ? t("desktop.packageDisabled") : t("desktop.noResolvedResources")}
       </div>
     );
   }
@@ -155,6 +158,7 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
 }
 
 function ScopeTag({ scope }: { scope: PluginScope }) {
+  const { t } = useI18n();
   return (
     <span
       style={{
@@ -166,7 +170,7 @@ function ScopeTag({ scope }: { scope: PluginScope }) {
         color: scope === "project" ? "rgba(99,102,241,0.85)" : "var(--text-dim)",
       }}
     >
-      {scope}
+      {t(`desktop.${scope}`)}
     </span>
   );
 }
@@ -237,11 +241,9 @@ function Toggle({
 
 function SegmentedScope({
   value,
-  projectResourcesLoaded,
   onChange,
 }: {
   value: PluginScope;
-  projectResourcesLoaded: boolean;
   onChange: (scope: PluginScope) => void;
 }) {
   const { t } = useI18n();
@@ -257,27 +259,21 @@ function SegmentedScope({
     >
       {(["global", "project"] as PluginScope[]).map((scope) => {
         const active = value === scope;
-        const disabled = scope === "project" && !projectResourcesLoaded;
         return (
           <button
             key={scope}
-            onClick={() => {
-              if (!disabled) onChange(scope);
-            }}
-            disabled={disabled}
-            title={disabled ? t("trust.projectScopeUnavailable") : undefined}
+            onClick={() => onChange(scope)}
             style={{
               width: 76,
               border: "none",
               borderRight: scope === "global" ? "1px solid var(--border)" : "none",
               background: active ? "var(--bg-selected)" : "none",
               color: active ? "var(--text)" : "var(--text-muted)",
-              cursor: disabled ? "not-allowed" : "pointer",
-              opacity: disabled ? 0.45 : 1,
+              cursor: "pointer",
               fontSize: 12,
             }}
           >
-            {scope}
+            {t(`desktop.${scope}`)}
           </button>
         );
       })}
@@ -289,7 +285,6 @@ function AddPluginPanel({
   cwd,
   source,
   scope,
-  projectResourcesLoaded,
   busy,
   actionError,
   onSourceChange,
@@ -299,7 +294,6 @@ function AddPluginPanel({
   cwd: string;
   source: string;
   scope: PluginScope;
-  projectResourcesLoaded: boolean;
   busy: boolean;
   actionError: string | null;
   onSourceChange: (value: string) => void;
@@ -319,31 +313,15 @@ function AddPluginPanel({
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
-            {t("i18n.addPlugin")}
+            {t("desktop.addPluginTitle")}
           </div>
           <a
             href="https://pi.dev/packages"
             target="_blank"
             rel="noopener noreferrer"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              color: "var(--accent)",
-              fontSize: 12,
-              textDecoration: "none",
-              whiteSpace: "nowrap",
-            }}
+            style={{ color: "var(--accent)", fontSize: 12, textDecoration: "none", whiteSpace: "nowrap" }}
           >
-            <svg width="28" height="28" viewBox="0 0 800 800" aria-hidden="true" focusable="false" style={{ flexShrink: 0 }}>
-              <path
-                fill="#000"
-                fillRule="evenodd"
-                d="M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z"
-              />
-              <path fill="#000" d="M517.36 400H634.72V634.72H517.36Z" />
-            </svg>
-            pi.dev/packages
+            pi.dev/packages ↗
           </a>
         </div>
         <div style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
@@ -353,7 +331,7 @@ function AddPluginPanel({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         <label htmlFor="plugin-source" style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
-          Source
+          {t("desktop.pluginSource")}
         </label>
         <input
           id="plugin-source"
@@ -388,11 +366,7 @@ function AddPluginPanel({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <SegmentedScope
-          value={scope}
-          projectResourcesLoaded={projectResourcesLoaded}
-          onChange={onScopeChange}
-        />
+        <SegmentedScope value={scope} onChange={onScopeChange} />
         <button
           type="button"
           onClick={onInstall}
@@ -404,13 +378,13 @@ function AddPluginPanel({
             borderColor: "var(--accent)",
           }}
         >
-          {busy ? t("i18n.installing") : t("i18n.install")}
+          {busy ? t("desktop.installing") : t("desktop.install")}
         </button>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
-          Examples
+          {t("desktop.examples")}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {examples.map((example) => (
@@ -488,7 +462,7 @@ function PackageDetail({
             enabled={enabled}
             loading={busy || reloadBusy}
             onToggle={() => onAction(pkg.disabled ? "enable" : "disable", pkg)}
-            label={pkg.disabled ? t("i18n.enablePackage") : t("i18n.disablePackage")}
+            label={pkg.disabled ? t("desktop.enablePackage") : t("desktop.disablePackage")}
           />
           <ScopeTag scope={pkg.scope} />
           {pkg.disabled ? (
@@ -501,7 +475,7 @@ function PackageDetail({
                 color: "var(--text-dim)",
               }}
             >
-              {t("i18n.disabled")}
+              {t("desktop.disabled")}
             </span>
           ) : pkg.filtered && (
             <span
@@ -513,7 +487,7 @@ function PackageDetail({
                 color: "#d97706",
               }}
             >
-              {t("i18n.filtered")}
+              {t("desktop.filtered")}
             </span>
           )}
           <span
@@ -536,22 +510,22 @@ function PackageDetail({
             disabled={busy || reloadBusy}
             style={buttonStyle(busy || reloadBusy)}
           >
-             {busyKey === `update:${key}` ? t("i18n.updating") : t("i18n.update")}
+            {busyKey === `update:${key}` ? t("desktop.updating") : t("desktop.update")}
           </button>
           <button
             onClick={onReloadSession}
             disabled={!sessionId || reloadBusy || busy}
             style={buttonStyle(!sessionId || reloadBusy || busy)}
-             title={sessionId ? t("i18n.reloadSession") : t("i18n.openSessionToReload")}
+            title={sessionId ? t("desktop.reloadCurrentSession") : t("desktop.openSessionToReload")}
           >
-             {reloadBusy ? t("i18n.reloading") : t("i18n.reloadSession")}
+            {reloadBusy ? t("desktop.reloading") : t("desktop.reloadSession")}
           </button>
           <button
             onClick={() => onAction("remove", pkg)}
             disabled={busy || reloadBusy}
             style={buttonStyle(busy || reloadBusy, true)}
           >
-             {busyKey === `remove:${key}` ? t("i18n.removing") : t("i18n.remove")}
+            {busyKey === `remove:${key}` ? t("desktop.removing") : t("desktop.remove")}
           </button>
         </div>
       </div>
@@ -565,17 +539,17 @@ function PackageDetail({
           lineHeight: 1.45,
         }}
       >
-        <div style={{ color: "var(--text-dim)" }}>{t("i18n.status")}</div>
+        <div style={{ color: "var(--text-dim)" }}>{t("desktop.status")}</div>
         <div style={{ color: statusColor(pkg.status), textTransform: "capitalize" }}>{pkg.status}</div>
-        <div style={{ color: "var(--text-dim)" }}>{t("i18n.version")}</div>
-         <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{versionSummary(pkg, t)}</div>
-        <div style={{ color: "var(--text-dim)" }}>{t("i18n.package")}</div>
+        <div style={{ color: "var(--text-dim)" }}>{t("desktop.version")}</div>
+        <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{versionSummary(pkg, t)}</div>
+        <div style={{ color: "var(--text-dim)" }}>{t("desktop.package")}</div>
         <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
-          {pkg.packageName ?? t("i18n.unknown")}
+          {pkg.packageName ?? t("desktop.unknown")}
         </div>
-        <div style={{ color: "var(--text-dim)" }}>{t("i18n.resources")}</div>
-         <div style={{ color: "var(--text-muted)" }}>{resourceSummary(pkg, t)}</div>
-        <div style={{ color: "var(--text-dim)" }}>{t("i18n.installedPath")}</div>
+        <div style={{ color: "var(--text-dim)" }}>{t("desktop.resources")}</div>
+        <div style={{ color: "var(--text-muted)" }}>{resourceSummary(pkg, t)}</div>
+        <div style={{ color: "var(--text-dim)" }}>{t("desktop.installedPath")}</div>
         <div
           style={{
             color: pkg.installedPath ? "var(--text-muted)" : "#ef4444",
@@ -583,9 +557,9 @@ function PackageDetail({
             overflowWrap: "anywhere",
           }}
         >
-          {pkg.installedPath ? shortenPath(pkg.installedPath) : t("i18n.notFound")}
+          {pkg.installedPath ? shortenPath(pkg.installedPath) : t("desktop.notFound")}
         </div>
-        <div style={{ color: "var(--text-dim)" }}>{t("i18n.cwd")}</div>
+        <div style={{ color: "var(--text-dim)" }}>{t("desktop.cwd")}</div>
         <div style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
           {shortenPath(cwd)}
         </div>
@@ -593,7 +567,7 @@ function PackageDetail({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
-          {t("i18n.resolvedResources")}
+          {t("desktop.resolvedResources")}
         </div>
         <ResourceList pkg={pkg} />
       </div>
@@ -615,13 +589,15 @@ function PackageDetail({
 export function PluginsConfig({
   cwd,
   sessionId,
-  onClose,
-  onReloaded,
+  embedded = false,
+  onCloseAction,
+  onReloadedAction,
 }: {
   cwd: string;
   sessionId: string | null;
-  onClose: () => void;
-  onReloaded?: () => void;
+  embedded?: boolean;
+  onCloseAction?: () => void;
+  onReloadedAction?: () => void;
 }) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -638,7 +614,6 @@ export function PluginsConfig({
 
   const packages = useMemo(() => data?.packages ?? [], [data?.packages]);
   const selectedPackage = packages.find((pkg) => packageKey(pkg) === selected) ?? null;
-  const projectResourcesLoaded = data?.projectResourcesLoaded ?? true;
 
   const groupedPackages = useMemo(() => {
     return (["project", "global"] as PluginScope[])
@@ -687,13 +662,13 @@ export function PluginsConfig({
       if (action === "remove") {
         setSelected(next.packages[0] ? packageKey(next.packages[0]) : null);
         if (next.packages.length === 0) setAddMode(true);
-        setActionMessage("Package removed.");
+        setActionMessage(t("desktop.packageRemoved"));
       } else {
         const messages: Record<Exclude<PluginAction, "remove">, string> = {
-          install: "Package installed.",
-          update: "Package updated.",
-          disable: "Package disabled.",
-          enable: "Package enabled.",
+          install: t("desktop.packageInstalled"),
+          update: t("desktop.packageUpdated"),
+          disable: t("desktop.packageDisabledMessage"),
+          enable: t("desktop.packageEnabled"),
         };
         setActionMessage(messages[action]);
       }
@@ -702,12 +677,11 @@ export function PluginsConfig({
     } finally {
       setBusyKey(null);
     }
-  }, [cwd]);
+  }, [cwd, t]);
 
   const installPlugin = useCallback(async () => {
     const source = normalizePluginSourceInput(installSource).trim();
     if (!source) return;
-    setInstallSource(source);
     const key = `${installScope}\0${source}`;
     setBusyKey(`install:${key}`);
     setActionError(null);
@@ -725,13 +699,13 @@ export function PluginsConfig({
       setSelected(installed ? packageKey(installed) : key);
       setAddMode(false);
       setInstallSource("");
-      setActionMessage("Package installed.");
+      setActionMessage(t("desktop.packageInstalled"));
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyKey(null);
     }
-  }, [cwd, installScope, installSource]);
+  }, [cwd, installScope, installSource, t]);
 
   const reloadSession = useCallback(async () => {
     if (!sessionId) return;
@@ -740,103 +714,38 @@ export function PluginsConfig({
     setActionMessage(null);
     try {
       await sendAgentCommand(sessionId, { type: "reload" });
-      onReloaded?.();
+      onReloadedAction?.();
       await loadPlugins();
-      setActionMessage("Session reloaded.");
+      setActionMessage(t("desktop.sessionReloaded"));
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyKey(null);
     }
-  }, [loadPlugins, onReloaded, sessionId]);
+  }, [loadPlugins, onReloadedAction, sessionId, t]);
 
   const addBusy = busyKey?.startsWith("install:") ?? false;
 
   return (
     <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1000,
-        background: "rgba(0,0,0,0.35)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      style={embedded
+        ? { display: "flex", flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }
+        : { position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (!embedded && e.target === e.currentTarget) onCloseAction?.(); }}
     >
       <div
-        style={{
-          width: isMobile ? "calc(100vw - 16px)" : 860,
-          maxWidth: "calc(100vw - 16px)",
-          height: isMobile ? "calc(100dvh - 16px)" : "76vh",
-          maxHeight: "calc(100dvh - 16px)",
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-          overflow: "hidden",
-        }}
+        style={embedded
+          ? { display: "flex", flex: 1, minWidth: 0, minHeight: 0, flexDirection: "column", overflow: "hidden" }
+          : { width: isMobile ? "calc(100vw - 16px)" : 860, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "76vh", maxHeight: "calc(100dvh - 16px)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }
+        }
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 18px",
-            borderBottom: "1px solid var(--border)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
-              {t("common.plugins")}
-            </span>
-            <code
-              style={{
-                fontSize: 11,
-                color: "var(--text-muted)",
-                fontFamily: "var(--font-mono)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {shortenPath(cwd)}
-            </code>
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 20,
-              lineHeight: 1,
-              padding: "2px 6px",
-            }}
-          >
-            ×
-          </button>
-        </div>
-
-        {!projectResourcesLoaded && (
-          <div
-            role="status"
-            style={{
-              padding: "8px 18px",
-              borderBottom: "1px solid var(--border)",
-              background: "var(--bg-panel)",
-              color: "var(--text-muted)",
-              fontSize: 12,
-            }}
-          >
-            {t("trust.pluginsNotLoaded")}
+        {!embedded && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{t("desktop.plugins")}</span>
+              <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortenPath(cwd)}</code>
+            </div>
+            <button onClick={onCloseAction} title={t("desktop.close")} aria-label={t("desktop.close")} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
           </div>
         )}
 
@@ -856,7 +765,7 @@ export function PluginsConfig({
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 6px" }}>
               {loading ? (
                 <div style={{ padding: "10px 8px", fontSize: 12, color: "var(--text-muted)" }}>
-                  Loading...
+                  {t("desktop.loading")}
                 </div>
               ) : error ? (
                 <div style={{ padding: "10px 8px", fontSize: 11, color: "#ef4444" }}>
@@ -864,7 +773,7 @@ export function PluginsConfig({
                 </div>
               ) : packages.length === 0 ? (
                 <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--text-dim)" }}>
-                  No plugins configured
+                  {t("desktop.noPluginsConfigured")}
                 </div>
               ) : (
                 groupedPackages.map((group) => (
@@ -878,7 +787,7 @@ export function PluginsConfig({
                         textTransform: "uppercase",
                       }}
                     >
-                      {group.scope}
+                      {t(`desktop.${group.scope}`)}
                     </div>
                     {group.packages.map((pkg) => {
                       const key = packageKey(pkg);
@@ -954,7 +863,7 @@ export function PluginsConfig({
                                   marginTop: 2,
                                 }}
                               >
-                                 {versionSummary(pkg, t)}
+                                {versionSummary(pkg, t)}
                               </div>
                             )}
                           </div>
@@ -993,20 +902,8 @@ export function PluginsConfig({
                   if (!addMode) e.currentTarget.style.background = "none";
                 }}
               >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                 {t("i18n.addPlugin")}
+                <PlusIcon size={13} />
+                {t("desktop.addPlugin")}
               </button>
             </div>
           </div>
@@ -1017,7 +914,6 @@ export function PluginsConfig({
                 cwd={cwd}
                 source={installSource}
                 scope={installScope}
-                projectResourcesLoaded={projectResourcesLoaded}
                 busy={addBusy}
                 actionError={actionError}
                 onSourceChange={setInstallSource}
@@ -1047,7 +943,7 @@ export function PluginsConfig({
                   fontSize: 13,
                 }}
               >
-                {t("i18n.selectPackage")}
+                {t("desktop.selectPackage")}
               </div>
             )}
           </div>
@@ -1070,20 +966,32 @@ export function PluginsConfig({
                 title={data.diagnostics.map((d) => `${d.type}: ${d.source ? `${d.source}: ` : ""}${d.message}`).join("\n")}
                 style={{ color: data.diagnostics.some((d) => d.type === "error") ? "#ef4444" : "#d97706" }}
               >
-                {data.diagnostics.length} diagnostic{data.diagnostics.length === 1 ? "" : "s"}
+                {t("desktop.diagnosticsCount", {
+                  count: data.diagnostics.length,
+                  suffix: data.diagnostics.length === 1 ? "" : "s",
+                })}
               </span>
             ) : (
               <span>
-                {data ? `${data.totals.extensions} ext · ${data.totals.skills} skills · ${data.totals.prompts} prompts · ${data.totals.themes} themes` : ""}
+                {data
+                  ? t("desktop.pluginResourceTotals", {
+                    extensions: data.totals.extensions,
+                    skills: data.totals.skills,
+                    prompts: data.totals.prompts,
+                    themes: data.totals.themes,
+                  })
+                  : ""}
               </span>
             )}
           </div>
           <button onClick={() => void loadPlugins()} disabled={loading || busyKey !== null} style={buttonStyle(loading || busyKey !== null)}>
-             {t("i18n.refresh")}
+            {t("desktop.refresh")}
           </button>
-          <button onClick={onClose} style={buttonStyle(false)}>
-             {t("i18n.close")}
-          </button>
+          {!embedded && (
+            <button onClick={onCloseAction} style={buttonStyle(false)}>
+              {t("desktop.close")}
+            </button>
+          )}
         </div>
       </div>
     </div>

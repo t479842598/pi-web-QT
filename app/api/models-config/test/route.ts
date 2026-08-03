@@ -4,7 +4,6 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { completeSimple, type AssistantMessage } from "@earendil-works/pi-ai/compat";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 
 export const dynamic = "force-dynamic";
 
@@ -26,16 +25,6 @@ function getAssistantText(message: AssistantMessage): string {
 }
 
 export async function POST(req: Request) {
-  if (!isApiRequestAllowed(req)) {
-    return NextResponse.json({ ok: false, error: "Untrusted API request" }, { status: 403 });
-  }
-  if (!hasJsonContentType(req)) {
-    return NextResponse.json(
-      { ok: false, error: "Content-Type must be application/json" },
-      { status: 415 },
-    );
-  }
-
   let tempDir: string | undefined;
 
   try {

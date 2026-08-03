@@ -4,10 +4,10 @@ import { I18nProvider } from "@/hooks/useI18n";
 
 export default function Home() {
   return (
-    <Suspense>
-      <I18nProvider>
+    <I18nProvider>
+      <Suspense>
         <AppShell />
-      </I18nProvider>
-    </Suspense>
+      </Suspense>
+    </I18nProvider>
   );
 }

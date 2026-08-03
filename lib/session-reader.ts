@@ -6,11 +6,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { closeSync, openSync, readSync } from "fs";
 import { normalize as normalizePath } from "path";
-import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext, UserMessage } from "./types";
+import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
-import { resolveSlashDisplayText, userMessagePlainText } from "./slash-display";
-import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
 
 export { getAgentDir };
@@ -18,7 +16,7 @@ export { getAgentDir };
 async function loadAllSessions(): Promise<SessionInfo[]> {
   const piSessions: PiSessionInfo[] = await SessionManager.listAll();
   const pathToId = new Map<string, string>();
-  for (const s of piSessions) pathToId.set(sessionPathKey(s.path), s.id);
+  for (const s of piSessions) pathToId.set(normalizePath(s.path), s.id);
 
   // Resolve each unique cwd to its project root (main repo shared by all
   // worktrees). resolveProject caches per-cwd, so this is cheap after warmup.
@@ -40,7 +38,7 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
       modified: s.modified instanceof Date ? s.modified.toISOString() : String(s.modified),
       messageCount: s.messageCount,
       firstMessage: s.firstMessage || "(no messages)",
-      parentSessionId: s.parentSessionPath ? pathToId.get(sessionPathKey(s.parentSessionPath)) : undefined,
+      parentSessionId: s.parentSessionPath ? pathToId.get(normalizePath(s.parentSessionPath)) : undefined,
       projectRoot: project?.projectRoot ?? s.cwd,
       ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
     };
@@ -121,7 +119,7 @@ export async function resolveSessionPath(sessionId: string): Promise<string | nu
 }
 
 export async function resolveSessionIdByPath(filePath: string): Promise<string | undefined> {
-  const pathKey = sessionPathKey(filePath);
+  const pathKey = normalizePath(filePath);
   const cached = getPathToIdCache().get(pathKey);
   if (cached) return cached;
 
@@ -130,26 +128,18 @@ export async function resolveSessionIdByPath(filePath: string): Promise<string |
 }
 
 export function cacheSessionPath(sessionId: string, filePath: string): void {
-  const normalizedPath = normalizePath(filePath);
-  const pathKey = sessionPathKey(normalizedPath);
+  const pathKey = normalizePath(filePath);
   const pathCache = getPathCache();
   const reverseCache = getPathToIdCache();
   const previousPath = pathCache.get(sessionId);
-  const previousPathKey = previousPath ? sessionPathKey(previousPath) : undefined;
   const previousSessionId = reverseCache.get(pathKey);
-  const previousOwnerPath = previousSessionId ? pathCache.get(previousSessionId) : undefined;
-  if (previousPathKey && previousPathKey !== pathKey && reverseCache.get(previousPathKey) === sessionId) {
-    reverseCache.delete(previousPathKey);
+  if (previousPath && previousPath !== pathKey && reverseCache.get(previousPath) === sessionId) {
+    reverseCache.delete(previousPath);
   }
-  if (
-    previousSessionId &&
-    previousSessionId !== sessionId &&
-    previousOwnerPath &&
-    sessionPathKey(previousOwnerPath) === pathKey
-  ) {
+  if (previousSessionId && previousSessionId !== sessionId && pathCache.get(previousSessionId) === pathKey) {
     pathCache.delete(previousSessionId);
   }
-  pathCache.set(sessionId, normalizedPath);
+  pathCache.set(sessionId, pathKey);
   reverseCache.set(pathKey, sessionId);
 }
 
@@ -158,9 +148,8 @@ export function invalidateSessionPathCache(sessionId: string): void {
   const reverseCache = getPathToIdCache();
   const filePath = pathCache.get(sessionId);
   pathCache.delete(sessionId);
-  const pathKey = filePath ? sessionPathKey(filePath) : undefined;
-  if (pathKey && reverseCache.get(pathKey) === sessionId) {
-    reverseCache.delete(pathKey);
+  if (filePath && reverseCache.get(filePath) === sessionId) {
+    reverseCache.delete(filePath);
   }
 }
 
@@ -227,20 +216,6 @@ export function buildSessionContext(
     const localEntry = entry as unknown as SessionEntry;
     const m = entryToUiMessage(localEntry, options);
     if (m) {
-      // 斜杠命令展开消息（/skill:name /模板名）：还原紧凑命令形式供界面展示。
-      // prompt 模板展开文本无特征标记，无法还原，保持全文（已知局限）。
-      // 注意用展开运算符新建消息对象注入 originalText，不改写 SDK 返回的原始对象
-      //（该对象可能被 SDK 后续持久化复用，直接赋值会污染存储）。
-      if (m.role === "user") {
-        const userMessage = m as UserMessage;
-        const text = userMessagePlainText(userMessage.content);
-        const originalText = resolveSlashDisplayText(text);
-        if (originalText && originalText !== text) {
-          messages.push({ ...userMessage, originalText });
-          entryIds.push(localEntry.id);
-          continue;
-        }
-      }
       messages.push(m);
       entryIds.push(localEntry.id);
     }
@@ -311,11 +286,6 @@ function entryToUiMessage(
   entry: SessionEntry,
   options: { deferThinking?: boolean; deferToolResultImages?: boolean },
 ): AgentMessage | null {
-  // Supported message roles: user, assistant, toolResult, bashExecution.
-  // bashExecution messages enter the case "message" branch (entry.type === "message").
-  // The early return at line below ("!options.deferThinking || message.role !== "assistant"")
-  // passes non-assistant messages — including bashExecution — through unchanged.
-  // normalizeToolCalls is a secondary guard (returns non-assistant messages as-is).
   switch (entry.type) {
     case "message": {
       const message = options.deferToolResultImages

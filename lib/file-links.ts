@@ -53,11 +53,10 @@ function isPathInside(candidate: string, root: string): boolean {
 }
 
 function looksLikeRelativeFileHref(href: string): boolean {
-  const pathWithoutLine = stripLineSuffix(href);
-  if (pathWithoutLine.startsWith("#") || pathWithoutLine.startsWith("?")) return false;
-  if (pathWithoutLine.startsWith("./") || pathWithoutLine.startsWith("../")) return true;
-  if (pathWithoutLine.includes("/")) return true;
-  return /(^|\/)\.?[^/]+\.[^/.]+$/.test(pathWithoutLine);
+  if (href.startsWith("#") || href.startsWith("?")) return false;
+  if (href.startsWith("./") || href.startsWith("../")) return true;
+  if (href.includes("/")) return true;
+  return /(^|\/)\.?[^/]+\.[^/.]+$/.test(href);
 }
 
 function fileUrlToPath(href: string): string | null {
@@ -91,11 +90,10 @@ export function resolveLocalFileHref(
   const isBackslashUncPath = decodedHref.startsWith("\\\\");
   const normalizedHref = normalizeFilePathSlashes(decodedHref);
   const lowerHref = normalizedHref.toLowerCase();
-  const isBareRelativeLineHref = /^[^/?#\s]+:\d+(?::\d+)?$/.test(normalizedHref);
 
   if (lowerHref.startsWith("/api/") || lowerHref.startsWith("/_next/")) return null;
   if (!isBackslashUncPath && normalizedHref.startsWith("//")) return null;
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(normalizedHref) && !lowerHref.startsWith("file:") && !/^[a-zA-Z]:\//.test(normalizedHref) && !isBareRelativeLineHref) {
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(normalizedHref) && !lowerHref.startsWith("file:") && !/^[a-zA-Z]:\//.test(normalizedHref)) {
     return null;
   }
 

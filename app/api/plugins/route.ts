@@ -9,9 +9,6 @@ import {
   type ResolvedPaths,
   type ResolvedResource,
 } from "@earendil-works/pi-coding-agent";
-import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
-import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
-import { getProjectTrustStatus } from "@/lib/project-trust";
 import type {
   PluginDiagnostic,
   PluginPackageInfo,
@@ -21,6 +18,9 @@ import type {
   PluginScope,
   PluginsResponse,
 } from "@/lib/api-types";
+import { getAllowedFileRoots, isFilePathAllowed } from "@/lib/file-access";
+import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
+import { getProjectTrustStatus } from "@/lib/project-trust";
 
 export const dynamic = "force-dynamic";
 
@@ -266,12 +266,7 @@ async function readPlugins(cwd: string): Promise<PluginsResponse> {
     } satisfies PluginPackageInfo;
   });
 
-  return {
-    packages,
-    totals,
-    diagnostics,
-    projectResourcesLoaded: projectTrust.trusted,
-  };
+  return { packages, totals, diagnostics, projectResourcesLoaded: projectTrust.trusted };
 }
 
 function readScope(scope: unknown): PluginScope {
@@ -285,7 +280,7 @@ export async function GET(req: Request) {
 
   try {
     const allowedRoots = await getAllowedFileRoots();
-    if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
+    if (!isFilePathAllowed(cwd, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
     return NextResponse.json(await readPlugins(cwd));
@@ -313,7 +308,7 @@ export async function POST(req: Request) {
     if (!body.cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
     if (!body.action) return NextResponse.json({ error: "action required" }, { status: 400 });
     const allowedRoots = await getAllowedFileRoots();
-    if (!isExistingFilePathAllowed(body.cwd, allowedRoots)) {
+    if (!isFilePathAllowed(body.cwd, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 

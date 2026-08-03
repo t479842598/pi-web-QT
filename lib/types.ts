@@ -51,12 +51,6 @@ export interface UserMessage {
   role: "user";
   content: string | (TextContent | ImageContent)[];
   timestamp?: number;
-  /**
-   * 斜杠命令的原始调用文本（如 `/skill:review src/main.go`）。
-   * 仅 pi-web 展示层传输字段：SDK 把展开后的完整文本写入 session JSONL，
-   * rpc-manager / session-reader 在回传与读取时注入此字段，不落盘。
-   */
-  originalText?: string;
 }
 
 export interface AssistantMessage {

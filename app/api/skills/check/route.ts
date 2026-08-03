@@ -1,12 +1,20 @@
 import { NextResponse } from "next/server";
 import type { SkillInstallScope } from "@/lib/api-types";
+import { getAllowedFileRoots, isFilePathAllowed } from "@/lib/file-access";
+import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { checkSkillUpdates } from "@/lib/skill-updates";
 import { loadSkillsWithInstallInfo } from "@/lib/skills-service";
-import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+  if (!hasJsonContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
+  }
+
   try {
     const body = await req.json() as {
       cwd?: unknown;
@@ -15,8 +23,9 @@ export async function POST(req: Request) {
     };
     const cwd = typeof body.cwd === "string" ? body.cwd : "";
     if (!cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
+
     const allowedRoots = await getAllowedFileRoots();
-    if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
+    if (!isFilePathAllowed(cwd, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 

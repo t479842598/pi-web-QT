@@ -2,11 +2,8 @@ import coreWebVitals from "eslint-config-next/core-web-vitals";
 import typescript from "eslint-config-next/typescript";
 
 const eslintConfig = [
-  // electron/ is plain CommonJS Node code (require(), process.env) — not
-  // part of the Next.js app, so exclude it from linting.
-  {
-    ignores: ["electron/**"],
-  },
+  // Reference trees and packaged/generated output are not source to lint.
+  { ignores: ["ref-repos/**", "release/**", ".next/**"] },
   ...coreWebVitals,
   ...typescript,
   {

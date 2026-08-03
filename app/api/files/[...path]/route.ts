@@ -3,7 +3,6 @@ import fs from "fs";
 import path from "path";
 import {
   getAllowedFileRoots,
-  isExistingFilePathAllowed,
   isFilePathAllowed,
   isWindowsAbsolutePath,
   normalizeSlashes,
@@ -20,13 +19,16 @@ import {
 } from "@/lib/file-types";
 import { resolveDirentIsDirectory } from "@/lib/file-dirent";
 import { isFilePathReferencedBySession } from "@/lib/session-file-references";
-import { isApiRequestAllowed } from "@/lib/request-security";
 import {
   inspectUploadTargets,
+  MAX_UPLOAD_FILE_BYTES,
+  MAX_UPLOAD_REQUEST_BYTES,
+  MAX_UPLOAD_TOTAL_BYTES,
   parseUploadConflictStrategy,
   validateUploadFileNames,
 } from "@/lib/file-upload";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
+import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -39,10 +41,6 @@ const IGNORED_SUFFIXES = [".pyc"];
 const FILE_REQUEST_TYPES = ["list", "read", "download", "meta", "preview", "watch"] as const;
 type FileRequestType = typeof FILE_REQUEST_TYPES[number];
 const FILE_REQUEST_TYPE_SET = new Set<string>(FILE_REQUEST_TYPES);
-const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
-const MAX_UPLOAD_TOTAL_BYTES = 100 * 1024 * 1024;
-// Multipart boundaries and headers are not file bytes, but must be bounded too.
-const MAX_UPLOAD_REQUEST_BYTES = MAX_UPLOAD_TOTAL_BYTES + 1024 * 1024;
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
@@ -138,6 +136,9 @@ export async function POST(
     const type = request.nextUrl.searchParams.get("type") ?? "upload";
 
     if (type === "upload-check") {
+      if (!hasJsonContentType(request)) {
+        return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
+      }
       const body = await request.json().catch(() => null) as { fileNames?: unknown } | null;
       const fileNames = parseUploadFileNames(body?.fileNames);
       if (!fileNames) {
@@ -157,6 +158,9 @@ export async function POST(
     const strategy = parseUploadConflictStrategy(request.nextUrl.searchParams.get("conflict"));
     if (!strategy) {
       return NextResponse.json({ error: "Invalid conflict strategy" }, { status: 400 });
+    }
+    if (!request.headers.get("content-type")?.toLowerCase().startsWith("multipart/form-data;")) {
+      return NextResponse.json({ error: "Content-Type must be multipart/form-data" }, { status: 415 });
     }
 
     let formData: FormData;
@@ -442,10 +446,6 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    if (!allowedBySessionReference && !isExistingFilePathAllowed(filePath, allowedRoots)) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
-
     if (type === "read") {
       if (!stat.isFile()) {
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
@@ -532,8 +532,6 @@ export async function GET(
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
       }
       let watcher: fs.FSWatcher | null = null;
-      let lastMtimeMs = stat.mtimeMs;
-      let lastSize = stat.size;
       const stream = new ReadableStream({
         start(controller) {
           const send = (eventName: string, data: Record<string, unknown>) => {
@@ -550,11 +548,6 @@ export async function GET(
             watcher = fs.watch(filePath, () => {
               try {
                 const s = fs.statSync(filePath);
-                // Some platforms emit watch events for file reads/attribute
-                // access. Ignore those or the client's refresh read loops.
-                if (s.mtimeMs === lastMtimeMs && s.size === lastSize) return;
-                lastMtimeMs = s.mtimeMs;
-                lastSize = s.size;
                 send("change", { mtime: s.mtime.toISOString(), size: s.size });
               } catch {
                 send("change", { mtime: new Date().toISOString(), size: 0 });

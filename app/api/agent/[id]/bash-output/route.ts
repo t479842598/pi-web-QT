@@ -8,34 +8,28 @@ import {
   resolveBashOutputPath,
 } from "@/lib/bash-output";
 import { isBashOutputPathReferencedBySession } from "@/lib/session-file-references";
+import { isApiRequestAllowed } from "@/lib/request-security";
 
-// GET /api/agent/[id]/bash-output?path=<absPath>
-// Reads a bash output temp file referenced by this session. Inline display is
-// size-limited; download responses stream the file without buffering it.
+export const dynamic = "force-dynamic";
+
+// Reads only an SDK-created temp file already referenced by the requested session.
+// Inline output is bounded; downloads stream the file without buffering it.
 export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  let path: string | null = null;
-  let download = false;
-  try {
-    const url = new URL(_req.url);
-    path = url.searchParams.get("path");
-    download = url.searchParams.get("download") === "1";
-  } catch {
-    return NextResponse.json({ error: "invalid url" }, { status: 400 });
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
   }
 
-  if (!path) {
-    return NextResponse.json({ error: "path required" }, { status: 400 });
-  }
+  const { id } = await params;
+  const url = new URL(req.url);
+  const path = url.searchParams.get("path");
+  const download = url.searchParams.get("download") === "1";
+  if (!path) return NextResponse.json({ error: "path required" }, { status: 400 });
 
   const resolved = resolveBashOutputPath(path, tmpdir());
-  if (!resolved) {
-    return NextResponse.json({ error: "invalid path" }, { status: 400 });
-  }
-
+  if (!resolved) return NextResponse.json({ error: "invalid path" }, { status: 400 });
   if (!await isBashOutputPathReferencedBySession(resolved, id)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
@@ -60,7 +54,9 @@ export async function GET(
         data: { size: result.size, maxBytes: MAX_INLINE_BASH_OUTPUT_BYTES },
       }, { status: 413 });
     }
-    return NextResponse.json({ success: true, data: { output: result.content } });
+    return NextResponse.json({ success: true, data: { output: result.content } }, {
+      headers: { "Cache-Control": "no-store" },
+    });
   } catch {
     return NextResponse.json({ error: "full output unavailable" }, { status: 404 });
   }

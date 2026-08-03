@@ -1,16 +1,13 @@
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ProviderCredentialType, ProviderListingInput } from "@/lib/provider-listing";
 
-/**
- * Adapter between `ModelRuntime` and the pure listing helpers in
- * `lib/provider-listing.ts`.
- */
+/** Converts ModelRuntime state into the pure provider-listing input contract. */
 export async function collectProviderListingInputs(
   modelRuntime: ModelRuntime,
 ): Promise<ProviderListingInput[]> {
   const models = modelRuntime.getModels();
-
   const credentialTypes = new Map<string, ProviderCredentialType>();
+
   try {
     for (const credential of await modelRuntime.listCredentials()) {
       if (credential.type === "api_key" || credential.type === "oauth") {
@@ -18,8 +15,7 @@ export async function collectProviderListingInputs(
       }
     }
   } catch {
-    // A damaged auth.json must not empty the provider list; fall back to the
-    // per-provider auth status only.
+    // A malformed auth.json should not hide every provider from configuration.
   }
 
   return modelRuntime.getProviders().map((provider) => ({

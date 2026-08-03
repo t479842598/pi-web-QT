@@ -5,7 +5,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
 import type { ProviderCredentialType } from "@/lib/provider-listing";
 
-const AUTH_FILE_WRITE_OPTIONS = { encoding: "utf-8" as const, mode: 0o600 };
+const AUTH_WRITE_OPTIONS = { encoding: "utf-8" as const, mode: 0o600 };
 
 export type CredentialRemovalResult =
   | { status: "removed" }
@@ -13,10 +13,10 @@ export type CredentialRemovalResult =
   | { status: "type_mismatch"; storedType: string };
 
 function ensureAuthFile(authPath: string): void {
-  const parent = dirname(authPath);
-  if (!existsSync(parent)) mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const parentDirectory = dirname(authPath);
+  if (!existsSync(parentDirectory)) mkdirSync(parentDirectory, { recursive: true, mode: 0o700 });
   if (!existsSync(authPath)) {
-    writeFileSync(authPath, "{}", AUTH_FILE_WRITE_OPTIONS);
+    writeFileSync(authPath, "{}", AUTH_WRITE_OPTIONS);
     chmodSync(authPath, 0o600);
   }
 }
@@ -30,35 +30,25 @@ async function updateStoredCredentials<T>(
   update: (credentials: Record<string, unknown>) => { result: T; changed: boolean },
 ): Promise<T> {
   ensureAuthFile(authPath);
-
-  let lockCompromisedError: Error | undefined;
+  let compromisedError: Error | undefined;
   const release = await lockfile.lock(authPath, {
-    retries: {
-      retries: 10,
-      factor: 2,
-      minTimeout: 100,
-      maxTimeout: 10_000,
-      randomize: true,
-    },
+    retries: { retries: 10, factor: 2, minTimeout: 100, maxTimeout: 10_000, randomize: true },
     stale: 30_000,
-    onCompromised: (error) => {
-      lockCompromisedError = error;
-    },
+    onCompromised: (error) => { compromisedError = error; },
   });
-
   const throwIfCompromised = () => {
-    if (lockCompromisedError) throw lockCompromisedError;
+    if (compromisedError) throw compromisedError;
   };
 
   try {
     throwIfCompromised();
-    const parsed: unknown = JSON.parse(readFileSync(authPath, "utf-8"));
-    if (!isRecord(parsed)) throw new Error("Invalid auth.json: expected an object");
+    const data: unknown = JSON.parse(readFileSync(authPath, "utf-8"));
+    if (!isRecord(data)) throw new Error("Invalid auth.json: expected an object");
 
-    const { result, changed } = update(parsed);
+    const { result, changed } = update(data);
     if (changed) {
       throwIfCompromised();
-      writeFileSync(authPath, JSON.stringify(parsed, null, 2), AUTH_FILE_WRITE_OPTIONS);
+      writeFileSync(authPath, JSON.stringify(data, null, 2), AUTH_WRITE_OPTIONS);
       chmodSync(authPath, 0o600);
       throwIfCompromised();
     }
@@ -67,7 +57,7 @@ async function updateStoredCredentials<T>(
     try {
       await release();
     } catch {
-      // The compromised-lock error above is more useful than an unlock error.
+      // A compromised lock provides the more actionable failure.
     }
   }
 }
@@ -85,12 +75,10 @@ export function storeProviderCredential(
 }
 
 /**
- * Removes a provider credential only when its current stored type matches.
- *
- * The comparison and write share the same proper-lockfile lock used by pi's
- * AuthStorage, so a concurrent login cannot be deleted by a stale UI request.
+ * Compares and removes within pi-compatible auth.json locking, so an outdated
+ * delete request cannot remove a credential installed by a later login.
  */
-export async function removeStoredCredentialIfType(
+export function removeStoredCredentialIfType(
   providerId: string,
   expectedType: ProviderCredentialType,
   authPath = join(getAgentDir(), "auth.json"),

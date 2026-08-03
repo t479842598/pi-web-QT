@@ -12,7 +12,7 @@ interface Props {
   /** Called with the formatted quote-reply text (caller inserts it into the input). */
   onPick: (quote: string) => void;
   /** Open a file path (from inline paths mentioned in the text). */
-  onOpenFile?: (filePath: string, fileName?: string) => void;
+  onOpenFile?: (filePath: string) => void;
   /** Session cwd used to resolve relative paths before checking /api/files. */
   cwd?: string;
   /** Optional ref to the popover element (caller scrolls it into view on open). */
@@ -83,8 +83,8 @@ export function QuoteReplyPopover({ segments, onPick, onOpenFile, cwd, innerRef 
             <button
               key={abs}
               type="button"
-              onClick={(e) => { e.stopPropagation(); onOpenFile(abs, abs.split("/").pop() ?? abs); }}
-              title={t("i18n.openFile")}
+              onClick={(e) => { e.stopPropagation(); onOpenFile(abs); }}
+              title={t("desktop.openFile")}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -103,7 +103,7 @@ export function QuoteReplyPopover({ segments, onPick, onOpenFile, cwd, innerRef 
               }}
             >
               <FolderOpenIcon />
-              {t("i18n.openFile")}: {abs.split("/").pop()}
+              {t("desktop.openFile")}: {abs.split("/").pop()}
             </button>
           ))}
         </span>
@@ -125,7 +125,7 @@ function SegmentRow({
   t: (k: string) => string;
 }) {
   const options: QuoteOption[] =
-    segment.options ?? [{ label: t("chat.quoteReply"), value: "" }];
+    segment.options ?? [{ label: t("desktop.quoteReply"), value: "" }];
   return (
     <span style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
       {options.map((opt, j) => (

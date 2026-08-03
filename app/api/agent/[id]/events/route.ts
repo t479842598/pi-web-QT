@@ -3,6 +3,8 @@ import { getRpcSession, startRpcSession, type AgentEvent } from "@/lib/rpc-manag
 
 export const dynamic = "force-dynamic";
 
+// These SDK events are not consumed by the web client and can be emitted for
+// every streamed chunk. Omitting them avoids serializing duplicate payloads.
 const OMITTED_EVENT_TYPES = new Set(["turn_start", "turn_end", "tool_execution_update"]);
 
 function toClientEvent(event: AgentEvent): AgentEvent | null {
@@ -12,7 +14,15 @@ function toClientEvent(event: AgentEvent): AgentEvent | null {
     delete clientEvent.assistantMessageEvent;
     return clientEvent;
   }
-  if (event.type === "agent_end") return { type: "agent_end" };
+  if (event.type === "agent_end") {
+    // The desktop client uses these fields to show non-retryable provider
+    // failures, unlike upstream's web-only client which needs no end payload.
+    return {
+      type: "agent_end",
+      ...(event.willRetry !== undefined ? { willRetry: event.willRetry } : {}),
+      ...(event.messages !== undefined ? { messages: event.messages } : {}),
+    };
+  }
   return event;
 }
 

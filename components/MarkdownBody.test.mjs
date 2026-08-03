@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFile } from "node:fs/promises";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, {
@@ -9,15 +10,30 @@ const jiti = createJiti(import.meta.url, {
   tsconfigPaths: true,
 });
 const { MarkdownBody } = await jiti.import("./MarkdownBody.tsx");
-const { normalizeDisplayMath } = await jiti.import("../lib/markdown.ts");
+const { I18nContext } = await jiti.import("@/hooks/useI18n");
 
-function renderMarkdown(markdown, extraProps = {}) {
+const i18nValue = {
+  locale: "en",
+  setLocale() {},
+  t: (key) => key,
+  supportedLocales: [],
+};
+
+function renderMarkdown(markdown, isStreaming = false) {
   return renderToStaticMarkup(
-    React.createElement(MarkdownBody, {
-      cwd: "/home/me/project",
-      onOpenFile() {},
-      ...extraProps,
-    }, markdown),
+    React.createElement(
+      I18nContext.Provider,
+      { value: i18nValue },
+      React.createElement(
+        MarkdownBody,
+        {
+          cwd: "/home/me/project",
+          isStreaming,
+          onOpenFile() {},
+        },
+        markdown,
+      ),
+    ),
   );
 }
 
@@ -31,77 +47,71 @@ test("opens non-file markdown links in a safe new tab", () => {
   assert.doesNotMatch(html, /\snode=/);
 });
 
-test("renders local file markdown links as downloadable file chips", () => {
-  const html = renderMarkdown("[file](components/MarkdownBody.tsx)", {
-    sessionId: "11111111-1111-1111-1111-111111111111",
-  });
+test("keeps local file markdown links in the app", () => {
+  const html = renderMarkdown("[file](components/MarkdownBody.tsx)");
 
-  assert.match(html, /class="markdown-file-link"/);
-  assert.match(html, /href="\/api\/files\/home\/me\/project\/components\/MarkdownBody\.tsx\?type=download&amp;sessionId=11111111-1111-1111-1111-111111111111"/);
-  assert.match(html, /download="MarkdownBody\.tsx"/);
-  assert.match(html, /<svg/);
+  assert.match(html, /<a (?=[^>]*href="components\/MarkdownBody\.tsx")[^>]*>file<\/a>/);
   assert.doesNotMatch(html, /target=|rel=|\snode=/);
 });
 
-test("recognizes bare relative file links with line numbers", () => {
-  const html = renderMarkdown("[source](MarkdownBody.tsx:42)");
+test("renders quoteable table rows without inline elements under tr", async () => {
+  const source = await readFile(new URL("./MarkdownBody.tsx", import.meta.url), "utf8");
+  const tableRowBranch = source.slice(source.indexOf('if (as === "tr")'));
 
-  assert.match(html, /class="markdown-file-link"/);
-  assert.match(html, /download="MarkdownBody\.tsx"/);
+  assert.match(tableRowBranch, /<tr[\s\S]*?title=\{!coarse && !segments \? t\("desktop\.quoteReplyHint"\) : undefined\}[\s\S]*?>/);
+  assert.match(tableRowBranch, /<td colSpan=\{tableColumnCount\}>\{popover\}<\/td>/);
+  assert.doesNotMatch(tableRowBranch.slice(0, tableRowBranch.indexOf("return (\n    <Tag")), /<span/);
 });
 
-test("renders Windows backslash file links as downloadable file chips", () => {
-  const html = renderMarkdown(String.raw`[下载](D:\\桌面文件\\易智瑞\\数据731\\结果.xlsx)`, {
-    sessionId: "11111111-1111-1111-1111-111111111111",
-  });
+test("defers Prism highlighting while a code block is streaming", async () => {
+  const source = await readFile(new URL("./MarkdownBody.tsx", import.meta.url), "utf8");
+  const codeBlockSource = source.slice(source.indexOf("export function CodeBlock"));
 
-  assert.match(html, /class="markdown-file-link"/);
-  assert.match(html, /download="结果\.xlsx"/);
+  assert.match(codeBlockSource, /isStreaming \? \(/);
+  assert.match(codeBlockSource, /<pre className="markdown-code-streaming"><code>\{code\}<\/code><\/pre>/);
+  assert.match(codeBlockSource, /\) : \(\s*<SyntaxHighlighter/s);
 });
 
-test("renders LaTeX parenthesis delimiters as inline math", () => {
-  const html = renderMarkdown(String.raw`射线为 \(r_c = K^{-1}p\)。`);
-
-  assert.match(html, /class="katex"/);
-  assert.match(html, /r_c/);
+test("streaming split: closed code block is highlighted, growing tail uses plain pre", () => {
+  const html = renderMarkdown(
+    "stable para\n\n```ts\nconst x = 1;\n```\n\ngrowing tail",
+    true,
+  );
+  // The stable part (closed fence) renders with Prism tokens immediately...
+  assert.match(html, /<p>stable para<\/p>/);
+  assert.match(html, /token[^>]*>[^<]*const/);
+  // ...while the growing tail stays a plain paragraph.
+  assert.match(html, /<p>growing tail<\/p>/);
+  // The tail has no code block, so no streaming <pre> appears.
+  assert.doesNotMatch(html, /markdown-code-streaming/);
 });
 
-test("renders paired LaTeX bracket delimiters as display math", () => {
-  const html = renderMarkdown(String.raw`\[
-P(\lambda)=o_b+\lambda r_b
-\]`);
-  const oneLineHtml = renderMarkdown(String.raw`\[P(\lambda)=o_b+\lambda r_b\]`);
-
-  assert.match(html, /class="katex-display"/);
-  assert.match(html, /lambda/);
-  assert.match(oneLineHtml, /class="katex-display"/);
+test("streaming split: unterminated fence stays a streaming pre", () => {
+  const html = renderMarkdown(
+    "before\n\n```ts\nconst x = 1;\nconst y =",
+    true,
+  );
+  assert.match(html, /<p>before<\/p>/);
+  assert.match(html, /markdown-code-streaming/);
+  assert.doesNotMatch(html, /token[^>]*>[^<]*const y/);
 });
 
-test("leaves an unmatched LaTeX bracket delimiter unchanged", () => {
-  const markdown = String.raw`before
-\[
-x + y
-after`;
-
-  assert.equal(normalizeDisplayMath(markdown), markdown);
+test("non-streaming render is unchanged: no split, no streaming pre", () => {
+  const html = renderMarkdown("a\n\n```js\nlet z = 1;\n```\n\nb");
+  assert.doesNotMatch(html, /markdown-code-streaming/);
+  // Prism highlights the single code block as before.
+  assert.match(html, /token[^>]*>[^<]*let/);
 });
 
-test("does not normalize LaTeX delimiters inside Markdown code", () => {
-  const markdown = "    \\(indented\\)\n\n`code\n\\(inline\\)`\n\n```text\n\\[\nfenced\n\\]\n```";
+test("Prism token colors follow theme CSS variables", async () => {
+  const themeSource = await readFile(new URL("../lib/prism-theme.ts", import.meta.url), "utf8");
+  const markdownSource = await readFile(new URL("./MarkdownBody.tsx", import.meta.url), "utf8");
+  const fileViewerSource = await readFile(new URL("./FileViewer.tsx", import.meta.url), "utf8");
 
-  assert.equal(normalizeDisplayMath(markdown), markdown);
-});
-
-test("does not normalize LaTeX delimiters inside raw HTML code", () => {
-  const markdown = "<code>\\(inline\\)</code>\n\n<pre>\n\\(block\\)\n</pre>";
-
-  assert.equal(normalizeDisplayMath(markdown), markdown);
-});
-
-test("does not normalize escaped delimiters or link destinations", () => {
-  const escaped = String.raw`Literal: \\(x+y\\).`;
-  const link = String.raw`[docs](https://example.com/\(manual\))`;
-
-  assert.equal(normalizeDisplayMath(escaped), escaped);
-  assert.equal(normalizeDisplayMath(link), link);
+  assert.match(themeSource, /keyword: \{ color: "var\(--accent\)" \}/);
+  assert.match(themeSource, /string: \{ color: "var\(--accent-orange\)" \}/);
+  for (const source of [markdownSource, fileViewerSource]) {
+    assert.match(source, /style=\{prismTheme\}/);
+    assert.doesNotMatch(source, /react-syntax-highlighter\/dist\/cjs\/styles\/prism/);
+  }
 });

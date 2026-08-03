@@ -1,13 +1,23 @@
 import { NextResponse } from "next/server";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { runNpx } from "@/lib/npx";
 import type { SkillInstallScope } from "@/lib/api-types";
+import { getAllowedFileRoots, isFilePathAllowed } from "@/lib/file-access";
+import { getProjectTrustStatus } from "@/lib/project-trust";
+import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { buildSkillUpdateArgs } from "@/lib/skill-updates";
 import { loadSkillsWithInstallInfo } from "@/lib/skills-service";
-import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+  if (!hasJsonContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
+  }
+
   try {
     const body = await req.json() as {
       cwd?: unknown;
@@ -22,9 +32,16 @@ export async function POST(req: Request) {
     if (!cwd || !pkg || !scope) {
       return NextResponse.json({ error: "cwd, package, and scope are required" }, { status: 400 });
     }
+
     const allowedRoots = await getAllowedFileRoots();
-    if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
+    if (!isFilePathAllowed(cwd, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    if (scope === "project" && !getProjectTrustStatus(cwd, getAgentDir()).trusted) {
+      return NextResponse.json(
+        { error: "Project resources must be trusted before updating project skills" },
+        { status: 403 },
+      );
     }
 
     const { skills } = await loadSkillsWithInstallInfo(cwd);

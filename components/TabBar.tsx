@@ -1,15 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { getFileIcon } from "./FileIcons";
+import { X } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
+import { getFileIcon } from "./FileIcons";
 
 export interface Tab {
   id: string;
   label: string;
   filePath: string;
   sourceSessionId?: string | null;
-  initialDisplayMode?: "source" | "preview" | "diff";
+  initialDisplayMode?: "diff";
 }
 
 interface Props {
@@ -40,15 +41,6 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
           <div
             key={tab.id}
             onClick={() => onSelectTab(tab.id)}
-            onMouseDown={(e) => {
-              if (e.button === 1) e.preventDefault();
-            }}
-            onAuxClick={(e) => {
-              if (e.button !== 1) return;
-              e.preventDefault();
-              e.stopPropagation();
-              onCloseTab(tab.id);
-            }}
             style={{
               display: "flex",
               alignItems: "center",
@@ -99,13 +91,10 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
                 flexShrink: 0,
                 transition: "background 0.1s, color 0.1s",
               }}
-               title={t("i18n.close")}
-               aria-label={`${t("i18n.close")} ${tab.label}`}
+              title={t("desktop.closeTab")}
+              aria-label={t("desktop.closeTabWithLabel", { label: tab.label })}
             >
-              <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                <line x1="2" y1="2" x2="8" y2="8" />
-                <line x1="8" y1="2" x2="2" y2="8" />
-              </svg>
+              <X size={11} aria-hidden="true" />
             </button>
           </div>
         );

@@ -322,7 +322,7 @@ export function ZoomPanViewer({
         <div className="mermaid-zoom-toolbar">
           {title ? <span className="mermaid-zoom-title">{title}</span> : null}
           {!selectMode && (
-            <span className="mermaid-zoom-hint">{t("i18n.zoomPanHint")}</span>
+            <span className="mermaid-zoom-hint">{t("desktop.zoomPanHint")}</span>
           )}
           <div className="mermaid-zoom-actions">
             <button
@@ -335,8 +335,8 @@ export function ZoomPanViewer({
                 .filter(Boolean)
                 .join(" ")}
               onClick={() => setSelectMode((value) => !value)}
-              title={t("i18n.selectText")}
-              aria-label={t("i18n.selectText")}
+              title={t("desktop.selectText")}
+              aria-label={t("desktop.selectText")}
               aria-pressed={selectMode}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -348,8 +348,8 @@ export function ZoomPanViewer({
                 type="button"
                 onClick={() => zoomByRelativeStep(-1)}
                 disabled={transform.scale <= minScale + 1e-9}
-                title={t("i18n.zoomOut")}
-                aria-label={t("i18n.zoomOut")}
+                title={t("desktop.zoomOut")}
+                aria-label={t("desktop.zoomOut")}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                   <path d="M5 12h14" />
@@ -362,7 +362,7 @@ export function ZoomPanViewer({
                   // Click percentage → restore fit (100%).
                   fitToViewport();
                 }}
-                title={t("i18n.resetZoom")}
+                title={t("desktop.resetZoom")}
                 aria-label={`${relativePercent}%`}
               >
                 {relativePercent}%
@@ -371,8 +371,8 @@ export function ZoomPanViewer({
                 type="button"
                 onClick={() => zoomByRelativeStep(1)}
                 disabled={transform.scale >= maxScale - 1e-9}
-                title={t("i18n.zoomIn")}
-                aria-label={t("i18n.zoomIn")}
+                title={t("desktop.zoomIn")}
+                aria-label={t("desktop.zoomIn")}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                   <path d="M12 5v14M5 12h14" />
@@ -383,8 +383,8 @@ export function ZoomPanViewer({
               type="button"
               className="mermaid-zoom-icon-button"
               onClick={fitToViewport}
-              title={t("i18n.fitToViewport")}
-              aria-label={t("i18n.fitToViewport")}
+              title={t("desktop.fitToViewport")}
+              aria-label={t("desktop.fitToViewport")}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
@@ -394,8 +394,8 @@ export function ZoomPanViewer({
               type="button"
               className="mermaid-zoom-icon-button"
               onClick={onClose}
-              title={t("i18n.close")}
-              aria-label={t("i18n.close")}
+              title={t("desktop.close")}
+              aria-label={t("desktop.close")}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                 <path d="M6 6l12 12M18 6 6 18" />

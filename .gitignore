@@ -15,20 +15,23 @@
 
 # next.js
 /.next/
-/.next-dev/
 /out/
+
+# Windows Turbopack bug - NUL device file leak
+nul
 
 # production
 /build
-
-# electron-builder output
 /release
 
-# Reasonix tool metadata (not part of the app)
-/.reasonix
+# electron
+electron/node_modules/
 
-# CI workaround home dir
-/.ci-home
+# tauri (remnants from previous Tauri migration, kept to prevent re-inclusion)
+src-tauri/
+tauri-dist/
+build-app/
+build-temp/
 
 # misc
 .DS_Store
@@ -51,3 +54,6 @@ yarn-error.log*
 next-env.d.ts
 .factory
 
+.myLastChat
+ref-repos
+.lrnev/

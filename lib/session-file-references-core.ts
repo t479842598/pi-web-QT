@@ -74,9 +74,9 @@ export function isFilePathReferencedByEntries(filePath: string, entries: Session
 }
 
 export function isBashOutputPathReferencedByEntries(filePath: string, entries: SessionEntry[]): boolean {
-  return entries.some((entry) => (
+  return entries.some((entry) =>
     entry.type === "message"
-    && entry.message.role === "bashExecution"
-    && entry.message.fullOutputPath === filePath
-  ));
+    && entry.message?.role === "bashExecution"
+    && entry.message.fullOutputPath === filePath,
+  );
 }

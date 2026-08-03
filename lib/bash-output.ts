@@ -4,6 +4,7 @@ import { basename, dirname, resolve } from "node:path";
 
 export const MAX_INLINE_BASH_OUTPUT_BYTES = 5 * 1024 * 1024;
 
+/** Only SDK-created temporary bash logs can be retrieved through the API. */
 export function resolveBashOutputPath(filePath: string, tempRoot: string): string | null {
   const resolvedPath = resolve(filePath);
   if (dirname(resolvedPath) !== resolve(tempRoot)) return null;

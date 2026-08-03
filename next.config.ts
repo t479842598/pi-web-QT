@@ -3,6 +3,9 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 const { version } = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf8")) as { version: string };
+const allowedDevOrigins = (process.env.PI_WEB_ALLOWED_HOSTS?.split(",") ?? [])
+  .map((host) => host.trim())
+  .filter(Boolean);
 let piVersion = "unknown";
 try {
   const piPkgPath = join(__dirname, "node_modules/@earendil-works/pi-coding-agent/package.json");
@@ -10,17 +13,15 @@ try {
 } catch { /* package not found, use default */ }
 
 const nextConfig: NextConfig = {
-  // Dev server runs against its own build directory (.next-dev) so it can
-  // coexist with the production `next start` (.next) on a different port.
-  distDir: process.env.PI_WEB_DEV_DIST ? ".next-dev" : ".next",
+  allowedDevOrigins,
+  devIndicators: false,
   serverExternalPackages: [
-    "undici",
-    "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-agent-core",
+    "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
+    "undici",
   ],
-  allowedDevOrigins: ['192.168.*.*', 'piweb.274747.xyz'],
   async headers() {
     return [
       {
@@ -29,19 +30,7 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "private, no-cache, max-age=0, must-revalidate" },
         ],
       },
-      {
-        source: "/sw.js",
-        headers: [
-          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
-          { key: "Service-Worker-Allowed", value: "/" },
-        ],
-      },
-      {
-        source: "/manifest.webmanifest",
-        headers: [
-          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
-        ],
-      },
+
     ];
   },
   env: {

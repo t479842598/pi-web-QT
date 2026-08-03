@@ -2,18 +2,18 @@
 
 import { useEffect, useState } from "react";
 import {
+  Check,
   Copy,
   Gear,
   List,
-  Minus,
   Moon,
   SidebarSimple,
-  Square,
   Sun,
-  X,
 } from "@phosphor-icons/react";
-import { useElectronWindow } from "@/hooks/useElectronWindow";
 import { useI18n } from "@/hooks/useI18n";
+import type { SessionStatsInfo } from "@/lib/pi-types";
+
+type SessionCopyField = "file" | "id";
 
 interface AppTitleBarProps {
   topBarRef: React.RefObject<HTMLDivElement | null>;
@@ -21,14 +21,21 @@ interface AppTitleBarProps {
   onSidebarToggle: () => void;
   isDark: boolean;
   toggleTheme: (origin?: { x: number; y: number }) => void;
+  isMobile: boolean;
   showChat: boolean;
+  systemPrompt: string | null;
+  activeTopPanel: "system" | "session" | null;
+
+  topPanelPos: { top: number; left: number; width: number } | null;
+  sessionStats: SessionStatsInfo | null;
+  contextUsage: { percent: number | null; contextWindow: number; tokens: number | null } | null;
+  copiedSessionField: SessionCopyField | null;
+  onCopySessionField: (field: SessionCopyField, value: string) => void;
   rightPanelOpen: boolean;
   onToggleFilePanel: () => void;
   onOpenSettings: () => void;
   sessionTitle: string | null;
   onWorkspaceControlsHostChange?: (node: HTMLDivElement | null) => void;
-  /** Extra top-bar buttons (language, auto-name, etc.) rendered in the showChat slot. */
-  children?: React.ReactNode;
 }
 
 /** Renders a placeholder icon until mounted, then the correct theme icon.
@@ -85,20 +92,26 @@ export function AppTitleBar({
   onSidebarToggle,
   isDark,
   toggleTheme,
+  isMobile,
   showChat,
+  systemPrompt,
+  activeTopPanel,
+
+  topPanelPos,
+  sessionStats,
+  contextUsage,
+  copiedSessionField,
+  onCopySessionField,
   rightPanelOpen,
   onToggleFilePanel,
   onOpenSettings,
   sessionTitle,
   onWorkspaceControlsHostChange,
-  children,
 }: AppTitleBarProps) {
-  const { isElectron, isMaximized, minimize, toggleMaximize, close } = useElectronWindow();
   const { t: translate } = useI18n();
 
   return (
     <>
-      {/* Full-width app title bar — drag region for frameless Electron */}
       <div
         ref={topBarRef}
         className="app-title-bar"
@@ -111,13 +124,6 @@ export function AppTitleBar({
           background: "var(--bg-panel)",
           position: "relative",
           zIndex: 600,
-        }}
-        onDoubleClick={(e) => {
-          // Double-click title bar to toggle maximize (only in Electron)
-          if (!isElectron) return;
-          const target = e.target as HTMLElement;
-          if (target.closest("button, a, input, select, textarea")) return;
-          toggleMaximize();
         }}
       >
         {/* Sidebar toggle */}
@@ -154,12 +160,10 @@ export function AppTitleBar({
         />
 
         {showChat && (
-          <div style={{ display: "flex", alignItems: "stretch", height: "100%", flex: 1, minWidth: 0, overflow: "visible" }}>
-            {children}
-          </div>
+          <div style={{ display: "flex", alignItems: "stretch", height: "100%" }} />
         )}
 
-        {/* Flexible title spacer; in Electron this is the primary drag area. */}
+        {/* Flexible title spacer for the active session title. */}
         <div
           className="app-title-drag"
           style={{
@@ -233,64 +237,195 @@ export function AppTitleBar({
           <Gear size={16} aria-hidden="true" />
         </button>
 
-        {/* Window controls (Electron only) */}
-        {isElectron && (
-          <div style={{ display: "flex", alignItems: "stretch", height: "100%", flexShrink: 0 }}>
-            <button
-              className="app-no-drag"
-              onClick={minimize}
-              title={translate("desktop.minimize")}
-              aria-label={translate("desktop.minimize")}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 44, height: "100%", padding: 0,
-                background: "none", border: "none",
-                color: "var(--text-muted)", cursor: "pointer",
-                transition: "color 0.12s, background 0.12s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "none"; }}
-            >
-              <Minus size={16} aria-hidden="true" />
-            </button>
-            <button
-              className="app-no-drag"
-              onClick={toggleMaximize}
-              title={isMaximized ? translate("desktop.restore") : translate("desktop.maximize")}
-              aria-label={isMaximized ? translate("desktop.restore") : translate("desktop.maximize")}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 44, height: "100%", padding: 0,
-                background: "none", border: "none",
-                color: "var(--text-muted)", cursor: "pointer",
-                transition: "color 0.12s, background 0.12s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "none"; }}
-            >
-              {isMaximized ? <Copy size={16} aria-hidden="true" /> : <Square size={16} aria-hidden="true" />}
-            </button>
-            <button
-              className="app-no-drag"
-              onClick={close}
-              title={translate("desktop.close")}
-              aria-label={translate("desktop.close")}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 44, height: "100%", padding: 0,
-                background: "none", border: "none",
-                color: "var(--text-muted)", cursor: "pointer",
-                transition: "color 0.12s, background 0.12s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.background = "#e81123"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "none"; }}
-            >
-              <X size={16} aria-hidden="true" />
-            </button>
-          </div>
-        )}
       </div>
 
+      {/* Dropdown panel — fixed position, full width below title bar */}
+      {activeTopPanel && topPanelPos && (
+        <div style={{
+          position: "fixed",
+          top: topPanelPos.top,
+          left: topPanelPos.left,
+          width: topPanelPos.width,
+          maxHeight: `calc(100dvh - ${topPanelPos.top}px)`,
+          overflowY: "auto",
+          zIndex: 500,
+        }}>
+          {activeTopPanel === "system" && (
+            <div style={{
+              background: "var(--bg-panel)",
+              borderBottom: "1px solid var(--border)",
+            }}>
+              {systemPrompt ? (
+                <div style={{
+                  maxHeight: "min(600px, 75vh)",
+                  overflowY: "auto",
+                  padding: "12px 16px",
+                  color: "var(--text-muted)",
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                  whiteSpace: "pre-wrap",
+                  fontFamily: "var(--font-mono)",
+                }}>
+                  {systemPrompt}
+                </div>
+              ) : systemPrompt === "" ? (
+                <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+                  System prompt is empty (tools are disabled)
+                </div>
+              ) : (
+                <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+                  Send a message to load the system prompt
+                </div>
+              )}
+            </div>
+          )}
+          {activeTopPanel === "session" && (
+            <div style={{
+              background: "var(--bg-panel)",
+              borderBottom: "1px solid var(--border)",
+              boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
+              padding: "12px 16px",
+            }}>
+              {sessionStats ? (() => {
+                const sessionRows = [
+                  ...(sessionStats.sessionName ? [{ label: translate("desktop.name"), value: sessionStats.sessionName, copyField: null }] : []),
+                  { label: translate("desktop.sessionInfoFile"), value: sessionStats.sessionFile ?? translate("desktop.sessionInfoInMemory"), copyField: "file" as const },
+                  { label: translate("desktop.sessionInfoId"), value: sessionStats.sessionId, copyField: "id" as const },
+                ];
+                const messageRows = [
+                  [translate("desktop.sessionInfoUser"), sessionStats.userMessages.toLocaleString()],
+                  [translate("desktop.sessionInfoAssistant"), sessionStats.assistantMessages.toLocaleString()],
+                  [translate("desktop.sessionInfoToolCalls"), sessionStats.toolCalls.toLocaleString()],
+                  [translate("desktop.sessionInfoToolResults"), sessionStats.toolResults.toLocaleString()],
+                  [translate("desktop.sessionInfoTotal"), sessionStats.totalMessages.toLocaleString()],
+                ];
+                const tokenRows = [
+                  [translate("desktop.sessionInfoInput"), sessionStats.tokens.input.toLocaleString()],
+                  [translate("desktop.sessionInfoOutput"), sessionStats.tokens.output.toLocaleString()],
+                  ...(sessionStats.tokens.cacheRead > 0 ? [[translate("desktop.sessionInfoCacheRead"), sessionStats.tokens.cacheRead.toLocaleString()]] : []),
+                  ...(sessionStats.tokens.cacheWrite > 0 ? [[translate("desktop.sessionInfoCacheWrite"), sessionStats.tokens.cacheWrite.toLocaleString()]] : []),
+                  [translate("desktop.sessionInfoTotal"), sessionStats.tokens.total.toLocaleString()],
+                ];
+                const ctx = contextUsage ?? sessionStats.contextUsage;
+                const formatCompact = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
+                const extraTokenRows = [
+                  ...(sessionStats.cost > 0 ? [[translate("desktop.sessionInfoCost"), `$${sessionStats.cost.toFixed(4)}`]] : []),
+                  ...(ctx?.contextWindow ? [[translate("desktop.sessionInfoContext"), `${ctx.percent !== null ? `${ctx.percent.toFixed(1)}%` : "?"} / ${formatCompact(ctx.contextWindow)}`]] : []),
+                ];
+                const section = (
+                  title: string,
+                  sectionRows: string[][],
+                  valueAlign: "left" | "right" = "left",
+                  compact = false,
+                ) => (
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{title}</div>
+                    <div style={{
+                      display: "grid",
+                      gridTemplateColumns: compact ? "max-content max-content" : "auto minmax(0, 1fr)",
+                      columnGap: compact ? 14 : 12,
+                      rowGap: 4,
+                      justifyContent: compact ? "start" : undefined,
+                    }}>
+                      {sectionRows.map(([label, value]) => (
+                        <div key={`${title}:${label}`} style={{ display: "contents" }}>
+                          <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{label}</div>
+                          <div style={{
+                            color: "var(--text-muted)",
+                            minWidth: 0,
+                            overflowWrap: compact ? "normal" : "anywhere",
+                            textAlign: valueAlign,
+                            whiteSpace: valueAlign === "right" ? "nowrap" : "normal",
+                          }}>{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+                const copyButton = (field: SessionCopyField, value: string) => {
+                  const copied = copiedSessionField === field;
+                  return (
+                    <button
+                      type="button"
+                      title={copied ? translate("desktop.copied") : field === "file" ? translate("desktop.copyFilePath") : translate("desktop.copySessionId")}
+                      onClick={() => onCopySessionField(field, value)}
+                      style={{
+                        alignSelf: "start",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 22,
+                        height: 22,
+                        marginTop: -2,
+                        color: copied ? "var(--accent)" : "var(--text-dim)",
+                        background: "transparent",
+                        border: "1px solid var(--border)",
+                        borderRadius: 4,
+                        cursor: "pointer",
+                        flex: "0 0 auto",
+                        transition: "color 0.12s, border-color 0.12s, background 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = "var(--accent)";
+                        e.currentTarget.style.borderColor = "var(--accent)";
+                        e.currentTarget.style.background = "var(--bg-hover)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = copied ? "var(--accent)" : "var(--text-dim)";
+                        e.currentTarget.style.borderColor = "var(--border)";
+                        e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+                    </button>
+                  );
+                };
+                const sessionInfoSection = (
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{translate("desktop.sessionInfoTitle")}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: 12, rowGap: 8, alignItems: "start" }}>
+                      {sessionRows.map((row) => (
+                        <div key={`session-info:${row.label}`} style={{ display: "contents" }}>
+                          <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{row.label}</div>
+                          <div style={{
+                            color: "var(--text-muted)",
+                            minWidth: 0,
+                            overflowWrap: "anywhere",
+                            wordBreak: "break-word",
+                            whiteSpace: "normal",
+                          }}>{row.value}</div>
+                          <div>{row.copyField ? copyButton(row.copyField, row.value) : null}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+
+                return (
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: isMobile
+                      ? "1fr"
+                      : "minmax(360px, 1.7fr) minmax(140px, 0.55fr) minmax(190px, 0.75fr)",
+                    gap: isMobile ? 16 : 24,
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    fontFamily: "var(--font-mono)",
+                  }}>
+                    {sessionInfoSection}
+                    {section(translate("desktop.sessionInfoMessages"), messageRows)}
+                    {section(translate("desktop.sessionInfoTokens"), [...tokenRows, ...extraTokenRows], "right", true)}
+                  </div>
+                );
+              })() : (
+                <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+                  {translate("desktop.sendMessageForSessionInfo")}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }
