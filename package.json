@@ -1,6 +1,6 @@
 {
   "name": "@agegr/pi-web",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Web UI for the pi coding agent",
   "main": "electron/main.js",
   "homepage": "https://github.com/agegr/pi-web#readme",
@@ -45,6 +45,7 @@
     "@earendil-works/pi-ai": "0.83.0",
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@earendil-works/pi-tui": "0.83.0",
+    "@phosphor-icons/react": "^2.1.10",
     "next": "16.2.12",
     "proper-lockfile": "4.1.2",
     "react": "^19.2.4",

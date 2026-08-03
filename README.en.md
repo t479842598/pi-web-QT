@@ -4,7 +4,7 @@
 
 Local web UI for the [pi coding agent](https://github.com/badlogic/pi-mono). Pi Web reads your local pi session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
-This fork is based on [agegr/pi-web](https://github.com/agegr/pi-web) **v0.8.6** and adds a set of UX fixes and enhancements (scroll behavior, mobile usability, math/Mermaid rendering, file handling, queue persistence, usage statistics, quote-reply, and more). See [Changes in this fork](#changes-in-this-fork) below for the full list.
+This fork is based on [agegr/pi-web](https://github.com/agegr/pi-web) **v0.8.6** and adds a set of UX fixes and enhancements (scroll behavior, mobile usability, math/Mermaid rendering, file handling, queue persistence, usage statistics, quote-reply, and more), plus **Gruvbox theme**, an **Electron desktop app**, and desktop UI/UX features ported from [pi-web-desktop](https://github.com/isWittHere/pi-web-desktop) v0.7.16 (multi-step process groups, unified settings modal, session info bar, PI-TUI theme JSON support — see [CHANGELOG](./CHANGELOG.md)). See [Changes in this fork](#changes-in-this-fork) below for the full list.
 
 ![Pi Web shows the same pi session with structured Markdown, tool calls, and project navigation beside the CLI](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
 
@@ -80,6 +80,9 @@ npx @agegr/pi-web@latest
 - **See session state clearly**: context usage, cost, compaction state, and system prompt details are visible from the top bar.
 - **Configure less from the terminal**: manage models, login/API keys, model tests, and skill switches from the web UI.
 - **Use the interface in your language**: switch between the supported UI languages from the top bar.
+- **Follow agent progress in grouped steps** (v0.9.1): tool calls are auto-grouped by semantic step with timeline/tab display modes, file target tags, error highlighting, and live streaming summaries.
+- **Unified settings modal** (v0.9.1): gear button opens a settings center with Chat (input shortcut) and Display (theme, custom PI-TUI themes, language) tabs.
+- **Session info bar** (v0.9.1): under the chat input — completion sound, full history, branches, system prompt, compaction, token usage and a context donut chart.
 
 ## Changes in this fork
 

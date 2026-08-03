@@ -10,6 +10,8 @@ interface Props {
   onLeafChange: (leafId: string | null) => void;
   /** When true, renders as a compact inline button for embedding in a top bar */
   inline?: boolean;
+  /** Alias of inline, used by SessionInfoBar's embedded popover. */
+  embedded?: boolean;
   /** When inline, use this ref's bounding rect to size/position the dropdown */
   containerRef?: React.RefObject<HTMLElement | null>;
   /** Controlled open state for inline mode */
@@ -217,12 +219,14 @@ function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelec
   );
 }
 
-export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession, compact }: Props) {
+export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, embedded, containerRef, open: openProp, onToggle, hasSession, compact }: Props) {
   const { t } = useI18n();
   const [openInternal, setOpenInternal] = useState(false);
   const open = openProp !== undefined ? openProp : openInternal;
   const btnRef = useRef<HTMLButtonElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  // embedded is an alias of inline (used by SessionInfoBar popover).
+  inline = inline || embedded;
 
   useEffect(() => {
     if (!open || !inline) return;

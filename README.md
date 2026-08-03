@@ -4,7 +4,7 @@
 
 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
 
-本分支基于 [agegr/pi-web](https://github.com/agegr/pi-web) **v0.8.6**，合并了一系列体验修复与增强（滚动行为、移动端可用性、数学公式/Mermaid 渲染、文件处理、队列持久化、用量统计、引用回复等），并新增 **Gruvbox 主题**和 **Electron 桌面端** 支持。
+本分支基于 [agegr/pi-web](https://github.com/agegr/pi-web) **v0.8.6**，合并了一系列体验修复与增强（滚动行为、移动端可用性、数学公式/Mermaid 渲染、文件处理、队列持久化、用量统计、引用回复等），并新增 **Gruvbox 主题**、**Electron 桌面端** 支持，以及从 [pi-web-desktop](https://github.com/isWittHere/pi-web-desktop) v0.7.16 移植的桌面 UI/UX 增强（多步骤过程分组、统一设置弹窗、会话信息条、PI-TUI 主题 JSON 兼容，详见 [CHANGELOG](./CHANGELOG.md)）。
 
 中文微信群：请查看 [GitHub Discussions 帖子](https://github.com/agegr/pi-web/discussions/271)。
 
@@ -75,6 +75,13 @@ npm run desktop
 | 暗色 | `#1d2021` | `#ebdbb2` | `#83a598` |
 
 颜色变量定义在 `app/globals.css`，可通过 CSS 变量自行覆盖。
+
+## UI 增强（v0.9.1）
+
+- **多步骤过程分组** — 工具调用按语义自动合并为步骤组，支持时间线 / 标签页双显示模式，文件目标标签、错误高亮、流式摘要。
+- **统一设置弹窗** — 顶栏齿轮按钮打开设置中心，包含「聊天」「显示」标签页（输入快捷键、主题、语言）。
+- **会话信息条** — ChatInput 下方展示提示音、完整历史、分支、系统提示、上下文压缩、token 用量与上下文 donut 图表。
+- **PI-TUI 主题 JSON 兼容** — 将 `-dark.json` / `-light.json` 主题文件放入 `~/.pi/agent/themes/`，即可在设置中选用。
 
 ## 完整命令行参数
 

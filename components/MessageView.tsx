@@ -705,18 +705,41 @@ function TextBlock({ block, isStreaming, cwd, onOpenFile, sessionId, onQuoteRepl
   return <MarkdownBody isStreaming={isStreaming} cwd={cwd} sessionId={sessionId} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply}>{block.text}</MarkdownBody>;
 }
 
-function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
+export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex, contentOnly = false, isStreaming, cwd, onOpenFile, className }: {
   block: ThinkingContent;
   duration?: number;
   sessionId?: string;
   entryId?: string;
   blockIndex: number;
+  contentOnly?: boolean;
+  isStreaming?: boolean;
+  cwd?: string;
+  onOpenFile?: (filePath: string) => void;
+  className?: string;
 }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  if (contentOnly) {
+    // Content-only variant for embedded process groups: renders the thinking
+    // body directly (loading deferred content on demand) without the foldable
+    // header chrome.
+    return (
+      <ThinkingContentBody
+        block={block}
+        sessionId={sessionId}
+        entryId={entryId}
+        blockIndex={blockIndex}
+        isStreaming={isStreaming}
+        cwd={cwd}
+        onOpenFile={onOpenFile}
+        className={className}
+      />
+    );
+  }
 
   const toggle = async () => {
     const nextExpanded = !expanded;
@@ -787,8 +810,52 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
   );
 }
 
+function ThinkingContentBody({ block, sessionId, entryId, blockIndex, isStreaming, cwd, onOpenFile, className }: {
+  block: ThinkingContent;
+  sessionId?: string;
+  entryId?: string;
+  blockIndex: number;
+  isStreaming?: boolean;
+  cwd?: string;
+  onOpenFile?: (filePath: string) => void;
+  className?: string;
+}) {
+  const { t } = useI18n();
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(block.deferred === true);
+  const [error, setError] = useState<string | null>(null);
 
-function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number }) {
+  useEffect(() => {
+    let cancelled = false;
+    if (!block.deferred) {
+      setLoading(false);
+      return;
+    }
+    if (!sessionId || !entryId) {
+      setLoading(false);
+      setError(t("i18n.thinkingUnavailable"));
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    void loadThinkingContent(sessionId, entryId, blockIndex)
+      .then((value) => { if (!cancelled) setContent(value); })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [block.deferred, blockIndex, entryId, sessionId, t]);
+
+  if (loading) return <div style={{ fontSize: 12, color: "var(--text-dim)" }}>{t("i18n.loadingThinking")}</div>;
+  if (error) return <div style={{ fontSize: 12, color: "#f87171" }}>{error}</div>;
+
+  return (
+    <MarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} className={className}>
+      {block.deferred ? (content ?? "") : block.thinking}
+    </MarkdownBody>
+  );
+}
+
+export function ToolCallBlock({ block, result, duration, processStyle = false }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; processStyle?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const inputStr = JSON.stringify(block.input, null, 2);
   const isEditTool = isEditToolName(block.toolName);
@@ -807,8 +874,12 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
         borderRadius: 7,
         overflow: "hidden",
         fontSize: 12,
-        border: isError ? "1px solid rgba(248,113,113,0.45)" : "1px solid rgba(34,197,94,0.25)",
-        background: isError ? "rgba(248,113,113,0.05)" : "rgba(34,197,94,0.04)",
+        border: processStyle
+          ? (isError ? "1px solid rgba(248,113,113,0.45)" : "1px solid var(--border)")
+          : (isError ? "1px solid rgba(248,113,113,0.45)" : "1px solid rgba(34,197,94,0.25)"),
+        background: processStyle
+          ? (isError ? "rgba(248,113,113,0.05)" : "var(--bg-panel)")
+          : (isError ? "rgba(248,113,113,0.05)" : "rgba(34,197,94,0.04)"),
       }}
     >
       {/* ── Tool call header ── */}
@@ -868,12 +939,14 @@ function ToolCallBlock({ block, result, duration }: { block: ToolCallContent; re
         resultDiff ? (
           <PairedDiffResult
             diff={resultDiff}
+            processStyle={processStyle}
           />
         ) : (
           <PairedResult
             text={resultText ?? ""}
             isEmpty={resultIsEmpty}
             isError={isError}
+            processStyle={processStyle}
           />
         )
       )}
@@ -885,13 +958,14 @@ interface ResultDiff {
   text: string;
 }
 
-function PairedDiffResult({ diff }: {
+function PairedDiffResult({ diff, processStyle = false }: {
   diff: ResultDiff;
+  processStyle?: boolean;
 }) {
   return (
     <div
       style={{
-        borderTop: "1px solid rgba(34,197,94,0.15)",
+        borderTop: processStyle ? "1px solid var(--border)" : "1px solid rgba(34,197,94,0.15)",
         background: "var(--bg)",
       }}
     >
@@ -1127,16 +1201,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function PairedResult({ text, isEmpty, isError }: {
+function PairedResult({ text, isEmpty, isError, processStyle = false }: {
   text: string;
   isEmpty: boolean;
   isError: boolean;
+  processStyle?: boolean;
 }) {
   const { t } = useI18n();
   return (
     <div
       style={{
-        borderTop: `1px solid ${isError ? "rgba(248,113,113,0.3)" : "rgba(34,197,94,0.15)"}`,
+        borderTop: `1px solid ${isError ? "rgba(248,113,113,0.3)" : (processStyle ? "var(--border)" : "rgba(34,197,94,0.15)")}`,
         background: isError ? "rgba(248,113,113,0.04)" : "var(--bg-subtle)",
       }}
     >
