@@ -1,12 +1,51 @@
-# Pi Web (pi-web-QT)
+<div align="center">
 
-[English](./README.en.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+# 🍜 Pi Web (pi-web-QT)
 
-[pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
+**pi 编程智能体（[pi-mono](https://github.com/badlogic/pi-mono)）的本地桌面网页界面**
+
+读取本机 pi 会话文件，提供会话管理、实时对话、模型配置、技能管理与项目文件预览，支持浏览器与 Electron 桌面端双模式。
+
+[English](./README.en.md) · [日本語](./README.ja.md) · [Русский](./README.ru.md)
+
+![Version](https://img.shields.io/badge/version-0.9.1-blue)
+![Node](https://img.shields.io/badge/node-%3E%3D22.19.0-green)
+![License](https://img.shields.io/badge/license-MIT-yellow)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+
+</div>
+
+## ✨ 功能一览
+
+| 功能 | 说明 |
+|------|------|
+| 💬 **实时对话** | 与 pi 智能体多轮对话，SSE 流式输出、输入快捷键（Enter / Ctrl+Enter）可配 |
+| 🧩 **多步骤过程分组** | 工具调用按语义自动合并为步骤组，时间线 / 标签页双模式、文件标签、错误高亮、流式摘要 |
+| 📂 **项目文件浏览** | 侧栏文件树 + 右侧源码 / diff / 图片 / 音频 / PDF / DOCX 预览 |
+| 🌿 **会话分支与 Fork** | 从任意消息继续分支或 Fork 独立会话，侧栏树形展示 |
+| 🧠 **多模型配置** | 可视化编辑 `~/.pi/agent/models.json`，OAuth / API Key 登录、模型连通性测试 |
+| 🛠 **技能与插件管理** | 技能搜索 / 安装 / 启停，package 插件管理 |
+| 📊 **用量统计** | token 用量、费用、上下文使用率 donut 图表、会话信息条 |
+| 🎨 **多主题** | Gruvbox 默认 + 6 套内置主题，亮 / 暗双模式，PI-TUI 主题 JSON 兼容（`~/.pi/agent/themes/`） |
+| 📦 **Electron 桌面端** | 三平台打包（macOS dmg / Windows exe / Linux AppImage），首次运行设置向导 |
+| 🧵 **Git Worktree** | 从侧栏切换 / 创建 worktree，会话与文件树跟随分支 |
+| ⏳ **队列持久化** | 会话中断后队列自动恢复，可视化管理待处理消息 |
+| 🌐 **i18n** | 中文 / English / 日本語 / Русский 界面语言切换 |
+
+## 🧰 技术栈
+
+| 层 | 技术 |
+|----|------|
+| 前端框架 | [Next.js 16](https://nextjs.org)（App Router）+ React 19 |
+| 样式 | Tailwind CSS 4 + CSS 变量主题系统 |
+| AI 引擎 | [@earendil-works/pi-coding-agent](https://github.com/badlogic/pi-mono)（进程内 AgentSession） |
+| 桌面壳 | Electron 43 + electron-builder（三平台打包） |
+| 图标 | @phosphor-icons/react |
+| 语言 | TypeScript 5（strict） |
+
+## 🔧 分支说明
 
 本分支基于 [agegr/pi-web](https://github.com/agegr/pi-web) **v0.8.6**，合并了一系列体验修复与增强（滚动行为、移动端可用性、数学公式/Mermaid 渲染、文件处理、队列持久化、用量统计、引用回复等），并新增 **Gruvbox 主题**、**Electron 桌面端** 支持，以及从 [pi-web-desktop](https://github.com/isWittHere/pi-web-desktop) v0.7.16 移植的桌面 UI/UX 增强（多步骤过程分组、统一设置弹窗、会话信息条、PI-TUI 主题 JSON 兼容，详见 [CHANGELOG](./CHANGELOG.md)）。
-
-中文微信群：请查看 [GitHub Discussions 帖子](https://github.com/agegr/pi-web/discussions/271)。
 
 ## 快速开始
 

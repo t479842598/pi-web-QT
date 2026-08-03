@@ -690,12 +690,22 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     );
                   }
                   if (!hasStreamingAssistant && finalAssistantIdx >= 0) {
+                    // The finalAssistant's process blocks are already inside the
+                    // live ProcessGroup above; render only its answer portion so
+                    // tool calls do not appear twice.
+                    const finalAssistant = messages[finalAssistantIdx] as AssistantMessage;
+                    const liveFinalSplit = splitFinalAssistantBlocks(finalAssistant);
+                    const liveAnswerMessage = liveFinalSplit.answerBlocks.length > 0 || getAssistantErrorMessage(finalAssistant)
+                      ? withAssistantBlocks(finalAssistant, liveFinalSplit.answerBlocks)
+                      : null;
                     for (let renderIdx = userIdx + 1; renderIdx < endIdx; renderIdx++) {
                       if (renderIdx === finalAssistantIdx) continue;
                       if (liveProcessIndices.includes(renderIdx)) continue;
                       rendered.push(renderMessage(renderIdx));
                     }
-                    rendered.push(renderMessage(finalAssistantIdx));
+                    if (liveAnswerMessage) {
+                      rendered.push(renderMessage(finalAssistantIdx, { messageOverride: liveAnswerMessage }));
+                    }
                   } else {
                     for (let renderIdx = userIdx + 1; renderIdx < endIdx; renderIdx++) {
                       if (liveProcessIndices.includes(renderIdx)) continue;
