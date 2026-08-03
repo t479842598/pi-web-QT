@@ -19,6 +19,14 @@
 - Model, OAuth/API-key, skill, plugin, theme, language, and Git worktree management in the browser.
 - Mobile layout keeps the selected model and send action visible, while long project and repository labels truncate instead of causing horizontal scrolling.
 
+## Latest changes (2026-08-03)
+
+- The repository now uses the `pi-web-desktop` web baseline only. Electron, desktop packaging, the PWA Service Worker, and tag-triggered desktop releases were removed.
+- **Choose folder** opens a browsable directory picker instead of asking for a manually typed path.
+- On mobile, project and Git worktree labels are smaller and truncate safely; the model selector and send action remain visible.
+- Expanding a provider in the model selector keeps the dropdown frame fixed and scrolls only the result list.
+- Production serving no longer relies on Turbopack development chunks, and quoteable Markdown table rows render with valid table DOM.
+
 ## Requirements
 
 - Node.js **22.19.0 or newer**

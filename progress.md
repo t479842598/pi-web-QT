@@ -582,3 +582,25 @@
 - `public/catppuccin-icons/**`：新增 1313 个上游 Catppuccin 图标静态资源，供文件图标展示使用。
 
 回滚方式：提交后执行 `git revert HEAD`；如需恢复同步前未提交工作树，使用 `/Volumes/1T 原装/项目研发/.pi-web-sync-backups/20260803-155900/pi-web-QT/working-tree.before.tgz` 与同目录的 staged/unstaged patch，旧 `.next` 已保留在 `/tmp/pi-web-qt-next-before-source-sync-20260803-161500`。
+
+## 2026-08-03 - Task: 补齐 README 更新日志并通过 7897 推送 QT 仓库
+
+### What was done
+- 在根目录 `README.md` 补充当前网页基线、目录选择器、移动端名称收紧、常显模型/发送按钮、稳定模型下拉和生产渲染修复的更新日志。
+- 同步 `README.en.md` 的最新更新摘要，并将 `CHANGELOG.md` 的 Unreleased 内容改为当前实现对应的完整变更项。
+- 使用本机 `127.0.0.1:7897` 代理将上一轮 Web 基线提交推送至 `t479842598/pi-web-QT` 的 `main` 分支。
+
+### Testing
+- `HTTPS_PROXY=http://127.0.0.1:7897 curl -IL https://github.com`：返回 200，确认代理可访问 GitHub。
+- `HTTPS_PROXY/HTTP_PROXY/ALL_PROXY=http://127.0.0.1:7897 git push origin main`：`7c1c3e1..658b96d main -> main`。
+- `git diff --check`：通过。
+- README/CHANGELOG 标题与“模型下拉稳定性”条目检索：通过。
+
+### Notes
+改动文件清单：
+- `README.md`：增加面向使用者的完整最新更新日志，并修正当前仅支持中文/English 的语言说明。
+- `README.en.md`：增加英文最新更新摘要。
+- `CHANGELOG.md`：将 Unreleased 改为与现有 Web-only、目录选择、移动端与渲染修复一致的变更记录。
+- `progress.md`：追加本轮文档、推送和验证记录。
+
+回滚方式：文档提交后执行 `git revert HEAD`；已推送的上一轮 Web 基线提交可使用 `git revert 658b96d` 回退。

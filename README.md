@@ -32,8 +32,16 @@
 | 模型与认证 | 在网页中管理模型、OAuth/API Key、连通性测试和默认模型。 |
 | 技能与插件 | 查询、安装、启停 Skills 与 package 插件。 |
 | Git Worktree | 在同一项目下创建、切换和移除 Worktree。 |
-| 主题与语言 | 支持 Pi TUI 主题、亮暗模式及中文/English/日本語/Русский。 |
+| 主题与语言 | 支持 Pi TUI 主题、亮暗模式及中文/English。 |
 | 移动端 | 适配 Safari/Chrome 窄屏布局；模型选择和发送操作保持可见。 |
+
+## 最新更新（2026-08-03）
+
+- **Web-only 基线**：界面和运行代码已统一为 `pi-web-desktop` 的网页基线；Electron 主进程、桌面端打包、PWA Service Worker 与 tag 驱动的桌面 Release 工作流已移除。
+- **目录选择器**：侧栏“选择文件夹”改为可逐级浏览的目录弹窗，选择“此文件夹”后直接加载项目，不再要求手动输入路径。
+- **移动端可用性**：当前模型和发送按钮始终显示；项目名、Git 仓库/Worktree 名在窄屏缩小并省略，避免横向滚动。
+- **模型下拉稳定性**：展开或收起供应商二级模型列表时，面板外框保持固定高度，只有结果列表滚动，不再上下跳动。
+- **运行与渲染修复**：生产服务不再依赖 Turbopack 开发 chunk；Markdown 表格行引用保持合法 DOM 结构，避免 hydration 报错。
 
 ## 快速开始
 
@@ -57,13 +65,6 @@ npm run dev
 
 ```bash
 npm run dev:lan
-```
-
-### 使用 npm 命令
-
-```bash
-npm install -g @agegr/pi-web
-pi-web
 ```
 
 ## 生产部署

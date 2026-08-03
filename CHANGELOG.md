@@ -1,10 +1,21 @@
 # Changelog
 
-## Unreleased
+## Unreleased — 2026-08-03
 
-### Web-only
-- 移除 Electron 主进程、桌面端打包依赖、安装向导和 tag 驱动的三平台 Release 工作流。
-- 保留并完善浏览器部署路径；部署示例见 [`docs/deployment.md`](./docs/deployment.md)。
+### Web-only 运行基线
+- 统一为 `pi-web-desktop` 的网页界面与运行基线；移除 Electron 主进程、桌面端打包依赖、安装向导、PWA Service Worker 和 tag 驱动的三平台 Release 工作流。
+- 保留浏览器部署路径；生产部署示例见 [`docs/deployment.md`](./docs/deployment.md)。
+
+### 工作区与移动端
+- **目录选择器** — 侧栏“选择文件夹”改为逐级浏览目录并确认当前目录，不再使用路径输入框。
+- **窄屏名称** — 项目、Git 仓库与 Worktree 名称缩小并省略，避免横向滚动。
+- **常显操作** — 移动端当前模型与发送按钮始终可见；思考、工具、压缩和提示音仍收纳在“更多控件”中。
+- **稳定模型菜单** — 展开或收起供应商二级模型列表时，模型下拉面板保持固定高度，仅结果区滚动。
+
+### 可靠性与渲染
+- **生产资源** — 生产服务不再依赖 Turbopack 开发 chunk，避免旧开发资源与新页面混用。
+- **Markdown 表格引用** — 表格行引用提示改为合法表格 DOM，避免 hydration 报错。
+- **Route Handler 类型校验** — 新会话目录授权辅助函数移至 `lib/`，避免 Next.js Route Handler 因额外导出而无法通过类型校验。
 
 ## 0.9.1 — 2026-08-03
 
