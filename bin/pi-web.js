@@ -19,6 +19,10 @@ if (fs.existsSync(envFilePath)) {
     if (eq <= 0) continue;
     const key = trimmed.slice(0, eq).trim();
     let value = trimmed.slice(eq + 1).trim();
+    // Strip an inline ` #comment` tail first (dotenv convention) so a quoted
+    // value followed by a comment still gets its quotes stripped below.
+    const hash = value.indexOf(" #");
+    if (hash >= 0) value = value.slice(0, hash).trim();
     // Strip surrounding single/double quotes.
     if (value.length >= 2 && ((value[0] === "'" && value.endsWith("'")) || (value[0] === '"' && value.endsWith('"')))) {
       value = value.slice(1, -1);

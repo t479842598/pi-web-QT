@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
@@ -95,10 +95,20 @@ function createMainWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
     },
-    titleBarStyle: "hiddenInset",
+    frame: false,
     show: false,
   });
+
+  // Notify the renderer (AppTitleBar) when maximized state changes.
+  const sendMaximizedState = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("window:maximized-changed", mainWindow.isMaximized());
+    }
+  };
+  mainWindow.on("maximize", sendMaximizedState);
+  mainWindow.on("unmaximize", sendMaximizedState);
 
   mainWindow.loadURL(`http://127.0.0.1:${serverPort}`);
   mainWindow.once("ready-to-show", () => mainWindow.show());
@@ -151,6 +161,46 @@ ipcMain.handle("check-port", async (_event, port) => {
     });
     srv.on("error", () => resolve({ free: false }));
   });
+});
+
+// ── Frameless window controls (used by AppTitleBar) ────────────────────────
+ipcMain.on("window:minimize", (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize();
+});
+
+ipcMain.on("window:toggle-maximize", (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return;
+  if (window.isMaximized()) window.unmaximize();
+  else window.maximize();
+});
+
+ipcMain.on("window:close", (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.close();
+});
+
+ipcMain.handle("window:is-maximized", (event) => {
+  return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false;
+});
+
+// Native OS directory picker (used by the workspace selector).
+ipcMain.handle("dialog:select-directory", async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const result = await dialog.showOpenDialog(window, {
+    properties: ["openDirectory", "createDirectory"],
+  });
+  return result.canceled ? null : result.filePaths[0] ?? null;
+});
+
+// Open the PI theme folder / docs in the OS shell.
+ipcMain.handle("shell:open-theme-folder", async () => {
+  const themesDir = path.join(require("os").homedir(), ".pi", "agent", "themes");
+  fs.mkdirSync(themesDir, { recursive: true });
+  shell.openPath(themesDir);
+});
+
+ipcMain.handle("shell:open-theme-docs", () => {
+  shell.openExternal("https://pi.dev/docs/latest/themes");
 });
 
 app.whenReady().then(async () => {

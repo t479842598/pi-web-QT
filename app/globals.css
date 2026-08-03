@@ -1839,3 +1839,18 @@ span.linenumber {
 .session-stats-copy.is-copied:hover {
   color: var(--accent);
 }
+
+/* ============ AppTitleBar (frameless Electron title bar) ============
+   Ported from pi-web-desktop v0.7.16. Empty space is a drag handle;
+   interactive elements opt out individually. In a plain browser tab the
+   -webkit-app-region rules are no-ops (only honored inside Electron). */
+.app-title-bar {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+.app-title-drag {
+  -webkit-app-region: drag;
+  min-width: 0;
+}

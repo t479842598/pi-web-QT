@@ -7,14 +7,7 @@ import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { UsageStats } from "./UsageStats";
 
-declare global {
-  interface Window {
-    piDesktop?: {
-      selectDirectory: () => Promise<string | null>;
-    };
-  }
-}
-
+// window.piDesktop types are declared centrally in global.d.ts.
 function ToolbarIconButton({
   onClick,
   title,
