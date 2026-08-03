@@ -696,6 +696,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       touchStartRef.current = null;
       return;
     }
+    // Touches inside an open dropdown (model list, etc.) must not start the
+    // swipe-to-collapse gesture — scrolling the list would collapse the input.
+    if (e.target instanceof Element && e.target.closest("[data-swipe-ignore]")) {
+      touchStartRef.current = null;
+      return;
+    }
     const t = e.touches[0];
     touchStartRef.current = { y: t.clientY, x: t.clientX, active: true };
   }, [isMobile]);
@@ -2712,19 +2718,31 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   </button>
                   {modelDropdownOpen && modelDropdownRect && (() => {
                     const vh = viewportH > 0 ? viewportH : (window.visualViewport?.height ?? window.innerHeight);
-                    // Anchor the panel to the visible viewport bottom. `rect.top`
-                    // is captured at click time; with the keyboard open the button
-                    // may have moved, so clamp so the panel never goes off-screen.
+                    const vv = window.visualViewport;
+                    // When the mobile keyboard is open, position:fixed anchors to
+                    // the layout viewport whose bottom is hidden behind the
+                    // keyboard. Offset by visualViewport.offsetTop (the keyboard
+                    // height) so the panel always stays visible above it.
+                    const keyboardOffset = isMobile && vv ? vv.offsetTop : 0;
                     const topInViewport = Math.min(modelDropdownRect.top, vh - 48);
-                    const bottom = Math.max(6, vh - topInViewport + 6);
-                    const maxH = Math.max(120, Math.min(topInViewport - 8, vh * 0.6));
+                    const bottom = Math.max(6, vh - topInViewport + 6 + keyboardOffset);
+                    const maxH = Math.max(120, Math.min(vh - keyboardOffset - 16, vh * 0.7));
                     // On mobile, pin to a small left margin and cap width to the
                     // viewport so long model names never push the panel off-screen.
                     const panelPos: React.CSSProperties = isMobile
                       ? { left: 8, right: 8, maxWidth: "calc(100vw - 16px)" }
                       : { left: modelDropdownRect.left, width: "max-content", minWidth: modelDropdownRect.width };
                     return (
-                      <div ref={modelDropdownPanelRef} style={{
+                      <div
+                        ref={modelDropdownPanelRef}
+                        data-swipe-ignore
+                        // Scrolling the model list / typing in the filter must not
+                        // bubble to the input's swipe-to-collapse gesture handler.
+                        onTouchStart={(e) => e.stopPropagation()}
+                        onTouchMove={(e) => e.stopPropagation()}
+                        onTouchEnd={(e) => e.stopPropagation()}
+                        onTouchCancel={(e) => e.stopPropagation()}
+                        style={{
                       position: "fixed",
                       bottom,
                       ...panelPos,
