@@ -2,6 +2,33 @@
 "use strict";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
+const fs = require("fs");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const path = require("path");
+
+// Load a project-local .env file (if present) as *defaults* — explicit
+// environment variables always win. The .env file is gitignored so secrets
+// like PI_WEB_PASSWORD never land in the repository.
+const envFilePath = path.join(__dirname, "..", ".env");
+if (fs.existsSync(envFilePath)) {
+  const lines = fs.readFileSync(envFilePath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    // Strip surrounding single/double quotes.
+    if (value.length >= 2 && ((value[0] === "'" && value.endsWith("'")) || (value[0] === '"' && value.endsWith('"')))) {
+      value = value.slice(1, -1);
+    }
+    // Only apply when the user has not already exported the variable.
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { getUnsupportedNodeVersionMessage, isNodeVersionSupported } = require("./node-version");
 
 if (!isNodeVersionSupported(process.versions.node)) {
@@ -11,10 +38,6 @@ if (!isNodeVersionSupported(process.versions.node)) {
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { spawn } = require("child_process");
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const path = require("path");
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const fs = require("fs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { parseLaunchOptions } = require("./pi-web-options");
 
