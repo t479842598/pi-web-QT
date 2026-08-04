@@ -911,3 +911,32 @@ npm install -g @qt4798/pi-web@0.9.4
 - `progress.md`：本记录。
 
 回滚方式：npm unpublish @qt4798/pi-web@0.9.5（72 小时内）；git revert 877f026 并删除远端 tag：`git push origin :refs/tags/v0.9.5`。
+
+## 2026-08-04 - Task: 本地仓库改为测试环境（随机端口），命令行运行指向 npm 全局包
+
+### What was done
+按用户指示调整运行环境划分：
+1. 本地仓库（pi-web-QT）不再作为命令行运行环境，仅作测试环境：`dev` / `dev:lan` / `start` / `start:lan` 全部改用随机端口（`-p 0`），启动日志打印实际地址，避免与命令行 pi-web（固定 30141）冲突。
+2. 命令行运行环境改为 npm 全局安装的 `@qt4798/pi-web`（0.9.5）：fnm 全局 bin 与 multishell 软链均已指向该包（`@agegr/pi-web` 已卸载）；唯一遗留是 `~/.local/bin/pi-web`（指向本地仓库的遮蔽脚本，PATH 优先），需用户手动移除/改名。
+3. 文档同步：README.md / README.en.md 开发段改为随机端口说明并注明"本地仓库仅测试"；AGENTS.md Quick Start 注释同步。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm test`：279/279 通过。
+- `git diff --check`：通过。
+- 随机端口实测：`npm run dev` 启动于 `http://127.0.0.1:64312`（非 30141），30141 端口空闲；测试进程已停止。
+
+### Notes
+改动文件清单：
+- `package.json`：dev/dev:lan/start/start:lan 端口 30141 → 0（随机）。
+- `README.md` / `README.en.md`：开发段随机端口说明 + 测试环境定位。
+- `AGENTS.md`：Quick Start 注释更新。
+- `progress.md`：本记录。
+
+回滚方式：`git checkout -- package.json README.md README.en.md AGENTS.md`。
+
+### 待用户手动执行（沙箱无法写入 ~/.local/bin）
+```bash
+mv ~/.local/bin/pi-web ~/.local/bin/pi-web.local-backup
+```
+移走后 `pi-web` 命令将解析到 npm 全局包（fnm multishell bin 软链 → @qt4798/pi-web@0.9.5）。验证：`command -v pi-web` 应显示 fnm multishell 路径；`pi-web` 启动于 30141。

@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-npm run dev   # port 30141
+npm run dev   # random port (see startup log; local repo is test-only)
 ```
 
 Typecheck: `node_modules/.bin/tsc --noEmit`  

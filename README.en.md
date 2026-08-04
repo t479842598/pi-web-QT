@@ -46,7 +46,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:30141`. The development server listens on loopback by default; use `npm run dev:lan` only for trusted LAN testing.
+`npm run dev` uses a **random port** (`-p 0`); the startup log prints the actual address, e.g. `http://127.0.0.1:<random port>`. The local repo build is for testing only — for daily command-line use, run the globally installed `@qt4798/pi-web` via the `pi-web` command (fixed `http://127.0.0.1:30141`). The development server listens on loopback by default; use `npm run dev:lan` only for trusted LAN testing.
 
 ## Production deployment
 
