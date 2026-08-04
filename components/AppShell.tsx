@@ -424,9 +424,12 @@ export function AppShell() {
     );
   }, [selectedSession]);
 
-  // Show chat area if a session is selected, or if we have a cwd to start a new session in
+  // Show chat area if a session is selected, or if we have a cwd to start a new session in.
+  // While a ?cwd= URL parameter is still validating (or failed), keep the chat area hidden so
+  // the validating/error panels render instead of a default workspace.
+  const initialCwdPending = initialCwdStatus === "validating" || initialCwdStatus === "error";
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
-  const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
+  const showChat = !initialCwdPending && (selectedSession !== null || effectiveNewSessionCwd !== null);
   const projectTrustCwd = selectedSession?.cwd ?? effectiveNewSessionCwd;
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;

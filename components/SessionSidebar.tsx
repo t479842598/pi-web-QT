@@ -1790,7 +1790,8 @@ function SessionItem({
   const performDelete = useCallback(async () => {
     setDeleting(true);
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       onDeleted?.(session.id);
     } catch {
       setDeleting(false);
