@@ -736,3 +736,24 @@
 
 回滚方式：`git revert <commit>`；服务重启由用户命令行执行（本项目 `pi-web` 命令自动切到项目目录、加载 .env）。
 
+## 2026-08-04 - Task: review 修复（?cwd= 错误面板 + 删除错误处理）
+
+### What was done
+- fresh review（提交 6454dd9）verdict=warn，3 个 medium：① AppShell `?cwd=` 校验失败时错误面板不渲染（sidebar 的 activeCwd 驱动 showChat 导致 error 分支被跳过）；② SessionSidebar Shift+Delete 忽略 HTTP 错误（fetch 不检查 res.ok 时 UI 卡在 deleting）；③ model-catalog 域名后缀匹配理论误判（经确认实际不可触发，降级不修）。
+- 修复 ①：AppShell 加 `initialCwdPending`（validating/error 时抑制 showChat），`?cwd=` 校验中/失败时显示 validating/error 面板。
+- 修复 ②：SessionSidebar performDelete 检查 `res.ok`，非 2xx 抛错进入 catch 复位 deleting。
+- 提交 `75f4c55` 经本地代理 7897 推送到 GitHub。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm run lint`：通过。
+- 测试 12/12 通过（i18n catalog 3 + model-catalog 6 + model-discovery 3）。
+- `?cwd=` 错误面板行为需浏览器实操确认（访问无效路径应显示"无法打开此工作区"）。
+
+### Notes
+改动文件清单：
+- `components/AppShell.tsx`：`initialCwdPending` 抑制 showChat，修复 `?cwd=` 错误面板不渲染。
+- `components/SessionSidebar.tsx`：performDelete 检查 res.ok。
+
+回滚方式：`git revert 75f4c55`。
+
