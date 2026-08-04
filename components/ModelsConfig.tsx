@@ -12,6 +12,8 @@ import {
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "@/components/ProviderIcon";
+import { TitleModelSetting } from "@/components/TitleModelSetting";
+import { BuiltinModelsDetail } from "@/components/BuiltinModelsDetail";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
 import type { DiscoveredModel } from "@/lib/model-discovery";
 
@@ -467,7 +469,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
 
 // ── ThinkingLevelMap editor ───────────────────────────────────────────────────
 
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 type ThinkingLevel = typeof THINKING_LEVELS[number];
 
 const LEVEL_COLORS: Record<ThinkingLevel, string> = {
@@ -480,7 +482,7 @@ const LEVEL_COLORS: Record<ThinkingLevel, string> = {
   max:     "#ef4444",
 };
 
-function ThinkingLevelMapEditor({
+export function ThinkingLevelMapEditor({
   value,
   onChange,
 }: {
@@ -1266,6 +1268,8 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
           </>
         )}
       </div>
+
+      <BuiltinModelsDetail providerId={provider.id} />
     </div>
   );
 }
@@ -1402,6 +1406,8 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
           {removing ? t("desktop.modelsRemoving") : t("desktop.modelsDisconnect")}
         </button>
       )}
+
+      <BuiltinModelsDetail providerId={provider.id} />
     </div>
   );
 }
@@ -1773,6 +1779,9 @@ export function ModelsConfig({
             <button onClick={onCloseAction} aria-label={t("desktop.modelsClose")} title={t("desktop.modelsClose")} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
           </div>
         )}
+
+        {/* Global title model setting */}
+        <TitleModelSetting />
 
         {/* Body */}
         <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>

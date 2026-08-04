@@ -30,6 +30,7 @@
 | 会话管理 | 按项目查看会话，支持会话内分支、Fork、重命名、删除、AI 自动生成标题与 HTML 导出。 |
 | 项目与文件 | 通过目录选择器加载项目，浏览文件、Diff、图片、音频、PDF、DOCX。 |
 | 模型与认证 | 在网页中管理模型、OAuth/API Key、连通性测试和默认模型；支持从供应商自动获取模型列表与 models.dev 定价预设一键填入。 |
+| 备份恢复 | 一键导出/导入核心配置、技能、插件、MCP 服务器与会话（可选含密钥），跨平台自动适配路径与命令。 |
 | 技能与插件 | 查询、安装、启停 Skills 与 package 插件。 |
 | Git Worktree | 在同一项目下创建、切换和移除 Worktree。 |
 | 主题与语言 | 支持 Pi TUI 主题、亮暗模式及中文/English。 |
@@ -37,11 +38,27 @@
 
 ## 最新更新（2026-08-04）
 
+- **跨平台备份恢复**：设置弹窗新增「备份」标签页，一键导出/导入核心配置、技能、插件、MCP 与会话；导入按平台自动适配路径与命令，支持类别勾选与 MCP 跳过。
+- **自动生成会话标题**：会话列表新增“生成标题”按钮，基于会话内容调用模型命名；可全局指定标题生成模型。
+- **内置模型覆盖**：模型配置可查看供应商内置模型明细并叠加 models.json 自定义覆盖项。
+- **安全加固**：auto-name / settings / models-config 等 API 补齐请求鉴权；备份导入增加解压炸弹防护（单条目/总量双重上限 + 实际字节校验）、脚本白名单、路径穿越校验与 npm 插件 opt-in 重装。
 - **供应商获取模型**：模型配置中可直接从供应商的 Base URL 拉取模型列表（支持 OpenAI / Anthropic / Google 等协议），筛选、多选后一键添加，无需手写模型 ID。
 - **models.dev 定价预设**：填写模型 ID 后一键从 models.dev 拉取名称、上下文窗口、价格等字段填入，支持撤销；价格来源与可信度一目了然。
 - **对话滚动跟随**：修复 agent 运行时消息列表跳到底部空白的问题；流式输出期间停留在列表底部则自动跟随，滚到上方查看历史不被打断，且最后一条消息与输入框之间保留间距。
 - **快捷操作**：文件标签页支持中间键关闭；会话删除支持 Shift+点击跳过确认；Markdown 中的本地图片可直接预览。
 - **URL 直达目录**：通过 `?cwd=<路径>` 参数打开网页时直接校验并进入指定目录的新会话。
+
+## 安装提示（npm 11）
+
+使用 npm ≥ 11 安装本包时可能出现两类提示，均为**提示性警告，不影响安装与运行**：
+
+- `ERESOLVE overriding peer dependency`：上游 `@lobehub/ui` 依赖的 `@emoji-mart/react@1.1.1` 的 peer 声明仅到 React 18，而本包使用 React 19。npm 会自动 override 并继续安装（实际兼容）。如需彻底消除，可在你的项目 `package.json` 添加：
+
+  ```json
+  "overrides": { "@emoji-mart/react": { "react": "$react" } }
+  ```
+
+- `allow-scripts`：npm 11 新增的安装脚本审批提示（sharp / protobufjs / @google/genai 等）。本项目已在包内声明 `allowScripts`，若你的 npm 仍提示，可执行 `npm approve-scripts --all` 审批，或在安装命令加 `--allow-scripts=sharp,protobufjs,@google/genai`。
 
 ## 最新更新（2026-08-03）
 

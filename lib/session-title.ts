@@ -5,6 +5,7 @@ import {
   type AgentTool,
 } from "@earendil-works/pi-agent-core";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 const TITLE_TIMEOUT_MS = 90_000;
 const MAX_TITLE_LENGTH = 80;
@@ -208,7 +209,10 @@ export function sanitizeTitleMessages(messages: AgentMessage[]): AgentMessage[] 
   return sanitized;
 }
 
-export async function generateSessionTitle(source: AgentSession): Promise<GeneratedSessionTitle> {
+export async function generateSessionTitle(
+  source: AgentSession,
+  modelOverride?: Model<Api>,
+): Promise<GeneratedSessionTitle> {
   const sourceAgent = source.agent;
   await sourceAgent.waitForIdle();
 
@@ -219,6 +223,9 @@ export async function generateSessionTitle(source: AgentSession): Promise<Genera
   }
 
   const options = buildSessionTitleAgentOptions(sourceAgent);
+  if (modelOverride) {
+    options.initialState!.model = modelOverride;
+  }
   options.initialState!.messages = sanitizedMessages;
   const continuesFromTrailingUser = sanitizedMessages.at(-1)?.role === "user";
   if (continuesFromTrailingUser) {

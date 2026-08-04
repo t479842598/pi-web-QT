@@ -800,3 +800,84 @@
 
 回滚方式：`git checkout -- hooks/useAgentSession.ts`。
 
+
+## 2026-08-04 - Task: 重新部署（含 backup / settings-title-model 新功能）到命令行运行目录
+
+### What was done
+重新生产构建并部署到命令行运行目录：`~/.local/bin/pi-web`（包装脚本固定 cd 到本仓库执行 `bin/pi-web.js`），`.next` 已更新为最新构建（BUILD_ID=Bb7tZBeyMnHB3a_DWDT6M，版本 0.9.4）。新增路由 `/api/backup/export`、`/api/backup/import`、`/api/settings/title-model` 已注册。30141 端口空闲，`.env`（PI_WEB_PASSWORD / PI_WEB_ALLOWED_HOSTS）就绪，用户可自行 `pi-web` 命令启动。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm test`：264/264 通过（含 backup 与 settings-title-model 新增测试）。
+- 构建产物验证：`.next/BUILD_ID` 存在，backup/settings 路由 server 产物存在。
+
+### Notes
+改动文件清单：
+- `.next/`：重新构建的生产产物（gitignored）。
+
+回滚方式：重新 `npm run build` 或 `git checkout -- .next`（产物由构建生成，源码未改动）。
+
+### 待用户执行（沙箱无法写入 fnm 全局目录）
+全局 npm 包仍是 `@agegr/pi-web@0.8.6`（官方上游包），需替换为用户自己的 `@qt4798/pi-web@0.9.4`（npm 上已发布）：
+```bash
+npm uninstall -g @agegr/pi-web
+npm install -g @qt4798/pi-web@0.9.4
+```
+若 fnm 全局目录权限不足，前缀 `sudo`。替换后命令行 `pi-web` 仍优先解析 `~/.local/bin/pi-web`（指向本仓库源码），全局包替换用于消除旧版残留、使 `npx pi-web` 等场景也使用用户自己的版本。
+
+## 2026-08-04 - Task: 安全修复后重新部署（含 builtin-model-overrides 新功能）
+
+### What was done
+security_review 发现的 HIGH（auto-name 路由无鉴权）与 3 个 MEDIUM（zip-bomb 解压放大、备份 token 无 TTL、不可信备份脚本落盘执行）由用户修复后，重新生产构建并部署到命令行运行目录（`~/.local/bin/pi-web` → 本仓库 `bin/pi-web.js`）。新构建 BUILD_ID=B6mrFjMIUEKt7afNu_rjS，版本 0.9.4。另新增 `/api/models-config/builtin` 路由（builtin-model-overrides 功能），经用户确认后补上 `isApiRequestAllowed` 鉴权（与已修复的 title-model 一致）后纳入构建。新构建含 `/api/backup/export`、`/api/backup/import`、`/api/settings/title-model`、`/api/models-config/builtin` 全部新路由。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm test`：276/276 通过（含 backup、settings-title-model、builtin-model-overrides 测试）。
+- 产物验证：`.next/BUILD_ID` 存在；auto-name/settings/title-model/models-config/builtin 四个路由产物均含 `Access denied`（鉴权 403 分支已打包）。
+- 配置存储位置确认：卸载全局 `@agegr/pi-web` 不影响配置——pi-web 配置/数据全部在 `~/.pi/agent/`（auth.json、mcp.json、models.json、settings.json、sessions/ 等），由 SDK `getAgentDir()` 解析，与全局 npm 包目录独立；`.env` 在项目目录，同样独立。
+
+### Notes
+改动文件清单：
+- `app/api/models-config/builtin/route.ts`：补 `isApiRequestAllowed` 鉴权（本轮唯一源码改动）。
+- `.next/`：重新构建的生产产物（gitignored）。
+
+回滚方式：`git checkout -- app/api/models-config/builtin/route.ts` 撤销鉴权改动；重新 `npm run build` 重建产物。
+
+### 待用户执行（沙箱无法写入 fnm 全局目录）
+全局 npm 包仍是 `@agegr/pi-web@0.8.6`，可安全替换为用户自己的 `@qt4798/pi-web@0.9.4`（npm 上已发布）：
+```bash
+npm uninstall -g @agegr/pi-web
+npm install -g @qt4798/pi-web@0.9.4
+```
+卸载 `@agegr/pi-web` **不会**删除任何配置：`~/.pi/agent/` 下所有配置（模型、会话、auth、mcp、settings）与项目 `.env` 均在包目录之外。若 fnm 全局目录权限不足，命令前缀 `sudo`。
+
+## 2026-08-04 - Task: 补修 security_review 复审 warn 的 3 个残余问题并重新部署
+
+### What was done
+security_review 复审（warn）发现的 3 个残余问题全部修复后重新构建部署（BUILD_ID=OXKzHOwbmocashffYQJBT，版本 0.9.4）：
+1. `app/api/models-config/route.ts` GET 补 `isApiRequestAllowed`（原 GET 无鉴权且返回含 `providers[].apiKey` 的 models.json，凭据泄露）。
+2. `lib/backup.ts` parseBackupZip 改双累计：`declaredTotal` 按 header 声明预检（写盘前快速失败）+ `actualTotal` 按 `statSync` 实际字节累计兜底（防伪造声明绕过 1GiB 限制）。
+3. `app/api/backup/import/route.ts` 缓冲 Map 加 `MAX_BUFFERED_BACKUPS=16` 硬上限，超限先清过期再逐出最旧。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm test`：277/277 通过（新增 aggregate cap 测试）。
+- 产物验证：BUILD_ID 存在；models-config / models-config/builtin / auto-name / settings/title-model 四个路由产物均含 `Access denied`。
+- security_review 复审 verdict=pass：3 个残余 finding 全部关闭，无剩余安全问题。
+
+### Notes
+改动文件清单：
+- `app/api/models-config/route.ts`：GET 加鉴权。
+- `lib/backup.ts`：解压总量声明预检 + 实际字节双累计。
+- `lib/backup.test.mjs`：新增多条目声明累计超限测试。
+- `app/api/backup/import/route.ts`：缓冲 Map 硬上限 16 + 最旧逐出。
+- `.next/`：重新构建的生产产物（gitignored）。
+
+回滚方式：`git checkout -- app/api/models-config/route.ts lib/backup.ts lib/backup.test.mjs app/api/backup/import/route.ts` 后重新 `npm run build`。
+
+### 待用户执行（沙箱无法写入 fnm 全局目录）
+全局 npm 包替换命令不变（卸载 `@agegr/pi-web` 不影响任何配置，见上一条记录）：
+```bash
+npm uninstall -g @agegr/pi-web
+npm install -g @qt4798/pi-web@0.9.4
+```

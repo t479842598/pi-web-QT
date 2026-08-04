@@ -4,6 +4,7 @@ import { join, dirname } from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "@/lib/atomic-file";
 import { invalidateModelsCache } from "@/lib/models-cache";
+import { isApiRequestAllowed } from "@/lib/request-security";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +29,17 @@ function writeModelsJson(data: Record<string, unknown>): void {
   writePrivateFileAtomicSync(path, JSON.stringify(data, null, 2));
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Access denied" }, { status: 403 });
+  }
   return NextResponse.json(readModelsJson());
 }
 
 export async function PUT(req: Request) {
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Access denied" }, { status: 403 });
+  }
   try {
     const body = await req.json() as Record<string, unknown>;
     writeModelsJson(body);

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ChatCenteredText, Cpu, Monitor, Plug, Stack, X } from "@phosphor-icons/react";
+import { ChatCenteredText, Cpu, Database, Monitor, Plug, Stack, X } from "@phosphor-icons/react";
+import { BackupConfig } from "./BackupConfig";
 import { ChatConfig } from "./ChatConfig";
 import { DisplayConfig } from "./DisplayConfig";
 import { ModelsConfig } from "./ModelsConfig";
@@ -10,7 +11,7 @@ import { SkillsConfig } from "./SkillsConfig";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 
-export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins";
+export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins" | "backup";
 
 interface SettingsModalProps {
   initialTab?: SettingsTab;
@@ -27,6 +28,7 @@ const tabs: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
   { id: "models", labelKey: "desktop.models", Icon: Cpu },
   { id: "skills", labelKey: "desktop.skills", Icon: Stack },
   { id: "plugins", labelKey: "desktop.plugins", Icon: Plug },
+  { id: "backup", labelKey: "desktop.backup", Icon: Database },
 ];
 
 export function SettingsModal({
@@ -42,7 +44,6 @@ export function SettingsModal({
   const [activeTab, setActiveTab] = useState<SettingsTab>(
     initialTab === "skills" || initialTab === "plugins" ? (cwd ? initialTab : "display") : initialTab,
   );
-
   return (
     <div
       style={{
@@ -193,6 +194,9 @@ export function SettingsModal({
               <PluginsConfig cwd={cwd} sessionId={sessionId} embedded onReloadedAction={onSessionReloadedAction} />
             </div>
           )}
+          <div style={{ display: activeTab === "backup" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
+            <BackupConfig cwd={cwd} />
+          </div>
         </div>
       </section>
     </div>

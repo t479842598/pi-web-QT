@@ -19,8 +19,11 @@
 - Model, OAuth/API-key, skill, plugin, theme, language, and Git worktree management in the browser.
 - Mobile layout keeps the selected model and send action visible, while long project and repository labels truncate instead of causing horizontal scrolling.
 
-## Latest changes (2026-08-03)
+## Latest changes (2026-08-04)
 
+- **Backup & restore** — a new Backup tab in Settings exports/imports core config, skills, plugins, MCP servers, and sessions (optionally including API keys) as a pi-backup zip; imports remap paths and adapt MCP commands per platform, with per-category selection and per-server skip.
+- **Auto session titles** — hover actions on a session now include a "Generate title" button that names the session from its content via a model; the title model can be set globally.
+- **Security hardening** — auth checks were added to the auto-name, settings/title-model, models-config, and builtin-model routes; backup import gained decompression-bomb limits (per-entry and total, verified against actual bytes), script shebang allow-lists, local-package name validation, and opt-in npm reinstall.
 - The repository now uses the `pi-web-desktop` web baseline only. Electron, desktop packaging, the PWA Service Worker, and tag-triggered desktop releases were removed.
 - **Choose folder** opens a browsable directory picker instead of asking for a manually typed path.
 - On mobile, project and Git worktree labels are smaller and truncate safely; the model selector and send action remain visible.
