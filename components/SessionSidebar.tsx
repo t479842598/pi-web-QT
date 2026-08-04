@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, CaretDown, CaretRight, Check, FolderOpen, GitBranch, Lightning, MagnifyingGlass, PencilSimple, Plus, Trash, UploadSimple } from "@phosphor-icons/react";
+import { ArrowClockwise, CaretDown, CaretRight, Check, FolderOpen, GitBranch, Lightning, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash, UploadSimple } from "@phosphor-icons/react";
 import type { SessionInfo } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
@@ -1729,6 +1729,8 @@ function SessionItem({
   const [renameCaretLeft, setRenameCaretLeft] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [autoNaming, setAutoNaming] = useState(false);
+  const [autoNameError, setAutoNameError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const renameMeasureRef = useRef<HTMLSpanElement>(null);
 
@@ -1763,6 +1765,27 @@ function SessionItem({
       // ignore
     }
   }, [renameValue, session.id, session.name, onRenamed]);
+
+  const handleAutoName = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (autoNaming || session.messageCount === 0) return;
+    setAutoNaming(true);
+    setAutoNameError(null);
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/auto-name`, {
+        method: "POST",
+      });
+      const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string };
+      if (!response.ok || !body.title) {
+        throw new Error(body.error || `HTTP ${response.status}`);
+      }
+      onRenamed?.();
+    } catch (error) {
+      setAutoNameError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAutoNaming(false);
+    }
+  }, [autoNaming, session.id, session.messageCount, onRenamed]);
 
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1976,6 +1999,49 @@ function SessionItem({
               {/* Action buttons — shown on hover */}
               {hovered && !renaming && (
                 <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+                <button
+                  onClick={handleAutoName}
+                  disabled={autoNaming || session.messageCount === 0}
+                  title={
+                    autoNameError ??
+                    (session.messageCount === 0
+                      ? t("desktop.titleNeedsMessages")
+                      : autoNaming
+                        ? t("desktop.generatingTitle")
+                        : t("desktop.generateTitle"))
+                  }
+                  aria-label={t("desktop.generateTitle")}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 20, height: 20, padding: 0,
+                    background: "none", border: "none",
+                    borderRadius: 4,
+                    color: autoNameError ? "#ef4444" : "var(--text-dim)",
+                    cursor: autoNaming || session.messageCount === 0 ? "default" : "pointer",
+                    flexShrink: 0,
+                    opacity: autoNaming ? 0.7 : session.messageCount === 0 ? 0.35 : 1,
+                    transition: "color 0.12s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (autoNaming || session.messageCount === 0) return;
+                    e.currentTarget.style.color = autoNameError ? "#ef4444" : "var(--accent)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = autoNameError ? "#ef4444" : "var(--text-dim)";
+                  }}
+                >
+                  {autoNaming ? (
+                    <svg
+                      style={{ animation: "spin 1s linear infinite" }}
+                      width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                    >
+                      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+                      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <Sparkle size={13} weight="regular" aria-hidden="true" />
+                  )}
+                </button>
                 <button
                   onClick={startRename}
                   title={t("desktop.rename")}

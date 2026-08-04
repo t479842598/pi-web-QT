@@ -57,3 +57,4 @@ next-env.d.ts
 .myLastChat
 ref-repos
 .lrnev/
+.reasonix/
