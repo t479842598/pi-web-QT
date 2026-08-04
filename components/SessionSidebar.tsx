@@ -1787,14 +1787,7 @@ function SessionItem({
     }
   }, [autoNaming, session.id, session.messageCount, onRenamed]);
 
-  const handleDeleteClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setConfirmDelete(true);
-  }, []);
-
-  const handleDeleteConfirm = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setConfirmDelete(false);
+  const performDelete = useCallback(async () => {
     setDeleting(true);
     try {
       await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
@@ -1803,6 +1796,21 @@ function SessionItem({
       setDeleting(false);
     }
   }, [session.id, onDeleted]);
+
+  const handleDeleteClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (e.shiftKey) {
+      void performDelete();
+    } else {
+      setConfirmDelete(true);
+    }
+  }, [performDelete]);
+
+  const handleDeleteConfirm = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setConfirmDelete(false);
+    void performDelete();
+  }, [performDelete]);
 
   const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -2064,7 +2072,7 @@ function SessionItem({
                 </button>
                 <button
                   onClick={handleDeleteClick}
-                  title={t("desktop.delete")}
+                  title={t("desktop.deleteWithShift")}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center",
                     width: 20, height: 20, padding: 0,

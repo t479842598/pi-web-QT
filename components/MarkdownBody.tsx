@@ -8,6 +8,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { copyText } from "@/lib/clipboard";
 import { resolveLocalFileHref } from "@/lib/file-links";
+import { encodeFilePathForApi } from "@/lib/file-paths";
 import { splitStableParts } from "@/lib/markdown-incremental";
 import { headingId, markdownRehypePlugins, markdownRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
 import { prismTheme } from "@/lib/prism-theme";
@@ -118,6 +119,15 @@ function buildMarkdownComponents({ isStreaming, cwd, onOpenFile, onQuoteReply, q
           {children}
         </a>
       );
+    },
+    img({ src, alt, ...props }: React.ComponentProps<'img'> & ExtraProps) {
+      delete props.node;
+      const filePath = typeof src === "string" ? resolveLocalFileHref(src, cwd) : null;
+      const imageSrc = filePath
+        ? `/api/files/${encodeFilePathForApi(filePath)}?type=read`
+        : src;
+      // eslint-disable-next-line @next/next/no-img-element
+      return <img src={imageSrc} alt={alt ?? ""} loading="lazy" {...props} />;
     },
     table({ children }: React.ComponentProps<'table'> & ExtraProps) {
       return (

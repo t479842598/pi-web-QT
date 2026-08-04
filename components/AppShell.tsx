@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { ArrowLeft } from "@phosphor-icons/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { getInitialNavigation } from "@/lib/initial-navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
@@ -38,6 +39,7 @@ type SessionCopyField = "file" | "id";
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
   const { isDark, toggleTheme } = useTheme();
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -201,12 +203,53 @@ export function AppShell() {
     chatInputRef.current?.insertText(buildFileLineMentionText(relativePath, startLine, endLine));
   }, []);
 
-  const [initialSessionId] = useState<string | null>(() => searchParams.get("session"));
+  const [initialSessionId] = useState<string | null>(() => initialNavigation.sessionId);
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
+  const [initialCwdStatus, setInitialCwdStatus] = useState<"idle" | "validating" | "ready" | "error">(
+    () => initialNavigation.requestedCwd ? "validating" : "idle",
+  );
+  const [initialCwdError, setInitialCwdError] = useState<string | null>(null);
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
-  const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !searchParams.get("session"));
+  const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
   // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
   const suppressCwdBumpRef = useRef(false);
+
+  // Validate and adopt a cwd requested via ?cwd= URL parameter, opening a new
+  // session in that directory instead of restoring a ?session=.
+  useEffect(() => {
+    const requestedCwd = initialNavigation.requestedCwd;
+    if (!requestedCwd) return;
+
+    const controller = new AbortController();
+    setInitialCwdStatus("validating");
+    setInitialCwdError(null);
+
+    void fetch("/api/cwd/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: requestedCwd }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({})) as { cwd?: string; error?: string };
+        if (!response.ok || !data.cwd) {
+          throw new Error(data.error ?? `HTTP ${response.status}`);
+        }
+
+        // The sidebar will notify us when it adopts this cwd. Avoid remounting
+        // the just-created empty chat during that initial synchronization.
+        suppressCwdBumpRef.current = true;
+        setNewSessionCwd(data.cwd);
+        setInitialCwdStatus("ready");
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setInitialCwdError(error instanceof Error ? error.message : String(error));
+        setInitialCwdStatus("error");
+      });
+
+    return () => controller.abort();
+  }, [initialNavigation]);
 
   const handleCwdChange = useCallback((cwd: string | null, projectRoot?: string | null) => {
     setActiveCwd(cwd);
@@ -606,6 +649,27 @@ export function AppShell() {
               onViewFullHistory={handleViewFullHistory}
               systemPrompt={systemPrompt}
             />
+          ) : initialCwdStatus === "validating" ? (
+            <div
+              role="status"
+              style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 24, color: "var(--text-muted)", textAlign: "center" }}
+            >
+              <div style={{ fontSize: 14, color: "var(--text)" }}>{t("desktop.openingWorkspace")}</div>
+              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                {initialNavigation.requestedCwd}
+              </div>
+            </div>
+          ) : initialCwdStatus === "error" ? (
+            <div
+              role="alert"
+              style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 24, color: "var(--text-muted)", textAlign: "center" }}
+            >
+              <div style={{ fontSize: 14, color: "#dc2626" }}>{t("desktop.unableToOpenWorkspace")}</div>
+              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                {initialNavigation.requestedCwd}
+              </div>
+              <div style={{ maxWidth: 720, fontSize: 12 }}>{initialCwdError}</div>
+            </div>
           ) : showPlaceholder ? (
             activeCwd ? (
               <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 15 }}>

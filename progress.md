@@ -700,3 +700,39 @@
 
 回滚方式：`git revert 2c87601`；服务重启：`kill 36414 && PI_WEB_PASSWORD='...' PI_WEB_ALLOWED_HOSTS='...' pi-web`（任意目录，脚本自动切到当前项目）。
 
+## 2026-08-04 - Task: 同步上游 v0.8.6 功能（供应商获取模型 + 常用小功能）
+
+### What was done
+- 对照上游 agegr/pi-web v0.8.6（0.7.16 之后 136 commits）做文件级差异分析，移植缺失功能：供应商获取模型（models-config/discover）、models.dev 定价预设（models-config/catalog）、以及常用小功能。
+- 移植后端：`lib/model-discovery.ts`（模型列表 URL 构建/解析去重排序）、`lib/model-discovery-auth.ts`（ModelRuntime 解析 apiKey/headers）、`lib/model-catalog.ts`（models.dev 目录扁平化/搜索/推荐）、`app/api/models-config/discover/route.ts`、`app/api/models-config/catalog/route.ts`。
+- 移植前端：ModelsConfig.tsx 新增 discover UI（导入模型按钮/筛选/多选/添加所选）与 catalog UI（填入模型信息/撤销），i18n 新增 22 条文案（zh-CN + en）。
+- 小功能：中间键关闭文件 tab（TabBar onAuxClick）、Shift+Delete 跳过确认删会话（SessionSidebar performDelete + shift 分支）、markdown 本地图片预览（MarkdownBody img 组件 + file API）、?cwd= URL 参数直接打开指定目录新会话（AppShell 校验/状态/UI + lib/initial-navigation.ts）。
+- 滚动跟随底部留白：scrollToBottom 加 `BOTTOM_KEEP_OUT_PX=32`，最后一条消息不再被 ChatInput 输入框遮挡。
+- 排查确认本地已具备无需移植：proxy 环境变量支持（lib/http-dispatcher.ts EnvHttpProxyAgent）、SSE 多窗口优化（SessionSidebar 可见才轮询 + visibilitychange 暂停）。
+- README.md 更新：功能表补充 discover/catalog，新增 2026-08-04 更新说明。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm run lint`：通过。
+- 测试 21/21 通过：model-discovery（3）+ model-catalog（6）+ i18n catalog（3：中英文 key 一致/所有 t() 字面量可解析/无 useLanguage 遗留）+ ModelsConfig（9）+ MarkdownBody 等。
+- `npm run build`：通过（含新路由 /api/models-config/discover、/api/models-config/catalog）。
+- 服务启动验证：页面 200；discover API 校验正常（缺 providerName 返回 400）；catalog 的 models.dev 拉取在本沙箱返回 502，经 curl 证实为网络限制（沙箱访问不了 models.dev/openai，非代码问题），需在可联网环境验证。
+- 滚动留白：需浏览器实操确认最后一条消息与输入框间距。
+
+### Notes
+改动文件清单：
+- `lib/model-discovery.ts`、`lib/model-discovery-auth.ts`、`lib/model-catalog.ts`（新）：discover/catalog 核心逻辑，含上游测试。
+- `app/api/models-config/discover/route.ts`、`app/api/models-config/catalog/route.ts`（新）：discover/catalog API 路由。
+- `lib/initial-navigation.ts`（新）：?cwd=/session URL 参数解析。
+- `components/ModelsConfig.tsx`：discover + catalog UI（导入模型/填入预设/撤销）。
+- `components/TabBar.tsx`：中间键关闭 tab。
+- `components/SessionSidebar.tsx`：Shift+Delete 跳过确认删除。
+- `components/MarkdownBody.tsx`：本地图片预览（resolveLocalFileHref + file API）。
+- `components/AppShell.tsx`：?cwd= URL 参数（校验/状态/UI）。
+- `hooks/useAgentSession.ts`：滚动跟随底部留白 BOTTOM_KEEP_OUT_PX。
+- `lib/i18n/messages/zh-CN.ts`、`lib/i18n/messages/en.ts`：新增 discover/catalog/删除/工作区文案。
+- `lib/model-discovery.test.mjs`、`lib/model-catalog.test.mjs`（新）：上游测试移植。
+- `README.md`：功能表与更新说明。
+
+回滚方式：`git revert <commit>`；服务重启由用户命令行执行（本项目 `pi-web` 命令自动切到项目目录、加载 .env）。
+

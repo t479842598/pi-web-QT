@@ -169,6 +169,10 @@ export const AGENT_RUNNING_SPACER_PX = 96;
 // scrolling is active. Larger values make follow more lenient; smaller values
 // require the user to stay closer to the bottom.
 const SCROLL_BOTTOM_THRESHOLD = 150;
+// Keep-out gap between the last message and the scroll container's bottom
+// edge when auto-scrolling, so the last message is never hidden behind the
+// fixed ChatInput bar below the list.
+const BOTTOM_KEEP_OUT_PX = 32;
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
 const PROMPT_SETTLE_MAX_MS = 20_000;
@@ -1036,12 +1040,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // The end sentinel sits BELOW the agent-running spacer. scrollIntoView on
     // the sentinel would put that blank spacer in the viewport — hence the
     // blank screen while streaming during a run. Back off by the spacer so
-    // the LAST MESSAGE lands at the viewport bottom (the sentinel sits right
-    // below the spacer, so scrolling it to the bottom edge puts the last
-    // message at the bottom).
+    // the LAST MESSAGE lands just above the viewport bottom with a keep-out
+    // gap (BOTTOM_KEEP_OUT_PX) so it is not hidden behind ChatInput.
     const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
     const spacerH = agentRunningRef.current ? AGENT_RUNNING_SPACER_PX : 0;
-    const target = Math.max(0, endInContainer - spacerH - container.clientHeight);
+    const target = Math.max(0, endInContainer - spacerH - container.clientHeight - BOTTOM_KEEP_OUT_PX);
     container.scrollTo({ top: target, behavior });
   }, []);
 

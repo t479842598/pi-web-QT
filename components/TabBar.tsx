@@ -41,6 +41,17 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
           <div
             key={tab.id}
             onClick={() => onSelectTab(tab.id)}
+            onMouseDown={(e) => {
+              // Prevent the middle-click autoscroll default on the tab itself.
+              if (e.button === 1) e.preventDefault();
+            }}
+            onAuxClick={(e) => {
+              // Middle-click closes the tab.
+              if (e.button !== 1) return;
+              e.preventDefault();
+              e.stopPropagation();
+              onCloseTab(tab.id);
+            }}
             style={{
               display: "flex",
               alignItems: "center",
