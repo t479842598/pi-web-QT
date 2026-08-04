@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { statSync, type Stats } from "fs";
+import { realpathSync, statSync, type Stats } from "fs";
 import { homedir } from "os";
 import { isAbsolute, resolve } from "path";
 import { allowFileRoot } from "@/lib/file-access";
@@ -41,8 +41,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Path is not a directory: ${cwd}` }, { status: 400 });
     }
 
-    allowFileRoot(normalizedCwd);
-    return NextResponse.json({ success: true, cwd: normalizedCwd });
+    // Resolve symlinks so the allow-listed root is the canonical target —
+    // otherwise a symlink like /tmp/x -> /etc would make /etc browsable.
+    let canonicalCwd: string;
+    try {
+      canonicalCwd = realpathSync(normalizedCwd);
+    } catch {
+      canonicalCwd = normalizedCwd;
+    }
+
+    allowFileRoot(canonicalCwd);
+    return NextResponse.json({ success: true, cwd: canonicalCwd });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

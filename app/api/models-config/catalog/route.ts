@@ -5,6 +5,7 @@ import {
   searchModelCatalog,
   type ModelCatalogEntry,
 } from "@/lib/model-catalog";
+import { isApiRequestAllowed } from "@/lib/request-security";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,9 @@ async function loadCatalog(): Promise<ModelCatalogEntry[]> {
 }
 
 export async function GET(req: Request) {
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Request not allowed" }, { status: 403 });
+  }
   const { searchParams } = new URL(req.url);
   const query = (searchParams.get("q") ?? "").slice(0, 120);
   const provider = (searchParams.get("provider") ?? "").slice(0, 120);

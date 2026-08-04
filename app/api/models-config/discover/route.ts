@@ -1,10 +1,41 @@
 import { NextResponse } from "next/server";
+import { isIP } from "node:net";
 import { resolveModelDiscoveryAuth } from "@/lib/model-discovery-auth";
 import { buildModelsListUrl, parseDiscoveredModels } from "@/lib/model-discovery";
+import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 
 export const dynamic = "force-dynamic";
 
 const DISCOVERY_TIMEOUT_MS = 20_000;
+
+/** Reject private, loopback, link-local, and unspecified networks to block SSRF
+ *  against internal hosts or cloud metadata endpoints via the attacker-chosen
+ *  baseUrl. */
+function isPrivateHost(hostname: string): boolean {
+  const lower = hostname.toLocaleLowerCase();
+  if (lower === "localhost" || lower.endsWith(".localhost")) return true;
+  if (isIP(lower) === 4) {
+    const parts = lower.split(".").map(Number);
+    const [a, b] = parts;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 0) return true;
+    if (a >= 224) return true; // multicast + reserved
+    return false;
+  }
+  if (isIP(lower) === 6) {
+    const firstGroup = lower.split(":").find((part) => part !== "");
+    const prefix = firstGroup?.toLocaleLowerCase() ?? "";
+    if (prefix === "fe80") return true; // link-local
+    if (prefix === "fc" || prefix === "fd") return true; // unique local
+    if (prefix === "::" || prefix === "0") return true; // unspecified
+    return false;
+  }
+  return false;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -32,6 +63,12 @@ function buildHeaders(api: string, apiKey: string | undefined, configured: Recor
 
 export async function POST(req: Request) {
   try {
+    if (!isApiRequestAllowed(req)) {
+      return NextResponse.json({ error: "Request not allowed" }, { status: 403 });
+    }
+    if (!hasJsonContentType(req)) {
+      return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
+    }
     const body = await req.json() as { providerName?: unknown; provider?: unknown };
     const providerName = typeof body.providerName === "string" ? body.providerName.trim() : "";
     if (!providerName) return NextResponse.json({ error: "providerName is required" }, { status: 400 });
@@ -48,6 +85,13 @@ export async function POST(req: Request) {
       endpoint = buildModelsListUrl(baseUrl, api);
     } catch {
       return NextResponse.json({ error: "Base URL is invalid" }, { status: 400 });
+    }
+    // SSRF guard: only public HTTPS hosts are acceptable model-list endpoints.
+    if (endpoint.protocol !== "https:") {
+      return NextResponse.json({ error: "Only https:// base URLs are allowed" }, { status: 400 });
+    }
+    if (isPrivateHost(endpoint.hostname)) {
+      return NextResponse.json({ error: "Private and local network addresses are not allowed" }, { status: 400 });
     }
 
     const auth = await resolveModelDiscoveryAuth(providerName, body.provider);

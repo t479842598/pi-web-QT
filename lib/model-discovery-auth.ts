@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -34,6 +34,8 @@ export async function resolveModelDiscoveryAuth(
         },
       },
     }, null, 2), "utf8");
+    // The file may contain a real API key — restrict access to the owner.
+    chmodSync(modelsPath, 0o600);
 
     const modelRuntime = await ModelRuntime.create({ modelsPath });
     const loadError = modelRuntime.getError();
