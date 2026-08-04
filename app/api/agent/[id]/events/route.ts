@@ -58,9 +58,46 @@ export async function GET(
       // Send initial connected event
       encode({ type: "connected", sessionId: id });
 
+      // --- Coalescing buffer for message_update events ---
+      // Each message_update carries the full accumulated message. During
+      // streaming, these fire ~every 50 chars — resending all prior content
+      // each time, causing O(n²) bandwidth amplification (~100-250x). For
+      // remote/VPN users this can turn a 15 KB response into 2+ MB on the
+      // wire. Coalescing all message_updates within a short window and only
+      // sending the latest one eliminates the quadratic curve.
+      const COALESCE_MS = 80;
+      let pendingUpdate: AgentEvent | null = null;
+      let coalesceTimer: ReturnType<typeof setTimeout> | undefined;
+
+      function flushPendingUpdate() {
+        if (pendingUpdate) {
+          encode(pendingUpdate);
+          pendingUpdate = null;
+        }
+        if (coalesceTimer) {
+          clearTimeout(coalesceTimer);
+          coalesceTimer = undefined;
+        }
+      }
+
       const unsubscribe = session.onEvent((event) => {
         const clientEvent = toClientEvent(event);
-        if (clientEvent) encode(clientEvent);
+        if (!clientEvent) return;
+
+        if (clientEvent.type === "message_update") {
+          // Replace any pending update with the latest one and (re)start the
+          // coalescing timer. Non-message_update events flush immediately.
+          pendingUpdate = clientEvent;
+          if (!coalesceTimer) {
+            coalesceTimer = setTimeout(flushPendingUpdate, COALESCE_MS);
+          }
+        } else {
+          // Flush any pending message_update before sending this event so
+          // ordering is preserved (the buffered update logically precedes
+          // whatever non-streaming event just arrived).
+          flushPendingUpdate();
+          encode(clientEvent);
+        }
       });
 
       // Heartbeat every 30s to prevent server/proxy timeout (Next.js default ~120-150s)
@@ -75,6 +112,7 @@ export async function GET(
       // Cleanup when client disconnects
       const cleanup = () => {
         clearInterval(heartbeat);
+        clearTimeout(coalesceTimer);
         unsubscribe();
         controller.close();
       };

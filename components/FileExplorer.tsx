@@ -302,7 +302,8 @@ function TreeNode({
               style={{
                 position: "absolute",
                 left: -1,
-                bottom: -1,
+                top: "50%",
+                transform: "translateY(-50%)",
                 zIndex: 1,
                 width: 7,
                 height: 7,

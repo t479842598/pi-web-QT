@@ -1044,7 +1044,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // gap (BOTTOM_KEEP_OUT_PX) so it is not hidden behind ChatInput.
     const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
     const spacerH = agentRunningRef.current ? AGENT_RUNNING_SPACER_PX : 0;
-    const target = Math.max(0, endInContainer - spacerH - container.clientHeight - BOTTOM_KEEP_OUT_PX);
+    const target = Math.max(0, endInContainer - spacerH - container.clientHeight + BOTTOM_KEEP_OUT_PX);
     container.scrollTo({ top: target, behavior });
   }, []);
 

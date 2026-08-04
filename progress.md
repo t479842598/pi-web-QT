@@ -783,3 +783,20 @@
 
 回滚方式：`git revert d7681ee`。
 
+## 2026-08-04 - Task: 修复跟随对话时最新消息被输入框遮挡
+
+### What was done
+`scrollToBottom` 的滚动目标公式符号错误：`- BOTTOM_KEEP_OUT_PX` 使最后一条消息落在视口底部**以下** 32px，导致跟随滚动时消息被 ChatInput 挡住。改为 `+ BOTTOM_KEEP_OUT_PX`，使消息底部落在视口底部以上 32px（加上消息自身 margin ≈20px，总计约 52px），消息完全可见。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm run lint`：通过。
+- `npm test`：244/244 通过。
+- 数学验证：修正后最后消息底部在视口底部以上 ~52px，ChatInput + SessionInfoBar 不遮挡。
+
+### Notes
+改动文件清单：
+- `hooks/useAgentSession.ts`：`scrollToBottom` 公式第 1047 行 `- BOTTOM_KEEP_OUT_PX` → `+ BOTTOM_KEEP_OUT_PX`。
+
+回滚方式：`git checkout -- hooks/useAgentSession.ts`。
+
