@@ -861,7 +861,13 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             )}
 
             {agentRunning && (
-              <div style={{ height: scrollContainerRef.current ? scrollContainerRef.current.clientHeight : "80vh" }} />
+              /* Room below the last message while the agent runs so it is not
+                 hidden behind ChatInput. A full-viewport spacer makes
+                 scrollToBottom land on blank space (the end sentinel sits
+                 BELOW the spacer) — keep it small and let scrollToBottom back
+                 it off so the LAST MESSAGE, not the spacer, sits at the
+                 viewport bottom. (Same approach as upstream PR #372.) */
+              <div style={{ height: 96 }} />
             )}
 
               <div ref={messagesEndRef} />

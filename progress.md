@@ -634,3 +634,27 @@
 - `progress.md`：追加本轮施工、验证和回滚记录。
 
 回滚方式：提交后执行 `git revert HEAD`；若只撤销未提交工作区，执行 `git restore -- app/globals.css lib/theme.ts README.md README.en.md CHANGELOG.md docs/theme-system.md docs/mobile-layout.md progress.md && rm lib/theme.test.mjs`。
+
+## 2026-08-04 - Task: 修复对话滚动跟随回归 + 版本号统一 0.9.2
+
+### What was done
+- 定位回归根源：8 月 2 日本地修复 `e7498f4`（52px spacer + 靠近底部自动跟随）被 8 月 4 日 `658b96d "Sync web baseline"` 同步上游时覆盖回退——`ChatWindow.tsx` 恢复 agent 运行时**全视口空白 spacer**，`scrollToBottom` 直接滚到 spacer 之后的 sentinel，导致"对话不跟随、跳到底部空白"。
+- 上游 `agegr/pi-web` PR #372（floating scroll toolbar，windli2018）**未合并**（状态 Open），其 diff 基线与本项目被覆盖前一致；参考其滚动修复方法（spacer 小高度 + scrollToBottom 回退 spacer 让最后一条消息落视口底部）并恢复本地原有自动跟随，未移植其浮动工具栏功能。
+- 版本号统一为 0.9.2：package.json / package-lock.json（`next.config.ts` 自动注入 `NEXT_PUBLIC_APP_VERSION`，界面显示 `web v0.9.2`）；CHANGELOG 新增 0.9.2 条目。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm run lint`：通过（脚本头显示 @iswitthere/pi-web-desktop@0.9.2，确认版本生效）。
+- 运行中的 dev server（127.0.0.1:30141，用户进程）热更新后页面 HTTP 200 无渲染错误。
+- 缺口：滚动行为（streaming 跟随、滚上方不被打断、无空白页）需浏览器实操确认——请刷新已打开的 dev 页面验证；dev server 为版本改动前启动，重启后才显示 `web v0.9.2`。
+
+### Notes
+改动文件清单：
+- `components/ChatWindow.tsx`：agent 运行时 spacer 从全视口 clientHeight 改为固定 96px（消除空白跳转）。
+- `hooks/useAgentSession.ts`：`scrollToBottom` 重写为回退算法（sentinel 绝对位置 − spacer − clientHeight − 4，最后一条消息落视口底部 ~40px）；新增 `SCROLL_BOTTOM_THRESHOLD=150` 与 `isNearBottomRef`，`message_start` 时靠近底部则 rAF 自动跟随，滚动离开后不打扰；恢复完成滚动条件 `|| isNearBottomRef.current`。
+- `package.json`：version 0.7.16 → 0.9.2。
+- `package-lock.json`：root version 同步 0.9.2。
+- `CHANGELOG.md`：新增 0.9.2 条目（滚动修复 + 版本统一）。
+
+回滚方式：提交后执行 `git revert HEAD`；若只撤销未提交工作区，执行 `git restore -- components/ChatWindow.tsx hooks/useAgentSession.ts package.json package-lock.json CHANGELOG.md progress.md`（版本号可再用 `npm version 0.7.16 --no-git-tag-version` 还原）。
+

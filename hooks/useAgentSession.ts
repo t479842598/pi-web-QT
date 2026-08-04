@@ -160,6 +160,10 @@ export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" 
 
 const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
 const USER_SCROLL_INTENT_MS = 1200;
+// Distance from the bottom of the scroll container within which live-follow
+// scrolling is active. Larger values make follow more lenient; smaller values
+// require the user to stay closer to the bottom.
+const SCROLL_BOTTOM_THRESHOLD = 150;
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
 const PROMPT_SETTLE_MAX_MS = 20_000;
@@ -401,6 +405,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollToUserRef = useRef(false);
   const completionScrollAllowedRef = useRef(true);
+  const isNearBottomRef = useRef(true);
   const userScrollIntentUntilRef = useRef(0);
   const ignoreProgrammaticScrollUntilRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -1018,6 +1023,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentRunningRef.current = agentRunning;
   }, [agentRunning]);
 
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
+    const container = scrollContainerRef.current;
+    const end = messagesEndRef.current;
+    if (!container || !end) return;
+    // The end sentinel sits BELOW the agent-running spacer. scrollIntoView on
+    // the sentinel would put that blank spacer in the viewport — hence the
+    // blank screen while streaming during a run. Back off by the spacer +
+    // viewport height so the LAST MESSAGE lands ~40px above the viewport
+    // bottom (sentinel 28px + the last message's own ~16px bottom margin).
+    const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+    const spacerH = agentRunningRef.current ? 96 : 0;
+    const target = Math.max(0, endInContainer - spacerH - container.clientHeight - 4);
+    container.scrollTo({ top: target, behavior });
+  }, []);
+
   const handleAgentEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
       case "agent_start":
@@ -1128,6 +1149,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // Without it, every streaming event schedules a phase update that
         // re-renders the whole chat tree while a long thinking block grows.
         setAgentPhase((prev) => (prev === null ? prev : null));
+        // Live-follow the streaming output only when the user is already near
+        // the bottom of the message list. If they scrolled up, leave them there.
+        if (isNearBottomRef.current) {
+          // Defer the scroll so React has time to update the DOM with the new
+          // streaming content; otherwise scrollTo may target stale layout.
+          requestAnimationFrame(() => scrollToBottom("auto"));
+        }
         break;
       }
       case "message_end": {
@@ -1226,6 +1254,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     settleUiStage,
     queueStreamUpdate,
     resetStreamUpdates,
+    scrollToBottom,
   ]);
   handleAgentEventRef.current = handleAgentEvent;
 
@@ -1843,11 +1872,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [setToolPresetState]);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
-    messagesEndRef.current?.scrollIntoView({ behavior });
-  }, []);
-
   const scrollUserMsgToTop = useCallback(() => {
     const container = scrollContainerRef.current;
     const el = lastUserMsgRef.current;
@@ -1866,6 +1890,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
   const handleScrollPositionChange = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (container) {
+      const { scrollTop, clientHeight, scrollHeight } = container;
+      isNearBottomRef.current = scrollTop + clientHeight >= scrollHeight - SCROLL_BOTTOM_THRESHOLD;
+    }
     if (!agentRunningRef.current) return;
     if (Date.now() < ignoreProgrammaticScrollUntilRef.current) return;
     if (Date.now() > userScrollIntentUntilRef.current) return;
@@ -1959,7 +1988,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       } else if (!initialScrollDoneRef.current) {
         initialScrollDoneRef.current = true;
         scrollToBottom("instant");
-      } else if (!agentRunningRef.current && completionScrollAllowedRef.current) {
+      } else if (!agentRunningRef.current && (completionScrollAllowedRef.current || isNearBottomRef.current)) {
         scrollToBottom("smooth");
       }
     }
