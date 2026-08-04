@@ -757,3 +757,29 @@
 
 回滚方式：`git revert 75f4c55`。
 
+## 2026-08-04 - Task: 安全审查修复（discover/catalog SSRF + 凭据落盘 + symlink 逃逸）
+
+### What was done
+- security_review（提交 6454dd9 全量）发现 1 个 CRITICAL + 1 个 HIGH + 1 个 MEDIUM + 1 个 LOW，全部修复：
+  - **CRITICAL** `app/api/models-config/discover/route.ts`：新增 `isApiRequestAllowed` + `hasJsonContentType`（防跨站 text/plain 简单请求），baseUrl 限制 https 协议 + `isPrivateHost` 拦截内网/环回/链路本地（IPv4: 10/127/169.254/172.16-31/192.168/0/224+；IPv6: ::1/fe80/fc/fd/::），封堵 SSRF 与凭据外泄。
+  - **HIGH** `lib/model-discovery-auth.ts`：临时 models.json 写入后 `chmodSync 0o600`，限制本机其他进程读取。
+  - **MEDIUM** `app/api/cwd/validate/route.ts`：`realpathSync` 解析真实路径后才 `allowFileRoot`，封堵 symlink 逃逸（如 /tmp/x -> /etc）。
+  - **LOW** `app/api/models-config/catalog/route.ts`：加 `isApiRequestAllowed`，防跨站触发缓存刷新。
+- security_review 复查 verdict=pass（4 个 finding 全部妥善修复，仅 1 个 LOW 级 DNS rebinding 已知限制，风险可接受）。
+- 提交 `d7681ee` 经本地代理 7897 推送到 GitHub。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm run lint`：通过。
+- 测试 17/17 通过（model-discovery 3 + model-catalog 6 + i18n 3 + request-security 5）。
+- security_review 复查通过。
+
+### Notes
+改动文件清单：
+- `app/api/models-config/discover/route.ts`：请求防护 + https/内网限制。
+- `app/api/models-config/catalog/route.ts`：请求防护。
+- `app/api/cwd/validate/route.ts`：realpathSync 解析 symlink。
+- `lib/model-discovery-auth.ts`：chmodSync 0600。
+
+回滚方式：`git revert d7681ee`。
+
