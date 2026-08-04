@@ -160,6 +160,11 @@ export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" 
 
 const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
 const USER_SCROLL_INTENT_MS = 1200;
+// Height of the blank spacer rendered below the last message while the agent
+// runs (see ChatWindow). scrollToBottom backs this exact height off so the
+// LAST MESSAGE lands at the viewport bottom; render and backoff MUST agree,
+// so both sides consume this single constant.
+export const AGENT_RUNNING_SPACER_PX = 96;
 // Distance from the bottom of the scroll container within which live-follow
 // scrolling is active. Larger values make follow more lenient; smaller values
 // require the user to stay closer to the bottom.
@@ -1030,12 +1035,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (!container || !end) return;
     // The end sentinel sits BELOW the agent-running spacer. scrollIntoView on
     // the sentinel would put that blank spacer in the viewport — hence the
-    // blank screen while streaming during a run. Back off by the spacer +
-    // viewport height so the LAST MESSAGE lands ~40px above the viewport
-    // bottom (sentinel 28px + the last message's own ~16px bottom margin).
+    // blank screen while streaming during a run. Back off by the spacer so
+    // the LAST MESSAGE lands at the viewport bottom (the sentinel sits right
+    // below the spacer, so scrolling it to the bottom edge puts the last
+    // message at the bottom).
     const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
-    const spacerH = agentRunningRef.current ? 96 : 0;
-    const target = Math.max(0, endInContainer - spacerH - container.clientHeight - 4);
+    const spacerH = agentRunningRef.current ? AGENT_RUNNING_SPACER_PX : 0;
+    const target = Math.max(0, endInContainer - spacerH - container.clientHeight);
     container.scrollTo({ top: target, behavior });
   }, []);
 

@@ -11,7 +11,7 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { QueueRecoveryDialog } from "./QueueRecoveryDialog";
 import { SessionInfoBar } from "./SessionInfoBar";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
-import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
+import { useAgentSession, AGENT_RUNNING_SPACER_PX, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -866,8 +866,10 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                  scrollToBottom land on blank space (the end sentinel sits
                  BELOW the spacer) — keep it small and let scrollToBottom back
                  it off so the LAST MESSAGE, not the spacer, sits at the
-                 viewport bottom. (Same approach as upstream PR #372.) */
-              <div style={{ height: 96 }} />
+                 viewport bottom. (Same approach as upstream PR #372; height
+                 shared with useAgentSession's backoff via
+                 AGENT_RUNNING_SPACER_PX.) */
+              <div style={{ height: AGENT_RUNNING_SPACER_PX }} />
             )}
 
               <div ref={messagesEndRef} />
