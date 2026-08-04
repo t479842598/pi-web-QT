@@ -678,3 +678,25 @@
 
 回滚方式：服务回退到 dev：`kill 32755 && npm run dev`；代码回退：`git revert dba83cf` 或 `git reset --hard d29791d`。
 
+## 2026-08-04 - Task: 常量重构收尾 + 用户手动启动验证
+
+### What was done
+- 按 review should-fix 提取共享常量 `AGENT_RUNNING_SPACER_PX = 96`（`hooks/useAgentSession.ts` 顶层导出），`scrollToBottom` 回退量与 ChatWindow spacer 渲染消费同一常量，消除双处硬编码几何错位风险；同步修正注释与公式（去掉 -4，最后一条消息贴视口底）。
+- 重新 `npm run build`（21.7s 通过，仅既有 NFT 追踪警告）；服务启动改由用户手动执行（用户指示权限原因），用户已 kill 旧进程并以 `pi-web` 命令启动新构建并验证 OK（web v0.9.2、滚动跟随正常），复查确认新进程 PID 36414 监听 30141、页面 HTTP 200。
+- 确认用户本机 `pi-web` 命令（`~/.local/bin/pi-web`）硬编码指向当前项目 `/Volumes/1T 原装/项目研发/pi-web-QT`，与 `.env` 密码/允许域名一致。
+- 提交 `2c87601`（refactor: 提取 AGENT_RUNNING_SPACER_PX 共享常量）推送 GitHub；fresh review（复用）判定 pass。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过；`git diff --check`：通过。
+- `npm run build`：通过（15/15 静态页）。
+- 用户浏览器实操验证：滚动跟随正常、无空白页、显示 web v0.9.2（用户确认 OK）。
+- 本机复查：生产页面 HTTP 200、`x-nextjs-cache: HIT`、PID 36414。
+
+### Notes
+改动文件清单：
+- `hooks/useAgentSession.ts`：新增导出 `AGENT_RUNNING_SPACER_PX`，scrollToBottom 回退公式同步（-4 移除）。
+- `components/ChatWindow.tsx`：import 常量并用于 spacer 渲染。
+- `progress.md`：追加本轮收尾记录。
+
+回滚方式：`git revert 2c87601`；服务重启：`kill 36414 && PI_WEB_PASSWORD='...' PI_WEB_ALLOWED_HOSTS='...' pi-web`（任意目录，脚本自动切到当前项目）。
+
