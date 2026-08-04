@@ -881,3 +881,33 @@ security_review 复审（warn）发现的 3 个残余问题全部修复后重新
 npm uninstall -g @agegr/pi-web
 npm install -g @qt4798/pi-web@0.9.4
 ```
+
+## 2026-08-04 - Task: 发布 v0.9.5（GitHub + npm）
+
+### What was done
+在安全修复与安装警告处理全部完成后发布 v0.9.5：
+1. 修复 security_review 复审发现的 2 个新问题：localPackages 路径穿越（manifest 可控 name 直接 join 逃逸 agentDir，复用 isSafeBinScriptName 校验）；npm 包恢复改为预览展示 + 显式 opt-in（默认不自动安装，防恶意 postinstall）。
+2. 安装警告处理：ERESOLVE（@emoji-mart/react peer react≤18 vs react 19，来自 @lobehub/ui→@lobehub/icons peer 链）与 allow-scripts（npm 11 新提示）经实测确认为提示性警告、不影响安装成功（added 871/872 packages）；package.json 增加 overrides + allowScripts 消除本项目构建环境警告，并在 README 增加安装提示说明。
+3. 版本 bump 0.9.5，更新 CHANGELOG.md（0.9.5 段）、README.md（最新更新/功能表/安装提示）、README.en.md。
+4. git commit 877f026 → push origin main（代理 7897）→ tag v0.9.5 → push tag。
+5. npm publish @qt4798/pi-web@0.9.5（latest tag）。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `npm test`：279/279 通过（新增 unsafe local package name、npm opt-in 测试）。
+- `npm run lint`：通过。
+- release 构建：BUILD_ID=18J6_veq2yz9MszwxTCgp，版本 0.9.5。
+- npm view 确认 registry 最新 0.9.5。
+
+### Notes
+改动文件清单（commit 877f026）：
+- `app/api/backup/`、`components/BackupConfig.tsx`、`lib/backup.ts`、`lib/backup.test.mjs`：备份/恢复功能 + 安全加固。
+- `app/api/settings/`、`lib/settings-title-model.ts`、`components/TitleModelSetting.tsx`：标题模型设置。
+- `app/api/models-config/builtin/`、`lib/builtin-model-overrides.ts`：内置模型覆盖。
+- `app/api/models-config/route.ts`、`app/api/sessions/[id]/auto-name/route.ts`：鉴权补齐。
+- `lib/i18n/messages/zh-CN.ts`、`en.ts`：npm opt-in 文案。
+- `package.json`、`package-lock.json`：版本 0.9.5、overrides、allowScripts。
+- `CHANGELOG.md`、`README.md`、`README.en.md`：发布日志与说明。
+- `progress.md`：本记录。
+
+回滚方式：npm unpublish @qt4798/pi-web@0.9.5（72 小时内）；git revert 877f026 并删除远端 tag：`git push origin :refs/tags/v0.9.5`。
