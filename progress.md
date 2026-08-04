@@ -658,3 +658,23 @@
 
 回滚方式：提交后执行 `git revert HEAD`；若只撤销未提交工作区，执行 `git restore -- components/ChatWindow.tsx hooks/useAgentSession.ts package.json package-lock.json CHANGELOG.md progress.md`（版本号可再用 `npm version 0.7.16 --no-git-tag-version` 还原）。
 
+## 2026-08-04 - Task: 发布 0.9.2（推送 GitHub + 切换生产模式）
+
+### What was done
+- 提交 `dba83cf`（fix: 修复对话滚动跟随回归 + 版本号统一 0.9.2，6 文件）推送至 GitHub `origin/main`（t479842598/pi-web-QT），推送输出 `d29791d..dba83cf`；工作区仅剩用户自己的 `FileExplorer.tsx` 未提交改动，未纳入。
+- 停止原 dev server（PID 19332），`npm run build` 生产构建（6.1s，TS 检查通过，15/15 静态页；仅既有 next.config.ts NFT 追踪非阻断警告）。
+- 用仓库 CLI 启动生产服务：`nohup node bin/pi-web.js -H 127.0.0.1 -p 30141 --no-open`（自动加载 `.env` 密码/允许域名），日志 `Ready in 92ms`，进程 PID 32755。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- 页面带 Basic 认证返回 HTTP 200；响应头 `x-nextjs-cache: HIT` / `x-nextjs-prerender: 1` 确认生产模式。
+- 构建产物 `.next/static/chunks/25kc5rbcw68l6.js` 含 `0.9.2`，全产物无 `0.7.16` 残留，`NEXT_PUBLIC_APP_VERSION` 注入正确（界面显示 `web v0.9.2`）。
+- 缺口：滚动行为浏览器实操确认（用户刷新生产页面验证）。
+
+### Notes
+改动文件清单：
+- `CHANGELOG.md`、`components/ChatWindow.tsx`、`hooks/useAgentSession.ts`、`package.json`、`package-lock.json`、`progress.md`：与上一轮修复内容一致，本轮经提交 `dba83cf` 推送到 GitHub。
+- 运行方式变更：服务由 dev 模式（next dev）切换为生产模式（next start，经 bin/pi-web.js 启动），端口不变 30141；重启命令 `node bin/pi-web.js -H 127.0.0.1 -p 30141 --no-open`（在项目目录、自动读 .env）。
+
+回滚方式：服务回退到 dev：`kill 32755 && npm run dev`；代码回退：`git revert dba83cf` 或 `git reset --hard d29791d`。
+
