@@ -60,6 +60,40 @@
 - Node.js **22.19.0 或更高版本**
 - 已配置可用的 Pi 模型/认证信息
 
+### 从 npm 安装（推荐）
+
+```bash
+npx @qt4798/pi-web@latest
+```
+
+或全局安装：
+
+```bash
+npm install -g @qt4798/pi-web
+pi-web
+```
+
+然后打开 [http://127.0.0.1:30141](http://127.0.0.1:30141)。CLI 会在服务就绪后自动打开浏览器。默认只监听 `127.0.0.1`。
+
+**常用选项：**
+
+```bash
+pi-web --port 8080              # 自定义端口
+pi-web --hostname 0.0.0.0       # 暴露在局域网
+pi-web -p 8080 -H 0.0.0.0       # 组合使用
+pi-web --no-open                # 不自动打开浏览器
+
+PORT=8080 pi-web                # 也可通过环境变量设置端口
+PI_WEB_HOSTNAME=0.0.0.0 pi-web  # 显式设置监听地址
+PI_WEB_ALLOWED_HOSTS=piweb.example.com pi-web  # 允许反向代理域名
+PI_WEB_PASSWORD='随机长密码' pi-web           # 启用 HTTP Basic Auth（用户名 pi）
+PI_WEB_NO_OPEN=1 pi-web         # 后台服务不自动打开浏览器
+```
+
+设置 `PI_WEB_PASSWORD` 后，所有网页接口和 API 端点都需要 HTTP Basic Auth 认证，用户名为 `pi`。不设或留空则禁用认证。
+
+> Basic Auth 不加密传输中的密码。请勿将纯 HTTP 直接暴露到公网，通过可信反向代理启用 HTTPS 或使用可信 VPN 进行远程访问。
+
 ### 从源码运行
 
 ```bash
