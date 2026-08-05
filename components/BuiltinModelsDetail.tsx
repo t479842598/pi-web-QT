@@ -199,7 +199,7 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
         if (draft.thinkingLevelMap && Object.keys(draft.thinkingLevelMap).length > 0) {
           entry.thinkingLevelMap = draft.thinkingLevelMap;
         }
-        if (typeof draft.hidden === "boolean") entry.hidden = draft.hidden;
+        if (draft.hidden === true) entry.hidden = true;
         entries.push(entry);
       }
 
