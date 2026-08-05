@@ -291,8 +291,16 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
           type="file"
           accept=".zip,application/zip"
           onChange={(e) => handleFileSelected(e.target.files?.[0])}
-          style={{ fontSize: 12, marginBottom: 14, color: "var(--text)" }}
+          style={{ display: "none" }}
         />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+        >
+          <Upload size={15} aria-hidden="true" />
+          {t("desktop.backupImportButton")}
+        </button>
 
         {importError && (
           <p style={{ margin: "0 0 10px", fontSize: 11, color: "#ef4444", lineHeight: 1.5 }}>{importError}</p>

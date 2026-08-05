@@ -15,6 +15,11 @@ try {
 const nextConfig: NextConfig = {
   allowedDevOrigins,
   devIndicators: false,
+  // proxy.ts clones the request body for /api/*; the Next.js default of
+  // 10MB truncates large backup uploads (import route allows up to 512MB).
+  experimental: {
+    proxyClientMaxBodySize: "600mb",
+  },
   serverExternalPackages: [
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-coding-agent",

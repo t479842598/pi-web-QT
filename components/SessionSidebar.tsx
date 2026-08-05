@@ -1045,10 +1045,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </button>
         </div>
 
-        {/* CWD picker — always show when no project is selected, even if portal hosts
-            exist, because the portaled content is hidden when showWorkspaceControls
-            is false (no project). */}
-        {(!hasWorkspaceControlsHosts || !selectedCwd) && <div ref={dropdownRef} style={{ position: "relative" }}>
+        {/* CWD picker — fallback only when no portal hosts exist. With hosts,
+            project selection always lives in the title/welcome workspace
+            control, which is now shown regardless of whether a project is
+            selected. */}
+        {!hasWorkspaceControlsHosts && <div ref={dropdownRef} style={{ position: "relative" }}>
           <button
             onClick={() => setDropdownOpen((v) => !v)}
             title={selectedProject ?? selectedCwd ?? ""}
@@ -1089,7 +1090,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   color: "var(--text-dim)",
                 }}
               >
-                {initialSessionId && !restoredRef.current ? "" : "Select project…"}
+                {initialSessionId && !restoredRef.current ? "" : `${t("desktop.selectProject")}…`}
               </span>
             )}
           </button>

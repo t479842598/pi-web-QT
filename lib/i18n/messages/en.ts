@@ -27,6 +27,7 @@ export const enLocale = {
     "desktop.backupExporting": "Exporting…",
     "desktop.backupExportFailed": "Backup export failed",
     "desktop.backupImportTitle": "Import backup",
+    "desktop.backupImportButton": "Choose backup file",
     "desktop.backupImportDescription": "Restore from a pi-backup zip. Paths are remapped to this machine and MCP commands are adapted per platform.",
     "desktop.backupImportFailed": "Failed to read the backup file",
     "desktop.backupRestoreFailed": "Restore failed",

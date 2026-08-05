@@ -96,12 +96,16 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
     setError(null);
     setSavedOk(false);
     try {
-      // Serialize drafts into overlay entries
+      // Serialize drafts into overlay entries.
+      // SDK 按 id 整体替换模型条目（非字段合并），因此必须带上 name/reasoning
+      // 及全部可编辑字段的当前值，否则未修改字段会被重置（如 name 丢失、reasoning 变 false）。
       const entries = [];
       for (const id of dirty) {
         const draft = drafts[id];
         if (!draft) continue;
         const entry: Record<string, unknown> = { id };
+        const model = models.find((m) => m.id === id);
+        if (model?.name) entry.name = model.name;
         if (typeof draft.reasoning === "boolean") entry.reasoning = draft.reasoning;
         const cw = numOrUndefined(draft.contextWindow ?? "");
         if (cw !== undefined) entry.contextWindow = cw;
@@ -148,7 +152,7 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
     } finally {
       setSaving(false);
     }
-  }, [dirty, drafts, providerId]);
+  }, [dirty, drafts, providerId, models]);
 
   if (loading) {
     return (

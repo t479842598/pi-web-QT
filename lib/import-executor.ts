@@ -6,26 +6,12 @@
  */
 
 import { join } from "path";
-import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from "fs";
+import { homedir } from "os";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { reasonixProjectsDir, reasonixProjectToPiCwdDir } from "./import-sources";
+import { reasonixProjectSessions, reasonixProjectToPiCwdDir } from "./import-sources";
 import { convertReasonixFile, serializePiEntries } from "./import-reasonix";
 import { invalidateSessionListCache } from "./session-reader";
-
-// Need a local helper since isReasonixMainSession isn't exported
-function isMainRsFile(filename: string): boolean {
-  if (!filename.endsWith(".jsonl")) return false;
-  const skips = [
-    ".events.jsonl", ".conflicts.jsonl", ".telemetry.json",
-    ".recovery.json", ".goal-state.json", ".event-index.json",
-    ".recovery.jsonl", ".ckpt", ".meta", ".lock", ".lease.json",
-    ".lease.lock", ".jobs",
-  ];
-  for (const s of skips) {
-    if (filename.endsWith(s)) return false;
-  }
-  return true;
-}
 
 // ============================================================================
 // Job 类型
@@ -68,23 +54,17 @@ export function startReasonixImport(
   projectNames: string[],
 ): { jobId: string } {
   const jobId = `import-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const rsDir = reasonixProjectsDir();
 
   // 计算总数
   let total = 0;
-  const filesByProject: Array<{ projectName: string; piCwdDir: string; files: string[] }> = [];
+  const filesByProject: Array<{ projectName: string; piCwdDir: string; files: string[]; flat: boolean }> = [];
 
   for (const projectName of projectNames) {
-    const sessionsDir = join(rsDir, projectName, "sessions");
-    let sessionFiles: string[];
-    try {
-      sessionFiles = readdirSync(sessionsDir).filter(isMainRsFile);
-    } catch {
-      continue;
-    }
+    const found = reasonixProjectSessions(projectName);
+    if (!found || found.files.length === 0) continue;
     const piCwdDir = reasonixProjectToPiCwdDir(projectName);
-    filesByProject.push({ projectName, piCwdDir, files: sessionFiles });
-    total += sessionFiles.length;
+    filesByProject.push({ projectName, piCwdDir, files: found.files, flat: found.flat });
+    total += found.files.length;
   }
 
   const job: ImportJob = {
@@ -102,7 +82,7 @@ export function startReasonixImport(
   getJobs().set(jobId, job);
 
   // 异步执行导入
-  runReasonixImport(job, filesByProject, rsDir).catch(err => {
+  runReasonixImport(job, filesByProject).catch(err => {
     console.error("[import-reasonix] Fatal:", err);
     job.done = true;
   });
@@ -112,26 +92,32 @@ export function startReasonixImport(
 
 async function runReasonixImport(
   job: ImportJob,
-  filesByProject: Array<{ projectName: string; piCwdDir: string; files: string[] }>,
-  rsDir: string,
+  filesByProject: Array<{ projectName: string; piCwdDir: string; files: string[]; flat: boolean }>,
 ): Promise<void> {
-  for (const { projectName, piCwdDir, files } of filesByProject) {
-    const sessionsDir = join(rsDir, projectName, "sessions");
+  for (const { projectName, piCwdDir, files, flat } of filesByProject) {
+    const found = reasonixProjectSessions(projectName);
+    if (!found) continue;
+    const sessionsDir = found.sessionsDir;
 
     // 从已有 pi session 获取正确的 cwd（避免 - 转义歧义）
     // 优先从已有的 pi session 文件头读取 cwd，fallback 时才用路径名推导。
     let cwd: string;
-    const inner = projectName.replace(/^-/, "");
-    if (process.platform === "win32") {
-      // Windows: detect drive-letter pattern (e.g. "C-Users-me-project" → C:\Users\me\project)
-      const segments = inner.split("-");
-      if (segments.length >= 2 && /^[a-zA-Z]$/.test(segments[0])) {
-        cwd = segments[0].toUpperCase() + ":\\" + segments.slice(1).join("\\");
+    if (flat) {
+      // 平铺会话（Windows/CLI）没有项目路径信息，默认用户主目录
+      cwd = homedir();
+    } else {
+      const inner = projectName.replace(/^-/, "");
+      if (process.platform === "win32") {
+        // Windows: detect drive-letter pattern (e.g. "C-Users-me-project" → C:\Users\me\project)
+        const segments = inner.split("-");
+        if (segments.length >= 2 && /^[a-zA-Z]$/.test(segments[0])) {
+          cwd = segments[0].toUpperCase() + ":\\" + segments.slice(1).join("\\");
+        } else {
+          cwd = "/" + inner.replace(/-/g, "/");
+        }
       } else {
         cwd = "/" + inner.replace(/-/g, "/");
       }
-    } else {
-      cwd = "/" + inner.replace(/-/g, "/");
     }
     try {
       const piDir = join(PI_SESSIONS_DIR, piCwdDir);
@@ -150,9 +136,12 @@ async function runReasonixImport(
       job.currentFile = filename;
 
       try {
-        // 生成 pi 文件名
-        const safeTs = filename.slice(0, 19).replace(/[:.]/g, "-");
         const sourcePath = join(sessionsDir, filename);
+
+        // 生成 pi 文件名；平铺命名（无法从文件名取时间戳）用文件 mtime
+        const safeTs = flat
+          ? statSync(sourcePath).mtime.toISOString().slice(0, 19).replace(/[:.]/g, "-")
+          : filename.slice(0, 19).replace(/[:.]/g, "-");
 
         const result = convertReasonixFile(sourcePath, cwd, filename);
 

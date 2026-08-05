@@ -27,6 +27,7 @@ export const zhCNLocale = {
     "desktop.backupExporting": "导出中…",
     "desktop.backupExportFailed": "备份导出失败",
     "desktop.backupImportTitle": "导入备份",
+    "desktop.backupImportButton": "选择备份文件",
     "desktop.backupImportDescription": "从 pi-backup zip 恢复。路径会自动重映射到本机，MCP 命令按平台适配。",
     "desktop.backupImportFailed": "读取备份文件失败",
     "desktop.backupRestoreFailed": "恢复失败",

@@ -24,6 +24,11 @@ export function reasonixProjectsDir(): string {
   return join(homedir(), ".reasonix", "projects");
 }
 
+/** Reasonix 平铺会话目录（Windows/CLI 布局：~/.reasonix/sessions/*.jsonl） */
+export function reasonixSessionsFlatDir(): string {
+  return join(homedir(), ".reasonix", "sessions");
+}
+
 /** Codex 会话目录（跨平台） */
 export function codexSessionsDir(): string {
   return join(homedir(), ".codex", "sessions");
@@ -122,12 +127,14 @@ export interface ReasonixDiscoverResult {
 
 /** 列出所有支持的导入源及状态 */
 export function listImportSources(): ImportSourceInfo[] {
+  const reasonixAvailable =
+    existsSync(reasonixProjectsDir()) || existsSync(reasonixSessionsFlatDir());
   return [
     {
       key: "reasonix",
       label: "Reasonix",
-      available: existsSync(reasonixProjectsDir()),
-      status: existsSync(reasonixProjectsDir()) ? "available" : "unavailable",
+      available: reasonixAvailable,
+      status: reasonixAvailable ? "available" : "unavailable",
     },
     {
       key: "codex",
@@ -150,45 +157,104 @@ export function listImportSources(): ImportSourceInfo[] {
   ];
 }
 
-/** 扫描 Reasonix 项目及可导入会话 */
-export function discoverReasonix(): ReasonixDiscoverResult {
-  const dir = reasonixProjectsDir();
-  if (!existsSync(dir)) {
-    return { available: false, projects: [], totalSessions: 0 };
+/**
+ * 解析一个 Reasonix 项目名的会话目录与文件列表。
+ * 优先 projects/<name>/sessions/（mac 布局），回退到平铺目录中 "<name>-" 前缀文件（Windows/CLI 布局）。
+ */
+export function reasonixProjectSessions(
+  projectName: string,
+): { sessionsDir: string; files: string[]; flat: boolean } | null {
+  const projectsDir = join(reasonixProjectsDir(), projectName, "sessions");
+  if (existsSync(projectsDir)) {
+    try {
+      const files = readdirSync(projectsDir).filter(isReasonixMainSession);
+      return { sessionsDir: projectsDir, files, flat: false };
+    } catch {
+      return null;
+    }
   }
+  const flatDir = reasonixSessionsFlatDir();
+  if (existsSync(flatDir)) {
+    try {
+      const prefix = `${projectName}-`;
+      const files = readdirSync(flatDir).filter(
+        (f) => isReasonixMainSession(f) && f.startsWith(prefix),
+      );
+      if (files.length > 0) return { sessionsDir: flatDir, files, flat: true };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
-  let projectNames: string[];
-  try {
-    projectNames = readdirSync(dir, { withFileTypes: true })
-      .filter(e => e.isDirectory())
-      .map(e => e.name);
-  } catch {
+/** 扫描 Reasonix 项目及可导入会话（projects 布局 + 平铺 sessions 布局） */
+export function discoverReasonix(): ReasonixDiscoverResult {
+  const projectsDir = reasonixProjectsDir();
+  const flatDir = reasonixSessionsFlatDir();
+  if (!existsSync(projectsDir) && !existsSync(flatDir)) {
     return { available: false, projects: [], totalSessions: 0 };
   }
 
   const projects: ReasonixProjectPreview[] = [];
   let total = 0;
+  const seen = new Set<string>();
 
-  for (const name of projectNames) {
-    const sessionsDir = join(dir, name, "sessions");
-    let sessions: string[];
+  // 1) projects/<name>/sessions/*.jsonl 布局
+  if (existsSync(projectsDir)) {
+    let projectNames: string[];
     try {
-      sessions = readdirSync(sessionsDir).filter(isReasonixMainSession);
+      projectNames = readdirSync(projectsDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
     } catch {
-      continue;
+      projectNames = [];
     }
-    if (sessions.length === 0) continue;
 
-    const piCwdDir = reasonixProjectToPiCwdDir(name);
-    const matched = piProjectExists(piCwdDir);
-    projects.push({
-      name,
-      sessions: sessions.length,
-      piCwdDir,
-      matched,
-      existingCount: matched ? piSessionCount(piCwdDir) : 0,
-    });
-    total += sessions.length;
+    for (const name of projectNames) {
+      const found = reasonixProjectSessions(name);
+      if (!found || found.files.length === 0) continue;
+      seen.add(name);
+      const piCwdDir = reasonixProjectToPiCwdDir(name);
+      const matched = piProjectExists(piCwdDir);
+      projects.push({
+        name,
+        sessions: found.files.length,
+        piCwdDir,
+        matched,
+        existingCount: matched ? piSessionCount(piCwdDir) : 0,
+      });
+      total += found.files.length;
+    }
+  }
+
+  // 2) 平铺 sessions/*.jsonl 布局：按文件名前缀（第一个 "-" 前）分组
+  if (existsSync(flatDir)) {
+    let files: string[];
+    try {
+      files = readdirSync(flatDir).filter(isReasonixMainSession);
+    } catch {
+      files = [];
+    }
+    const byPrefix = new Map<string, number>();
+    for (const f of files) {
+      const prefix = f.split("-")[0];
+      if (!prefix) continue;
+      byPrefix.set(prefix, (byPrefix.get(prefix) ?? 0) + 1);
+    }
+    for (const [prefix, count] of byPrefix) {
+      if (seen.has(prefix)) continue; // 与 projects 布局重名时以 projects 布局为准
+      const piCwdDir = reasonixProjectToPiCwdDir(prefix);
+      const matched = piProjectExists(piCwdDir);
+      projects.push({
+        name: prefix,
+        sessions: count,
+        piCwdDir,
+        matched,
+        existingCount: matched ? piSessionCount(piCwdDir) : 0,
+      });
+      total += count;
+    }
   }
 
   return { available: true, projects, totalSessions: total };

@@ -5,7 +5,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 // ============================================================================
 // 工具函数
@@ -40,16 +40,21 @@ function genEntryId(): string {
 /**
  * 解析 Reasonix 文件名，提取时间戳和模型信息
  * 格式: 20260721-082619.117399000-Freebuff-deepseek-deepseek-v4-flash.jsonl
+ * Windows/CLI 平铺文件名（如 code-t0005.jsonl、desktop-202605150544-2.jsonl）不匹配该格式时，
+ * 回退到 fallbackTimestamp，provider/modelId 记 unknown。
  */
-export function parseReasonixFilename(filename: string): {
+export function parseReasonixFilename(
+  filename: string,
+  fallbackTimestamp?: string,
+): {
   timestamp: string;
   provider: string;
   modelId: string;
 } {
   const base = filename.replace(/\.jsonl$/, "");
   const parts = base.split("-");
-  const dateStr = parts[0];
-  const timeStr = parts[1];
+  const dateStr = parts[0] ?? "";
+  const timeStr = parts[1] ?? "";
 
   const y = dateStr.slice(0, 4);
   const m = dateStr.slice(4, 6);
@@ -60,6 +65,13 @@ export function parseReasonixFilename(filename: string): {
   const ms = timeStr.slice(7, 10);
 
   const ts = new Date(`${y}-${m}-${d}T${hh}:${mm}:${ss}.${ms}Z`);
+  if (Number.isNaN(ts.getTime())) {
+    return {
+      timestamp: fallbackTimestamp ?? new Date(0).toISOString(),
+      provider: "unknown",
+      modelId: "unknown",
+    };
+  }
 
   const modelParts = parts.slice(2).join("-");
   let provider = "freebuff";
@@ -281,7 +293,11 @@ export function convertReasonixFile(
   // Split on LF, then strip optional trailing CR (Windows CRLF → Unix LF compatibility).
   const lines = content.trim().split("\n").map(l => l.replace(/\r$/, "")).filter(l => l.trim());
 
-  const { timestamp, provider, modelId } = parseReasonixFilename(filename);
+  // 文件名无法解析出时间戳（Windows/CLI 平铺命名）时，用文件 mtime 兜底
+  const { timestamp, provider, modelId } = parseReasonixFilename(
+    filename,
+    statSync(filePath).mtime.toISOString(),
+  );
   const sessionId = uuidv7();
   const entries: PiEntry[] = [];
 

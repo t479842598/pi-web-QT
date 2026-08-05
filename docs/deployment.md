@@ -109,3 +109,7 @@ sudo systemctl restart pi-web
 node_modules/.bin/tsc --noEmit
 npm run lint
 ```
+
+## 6. 备份导入大小
+
+导入接口 `/api/backup/import` 允许最大 512MB 的备份包。由于 `proxy.ts` 会克隆请求体，需在 `next.config.ts` 中通过 `experimental.proxyClientMaxBodySize` 调大该限制（默认 10MB，超过会截断请求体并报 "Request body exceeded"）。当前配置为 `"600mb"`；若需调整，请同步修改 `app/api/backup/import/route.ts` 中的 `MAX_UPLOAD_BYTES`。

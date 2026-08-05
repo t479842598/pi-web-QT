@@ -504,10 +504,10 @@ export function AppShell() {
           title: titleWorkspaceControlsHost,
           welcome: welcomeWorkspaceControlsHost,
         }}
-        // Both workspace controls (title bar + welcome page) stay hidden until
-        // a project is actually active. This also covers the initial welcome
-        // screen before sessions finish loading.
-        showWorkspaceControls={Boolean(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)}
+        // Workspace controls (title bar + welcome page) are always shown,
+        // including before a project is active, so new users can pick a
+        // project from the top-left corner instead of a sidebar-only button.
+        showWorkspaceControls={true}
       />
 
     </>

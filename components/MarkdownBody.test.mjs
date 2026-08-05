@@ -55,7 +55,9 @@ test("keeps local file markdown links in the app", () => {
 });
 
 test("renders quoteable table rows without inline elements under tr", async () => {
-  const source = await readFile(new URL("./MarkdownBody.tsx", import.meta.url), "utf8");
+  // Normalize line endings: git may check the file out as CRLF on Windows,
+  // while this test's source-structure assertions match LF.
+  const source = (await readFile(new URL("./MarkdownBody.tsx", import.meta.url), "utf8")).replace(/\r/g, "");
   const tableRowBranch = source.slice(source.indexOf('if (as === "tr")'));
 
   assert.match(tableRowBranch, /<tr[\s\S]*?title=\{!coarse && !segments \? t\("desktop\.quoteReplyHint"\) : undefined\}[\s\S]*?>/);
@@ -64,7 +66,7 @@ test("renders quoteable table rows without inline elements under tr", async () =
 });
 
 test("defers Prism highlighting while a code block is streaming", async () => {
-  const source = await readFile(new URL("./MarkdownBody.tsx", import.meta.url), "utf8");
+  const source = (await readFile(new URL("./MarkdownBody.tsx", import.meta.url), "utf8")).replace(/\r/g, "");
   const codeBlockSource = source.slice(source.indexOf("export function CodeBlock"));
 
   assert.match(codeBlockSource, /isStreaming \? \(/);

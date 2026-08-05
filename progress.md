@@ -940,3 +940,109 @@ npm install -g @qt4798/pi-web@0.9.4
 mv ~/.local/bin/pi-web ~/.local/bin/pi-web.local-backup
 ```
 移走后 `pi-web` 命令将解析到 npm 全局包（fnm multishell bin 软链 → @qt4798/pi-web@0.9.5）。验证：`command -v pi-web` 应显示 fnm multishell 路径；`pi-web` 启动于 30141。
+
+## 2026-08-05 - Task: 克隆 pi-web-QT 仓库并初始化 lrnev 治理
+
+### What was done
+将 GitHub 仓库 https://github.com/t479842598/pi-web-QT 克隆到 E:\AI\项目开发\pi-web-QT（1585 个文件，HEAD 14a7ac7，工作树干净）。按仓库执行规范初始化 .lrnev 本地治理工作区，并补全 PROJECT.md 与 ARCHITECTURE.md 元数据（技术栈 Next.js 16 + React 19 + pi SDK 0.83、架构与关键设计约束均据 package.json 与 AGENTS.md 归纳）。
+
+### Testing
+- `git clone` 完成，`git status` 干净（`.lrnev/` 已由仓库 .gitignore 排除，不入库）
+- `git log --oneline -1` 返回 14a7ac7，remote 指向 origin
+- `.lrnev/PROJECT.md`、`.lrnev/ARCHITECTURE.md` 存在且已替换全部 FILL 哨兵
+
+### Notes
+改动文件清单（均在克隆内容之外新增）：
+- `.lrnev/PROJECT.md`（新）：项目目标/范围/约束，lrnev 治理元数据
+- `.lrnev/ARCHITECTURE.md`（新）：技术栈/模块/数据流/关键设计约束
+- `progress.md`：末尾追加本轮记录
+回滚方式：删除 `E:\AI\项目开发\pi-web-QT` 目录后重新 `git clone`；`.lrnev/` 为本地治理数据，不参与 git，删除不影响仓库。
+
+## 2026-08-05 - Task: 修复备份导入 413（10MB body 限制）
+
+### What was done
+拉取最新版（083a47e → f3a289f，含 backup import 413 修复与 undici 8.10.0 升级），同步 npm 依赖后，用 mac 导出的 pi-backup-2026-08-05T04-57-18.zip（16MB）复现导入失败：HTTP 413 "Failed to parse form data"，dev 日志出现 "Request body exceeded 10MB for /api/backup/import"。根因：proxy.ts 匹配 /api/*，Next.js 16 克隆 proxy 请求体默认上限 10MB，16MB 备份被截断导致 FormData 解析失败。修复：next.config.ts 增加 experimental.proxyClientMaxBodySize: "600mb"（与导入路由 MAX_UPLOAD_BYTES=512MB 匹配）。修复后上传同一 zip 返回 HTTP 200 preview，无截断警告。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- 修复前复现：curl -F 上传 16MB zip → HTTP 413 + 日志 "Request body exceeded 10MB"。
+- 修复后验证：同一 curl 上传 → HTTP 200，返回 preview JSON（manifest 正确解析 darwin 平台备份，token 已缓存）。
+
+### Notes
+改动文件清单：
+- `next.config.ts`：新增 `experimental.proxyClientMaxBodySize: "600mb"`（proxy 克隆请求体上限，默认 10MB）。
+- `docs/deployment.md`：新增"备份导入大小"说明节。
+- `progress.md`：本记录。
+- `package-lock.json` / `node_modules`：随 git pull 同步依赖（undici 8.10.0，postinstall 脚本生效）。
+
+回滚方式：`git checkout -- next.config.ts docs/deployment.md`；依赖回滚用 `git checkout -- package-lock.json && npm install`。
+
+## 2026-08-05 - Task: UI/导入功能修复（内置模型保存、备份按钮、reasonix 导入、项目选择）
+
+### What was done
+1. 内置供应商模型配置：用户确认可修改；实测发现保存副作用 bug——overlay 只写 {id, contextWindow} 时 SDK 按 id 整体替换模型条目，导致 name 丢失、reasoning 变 false、maxTokens 被重置为 16384。修复 BuiltinModelsDetail.handleSave：保存时补齐 name/reasoning/maxTokens/thinkingLevelMap 全部字段，实测保存后模型信息完整保留。
+2. 导入备份控件：BackupConfig 中原生 file input（无按钮外观，宿主内像纯文字）改为 display:none input + 自定义按钮（Upload 图标 + 点击触发），新增 i18n 键 backupImportButton（选择备份文件 / Choose backup file）。
+3. Reasonix 会话导入：Windows/CLI 平铺布局 ~/.reasonix/sessions/*.jsonl 此前不被识别（仅支持 mac 的 ~/.reasonix/projects/<p>/sessions），导致 UI 上 reasonix 选项 unavailable 而无法点击。lib/import-sources.ts 新增平铺布局发现（按文件名前缀分组）与统一解析 reasonixProjectSessions()；parseReasonixFilename 对非 mac 命名容错（回退文件 mtime，provider/modelId=unknown）；import-executor 平铺项目 cwd 回退 homedir()。实测 discover available=true（43 会话）、单文件导入成功。
+4. 左侧项目选择：AppShell 左上角 workspace 项目选择模块改为始终显示（showWorkspaceControls=true）；SessionSidebar 侧边栏 CWD picker 仅在无 portal host 时兜底显示；无项目占位文案 "Select project…" 硬编码英文改为 i18n t("desktop.selectProject")（中文"选择项目…"）。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `node_modules/.bin/eslint`（7 个改动组件/lib 文件）：0 errors；仅 lib/import-sources.ts 4 条原有未用 import 的 warning（非本轮引入，未清理）。
+- `git diff --check`：通过。
+- dev server 实测（端口 17300）：
+  - PUT 完整模型 overlay 后 GET /api/models-config/builtin?provider=deepseek：name/reasoning/maxTokens/thinkingLevelMap 全部保留，contextWindow=900000 生效（修复前 name 丢失、reasoning=false、maxTokens=16384）；models.json 已恢复。
+  - GET /api/import/discover：reasonix available=true，发现 code(1)/desktop(41)/subagent(1) 共 43 会话。
+  - POST /api/import/execute（projects=["code"]）：job done，imported=1 errors=0，生成 ~/.pi/agent/sessions/--code--/ 会话文件（cwd=C:\Users\t0005，时间戳取 mtime）；测试产物已删除。
+  - 16MB 备份导入（proxyClientMaxBodySize 修复）此前已验证 HTTP 200。
+
+### Notes
+改动文件清单：
+- `components/BuiltinModelsDetail.tsx`：保存 overlay 补齐 name/reasoning/maxTokens/thinkingLevelMap；useCallback 依赖补 models。
+- `components/BackupConfig.tsx`：导入文件选择改为隐藏 input + 自定义按钮。
+- `lib/i18n/messages/zh-CN.ts` / `en.ts`：新增 desktop.backupImportButton。
+- `lib/import-sources.ts`：新增 reasonixSessionsFlatDir()/reasonixProjectSessions()；listImportSources/discoverReasonix 支持平铺布局。
+- `lib/import-reasonix.ts`：parseReasonixFilename 容错（fallbackTimestamp），convertReasonixFile 传文件 mtime。
+- `lib/import-executor.ts`：改用 reasonixProjectSessions；平铺项目 cwd=homedir、文件名时间戳=mtime；删除孤儿 isMainRsFile。
+- `components/AppShell.tsx`：showWorkspaceControls 恒为 true（左上角项目选择一直显示）。
+- `components/SessionSidebar.tsx`：侧边栏 CWD picker 仅无 host 时兜底；占位文案改 i18n。
+- `next.config.ts` / `docs/deployment.md` / `progress.md`：上一轮备份导入 413 修复的记录（本轮验证通过，未再改动 next.config.ts）。
+
+回滚方式：`git checkout -- components/BuiltinModelsDetail.tsx components/BackupConfig.tsx lib/i18n/messages/zh-CN.ts lib/i18n/messages/en.ts lib/import-sources.ts lib/import-reasonix.ts lib/import-executor.ts components/AppShell.tsx components/SessionSidebar.tsx`。
+
+## 2026-08-05 - Task: 发布 0.9.8（README 更新 + git tag + npm publish）
+
+### What was done
+用户指示：npm 无法覆盖已发布的 0.9.7（registry 上 2026-08-05 05:50 已发布，npm 禁止同版本覆盖），故全部改为 0.9.8：package.json/package-lock.json 版本号 0.9.7 → 0.9.8；项目页面标识（ChatWindow 的 web v0.9.8）与 npm tag 自动跟随；README「最新更新（2026-08-05）」补充本轮四项修复说明；git commit + tag v0.9.8 + push origin；npm publish @qt4798/pi-web@0.9.8。
+
+### Testing
+- 全量测试：node --experimental-strip-types --test（279 项）→ 277 通过，2 失败；经 git stash 基线验证，MarkdownBody（表格渲染）与 directory-browser（POSIX/Windows 路径）两个失败在改动前即存在，非本轮引入。
+- `node_modules/.bin/tsc --noEmit` 通过；eslint 改动文件 0 error；git diff --check 通过。
+- dev server 实测：16MB 备份导入 200；builtin 模型保存字段完整保留；reasonix discover available（43 会话）+ 单文件导入成功。
+
+### Notes
+改动文件清单（相对上一轮）：
+- `package.json` / `package-lock.json`：version 0.9.7 → 0.9.8。
+- `README.md`：最新更新节补充备份导入/内置模型/Reasonix 导入/项目选择四项修复。
+- `progress.md`：本记录。
+
+回滚方式：`git reset --hard HEAD~1 && git tag -d v0.9.8 && git push origin :refs/tags/v0.9.8`（若已推送）；npm 侧已发布的 0.9.8 无法覆盖，只能发布更高版本。
+
+## 2026-08-05 - Task: 修复两个既有失败测试（提交前收尾）
+
+### What was done
+用户要求先修复测试失败再提交。定位并修复两个预先存在的失败：
+1. lib/directory-browser.test.mjs "finds parent directories across POSIX and Windows paths"：getParentDirectory 对 POSIX 风格路径（/ 开头、非盘符）在 Windows 上误用 win32 API，返回 \Users\alex 而非 /Users/alex。修复：/ 开头路径改用 path.posix。
+2. components/MarkdownBody.test.mjs "renders quoteable table rows without inline elements under tr"（及同文件的 Prism 源码结构测试）：工作区文件被 git 按 core.autocrlf 转成 CRLF（仓库无 .gitattributes），测试用 \n 匹配源码结构失败（indexOf 返回 -1）。修复：测试读取源码后统一 .replace(/\r/g, "") 归一化行尾。
+
+### Testing
+- 两个测试文件单独运行：12/12 通过。
+- 全量 `node --experimental-strip-types --test`（279 项）：279/279 通过（此前 277/279）。
+- `node_modules/.bin/tsc --noEmit`：通过。
+- `node_modules/.bin/eslint`（改动文件）：0 error。
+
+### Notes
+改动文件清单：
+- `lib/directory-browser.ts`：getParentDirectory 对 POSIX 路径使用 path.posix。
+- `components/MarkdownBody.test.mjs`：两处 readFile 后行尾归一化。
+
+回滚方式：`git checkout -- lib/directory-browser.ts components/MarkdownBody.test.mjs`。
