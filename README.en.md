@@ -19,6 +19,11 @@
 - Model, OAuth/API-key, skill, plugin, theme, language, and Git worktree management in the browser.
 - Mobile layout keeps the selected model and send action visible, while long project and repository labels truncate instead of causing horizontal scrolling.
 
+## Latest changes (2026-08-05)
+
+- **Builtin model config persistence fix** — edits to builtin provider models (context window / max output / reasoning / thinking map / name / hidden) now persist as field-level `modelOverrides` instead of whole-model replacement entries, so untouched fields are never reset. All `models.json` mutations are serialized behind a file lock with atomic writes; local saves and the global Save button can no longer overwrite each other.
+- **Draft protection** — switching providers, clicking the global Save, or closing Settings first flushes pending builtin model edits; on failure the draft is kept and an error is shown instead of silently dropping changes. Historical `models[]` configs remain supported with custom/transport fields preserved.
+
 ## Latest changes (2026-08-04)
 
 - **Backup & restore** — a new Backup tab in Settings exports/imports core config, skills, plugins, MCP servers, and sessions (optionally including API keys) as a pi-backup zip; imports remap paths and adapt MCP commands per platform, with per-category selection and per-server skip.
