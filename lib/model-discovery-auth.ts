@@ -35,7 +35,7 @@ export async function resolveModelDiscoveryAuth(
       },
     }, null, 2), "utf8");
     // The file may contain a real API key — restrict access to the owner.
-    chmodSync(modelsPath, 0o600);
+    try { chmodSync(modelsPath, 0o600); } catch { /* Windows: silently ignored */ }
 
     const modelRuntime = await ModelRuntime.create({ modelsPath });
     const loadError = modelRuntime.getError();

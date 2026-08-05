@@ -278,7 +278,8 @@ export function convertReasonixFile(
   filename: string,
 ): ConversionResult {
   const content = readFileSync(filePath, "utf-8");
-  const lines = content.trim().split("\n").filter(l => l.trim());
+  // Split on LF, then strip optional trailing CR (Windows CRLF → Unix LF compatibility).
+  const lines = content.trim().split("\n").map(l => l.replace(/\r$/, "")).filter(l => l.trim());
 
   const { timestamp, provider, modelId } = parseReasonixFilename(filename);
   const sessionId = uuidv7();

@@ -217,7 +217,8 @@ export async function DELETE(
         const childPath = join(dir, file);
         try {
           const content = readFileSync(childPath, "utf8");
-          const lines = content.split("\n");
+          // Strip CR to handle Windows CRLF line endings in .jsonl files.
+          const lines = content.split("\n").map(l => l.replace(/\r$/, ""));
           const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
           if (header.type === "session" && header.parentSession === filePath) {
             // Rewrite header with new parentSession

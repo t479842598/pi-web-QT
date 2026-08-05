@@ -17,7 +17,7 @@ function ensureAuthFile(authPath: string): void {
   if (!existsSync(parentDirectory)) mkdirSync(parentDirectory, { recursive: true, mode: 0o700 });
   if (!existsSync(authPath)) {
     writeFileSync(authPath, "{}", AUTH_WRITE_OPTIONS);
-    chmodSync(authPath, 0o600);
+    try { chmodSync(authPath, 0o600); } catch { /* Windows: silently ignored */ }
   }
 }
 
@@ -49,7 +49,7 @@ async function updateStoredCredentials<T>(
     if (changed) {
       throwIfCompromised();
       writeFileSync(authPath, JSON.stringify(data, null, 2), AUTH_WRITE_OPTIONS);
-      chmodSync(authPath, 0o600);
+      try { chmodSync(authPath, 0o600); } catch { /* Windows: silently ignored */ }
       throwIfCompromised();
     }
     return result;

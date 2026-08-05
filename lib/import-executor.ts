@@ -120,12 +120,25 @@ async function runReasonixImport(
     const sessionsDir = join(rsDir, projectName, "sessions");
 
     // 从已有 pi session 获取正确的 cwd（避免 - 转义歧义）
-    let cwd = "/" + projectName.replace(/^-/, "").replace(/-/g, "/");
+    // 优先从已有的 pi session 文件头读取 cwd，fallback 时才用路径名推导。
+    let cwd: string;
+    const inner = projectName.replace(/^-/, "");
+    if (process.platform === "win32") {
+      // Windows: detect drive-letter pattern (e.g. "C-Users-me-project" → C:\Users\me\project)
+      const segments = inner.split("-");
+      if (segments.length >= 2 && /^[a-zA-Z]$/.test(segments[0])) {
+        cwd = segments[0].toUpperCase() + ":\\" + segments.slice(1).join("\\");
+      } else {
+        cwd = "/" + inner.replace(/-/g, "/");
+      }
+    } else {
+      cwd = "/" + inner.replace(/-/g, "/");
+    }
     try {
       const piDir = join(PI_SESSIONS_DIR, piCwdDir);
       const existing = readdirSync(piDir).filter(f => f.endsWith(".jsonl"));
       if (existing.length > 0) {
-        const firstLine = readFileSync(join(piDir, existing[0]), "utf-8").split("\n")[0];
+        const firstLine = readFileSync(join(piDir, existing[0]), "utf-8").split("\n")[0].replace(/\r$/, "");
         const parsed = JSON.parse(firstLine);
         if (parsed.cwd) cwd = parsed.cwd;
       }
