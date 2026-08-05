@@ -40,7 +40,7 @@ export function buildOverrideEntries(
     ) {
       entry.thinkingLevelMap = draft.thinkingLevelMap;
     }
-    if (typeof draft.hidden === "boolean") entry.hidden = draft.hidden;
+    if (draft.hidden === true) entry.hidden = draft.hidden;
     // A dirty model with no meaningful values left marks its overlay for removal.
     entries.push(entry);
   }

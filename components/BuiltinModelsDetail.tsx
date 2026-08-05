@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ThinkingLevelMapEditor } from "./ModelsConfig";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
@@ -54,18 +54,87 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
   const [savedOk, setSavedOk] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  // Refs let us access the latest state in the effect cleanup without
+  // adding them as dependencies (which would cause a save-reload loop).
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
+  const providerIdRef = useRef(providerId);
+  const prevProviderRef = useRef<string | undefined>(undefined);
+
+  /**
+   * Fire-and-forget save that writes dirty drafts for `pid` into models.json.
+   * Called when the user switches away from a provider without explicitly saving.
+   */
+  const autoSave = useCallback(async (
+    pid: string,
+    dirtyIds: Set<string>,
+    currentDrafts: Record<string, Draft>,
+    currentModels: BuiltinModelInfo[],
+  ) => {
+    const entries = [];
+    for (const id of dirtyIds) {
+      const draft = currentDrafts[id];
+      if (!draft) continue;
+      const entry: Record<string, unknown> = { id };
+      const model = currentModels.find((m) => m.id === id);
+      if (draft.name) entry.name = draft.name;
+      else if (model?.name) entry.name = model.name;
+      if (typeof draft.reasoning === "boolean") entry.reasoning = draft.reasoning;
+      const cw = numOrUndefined(draft.contextWindow ?? "");
+      if (cw !== undefined) entry.contextWindow = cw;
+      const mt = numOrUndefined(draft.maxTokens ?? "");
+      if (mt !== undefined) entry.maxTokens = mt;
+      if (draft.thinkingLevelMap && Object.keys(draft.thinkingLevelMap).length > 0) {
+        entry.thinkingLevelMap = draft.thinkingLevelMap;
+      }
+      if (draft.hidden === true) entry.hidden = true;
+      entries.push(entry);
+    }
+    if (entries.length === 0) return;
+
+    try {
+      const res = await fetch("/api/models-config");
+      const current = (await res.json()) as { providers?: Record<string, Record<string, unknown>> };
+      const providers = current.providers ?? {};
+      const dirtyIdSet = new Set([...dirtyIds]);
+      const kept = Array.isArray(providers[pid]?.models)
+        ? (providers[pid].models as Array<Record<string, unknown>>).filter(
+            (item) => !dirtyIdSet.has(String(item.id)),
+          )
+        : [];
+      const merged = [...kept, ...entries.filter((e) => Object.keys(e).length > 1)];
+      const nextProvider = merged.length > 0
+        ? { ...(providers[pid] ?? {}), models: merged }
+        : undefined;
+      const next = { ...providers };
+      if (nextProvider) next[pid] = nextProvider;
+      else delete next[pid];
+
+      await fetch("/api/models-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providers: next }),
+      });
+    } catch {
+      // Best-effort; silently ignore failures during auto-save.
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetch(`/api/models-config/builtin?provider=${encodeURIComponent(providerId)}`)
-      .then((r) => r.json())
-      .then((d: BuiltinModelsResponse) => {
+
+    const doLoad = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const r = await fetch(`/api/models-config/builtin?provider=${encodeURIComponent(providerId)}`);
+        const d: BuiltinModelsResponse = await r.json();
         if (cancelled) return;
-        if (d.error) {
-          setError(d.error);
-          return;
-        }
+        if (d.error) { setError(d.error); return; }
         setModels(d.models);
         const initial: Record<string, Draft> = {};
         for (const model of d.models) {
@@ -81,11 +150,22 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
         }
         setDrafts(initial);
         setDirty(new Set());
-      })
-      .catch(() => setError(String(t("desktop.builtinModelsLoadFailed"))))
-      .finally(() => {
+      } catch {
+        if (!cancelled) setError(String(t("desktop.builtinModelsLoadFailed")));
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    };
+
+    // Auto-save dirty changes from the previous provider before switching.
+    const prev = prevProviderRef.current;
+    if (prev !== undefined && prev !== providerId && dirtyRef.current.size > 0) {
+      autoSave(prev, dirtyRef.current, draftsRef.current, modelsRef.current)
+        .catch(() => {}); // fire-and-forget; best-effort save
+    }
+    prevProviderRef.current = providerId;
+
+    void doLoad();
     return () => { cancelled = true; };
   }, [providerId, t]);
 
