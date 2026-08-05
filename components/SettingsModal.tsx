@@ -1,17 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { ChatCenteredText, Cpu, Database, Monitor, Plug, Stack, X } from "@phosphor-icons/react";
+import { ChatCenteredText, Cpu, Database, DownloadSimple, Monitor, Plug, Stack, X } from "@phosphor-icons/react";
 import { BackupConfig } from "./BackupConfig";
 import { ChatConfig } from "./ChatConfig";
 import { DisplayConfig } from "./DisplayConfig";
+import { ImportSessionsConfig } from "./ImportSessionsConfig";
 import { ModelsConfig } from "./ModelsConfig";
 import { PluginsConfig } from "./PluginsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 
-export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins" | "backup";
+export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins" | "backup" | "import";
 
 interface SettingsModalProps {
   initialTab?: SettingsTab;
@@ -20,6 +21,7 @@ interface SettingsModalProps {
   onCloseAction: () => void;
   onModelsSavedAction: () => void;
   onSessionReloadedAction: () => void;
+  onSessionsChanged?: () => void;
 }
 
 const tabs: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
@@ -29,6 +31,7 @@ const tabs: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
   { id: "skills", labelKey: "desktop.skills", Icon: Stack },
   { id: "plugins", labelKey: "desktop.plugins", Icon: Plug },
   { id: "backup", labelKey: "desktop.backup", Icon: Database },
+  { id: "import", labelKey: "desktop.importSessions", Icon: DownloadSimple },
 ];
 
 export function SettingsModal({
@@ -38,6 +41,7 @@ export function SettingsModal({
   onCloseAction,
   onModelsSavedAction,
   onSessionReloadedAction,
+  onSessionsChanged,
 }: SettingsModalProps) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -196,6 +200,9 @@ export function SettingsModal({
           )}
           <div style={{ display: activeTab === "backup" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <BackupConfig cwd={cwd} />
+          </div>
+          <div style={{ display: activeTab === "import" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
+            <ImportSessionsConfig onSessionsChanged={onSessionsChanged} />
           </div>
         </div>
       </section>

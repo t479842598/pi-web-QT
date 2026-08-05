@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, CaretDown, CaretRight, Check, FolderOpen, GitBranch, Lightning, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash, UploadSimple } from "@phosphor-icons/react";
+import { ArrowClockwise, CaretDown, CaretRight, Check, DownloadSimple, FolderOpen, GitBranch, Lightning, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash, UploadSimple } from "@phosphor-icons/react";
 import type { SessionInfo } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
@@ -106,9 +106,15 @@ function getRecentProjects(sessions: SessionInfo[]): string[] {
     .map(([root]) => root);
 }
 
-/** Substitute the home dir prefix with ~ (no path truncation — see PathLabel) */
+/** Substitute the home dir prefix with ~ (no path truncation — see PathLabel). */
 function displayCwd(cwd: string, homeDir?: string): string {
-  return (homeDir && cwd.startsWith(homeDir)) ? "~" + cwd.slice(homeDir.length) : cwd;
+  if (!homeDir) return cwd;
+  // Windows paths are case-insensitive; compare lowercased.
+  const normCwd = cwd.replace(/\\/g, "/").toLowerCase();
+  const normHome = homeDir.replace(/\\/g, "/").toLowerCase();
+  if (!normCwd.startsWith(normHome)) return cwd;
+  const suffix = cwd.slice(homeDir.length);
+  return "~" + (suffix.startsWith("/") || suffix.startsWith("\\") ? suffix : suffix);
 }
 
 function pathBaseName(path: string): string {
@@ -119,10 +125,10 @@ function pathBaseName(path: string): string {
  *  ~/pi-cwd-<YYYYMMDD> (same shape the server uses to seed the allow-list). */
 function isQuickWorkspace(cwd: string, homeDir?: string): boolean {
   if (!homeDir) return false;
-  const normalizedCwd = cwd.replace(/\\/g, "/");
-  const normalizedHome = homeDir.replace(/\\/g, "/");
-  if (!normalizedCwd.startsWith(normalizedHome)) return false;
-  const firstSegment = normalizedCwd.slice(normalizedHome.length).replace(/^\/+/, "").split("/")[0] ?? "";
+  const normCwd = cwd.replace(/\\/g, "/").toLowerCase();
+  const normHome = homeDir.replace(/\\/g, "/").toLowerCase();
+  if (!normCwd.startsWith(normHome)) return false;
+  const firstSegment = normCwd.slice(normHome.length).replace(/^\/+/, "").split("/")[0] ?? "";
   return /^pi-cwd-\d{8}$/.test(firstSegment);
 }
 
@@ -1039,8 +1045,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </button>
         </div>
 
-        {/* CWD picker */}
-        {!hasWorkspaceControlsHosts && <div ref={dropdownRef} style={{ position: "relative" }}>
+        {/* CWD picker — always show when no project is selected, even if portal hosts
+            exist, because the portaled content is hidden when showWorkspaceControls
+            is false (no project). */}
+        {(!hasWorkspaceControlsHosts || !selectedCwd) && <div ref={dropdownRef} style={{ position: "relative" }}>
           <button
             onClick={() => setDropdownOpen((v) => !v)}
             title={selectedProject ?? selectedCwd ?? ""}
@@ -2105,6 +2113,14 @@ function SessionItem({
                 >
                   <GitBranch size={9} weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" />
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.worktreeBranch}</span>
+                </span>
+              )}
+              {session.importedFrom && (
+                <span style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--text-dim)", minWidth: 0, overflow: "hidden" }}>
+                  <DownloadSimple size={9} weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {session.importedFrom === "reasonix" ? (t("desktop.importFromReasonix") ?? "来自 Reasonix") : session.importedFrom}
+                  </span>
                 </span>
               )}
             </div>

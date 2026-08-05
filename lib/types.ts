@@ -7,6 +7,8 @@ export interface SessionHeader {
   timestamp: string;
   cwd: string;
   parentSession?: string;
+  /** Source tool when this session was imported (e.g. "reasonix", "codex") */
+  importedFrom?: string;
 }
 
 export interface SessionEntryBase {
@@ -298,6 +300,8 @@ export interface SessionInfo {
   projectRoot?: string;
   /** Branch name when cwd is a linked git worktree (not the main checkout) */
   worktreeBranch?: string;
+  /** Source tool when this session was imported (e.g. "reasonix", "codex") */
+  importedFrom?: string;
 }
 
 export interface SessionContext {

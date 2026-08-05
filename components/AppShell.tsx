@@ -770,6 +770,7 @@ export function AppShell() {
         }}
         onModelsSavedAction={() => setModelsRefreshKey((k) => k + 1)}
         onSessionReloadedAction={() => setSessionKey((k) => k + 1)}
+        onSessionsChanged={() => setRefreshKey((k) => k + 1)}
       />
     )}
     </div>
