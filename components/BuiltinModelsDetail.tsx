@@ -28,6 +28,7 @@ interface Draft {
   contextWindow?: string;
   maxTokens?: string;
   thinkingLevelMap?: Record<string, string | null>;
+  hidden?: boolean;
 }
 
 function numOrUndefined(value: string): number | undefined {
@@ -74,6 +75,7 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
             reasoning: typeof ov.reasoning === "boolean" ? ov.reasoning : model.reasoning,
             contextWindow: typeof ov.contextWindow === "number" ? String(ov.contextWindow) : model.contextWindow != null ? String(model.contextWindow) : "",
             maxTokens: typeof ov.maxTokens === "number" ? String(ov.maxTokens) : model.maxTokens != null ? String(model.maxTokens) : "",
+            hidden: typeof ov.hidden === "boolean" ? ov.hidden : false,
             thinkingLevelMap: (ov.thinkingLevelMap as Draft["thinkingLevelMap"]) ?? model.thinkingLevelMap,
           };
         }
@@ -117,6 +119,7 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
         if (draft.thinkingLevelMap && Object.keys(draft.thinkingLevelMap).length > 0) {
           entry.thinkingLevelMap = draft.thinkingLevelMap;
         }
+        if (typeof draft.hidden === "boolean") entry.hidden = draft.hidden;
         entries.push(entry);
       }
 
@@ -215,6 +218,14 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
                       onChange={(e) => patch(model.id, { name: e.target.value.trim() || undefined })}
                       style={{ flex: 1, minWidth: 0, padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
                     />
+                    <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, color: draft.hidden ? "#f87171" : "var(--text-muted)", cursor: "pointer", whiteSpace: "nowrap", marginLeft: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={draft.hidden === true}
+                        onChange={(e) => patch(model.id, { hidden: e.target.checked || undefined })}
+                      />
+                      {t("desktop.builtinModelsHide")}
+                    </label>
                   </label>
                   <div style={{ display: "flex", gap: 16, flexWrap: "wrap", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "flex-start" : "center" }}>
                     <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", cursor: "pointer" }}>

@@ -84,6 +84,7 @@ export const enLocale = {
     "desktop.builtinModelsReasoning": "Reasoning model",
     "desktop.builtinModelsThinking": "Thinking levels (thinkingLevelMap)",
     "desktop.builtinModelsDirty": "{count} unsaved change(s)",
+    "desktop.builtinModelsHide": "Hide this model",
     "desktop.inputShortcut": "Input shortcut",
     "desktop.inputShortcutDescription": "Choose how to send messages with the Enter key.",
     "desktop.useCtrlEnter": "Ctrl+Enter to send",

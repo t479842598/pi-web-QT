@@ -84,6 +84,7 @@ export const zhCNLocale = {
     "desktop.builtinModelsReasoning": "思考模型",
     "desktop.builtinModelsThinking": "思考强度（thinkingLevelMap）",
     "desktop.builtinModelsDirty": "{count} 处未保存修改",
+    "desktop.builtinModelsHide": "隐藏此模型",
     "desktop.inputShortcut": "输入快捷键",
     "desktop.inputShortcutDescription": "选择使用 Enter 键发送消息的方式。",
     "desktop.useCtrlEnter": "使用 Ctrl+Enter 发送",

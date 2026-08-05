@@ -5,10 +5,12 @@
  */
 
 export interface OverrideDraft {
+  name?: string;
   reasoning?: boolean;
   contextWindow?: number;
   maxTokens?: number;
   thinkingLevelMap?: Record<string, string | null>;
+  hidden?: boolean;
 }
 
 export type OverrideEntry = Record<string, unknown> & OverrideDraft & { id: string };
@@ -23,6 +25,7 @@ export function buildOverrideEntries(
     const draft = drafts[id];
     if (!draft) continue;
     const entry: OverrideEntry = { id };
+    if (typeof draft.name === "string" && draft.name.length > 0) entry.name = draft.name;
     if (typeof draft.reasoning === "boolean") entry.reasoning = draft.reasoning;
     if (typeof draft.contextWindow === "number" && draft.contextWindow > 0) {
       entry.contextWindow = draft.contextWindow;
@@ -37,6 +40,7 @@ export function buildOverrideEntries(
     ) {
       entry.thinkingLevelMap = draft.thinkingLevelMap;
     }
+    if (typeof draft.hidden === "boolean") entry.hidden = draft.hidden;
     // A dirty model with no meaningful values left marks its overlay for removal.
     entries.push(entry);
   }

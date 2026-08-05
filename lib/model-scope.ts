@@ -5,6 +5,7 @@ import {
   type ScopedModel,
 } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { readModelsJson } from "./settings-title-model";
 
 /**
  * Uses pi's resolver so pi-web accepts the same enabledModels globs, fuzzy
@@ -41,37 +42,49 @@ export async function resolveVisibleModels(
   modelRuntime: ModelRuntime,
   patterns: string[] | undefined,
 ): Promise<ModelScopeResult> {
-  const cleanedPatterns = (patterns ?? []).map((pattern) => pattern.trim()).filter(Boolean);
-  if (cleanedPatterns.length === 0) {
-    return {
-      visible: await modelRuntime.getAvailable(),
-      scopedModels: [],
-      thinkingLevelPins: {},
-      warnings: [],
-    };
-  }
-
-  const { scopedModels, diagnostics } = await resolveModelScopeWithDiagnostics(cleanedPatterns, modelRuntime);
-  const warnings = diagnostics.map((diagnostic) => diagnostic.message);
-  if (scopedModels.length === 0) {
-    return {
-      visible: await modelRuntime.getAvailable(),
-      scopedModels: [],
-      thinkingLevelPins: {},
-      warnings,
-    };
-  }
-
-  const thinkingLevelPins: Record<string, string> = {};
-  for (const scopedModel of scopedModels) {
-    if (scopedModel.thinkingLevel) {
-      thinkingLevelPins[`${scopedModel.model.provider}/${scopedModel.model.id}`] = scopedModel.thinkingLevel;
+  const modelsJson = readModelsJson();
+  const providers = (modelsJson.providers ?? {}) as Record<string, { models?: unknown }>;
+  const hiddenSet = new Set<string>();
+  for (const [pid, entry] of Object.entries(providers)) {
+    const models = (entry as { models?: Array<Record<string, unknown>> })?.models;
+    if (!Array.isArray(models)) continue;
+    for (const m of models) {
+      if (typeof m.id === "string" && m.hidden === true) {
+        hiddenSet.add(`${pid}/${m.id}`);
+      }
     }
   }
 
+  const cleanedPatterns = (patterns ?? []).map((pattern) => pattern.trim()).filter(Boolean);
+  let visible: readonly Model<Api>[] = [];
+  let scopedModels: readonly ScopedModel[] = [];
+  const thinkingLevelPins: Record<string, string> = {};
+  const warnings: string[] = [];
+
+  if (cleanedPatterns.length === 0) {
+    visible = await modelRuntime.getAvailable();
+  } else {
+    const result = await resolveModelScopeWithDiagnostics(cleanedPatterns, modelRuntime);
+    scopedModels = result.scopedModels;
+    visible = result.scopedModels.length > 0
+      ? result.scopedModels.map((s) => s.model)
+      : await modelRuntime.getAvailable();
+    warnings.push(...result.diagnostics.map((d) => d.message));
+    for (const scopedModel of scopedModels) {
+      if (scopedModel.thinkingLevel) {
+        thinkingLevelPins[`${scopedModel.model.provider}/${scopedModel.model.id}`] = scopedModel.thinkingLevel;
+      }
+    }
+  }
+
+  // Filter out hidden models
+  visible = visible.filter((model) => !hiddenSet.has(`${model.provider}/${model.id}`));
+
   return {
-    visible: scopedModels.map((scopedModel) => scopedModel.model),
-    scopedModels,
+    visible,
+    scopedModels: visible.length === scopedModels.length ? scopedModels : scopedModels.filter(
+      (s) => !hiddenSet.has(`${s.model.provider}/${s.model.id}`),
+    ),
     thinkingLevelPins,
     warnings,
   };

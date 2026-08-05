@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.13 — 2026-08-05
+
+### 修复
+- **内置模型属性修改保存不生效** — 上下文窗口、最大 tokens 等属性编辑后未持久化：`OverrideDraft` 接口补全 `name`/`hidden` 字段，`buildOverrideEntries` 同步写入。
+- **内置模型隐藏** — 新增"隐藏此模型"开关，勾选后该模型将不出现在模型选择器中；隐藏状态写入 `models.json` 的 overlay 条目，通过 `resolveVisibleModels` 全局过滤。
+- **隐藏模型过滤** — `lib/model-scope.ts` 在 visible model list 中过滤掉 `hidden: true` 的模型。
+
 ## 0.9.12 — 2026-08-05
 
 ### 修复
