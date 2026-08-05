@@ -23,6 +23,7 @@ interface BuiltinModelsResponse {
 }
 
 interface Draft {
+  name?: string;
   reasoning?: boolean;
   contextWindow?: string;
   maxTokens?: string;
@@ -69,6 +70,7 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
         for (const model of d.models) {
           const ov = d.overrides[model.id] ?? {};
           initial[model.id] = {
+            name: typeof ov.name === "string" && ov.name.length > 0 ? ov.name : model.name,
             reasoning: typeof ov.reasoning === "boolean" ? ov.reasoning : model.reasoning,
             contextWindow: typeof ov.contextWindow === "number" ? String(ov.contextWindow) : model.contextWindow != null ? String(model.contextWindow) : "",
             maxTokens: typeof ov.maxTokens === "number" ? String(ov.maxTokens) : model.maxTokens != null ? String(model.maxTokens) : "",
@@ -105,7 +107,8 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
         if (!draft) continue;
         const entry: Record<string, unknown> = { id };
         const model = models.find((m) => m.id === id);
-        if (model?.name) entry.name = model.name;
+        if (draft.name) entry.name = draft.name;
+        else if (model?.name) entry.name = model.name;
         if (typeof draft.reasoning === "boolean") entry.reasoning = draft.reasoning;
         const cw = numOrUndefined(draft.contextWindow ?? "");
         if (cw !== undefined) entry.contextWindow = cw;
@@ -185,7 +188,7 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
                   onClick={() => setExpanded(isOpen ? null : model.id)}
                   style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text)", fontSize: 12, fontWeight: 600, padding: 0, textAlign: "left" }}
                 >
-                  {model.name || model.id}
+                  {draft.name || model.name || model.id}
                   {isDirty && <span style={{ color: "var(--accent)", marginLeft: 6 }}>•</span>}
                 </button>
                 <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
@@ -203,6 +206,16 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
 
               {isOpen && (
                 <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", width: "100%" }}>
+                    {t("desktop.modelsName")}
+                    <input
+                      type="text"
+                      value={draft.name ?? ""}
+                      placeholder={model.name || model.id}
+                      onChange={(e) => patch(model.id, { name: e.target.value.trim() || undefined })}
+                      style={{ flex: 1, minWidth: 0, padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                    />
+                  </label>
                   <div style={{ display: "flex", gap: 16, flexWrap: "wrap", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "flex-start" : "center" }}>
                     <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", cursor: "pointer" }}>
                       <input
