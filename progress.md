@@ -1066,3 +1066,26 @@ GitHub 已推送 d8c3832（main + tag v0.9.8）。npm 发布前发现 build 障�
 - 未改 package.json 的 build script（保持 `env -u TURBOPACK next build --webpack`，作者 mac 环境可用）；Windows 本地构建/发布请用 `next build`（Turbopack）。
 - 改动文件：`progress.md`（本记录）。
 - 回滚：npm 0.9.8 已发布不可撤回（可发 0.9.9）；git 回滚 `git reset --hard d8c3832~1`。
+
+## 2026-08-05 - Task: v0.9.8 Release + 安全修复 + 发布 0.9.9
+
+### What was done
+1. GitHub Releases 停在 v0.9.3 的原因：Release 不随 tag 自动生成。用 git 凭据管理器 token（git credential fill，未回显）通过 GitHub API 创建 v0.9.8 Release 成功。
+2. review 审查发现两个 should-fix 并修复（lib/import-sources.ts）：reasonixProjectSessions 拒绝含路径分隔符/`.`/`..` 段的 projectName（防路径穿越逃出 ~/.reasonix，输入来自 POST /api/import/execute 请求体）；发现层 PI_SESSIONS_DIR 改用 getAgentDir() 与写入层统一（兼容 PI_CODING_AGENT_DIR）。
+3. github.com 直连被网络阻断（api.github.com 正常），用户确认使用本地代理 7890（Clash 混合端口），设置仓库级 git http.proxy 后推送成功。
+4. 用户确认 npm 发布 0.9.9（0.9.8 已发布不可覆盖，安全修复随 0.9.9 发布）：npm version 0.9.9 --no-git-tag-version + Turbopack next build + tag v0.9.9 + npm publish + v0.9.9 Release。
+
+### Testing
+- `node_modules/.bin/tsc --noEmit`：通过。
+- 全量 node --test：fail 0（279 项）。
+- Turbopack `next build`：成功（含 proxy middleware）。
+- git push（代理 7890）：8949968..f91cd41 成功。
+- 代理验证：curl -x http://127.0.0.1:7890 https://github.com → HTTP 200。
+
+### Notes
+改动文件清单：
+- `lib/import-sources.ts`：projectName 路径穿越校验 + PI_SESSIONS_DIR 用 getAgentDir()。
+- `package.json` / `package-lock.json`：version 0.9.8 → 0.9.9。
+- `progress.md`：本记录。
+
+回滚方式：`git reset --hard f91cd41~1`；npm 0.9.9 已发布不可撤回。
