@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.10 — 2026-08-05
+
+### 关键修复
+- **修复 npm 安装后启动崩溃** — 0.9.9 发布时误用了 Turbopack 构建产物，Turbopack 将 `serverExternalPackages` 中的 undici 映射为 `undici-<hash>` 虚拟模块名，导致 `next start` 时找不到该模块（`Cannot find module 'undici-43b6dae3674542ed'`）。本次重新用 `npm run build`（`env -u TURBOPACK next build --webpack`）构建，undici 引用恢复为正常的 `require("undici")`。
+
+## 0.9.9 — 2026-08-05
+
+### 安全修复
+- **Reasonix 导入路径穿越** — 拒绝包含 `..` 或 `%2e%2e` 等路径穿越字符的项目名，防止写入 sessions 目录之外的文件。
+- **PI_SESSIONS_DIR 对齐** — 会话目录推导改用 `getAgentDir()`，与 pi agent 内部逻辑保持一致。
+
 ## 0.9.7 — 2026-08-05
 
 ### 安全修复

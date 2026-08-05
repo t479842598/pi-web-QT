@@ -1,5 +1,21 @@
 # 进度日志
 
+## 2026-08-05 - Task: 修复 npm 安装后启动崩溃 (undici 虚拟模块)
+
+### What was done
+0.9.9 发布到 npm 时误用了 Turbopack 构建产物（.next 中存在 `[turbopack]_runtime.js`），Turbopack 将 `serverExternalPackages` 中的 undici 映射为 `undici-43b6dae3674542ed` 虚拟模块名，导致 `next start` 时 `Cannot find module 'undici-43b6dae3674542ed'`。用 `npm run build`（Webpack）重新构建后 undici 引用恢复正常，版本号升至 0.9.10 发布。
+
+### Testing
+- `node --check .next/server/instrumentation.js` 通过
+- grep 确认产物中无 `undici-<hash>` 哈希后缀
+- `npm run build` 全量通过（Webpack + TypeScript）
+
+### Notes
+改动文件清单：
+- `package.json`：版本号 0.9.9 → 0.9.10
+- `CHANGELOG.md`：新增 0.9.10（修复 Turbopack 产物误发）和 0.9.9（Reasonix 路径穿越修复、PI_SESSIONS_DIR 对齐）条目
+回滚方式：`git checkout v0.9.9` 即可回退。
+
 ## 2026-08-03 - Task: 移植 pi-web-desktop v0.7.16 的 UI/UX 到当前项目
 
 ### What was done
