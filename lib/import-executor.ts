@@ -6,11 +6,10 @@
  */
 
 import { join } from "path";
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "fs";
-import { homedir } from "os";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from "fs";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { reasonixProjectsDir, reasonixProjectToPiCwdDir } from "./import-sources";
 import { convertReasonixFile, serializePiEntries } from "./import-reasonix";
-import { readdirSync } from "fs";
 import { invalidateSessionListCache } from "./session-reader";
 
 // Need a local helper since isReasonixMainSession isn't exported
@@ -54,7 +53,7 @@ function getJobs(): Map<string, ImportJob> {
   return globalThis.__piImportJobs;
 }
 
-const PI_SESSIONS_DIR = join(homedir(), ".pi", "agent", "sessions");
+const PI_SESSIONS_DIR = join(getAgentDir(), "sessions");
 const JOB_TTL_MS = 30 * 60 * 1000; // 30 min
 
 // ============================================================================

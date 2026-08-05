@@ -304,7 +304,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
             <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
               <span style={{ color: "var(--text)", fontWeight: 600 }}>{t("desktop.backupManifest")}:</span>{" "}
               {new Date(preview.preview.manifest.createdAt).toLocaleString()} · {platformLabel(preview.preview.manifest.sourcePlatform)} →
-              {platformLabel(navigator.platform.includes("Win") ? "win32" : "darwin")} · pi-web {preview.preview.manifest.piWebVersion}
+              {platformLabel(navigator.platform.includes("Win") ? "win32" : navigator.platform.includes("Linux") ? "linux" : "darwin")} · pi-web {preview.preview.manifest.piWebVersion}
               {preview.preview.manifest.includeSecrets ? "" : ` · ${t("desktop.backupNoSecrets")}`}
             </div>
 

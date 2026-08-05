@@ -11,6 +11,7 @@
 import { homedir } from "os";
 import { join } from "path";
 import { existsSync, readdirSync, statSync } from "fs";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { SessionHeader } from "./types";
 import { readSessionHeader } from "./session-reader";
 
