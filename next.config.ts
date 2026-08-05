@@ -25,7 +25,6 @@ const nextConfig: NextConfig = {
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
-    "undici",
   ],
   async headers() {
     return [

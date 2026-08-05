@@ -1,9 +1,14 @@
 # Changelog
 
+## 0.9.11 — 2026-08-05
+
+### 关键修复
+- **修复 `Cannot find module 'undici'` 启动崩溃** — 将 undici 从 `serverExternalPackages` 中移除，改为由 Webpack 打包进 bundle。npm 全局安装时，macOS `com.apple.provenance` 安全属性阻止在 `node_modules/` 内创建新文件，导致 `serverExternalPackages` 标记的 undici 无法被安装。将 undici 打包进 bundle 彻底消除此运行依赖问题。
+
 ## 0.9.10 — 2026-08-05
 
 ### 关键修复
-- **修复 npm 安装后启动崩溃** — 0.9.9 发布时误用了 Turbopack 构建产物，Turbopack 将 `serverExternalPackages` 中的 undici 映射为 `undici-<hash>` 虚拟模块名，导致 `next start` 时找不到该模块（`Cannot find module 'undici-43b6dae3674542ed'`）。本次重新用 `npm run build`（`env -u TURBOPACK next build --webpack`）构建，undici 引用恢复为正常的 `require("undici")`。
+- **修复 npm 安装后启动崩溃（Turbopack 产物）** — 0.9.9 发布时误用了 Turbopack 构建产物，Turbopack 将 `serverExternalPackages` 中的 undici 映射为 `undici-<hash>` 虚拟模块名，导致 `next start` 时找不到该模块（`Cannot find module 'undici-43b6dae3674542ed'`）。本次重新用 `npm run build`（`env -u TURBOPACK next build --webpack`）构建，undici 引用恢复为正常的 `require("undici")`。但因 macOS `com.apple.provenance` 阻止新文件创建，undici 依赖仍然装不上——此问题在 0.9.11 彻底修复。
 
 ## 0.9.9 — 2026-08-05
 
