@@ -12,7 +12,6 @@ import {
   type RestoreReport,
   type RestoreSelections,
 } from "@/lib/backup";
-import { parseFormDataWithinLimit } from "@/lib/bounded-form-data";
 import { isApiRequestAllowed } from "@/lib/request-security";
 import { getProjectTrustStatus } from "@/lib/project-trust";
 
@@ -88,16 +87,27 @@ export async function POST(req: Request) {
 
   let formData: FormData;
   try {
-    formData = await parseFormDataWithinLimit(req, MAX_UPLOAD_BYTES);
-  } catch (error) {
-    return errorResponse(error, 413);
+    formData = await req.formData();
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to parse form data — the upload may be too large or malformed" },
+      { status: 413 },
+    );
+  }
+
+  // Enforce upload size limit on the parsed file
+  const file = formData.get("file");
+  if (file instanceof File && file.size > MAX_UPLOAD_BYTES) {
+    return NextResponse.json(
+      { error: `File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum is ${MAX_UPLOAD_BYTES / 1024 / 1024}MB.` },
+      { status: 413 },
+    );
   }
 
   const phase = String(formData.get("phase") ?? "parse");
 
   try {
     if (phase === "parse") {
-      const file = formData.get("file");
       if (!(file instanceof File)) return errorResponse("file field required", 400);
       const buffer = Buffer.from(await file.arrayBuffer());
 

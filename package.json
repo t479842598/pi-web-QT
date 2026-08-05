@@ -1,6 +1,6 @@
 {
   "name": "@qt4798/pi-web",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "description": "Web workspace for the pi coding agent",
   "homepage": "https://github.com/t479842598/pi-web-QT#readme",
   "repository": {
@@ -35,6 +35,7 @@
     "start:lan": "next start -H 0.0.0.0 -p 0",
     "lint": "eslint .",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
+    "postinstall": "node bin/fix-pi-agent-undici.js",
     "test": "node --experimental-strip-types --test $(find app components hooks lib -name '*.test.mjs' -print)"
   },
   "dependencies": {
@@ -62,11 +63,15 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "undici": "8.5.0"
+    "undici": "^8.10.0"
   },
   "overrides": {
+    "undici": "^8.10.0",
     "@emoji-mart/react": {
       "react": "$react"
+    },
+    "@earendil-works/pi-coding-agent": {
+      "undici": "^8.10.0"
     }
   },
   "allowScripts": {

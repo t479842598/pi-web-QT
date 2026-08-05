@@ -58,3 +58,6 @@ next-env.d.ts
 ref-repos
 .lrnev/
 .reasonix/
+
+# pi todo tool local state
+/.pi/

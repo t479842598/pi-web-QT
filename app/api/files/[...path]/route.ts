@@ -27,7 +27,6 @@ import {
   parseUploadConflictStrategy,
   validateUploadFileNames,
 } from "@/lib/file-upload";
-import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 
 const IGNORED_NAMES = new Set([
@@ -165,12 +164,9 @@ export async function POST(
 
     let formData: FormData;
     try {
-      formData = await parseFormDataWithinLimit(request, MAX_UPLOAD_REQUEST_BYTES);
-    } catch (error) {
-      if (error instanceof RequestBodyTooLargeError) {
-        return NextResponse.json({ error: "Uploads must total 100MB or less" }, { status: 413 });
-      }
-      throw error;
+      formData = await request.formData();
+    } catch {
+      return NextResponse.json({ error: "Uploads must total 100MB or less" }, { status: 413 });
     }
     const files = formData.getAll("files").filter((entry): entry is File => typeof entry !== "string");
     if (files.some((file) => file.size > MAX_UPLOAD_FILE_BYTES)) {
