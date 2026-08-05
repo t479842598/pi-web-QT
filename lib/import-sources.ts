@@ -81,7 +81,7 @@ export function reasonixProjectToPiCwdDir(projectName: string): string {
 // pi 会话目录 → 发现匹配
 // ============================================================================
 
-const PI_SESSIONS_DIR = join(homedir(), ".pi", "agent", "sessions");
+const PI_SESSIONS_DIR = join(getAgentDir(), "sessions");
 
 function piProjectExists(piCwdDir: string): boolean {
   return existsSync(join(PI_SESSIONS_DIR, piCwdDir));
@@ -160,10 +160,18 @@ export function listImportSources(): ImportSourceInfo[] {
 /**
  * 解析一个 Reasonix 项目名的会话目录与文件列表。
  * 优先 projects/<name>/sessions/（mac 布局），回退到平铺目录中 "<name>-" 前缀文件（Windows/CLI 布局）。
+ * projectName 来自请求体（POST /api/import/execute），此处拒绝路径分隔符与
+ * "." / ".." 段，防止路径穿越逃出 ~/.reasonix。
  */
 export function reasonixProjectSessions(
   projectName: string,
 ): { sessionsDir: string; files: string[]; flat: boolean } | null {
+  if (
+    !projectName ||
+    projectName.split(/[\\/]/).some((seg) => seg === "" || seg === "." || seg === "..")
+  ) {
+    return null;
+  }
   const projectsDir = join(reasonixProjectsDir(), projectName, "sessions");
   if (existsSync(projectsDir)) {
     try {
