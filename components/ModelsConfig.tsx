@@ -98,6 +98,11 @@ type Selection =
   | { type: "oauth"; providerId: string }
   | { type: "apikey"; providerId: string };
 
+type BuiltinFlush = () => Promise<void>;
+type RegisterBuiltinFlush = (providerId: string, flush: BuiltinFlush) => (() => void) | void;
+type BuiltinProviderChange = (provider: Record<string, unknown> | null) => void;
+type RegisterModelsFlush = (flush: BuiltinFlush) => (() => void) | void;
+
 const API_OPTIONS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const;
 
 function useModelTranslation() {
@@ -999,7 +1004,17 @@ function ModelDetail({
 
 // ── OAuth detail ──────────────────────────────────────────────────────────────
 
-function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefresh: () => void }) {
+function OAuthDetail({
+  provider,
+  onRefresh,
+  onRegisterBuiltinFlush,
+  onBuiltinProviderChange,
+}: {
+  provider: OAuthProvider;
+  onRefresh: () => void;
+  onRegisterBuiltinFlush?: RegisterBuiltinFlush;
+  onBuiltinProviderChange?: BuiltinProviderChange;
+}) {
   const t = useModelTranslation();
   const [loginState, setLoginState] = useState<OAuthLoginState>({ phase: "idle" });
   const [inputValue, setInputValue] = useState("");
@@ -1269,14 +1284,28 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
         )}
       </div>
 
-      <BuiltinModelsDetail providerId={provider.id} />
+      <BuiltinModelsDetail
+        providerId={provider.id}
+        onRegisterFlush={onRegisterBuiltinFlush}
+        onConfigChange={onBuiltinProviderChange}
+      />
     </div>
   );
 }
 
 // ── API Key detail ────────────────────────────────────────────────────────────
 
-function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRefresh: () => void }) {
+function ApiKeyDetail({
+  provider,
+  onRefresh,
+  onRegisterBuiltinFlush,
+  onBuiltinProviderChange,
+}: {
+  provider: ApiKeyProvider;
+  onRefresh: () => void;
+  onRegisterBuiltinFlush?: RegisterBuiltinFlush;
+  onBuiltinProviderChange?: BuiltinProviderChange;
+}) {
   const t = useModelTranslation();
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1407,7 +1436,11 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
         </button>
       )}
 
-      <BuiltinModelsDetail providerId={provider.id} />
+      <BuiltinModelsDetail
+        providerId={provider.id}
+        onRegisterFlush={onRegisterBuiltinFlush}
+        onConfigChange={onBuiltinProviderChange}
+      />
     </div>
   );
 }
@@ -1550,10 +1583,12 @@ export function ModelsConfig({
   embedded = false,
   onCloseAction,
   onSavedAction,
+  onRegisterFlush,
 }: {
   embedded?: boolean;
   onCloseAction?: () => void;
   onSavedAction?: () => void;
+  onRegisterFlush?: RegisterModelsFlush;
 }) {
   const t = useModelTranslation();
   const isMobile = useIsMobile();
@@ -1566,19 +1601,35 @@ export function ModelsConfig({
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [apiKeyProviders, setApiKeyProviders] = useState<ApiKeyProvider[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [providerListsReady, setProviderListsReady] = useState({ oauth: false, apiKey: false });
+  const configRef = useRef<ModelsJson>({ providers: {} });
+  const builtinFlushesRef = useRef<Map<string, BuiltinFlush>>(new Map());
+  const configVersionRef = useRef(0);
+  const selectionBusyRef = useRef(false);
+  configRef.current = config;
+
+  const updateConfigState = useCallback((updater: (previous: ModelsJson) => ModelsJson) => {
+    const next = updater(configRef.current);
+    configRef.current = next;
+    configVersionRef.current += 1;
+    setConfig(next);
+    return next;
+  }, []);
 
   const loadOAuthProviders = useCallback(() => {
     fetch("/api/auth/providers")
       .then((r) => r.json())
       .then((d: { providers: OAuthProvider[] }) => setOauthProviders(d.providers))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setProviderListsReady((previous) => ({ ...previous, oauth: true })));
   }, []);
 
   const loadApiKeyProviders = useCallback(() => {
     fetch("/api/auth/all-providers")
       .then((r) => r.json())
       .then((d: { providers: ApiKeyProvider[] }) => setApiKeyProviders(d.providers))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setProviderListsReady((previous) => ({ ...previous, apiKey: true })));
   }, []);
 
   const refreshAuthenticationProviders = useCallback(() => {
@@ -1586,39 +1637,100 @@ export function ModelsConfig({
     loadApiKeyProviders();
   }, [loadOAuthProviders, loadApiKeyProviders]);
 
+  const registerBuiltinFlush = useCallback<RegisterBuiltinFlush>((providerId, flush) => {
+    builtinFlushesRef.current.set(providerId, flush);
+    return () => {
+      if (builtinFlushesRef.current.get(providerId) === flush) {
+        builtinFlushesRef.current.delete(providerId);
+      }
+    };
+  }, []);
+
+  const flushBuiltinModels = useCallback(async () => {
+    const flushes = [...builtinFlushesRef.current.values()];
+    for (const flush of flushes) await flush();
+  }, []);
+
+  useEffect(() => {
+    if (!onRegisterFlush) return undefined;
+    return onRegisterFlush(flushBuiltinModels) ?? undefined;
+  }, [flushBuiltinModels, onRegisterFlush]);
+
+  const updateBuiltinProvider = useCallback((providerId: string, provider: Record<string, unknown> | null) => {
+    updateConfigState((previous) => {
+      const providers = { ...(previous.providers ?? {}) };
+      if (provider) providers[providerId] = provider as ProviderEntry;
+      else delete providers[providerId];
+      return { ...previous, providers };
+    });
+    onSavedAction?.();
+  }, [onSavedAction, updateConfigState]);
+
+  const selectSelection = useCallback(async (nextSelection: Selection) => {
+    if (selectionBusyRef.current) return;
+    selectionBusyRef.current = true;
+    setSaveError(null);
+    try {
+      await flushBuiltinModels();
+      setSelection(nextSelection);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      selectionBusyRef.current = false;
+    }
+  }, [flushBuiltinModels]);
+
   useEffect(() => {
     fetch("/api/models-config")
       .then((r) => r.json())
       .then((d: ModelsJson) => {
         const normalized = d.providers ? d : { ...d, providers: {} };
+        configRef.current = normalized;
+        configVersionRef.current += 1;
         setConfig(normalized);
-        const keys = Object.keys(normalized.providers ?? {});
-        if (keys.length > 0) setSelection({ type: "provider", name: keys[0] });
       })
-      .catch(() => setConfig({ providers: {} }))
+      .catch(() => {
+        const empty = { providers: {} };
+        configRef.current = empty;
+        configVersionRef.current += 1;
+        setConfig(empty);
+      })
       .finally(() => setLoading(false));
     refreshAuthenticationProviders();
   }, [refreshAuthenticationProviders]);
 
-  const addCustomProvider = useCallback(() => {
-    let finalName = "new-provider";
-    let n = 1;
-    while (config.providers?.[finalName]) finalName = `new-provider-${n++}`;
-    setConfig((prev) => ({ ...prev, providers: { ...(prev.providers ?? {}), [finalName]: { api: "openai-completions" } } }));
-    setSelection({ type: "provider", name: finalName });
-  }, [config.providers]);
+  const addCustomProvider = useCallback(async () => {
+    if (selectionBusyRef.current) return;
+    selectionBusyRef.current = true;
+    setSaveError(null);
+    try {
+      await flushBuiltinModels();
+      let finalName = "new-provider";
+      let n = 1;
+      while (configRef.current.providers?.[finalName]) finalName = `new-provider-${n++}`;
+      updateConfigState((previous) => ({
+        ...previous,
+        providers: { ...(previous.providers ?? {}), [finalName]: { api: "openai-completions" } },
+      }));
+      setSelection({ type: "provider", name: finalName });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      selectionBusyRef.current = false;
+    }
+  }, [flushBuiltinModels, updateConfigState]);
 
   const updateProvider = useCallback((name: string, p: ProviderEntry) => {
-    setConfig((prev) => ({ ...prev, providers: { ...(prev.providers ?? {}), [name]: p } }));
-  }, []);
+    updateConfigState((previous) => ({ ...previous, providers: { ...(previous.providers ?? {}), [name]: p } }));
+  }, [updateConfigState]);
 
   const renameProvider = useCallback((oldName: string, newName: string) => {
-    setConfig((prev) => {
-      const entries = Object.entries(prev.providers ?? {});
+    updateConfigState((previous) => {
+      const entries = Object.entries(previous.providers ?? {});
       const idx = entries.findIndex(([k]) => k === oldName);
-      if (idx === -1) return prev;
+      if (idx === -1) return previous;
       entries[idx] = [newName, entries[idx][1]];
-      return { ...prev, providers: Object.fromEntries(entries) };
+      return { ...previous, providers: Object.fromEntries(entries) };
     });
     setSelection((prev) => {
       if (!prev) return prev;
@@ -1626,37 +1738,41 @@ export function ModelsConfig({
       if (prev.type === "model" && prev.providerName === oldName) return { ...prev, providerName: newName };
       return prev;
     });
-  }, []);
+  }, [updateConfigState]);
 
   const deleteProvider = useCallback((name: string) => {
-    setConfig((prev) => {
-      const providers = { ...(prev.providers ?? {}) };
+    const next = updateConfigState((previous) => {
+      const providers = { ...(previous.providers ?? {}) };
       delete providers[name];
-      return { ...prev, providers };
+      return { ...previous, providers };
     });
-    setConfig((prev) => {
-      const remaining = Object.keys(prev.providers ?? {});
-      setSelection(remaining.length > 0 ? { type: "provider", name: remaining[0] } : null);
-      return prev;
-    });
-  }, []);
+    const remaining = Object.keys(next.providers ?? {});
+    setSelection(remaining.length > 0 ? { type: "provider", name: remaining[0] } : null);
+  }, [updateConfigState]);
 
-  const addModel = useCallback((providerName: string) => {
-    setConfig((prev) => {
-      const provider = prev.providers?.[providerName] ?? {};
-      const models = [...(provider.models ?? []), { id: "" }];
-      return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models } } };
-    });
-    setConfig((prev) => {
-      const idx = (prev.providers?.[providerName]?.models?.length ?? 1) - 1;
-      setSelection({ type: "model", providerName, index: idx });
-      return prev;
-    });
-  }, []);
+  const addModel = useCallback(async (providerName: string) => {
+    if (selectionBusyRef.current) return;
+    selectionBusyRef.current = true;
+    setSaveError(null);
+    try {
+      await flushBuiltinModels();
+      const next = updateConfigState((previous) => {
+        const provider = previous.providers?.[providerName] ?? {};
+        const models = [...(provider.models ?? []), { id: "" }];
+        return { ...previous, providers: { ...(previous.providers ?? {}), [providerName]: { ...provider, models } } };
+      });
+      const index = (next.providers?.[providerName]?.models?.length ?? 1) - 1;
+      setSelection({ type: "model", providerName, index });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      selectionBusyRef.current = false;
+    }
+  }, [flushBuiltinModels, updateConfigState]);
 
   const addDiscoveredModels = useCallback((providerName: string, discovered: DiscoveredModel[]) => {
-    setConfig((prev) => {
-      const provider = prev.providers?.[providerName] ?? {};
+    updateConfigState((previous) => {
+      const provider = previous.providers?.[providerName] ?? {};
       const models = [...(provider.models ?? [])];
       const existingIds = new Set(models.map((model) => model.id));
       for (const discoveredModel of discovered) {
@@ -1664,69 +1780,125 @@ export function ModelsConfig({
         existingIds.add(discoveredModel.id);
         models.push({ id: discoveredModel.id, name: discoveredModel.name });
       }
-      return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models } } };
+      return { ...previous, providers: { ...(previous.providers ?? {}), [providerName]: { ...provider, models } } };
     });
-  }, []);
+  }, [updateConfigState]);
 
   const updateModel = useCallback((providerName: string, index: number, m: ModelEntry) => {
-    setConfig((prev) => {
-      const provider = prev.providers?.[providerName] ?? {};
+    updateConfigState((previous) => {
+      const provider = previous.providers?.[providerName] ?? {};
       const models = [...(provider.models ?? [])];
       models[index] = m;
-      return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models } } };
+      return { ...previous, providers: { ...(previous.providers ?? {}), [providerName]: { ...provider, models } } };
     });
-  }, []);
+  }, [updateConfigState]);
 
-  const removeModel = useCallback((providerName: string, index: number) => {
-    setConfig((prev) => {
-      const provider = prev.providers?.[providerName] ?? {};
-      const models = [...(provider.models ?? [])];
-      models.splice(index, 1);
-      return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models: models.length ? models : undefined } } };
-    });
-    setSelection({ type: "provider", name: providerName });
-  }, []);
-
+  const removeModel = useCallback(async (providerName: string, index: number) => {
+    if (selectionBusyRef.current) return;
+    selectionBusyRef.current = true;
+    setSaveError(null);
+    try {
+      await flushBuiltinModels();
+      updateConfigState((previous) => {
+        const provider = previous.providers?.[providerName] ?? {};
+        const models = [...(provider.models ?? [])];
+        models.splice(index, 1);
+        return { ...previous, providers: { ...(previous.providers ?? {}), [providerName]: { ...provider, models: models.length ? models : undefined } } };
+      });
+      setSelection({ type: "provider", name: providerName });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      selectionBusyRef.current = false;
+    }
+  }, [flushBuiltinModels, updateConfigState]);
   const handleSave = useCallback(async () => {
+    if (saving) return;
     setSaving(true);
     setSaveError(null);
     setSavedOk(false);
     try {
+      await flushBuiltinModels();
+      const snapshot = configRef.current;
       const res = await fetch("/api/models-config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        body: JSON.stringify(snapshot),
       });
-      const d = await res.json() as { success?: boolean; error?: string };
-      if (!res.ok || d.error) setSaveError(d.error ?? `HTTP ${res.status}`);
-      else {
-        setSavedOk(true);
-        onSavedAction?.();
-        setTimeout(() => setSavedOk(false), 2000);
+      const data = await res.json() as { success?: boolean; error?: string; config?: ModelsJson };
+      if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
+      if (data.config) {
+        configRef.current = data.config;
+        configVersionRef.current += 1;
+        setConfig(data.config);
       }
-    } catch (e) {
-      setSaveError(String(e));
+      setSavedOk(true);
+      onSavedAction?.();
+      setTimeout(() => setSavedOk(false), 2000);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
     }
-  }, [config, onSavedAction]);
+  }, [flushBuiltinModels, onSavedAction, saving]);
+
+  const requestClose = useCallback(async () => {
+    try {
+      await flushBuiltinModels();
+      onCloseAction?.();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    }
+  }, [flushBuiltinModels, onCloseAction]);
 
   const providers = Object.entries(config.providers ?? {});
+  const builtinProviderIds = new Set([
+    ...oauthProviders.map((provider) => provider.id),
+    ...apiKeyProviders.map((provider) => provider.id),
+  ]);
+  const customProviders = providers.filter(([providerId]) => !builtinProviderIds.has(providerId));
   const activeOAuth = oauthProviders.filter((p) => p.loggedIn);
   const activeApiKey = apiKeyProviders.filter((p) => p.configured);
 
+  useEffect(() => {
+    if (selection || loading || !providerListsReady.oauth || !providerListsReady.apiKey) return;
+    const firstSelection: Selection | null = activeOAuth[0]
+      ? { type: "oauth", providerId: activeOAuth[0].id }
+      : activeApiKey[0]
+        ? { type: "apikey", providerId: activeApiKey[0].id }
+        : customProviders[0]?.[0]
+          ? { type: "provider", name: customProviders[0][0] }
+          : null;
+    if (firstSelection) setSelection(firstSelection);
+  }, [activeApiKey, activeOAuth, customProviders, loading, providerListsReady.apiKey, providerListsReady.oauth, selection]);
   // Resolve current detail
   const detailContent = (() => {
     if (!selection) return null;
     if (selection.type === "oauth") {
       const p = oauthProviders.find((p) => p.id === selection.providerId);
       if (!p) return null;
-      return <OAuthDetail key={p.id} provider={p} onRefresh={refreshAuthenticationProviders} />;
+      return (
+        <OAuthDetail
+          key={p.id}
+          provider={p}
+          onRefresh={refreshAuthenticationProviders}
+          onRegisterBuiltinFlush={registerBuiltinFlush}
+          onBuiltinProviderChange={(provider) => updateBuiltinProvider(p.id, provider)}
+        />
+      );
     }
     if (selection.type === "apikey") {
       const p = apiKeyProviders.find((p) => p.id === selection.providerId);
       if (!p) return null;
-      return <ApiKeyDetail key={p.id} provider={p} onRefresh={refreshAuthenticationProviders} />;
+      return (
+        <ApiKeyDetail
+          key={p.id}
+          provider={p}
+          onRefresh={refreshAuthenticationProviders}
+          onRegisterBuiltinFlush={registerBuiltinFlush}
+          onBuiltinProviderChange={(provider) => updateBuiltinProvider(p.id, provider)}
+        />
+      );
     }
     if (selection.type === "provider") {
       const provider = config.providers?.[selection.name];
@@ -1753,7 +1925,7 @@ export function ModelsConfig({
         provider={provider}
         model={model}
         onChange={(m) => updateModel(selection.providerName, selection.index, m)}
-        onDelete={() => removeModel(selection.providerName, selection.index)}
+        onDelete={() => { void removeModel(selection.providerName, selection.index); }}
       />
     );
   })();
@@ -1764,7 +1936,7 @@ export function ModelsConfig({
       style={embedded
         ? { display: "flex", flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }
         : { position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (!embedded && e.target === e.currentTarget) onCloseAction?.(); }}
+      onClick={(e) => { if (!embedded && e.target === e.currentTarget) void requestClose(); }}
     >
       <div style={embedded
         ? { flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }
@@ -1776,7 +1948,7 @@ export function ModelsConfig({
               <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{t("desktop.models")}</span>
               <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>~/.pi/agent/models.json</code>
             </div>
-            <button onClick={onCloseAction} aria-label={t("desktop.modelsClose")} title={t("desktop.modelsClose")} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
+            <button onClick={() => { void requestClose(); }} aria-label={t("desktop.modelsClose")} title={t("desktop.modelsClose")} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
           </div>
         )}
 
@@ -1801,7 +1973,7 @@ export function ModelsConfig({
                 return (
                   <div
                     key={p.id}
-                    onClick={() => setSelection({ type: "oauth", providerId: p.id })}
+                    onClick={() => { void selectSelection({ type: "oauth", providerId: p.id }); }}
                     style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 8px", borderRadius: 5, cursor: "pointer", background: isSelected ? "var(--bg-selected)" : "none" }}
                     onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)"; }}
                     onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "none"; }}
@@ -1818,7 +1990,7 @@ export function ModelsConfig({
                 return (
                   <div
                     key={p.id}
-                    onClick={() => setSelection({ type: "apikey", providerId: p.id })}
+                    onClick={() => { void selectSelection({ type: "apikey", providerId: p.id }); }}
                     style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 8px", borderRadius: 5, cursor: "pointer", background: isSelected ? "var(--bg-selected)" : "none" }}
                     onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)"; }}
                     onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "none"; }}
@@ -1830,21 +2002,21 @@ export function ModelsConfig({
               })}
 
               {/* Divider before custom providers, only when there are active managed providers */}
-              {(activeOAuth.length > 0 || activeApiKey.length > 0) && providers.length > 0 && (
+              {(activeOAuth.length > 0 || activeApiKey.length > 0) && customProviders.length > 0 && (
                 <div style={{ margin: "4px 8px", borderTop: "1px solid var(--border)" }} />
               )}
 
               {/* Custom providers */}
               {loading ? (
                 <div style={{ padding: "10px 8px", fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.modelsLoading")}</div>
-              ) : providers.map(([pName, pData]) => {
+              ) : customProviders.map(([pName, pData]) => {
                 const isProviderSelected = selection?.type === "provider" && selection.name === pName;
                 const models = pData.models ?? [];
                 return (
                   <div key={pName} style={{ marginBottom: 2 }}>
                     {/* Provider row */}
                     <div
-                      onClick={() => setSelection({ type: "provider", name: pName })}
+                      onClick={() => { void selectSelection({ type: "provider", name: pName }); }}
                       style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 8px", borderRadius: 5, cursor: "pointer", background: isProviderSelected ? "var(--bg-selected)" : "none" }}
                       onMouseEnter={(e) => { if (!isProviderSelected) e.currentTarget.style.background = "var(--bg-hover)"; }}
                       onMouseLeave={(e) => { if (!isProviderSelected) e.currentTarget.style.background = "none"; }}
@@ -1861,7 +2033,7 @@ export function ModelsConfig({
                       return (
                         <div
                           key={i}
-                          onClick={() => setSelection({ type: "model", providerName: pName, index: i })}
+                          onClick={() => { void selectSelection({ type: "model", providerName: pName, index: i }); }}
                           style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px 5px 26px", borderRadius: 5, cursor: "pointer", background: isModelSelected ? "var(--bg-selected)" : "none" }}
                           onMouseEnter={(e) => { if (!isModelSelected) e.currentTarget.style.background = "var(--bg-hover)"; }}
                           onMouseLeave={(e) => { if (!isModelSelected) e.currentTarget.style.background = "none"; }}
@@ -1878,7 +2050,7 @@ export function ModelsConfig({
 
                     {/* Add model button */}
                     <div
-                      onClick={(e) => { e.stopPropagation(); addModel(pName); }}
+                      onClick={(e) => { e.stopPropagation(); void addModel(pName); }}
                       style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px 4px 26px", borderRadius: 5, cursor: "pointer", color: "var(--text-dim)" }}
                       onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
@@ -1919,7 +2091,7 @@ export function ModelsConfig({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
           {saveError && <span style={{ fontSize: 12, color: "#f87171", flex: 1 }}>{saveError}</span>}
           {!embedded && (
-            <button onClick={onCloseAction} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>
+            <button onClick={() => { void requestClose(); }} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>
               {t("desktop.cancel")}
             </button>
           )}
@@ -1950,8 +2122,8 @@ export function ModelsConfig({
       <AddProviderPicker
         oauthProviders={oauthProviders}
         apiKeyProviders={apiKeyProviders}
-        onSelectOAuth={(id) => setSelection({ type: "oauth", providerId: id })}
-        onSelectApiKey={(id) => setSelection({ type: "apikey", providerId: id })}
+        onSelectOAuth={(id) => { void selectSelection({ type: "oauth", providerId: id }); }}
+        onSelectApiKey={(id) => { void selectSelection({ type: "apikey", providerId: id }); }}
         onAddCustom={addCustomProvider}
         onClose={() => setPickerOpen(false)}
       />

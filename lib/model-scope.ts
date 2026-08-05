@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { readModelsJson } from "./settings-title-model";
+import { getEffectiveOverrides } from "./builtin-model-overrides";
 
 /**
  * Uses pi's resolver so pi-web accepts the same enabledModels globs, fuzzy
@@ -41,17 +42,16 @@ function matchesModel(
 export async function resolveVisibleModels(
   modelRuntime: ModelRuntime,
   patterns: string[] | undefined,
+  options: { includeHidden?: boolean } = {},
 ): Promise<ModelScopeResult> {
   const modelsJson = readModelsJson();
   const providers = (modelsJson.providers ?? {}) as Record<string, { models?: unknown }>;
   const hiddenSet = new Set<string>();
-  for (const [pid, entry] of Object.entries(providers)) {
-    const models = (entry as { models?: Array<Record<string, unknown>> })?.models;
-    if (!Array.isArray(models)) continue;
-    for (const m of models) {
-      if (typeof m.id === "string" && m.hidden === true) {
-        hiddenSet.add(`${pid}/${m.id}`);
-      }
+  for (const [pid, rawEntry] of Object.entries(providers)) {
+    const entry = rawEntry as Record<string, unknown>;
+    const effective = getEffectiveOverrides(entry);
+    for (const [modelId, override] of Object.entries(effective)) {
+      if (override.hidden === true) hiddenSet.add(`${pid}/${modelId}`);
     }
   }
 
@@ -77,12 +77,13 @@ export async function resolveVisibleModels(
     }
   }
 
-  // Filter out hidden models
-  visible = visible.filter((model) => !hiddenSet.has(`${model.provider}/${model.id}`));
+  if (!options.includeHidden) {
+    visible = visible.filter((model) => !hiddenSet.has(`${model.provider}/${model.id}`));
+  }
 
   return {
     visible,
-    scopedModels: visible.length === scopedModels.length ? scopedModels : scopedModels.filter(
+    scopedModels: options.includeHidden || visible.length === scopedModels.length ? scopedModels : scopedModels.filter(
       (s) => !hiddenSet.has(`${s.model.provider}/${s.model.id}`),
     ),
     thinkingLevelPins,

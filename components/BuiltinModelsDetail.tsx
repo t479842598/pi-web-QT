@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ThinkingLevelMapEditor } from "./ModelsConfig";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
+import { buildOverridePatches, type OverrideDraft } from "@/lib/builtin-model-overrides";
 
 interface BuiltinModelInfo {
   id: string;
@@ -31,22 +32,49 @@ interface Draft {
   hidden?: boolean;
 }
 
+type FlushAction = () => Promise<void>;
+type RegisterFlush = (providerId: string, flush: FlushAction) => (() => void) | void;
+
 function numOrUndefined(value: string): number | undefined {
   if (value.trim() === "") return undefined;
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+function toOverrideDraft(draft: Draft): OverrideDraft {
+  const contextWindow = numOrUndefined(draft.contextWindow ?? "");
+  const maxTokens = numOrUndefined(draft.maxTokens ?? "");
+  const thinkingLevelMap = draft.thinkingLevelMap && Object.keys(draft.thinkingLevelMap).length > 0
+    ? { ...draft.thinkingLevelMap }
+    : undefined;
+  return {
+    ...(draft.name?.trim() ? { name: draft.name.trim() } : {}),
+    ...(typeof draft.reasoning === "boolean" ? { reasoning: draft.reasoning } : {}),
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+    ...(typeof draft.hidden === "boolean" ? { hidden: draft.hidden } : {}),
+  };
+}
+
 /**
- * Model field editor for builtin (API-key/OAuth) providers. Edits are written
- * into models.json as overlay entries for the provider, only for models the
- * user actually changed.
+ * Model field editor for builtin (API-key/OAuth) providers. New edits are
+ * persisted as field-level modelOverrides through the server PATCH API.
  */
-export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
+export function BuiltinModelsDetail({
+  providerId,
+  onRegisterFlush,
+  onConfigChange,
+}: {
+  providerId: string;
+  onRegisterFlush?: RegisterFlush;
+  onConfigChange?: (provider: Record<string, unknown> | null) => void;
+}) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const [models, setModels] = useState<BuiltinModelInfo[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [initialDrafts, setInitialDrafts] = useState<Record<string, Draft>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -54,191 +82,140 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
   const [savedOk, setSavedOk] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  // Refs let us access the latest state in the effect cleanup without
-  // adding them as dependencies (which would cause a save-reload loop).
-  const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
   const draftsRef = useRef(drafts);
-  draftsRef.current = drafts;
+  const initialDraftsRef = useRef(initialDrafts);
   const modelsRef = useRef(models);
+  const dirtyRef = useRef(dirty);
+  const draftRevisionRef = useRef(0);
+  const savePromiseRef = useRef<Promise<void> | null>(null);
+  draftsRef.current = drafts;
+  initialDraftsRef.current = initialDrafts;
   modelsRef.current = models;
-  const providerIdRef = useRef(providerId);
-  const prevProviderRef = useRef<string | undefined>(undefined);
-
-  /**
-   * Fire-and-forget save that writes dirty drafts for `pid` into models.json.
-   * Called when the user switches away from a provider without explicitly saving.
-   */
-  const autoSave = useCallback(async (
-    pid: string,
-    dirtyIds: Set<string>,
-    currentDrafts: Record<string, Draft>,
-    currentModels: BuiltinModelInfo[],
-  ) => {
-    const entries = [];
-    for (const id of dirtyIds) {
-      const draft = currentDrafts[id];
-      if (!draft) continue;
-      const entry: Record<string, unknown> = { id };
-      const model = currentModels.find((m) => m.id === id);
-      if (draft.name) entry.name = draft.name;
-      else if (model?.name) entry.name = model.name;
-      if (typeof draft.reasoning === "boolean") entry.reasoning = draft.reasoning;
-      const cw = numOrUndefined(draft.contextWindow ?? "");
-      if (cw !== undefined) entry.contextWindow = cw;
-      const mt = numOrUndefined(draft.maxTokens ?? "");
-      if (mt !== undefined) entry.maxTokens = mt;
-      if (draft.thinkingLevelMap && Object.keys(draft.thinkingLevelMap).length > 0) {
-        entry.thinkingLevelMap = draft.thinkingLevelMap;
-      }
-      if (draft.hidden === true) entry.hidden = true;
-      entries.push(entry);
-    }
-    if (entries.length === 0) return;
-
-    try {
-      const res = await fetch("/api/models-config");
-      const current = (await res.json()) as { providers?: Record<string, Record<string, unknown>> };
-      const providers = current.providers ?? {};
-      const dirtyIdSet = new Set([...dirtyIds]);
-      const kept = Array.isArray(providers[pid]?.models)
-        ? (providers[pid].models as Array<Record<string, unknown>>).filter(
-            (item) => !dirtyIdSet.has(String(item.id)),
-          )
-        : [];
-      const merged = [...kept, ...entries.filter((e) => Object.keys(e).length > 1)];
-      const nextProvider = merged.length > 0
-        ? { ...(providers[pid] ?? {}), models: merged }
-        : undefined;
-      const next = { ...providers };
-      if (nextProvider) next[pid] = nextProvider;
-      else delete next[pid];
-
-      await fetch("/api/models-config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providers: next }),
-      });
-    } catch {
-      // Best-effort; silently ignore failures during auto-save.
-    }
-  }, []);
+  dirtyRef.current = dirty;
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError(null);
 
-    const doLoad = async () => {
-      setLoading(true);
-      setError(null);
+    const load = async () => {
       try {
-        const r = await fetch(`/api/models-config/builtin?provider=${encodeURIComponent(providerId)}`);
-        const d: BuiltinModelsResponse = await r.json();
+        const response = await fetch(`/api/models-config/builtin?provider=${encodeURIComponent(providerId)}`);
+        const data: BuiltinModelsResponse = await response.json();
+        if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
         if (cancelled) return;
-        if (d.error) { setError(d.error); return; }
-        setModels(d.models);
-        const initial: Record<string, Draft> = {};
-        for (const model of d.models) {
-          const ov = d.overrides[model.id] ?? {};
-          initial[model.id] = {
-            name: typeof ov.name === "string" && ov.name.length > 0 ? ov.name : model.name,
-            reasoning: typeof ov.reasoning === "boolean" ? ov.reasoning : model.reasoning,
-            contextWindow: typeof ov.contextWindow === "number" ? String(ov.contextWindow) : model.contextWindow != null ? String(model.contextWindow) : "",
-            maxTokens: typeof ov.maxTokens === "number" ? String(ov.maxTokens) : model.maxTokens != null ? String(model.maxTokens) : "",
-            hidden: typeof ov.hidden === "boolean" ? ov.hidden : false,
-            thinkingLevelMap: (ov.thinkingLevelMap as Draft["thinkingLevelMap"]) ?? model.thinkingLevelMap,
+
+        const nextDrafts: Record<string, Draft> = {};
+        for (const model of data.models) {
+          const override = data.overrides[model.id] ?? {};
+          nextDrafts[model.id] = {
+            name: typeof override.name === "string" && override.name.length > 0 ? override.name : model.name,
+            reasoning: typeof override.reasoning === "boolean" ? override.reasoning : model.reasoning,
+            contextWindow: typeof override.contextWindow === "number"
+              ? String(override.contextWindow)
+              : model.contextWindow != null ? String(model.contextWindow) : "",
+            maxTokens: typeof override.maxTokens === "number"
+              ? String(override.maxTokens)
+              : model.maxTokens != null ? String(model.maxTokens) : "",
+            hidden: typeof override.hidden === "boolean" ? override.hidden : false,
+            thinkingLevelMap: (override.thinkingLevelMap as Draft["thinkingLevelMap"]) ?? model.thinkingLevelMap,
           };
         }
-        setDrafts(initial);
+        setModels(data.models);
+        setDrafts(nextDrafts);
+        setInitialDrafts(nextDrafts);
         setDirty(new Set());
-      } catch {
-        if (!cancelled) setError(String(t("desktop.builtinModelsLoadFailed")));
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : String(loadError));
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
-    // Auto-save dirty changes from the previous provider before switching.
-    const prev = prevProviderRef.current;
-    if (prev !== undefined && prev !== providerId && dirtyRef.current.size > 0) {
-      autoSave(prev, dirtyRef.current, draftsRef.current, modelsRef.current)
-        .catch(() => {}); // fire-and-forget; best-effort save
-    }
-    prevProviderRef.current = providerId;
-
-    void doLoad();
+    void load();
     return () => { cancelled = true; };
-  }, [providerId, t]);
+  }, [providerId]);
 
   const patch = useCallback((id: string, change: Partial<Draft>) => {
-    setDrafts((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), ...change } }));
-    setDirty((prev) => new Set(prev).add(id));
+    draftRevisionRef.current += 1;
+    setDrafts((previous) => ({ ...previous, [id]: { ...(previous[id] ?? {}), ...change } }));
+    setDirty((previous) => new Set(previous).add(id));
   }, []);
 
-  const handleSave = useCallback(async () => {
-    if (dirty.size === 0) return;
-    setSaving(true);
-    setError(null);
-    setSavedOk(false);
-    try {
-      // Serialize drafts into overlay entries.
-      // SDK 按 id 整体替换模型条目（非字段合并），因此必须带上 name/reasoning
-      // 及全部可编辑字段的当前值，否则未修改字段会被重置（如 name 丢失、reasoning 变 false）。
-      const entries = [];
-      for (const id of dirty) {
-        const draft = drafts[id];
-        if (!draft) continue;
-        const entry: Record<string, unknown> = { id };
-        const model = models.find((m) => m.id === id);
-        if (draft.name) entry.name = draft.name;
-        else if (model?.name) entry.name = model.name;
-        if (typeof draft.reasoning === "boolean") entry.reasoning = draft.reasoning;
-        const cw = numOrUndefined(draft.contextWindow ?? "");
-        if (cw !== undefined) entry.contextWindow = cw;
-        const mt = numOrUndefined(draft.maxTokens ?? "");
-        if (mt !== undefined) entry.maxTokens = mt;
-        if (draft.thinkingLevelMap && Object.keys(draft.thinkingLevelMap).length > 0) {
-          entry.thinkingLevelMap = draft.thinkingLevelMap;
-        }
-        if (draft.hidden === true) entry.hidden = true;
-        entries.push(entry);
+  const saveCurrent = useCallback(async (): Promise<void> => {
+    const existingRequest = savePromiseRef.current;
+    if (existingRequest) return existingRequest;
+
+    const run = async () => {
+      const currentDirty = new Set(dirtyRef.current);
+      if (currentDirty.size === 0) return;
+      const revisionAtStart = draftRevisionRef.current;
+      const draftsAtSave = { ...draftsRef.current };
+
+      const serializedDrafts: Record<string, OverrideDraft> = {};
+      const serializedInitial: Record<string, OverrideDraft> = {};
+      for (const model of modelsRef.current) {
+        const current = draftsAtSave[model.id];
+        const initial = initialDraftsRef.current[model.id];
+        if (current) serializedDrafts[model.id] = toOverrideDraft(current);
+        if (initial) serializedInitial[model.id] = toOverrideDraft(initial);
       }
-
-      const res = await fetch("/api/models-config");
-      const current = (await res.json()) as { providers?: Record<string, Record<string, unknown>> };
-      const providers = current.providers ?? {};
-      const dirtyIds = new Set([...dirty]);
-      const kept = Array.isArray(providers[providerId]?.models)
-        ? (providers[providerId].models as Array<Record<string, unknown>>).filter(
-            (item) => !dirtyIds.has(String(item.id)),
-          )
-        : [];
-      const merged = [...kept, ...entries.filter((e) => Object.keys(e).length > 1)];
-      const nextProvider = merged.length > 0
-        ? { ...(providers[providerId] ?? {}), models: merged }
-        : undefined;
-      const next = { ...providers };
-      if (nextProvider) next[providerId] = nextProvider;
-      else delete next[providerId];
-
-      const putRes = await fetch("/api/models-config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providers: next }),
-      });
-      const d = (await putRes.json()) as { success?: boolean; error?: string };
-      if (!putRes.ok || d.error) {
-        setError(d.error ?? `HTTP ${putRes.status}`);
+      const patches = buildOverridePatches(currentDirty, serializedDrafts, serializedInitial);
+      if (Object.keys(patches).length === 0) {
+        setDirty(new Set());
         return;
       }
-      setSavedOk(true);
-      setTimeout(() => setSavedOk(false), 2000);
-      setDirty(new Set());
-    } catch (e) {
-      setError(String(e));
+
+      setSaving(true);
+      setError(null);
+      setSavedOk(false);
+      try {
+        const response = await fetch("/api/models-config/builtin", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: providerId, patches }),
+        });
+        const data = await response.json() as {
+          success?: boolean;
+          error?: string;
+          provider?: Record<string, unknown> | null;
+        };
+        if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+
+        onConfigChange?.(data.provider ?? null);
+        const nextInitial = { ...initialDraftsRef.current };
+        for (const id of currentDirty) {
+          const current = draftsAtSave[id];
+          if (current) nextInitial[id] = { ...current };
+        }
+        initialDraftsRef.current = nextInitial;
+        setInitialDrafts(nextInitial);
+        if (draftRevisionRef.current === revisionAtStart) {
+          setDirty((previous) => new Set([...previous].filter((id) => !currentDirty.has(id))));
+        }
+        setSavedOk(true);
+        setTimeout(() => setSavedOk(false), 2000);
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : String(saveError));
+        throw saveError;
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const request = run();
+    savePromiseRef.current = request;
+    try {
+      await request;
     } finally {
-      setSaving(false);
+      if (savePromiseRef.current === request) savePromiseRef.current = null;
     }
-  }, [dirty, drafts, providerId, models]);
+  }, [onConfigChange, providerId]);
+
+  useEffect(() => {
+    if (!onRegisterFlush) return undefined;
+    return onRegisterFlush(providerId, saveCurrent) ?? undefined;
+  }, [onRegisterFlush, providerId, saveCurrent]);
 
   if (loading) {
     return (
@@ -275,7 +252,7 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
                   {isDirty && <span style={{ color: "var(--accent)", marginLeft: 6 }}>•</span>}
                 </button>
                 <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
-                {model.reasoning && (
+                {(draft.reasoning ?? model.reasoning) && (
                   <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--bg-selected)", color: "var(--text-muted)" }}>
                     reasoning
                   </span>
@@ -302,7 +279,7 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
                       <input
                         type="checkbox"
                         checked={draft.hidden === true}
-                        onChange={(e) => patch(model.id, { hidden: e.target.checked || undefined })}
+                        onChange={(e) => patch(model.id, { hidden: e.target.checked })}
                       />
                       {t("desktop.builtinModelsHide")}
                     </label>
@@ -357,7 +334,7 @@ export function BuiltinModelsDetail({ providerId }: { providerId: string }) {
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <button
           type="button"
-          onClick={handleSave}
+          onClick={() => { void saveCurrent().catch(() => {}); }}
           disabled={saving || dirty.size === 0}
           style={{
             alignSelf: "flex-start",

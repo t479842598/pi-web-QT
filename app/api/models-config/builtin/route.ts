@@ -7,8 +7,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { resolveVisibleModels } from "@/lib/model-scope";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
-import { readModelsJson } from "@/lib/settings-title-model";
-import { isApiRequestAllowed } from "@/lib/request-security";
+import {
+  applyBuiltinOverridePatches,
+  getEffectiveOverrides,
+  type OverridePatch,
+  type OverridePatches,
+} from "@/lib/builtin-model-overrides";
+import { mutateModelsConfig, readModelsConfig } from "@/lib/models-config-store";
+import { isApiRequestAllowed, hasJsonContentType } from "@/lib/request-security";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +27,51 @@ interface BuiltinModelInfo {
   thinkingLevelMap?: Record<string, string | null>;
 }
 
+const ALLOWED_FIELDS = new Set(["name", "reasoning", "contextWindow", "maxTokens", "thinkingLevelMap", "hidden"]);
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateThinkingMap(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return Object.entries(value).every(([key, entry]) => THINKING_LEVELS.has(key) && (entry === null || typeof entry === "string"));
+}
+
+function validatePatchValue(field: string, value: unknown): boolean {
+  if (value === null) return true;
+  if (field === "name") return typeof value === "string" && value.trim().length > 0;
+  if (field === "reasoning" || field === "hidden") return typeof value === "boolean";
+  if (field === "contextWindow" || field === "maxTokens") {
+    return typeof value === "number" && Number.isFinite(value) && value > 0;
+  }
+  if (field === "thinkingLevelMap") return validateThinkingMap(value);
+  return false;
+}
+
+function parsePatches(value: unknown): OverridePatches {
+  if (!isRecord(value)) throw new Error("patches must be an object");
+  const patches: OverridePatches = {};
+  for (const [modelId, rawPatch] of Object.entries(value)) {
+    if (!modelId || !isRecord(rawPatch)) throw new Error(`Invalid patch for model ${modelId}`);
+    const patch: OverridePatch = {};
+    for (const [field, fieldValue] of Object.entries(rawPatch)) {
+      if (!ALLOWED_FIELDS.has(field)) throw new Error(`Unknown override field: ${field}`);
+      if (!validatePatchValue(field, fieldValue)) throw new Error(`Invalid value for ${modelId}.${field}`);
+      patch[field as keyof OverridePatch] = fieldValue;
+    }
+    if (Object.keys(patch).length > 0) patches[modelId] = patch;
+  }
+  return patches;
+}
+
 export async function GET(req: Request) {
   if (!isApiRequestAllowed(req)) {
     return NextResponse.json({ error: "Access denied" }, { status: 403 });
   }
   const url = new URL(req.url);
-  const providerId = url.searchParams.get("provider");
+  const providerId = url.searchParams.get("provider")?.trim();
   if (!providerId) {
     return NextResponse.json({ error: "provider query parameter required" }, { status: 400 });
   }
@@ -41,7 +86,8 @@ export async function GET(req: Request) {
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
     const settings: SettingsManager = services.settingsManager;
-    const scope = await resolveVisibleModels(services.modelRuntime, settings.getEnabledModels());
+    // Hidden models remain editable here even though they are absent from normal selectors.
+    const scope = await resolveVisibleModels(services.modelRuntime, settings.getEnabledModels(), { includeHidden: true });
 
     const models: BuiltinModelInfo[] = scope.visible
       .filter((model) => model.provider === providerId)
@@ -55,27 +101,60 @@ export async function GET(req: Request) {
       }))
       .sort((a, b) => a.id.localeCompare(b.id));
 
-    // Existing overlay entries from models.json
-    const modelsJson = readModelsJson();
-    const providers = (modelsJson.providers ?? {}) as Record<string, { models?: unknown }>;
-    const entry = providers[providerId];
-    const overrides: Record<string, Record<string, unknown>> = {};
-    if (Array.isArray(entry?.models)) {
-      for (const item of entry.models as Array<Record<string, unknown>>) {
-        if (item && typeof item.id === "string") overrides[item.id] = item;
-      }
-    }
+    const modelsJson = readModelsConfig();
+    const providers = isRecord(modelsJson.providers) ? modelsJson.providers : {};
+    const provider = isRecord(providers[providerId]) ? providers[providerId] : undefined;
+    const overrides = getEffectiveOverrides(provider);
 
     return NextResponse.json({
       provider: providerId,
       models,
       overrides,
-      configured: entry !== undefined,
+      configured: provider !== undefined,
     });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
       { status: 500 },
     );
+  }
+}
+
+export async function PATCH(req: Request) {
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ error: "Access denied" }, { status: 403 });
+  }
+  if (!hasJsonContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
+  }
+
+  try {
+    const body = await req.json() as { provider?: unknown; patches?: unknown };
+    const providerId = typeof body.provider === "string" ? body.provider.trim() : "";
+    if (!providerId) return NextResponse.json({ error: "provider is required" }, { status: 400 });
+    const patches = parsePatches(body.patches);
+
+    const result = await mutateModelsConfig((current) => {
+      const providers = isRecord(current.providers) ? current.providers : {};
+      const existingProvider = isRecord(providers[providerId]) ? providers[providerId] : undefined;
+      const nextProvider = applyBuiltinOverridePatches(existingProvider, patches);
+      const nextProviders = { ...providers };
+      if (Object.keys(nextProvider).length > 0) nextProviders[providerId] = nextProvider;
+      else delete nextProviders[providerId];
+      const next = { ...current, providers: nextProviders };
+      return {
+        data: next,
+        result: {
+          provider: Object.keys(nextProvider).length > 0 ? nextProvider : null,
+          config: next,
+        },
+      };
+    });
+
+    return NextResponse.json({ success: true, ...result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = /required|invalid|unknown|must be|Content-Type/.test(message) ? 400 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

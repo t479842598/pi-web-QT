@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ChatCenteredText, Cpu, Database, DownloadSimple, Monitor, Plug, Stack, X } from "@phosphor-icons/react";
 import { BackupConfig } from "./BackupConfig";
 import { ChatConfig } from "./ChatConfig";
@@ -48,6 +48,31 @@ export function SettingsModal({
   const [activeTab, setActiveTab] = useState<SettingsTab>(
     initialTab === "skills" || initialTab === "plugins" ? (cwd ? initialTab : "display") : initialTab,
   );
+  const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const modelsFlushRef = useRef<(() => Promise<void>) | null>(null);
+
+  const registerModelsFlush = useCallback((flush: () => Promise<void>) => {
+    modelsFlushRef.current = flush;
+    return () => {
+      if (modelsFlushRef.current === flush) modelsFlushRef.current = null;
+    };
+  }, []);
+
+  const requestClose = useCallback(async () => {
+    if (closing) return;
+    setClosing(true);
+    setCloseError(null);
+    try {
+      await modelsFlushRef.current?.();
+      onCloseAction();
+    } catch (error) {
+      setCloseError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setClosing(false);
+    }
+  }, [closing, onCloseAction]);
+
   return (
     <div
       style={{
@@ -60,7 +85,7 @@ export function SettingsModal({
         justifyContent: "center",
       }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onCloseAction();
+        if (event.target === event.currentTarget) void requestClose();
       }}
     >
       <section
@@ -105,7 +130,8 @@ export function SettingsModal({
           </div>
           <button
             type="button"
-            onClick={onCloseAction}
+            onClick={() => { void requestClose(); }}
+            disabled={closing}
             title={t("desktop.closeSettings")}
             aria-label={t("desktop.closeSettings")}
             style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: 4, display: "flex" }}
@@ -114,7 +140,7 @@ export function SettingsModal({
           </button>
         </header>
 
-        <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: 0, overflow: "hidden" }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: 0, overflow: "hidden", pointerEvents: closing ? "none" : undefined }}>
           <nav
             aria-label={t("desktop.settingsSections")}
             style={{
@@ -186,7 +212,7 @@ export function SettingsModal({
             <ChatConfig />
           </div>
           <div style={{ display: activeTab === "models" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <ModelsConfig embedded onSavedAction={onModelsSavedAction} />
+            <ModelsConfig embedded onSavedAction={onModelsSavedAction} onRegisterFlush={registerModelsFlush} />
           </div>
           {cwd && (
             <div style={{ display: activeTab === "skills" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
@@ -205,6 +231,11 @@ export function SettingsModal({
             <ImportSessionsConfig onSessionsChanged={onSessionsChanged} />
           </div>
         </div>
+        {closeError && (
+          <div style={{ padding: "6px 18px", borderTop: "1px solid var(--border)", color: "#f87171", fontSize: 11 }}>
+            {closeError}
+          </div>
+        )}
       </section>
     </div>
   );

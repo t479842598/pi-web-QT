@@ -1,51 +1,72 @@
 import { NextResponse } from "next/server";
-import { readFileSync, existsSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { writePrivateFileAtomicSync } from "@/lib/atomic-file";
-import { invalidateModelsCache } from "@/lib/models-cache";
-import { isApiRequestAllowed } from "@/lib/request-security";
+import { assertModelsConfigBody, mutateModelsConfig, readModelsConfig } from "@/lib/models-config-store";
+import { isApiRequestAllowed, hasJsonContentType } from "@/lib/request-security";
+import type { ModelsConfigData } from "@/lib/models-config-store";
 
 export const dynamic = "force-dynamic";
 
-function getModelsPath(): string {
-  return join(getAgentDir(), "models.json");
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readModelsJson(): Record<string, unknown> {
-  const path = getModelsPath();
-  if (!existsSync(path)) return { providers: {} };
-  try {
-    return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-  } catch {
-    return { providers: {} };
+/**
+ * The built-in model editor owns modelOverrides through its PATCH endpoint.
+ * A full provider save must therefore never replay a stale modelOverrides
+ * snapshot from the form and undo a newer local edit.
+ */
+function mergeFullSaveWithCurrent(
+  current: ModelsConfigData,
+  incoming: ModelsConfigData,
+): ModelsConfigData {
+  const currentProviders = isRecord(current.providers) ? current.providers : {};
+  const incomingProviders = isRecord(incoming.providers) ? incoming.providers : {};
+  const providers: Record<string, unknown> = { ...incomingProviders };
+
+  for (const [providerId, incomingValue] of Object.entries(incomingProviders)) {
+    if (!isRecord(incomingValue)) continue;
+    const currentValue = currentProviders[providerId];
+    const nextProvider = { ...incomingValue };
+    // modelOverrides has a dedicated PATCH contract. Never replay a stale
+    // client copy; preserve the current disk value or remove the stale field.
+    if (isRecord(currentValue) && currentValue.modelOverrides !== undefined) {
+      nextProvider.modelOverrides = currentValue.modelOverrides;
+    } else {
+      delete nextProvider.modelOverrides;
+    }
+    providers[providerId] = nextProvider;
   }
-}
 
-function writeModelsJson(data: Record<string, unknown>): void {
-  const path = getModelsPath();
-  const dir = dirname(path);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writePrivateFileAtomicSync(path, JSON.stringify(data, null, 2));
+  return { ...incoming, providers };
 }
 
 export async function GET(req: Request) {
   if (!isApiRequestAllowed(req)) {
     return NextResponse.json({ error: "Access denied" }, { status: 403 });
   }
-  return NextResponse.json(readModelsJson());
+  try {
+    return NextResponse.json(readModelsConfig());
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
 }
 
 export async function PUT(req: Request) {
   if (!isApiRequestAllowed(req)) {
     return NextResponse.json({ error: "Access denied" }, { status: 403 });
   }
+  if (!hasJsonContentType(req)) {
+    return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
+  }
+
   try {
-    const body = await req.json() as Record<string, unknown>;
-    writeModelsJson(body);
-    invalidateModelsCache();
-    return NextResponse.json({ success: true });
+    const body = await req.json() as unknown;
+    assertModelsConfigBody(body);
+    const persisted = await mutateModelsConfig((current) => {
+      const next = mergeFullSaveWithCurrent(current, body);
+      return { data: next, result: next };
+    });
+    return NextResponse.json({ success: true, config: persisted });
   } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }
