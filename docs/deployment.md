@@ -85,6 +85,16 @@ ingress:
 
 ## 5. 更新
 
+### npm 全局安装
+
+```bash
+npm update -g @qt4798/pi-web
+# 或指定版本
+npm install -g @qt4798/pi-web@latest
+```
+
+### 源码部署
+
 ```bash
 cd /srv/pi-web
 git pull --ff-only

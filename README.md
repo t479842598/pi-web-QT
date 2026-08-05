@@ -98,6 +98,14 @@ pi-web
 
 然后打开 [http://127.0.0.1:30141](http://127.0.0.1:30141)。CLI 会在服务就绪后自动打开浏览器。默认只监听 `127.0.0.1`。
 
+**更新：**
+
+```bash
+npm update -g @qt4798/pi-web
+# 或指定版本
+npm install -g @qt4798/pi-web@latest
+```
+
 **常用选项：**
 
 ```bash
