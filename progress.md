@@ -1046,3 +1046,23 @@ mv ~/.local/bin/pi-web ~/.local/bin/pi-web.local-backup
 - `components/MarkdownBody.test.mjs`：两处 readFile 后行尾归一化。
 
 回滚方式：`git checkout -- lib/directory-browser.ts components/MarkdownBody.test.mjs`。
+
+## 2026-08-05 - Task: 发布 0.9.8 完成（build 问题处理 + npm publish）
+
+### What was done
+GitHub 已推送 d8c3832（main + tag v0.9.8）。npm 发布前发现 build 障碍并解决：
+- `next build --webpack` 在 Windows 上失败：EPERM scandir 用户目录（Cookies / Application Data junction）——Next 16 webpack 构建的 output file tracing（@vercel/nft）会静态执行 `lib/file-access.ts` 的 `readdirSync(homedir())`，Windows 上扫到受保护 junction 报错。Next 16 已移除顶层 `outputFileTracing: false` 开关，不可配置关闭。
+- 改用 Turbopack build（`next build`，不经 nft）：构建成功。
+- 生产模式实测（next start，端口 15795）：16MB 备份导入 HTTP 200；/api/import/discover reasonix available=true（43 会话）。
+- `npm publish`：@qt4798/pi-web@0.9.8 发布成功，registry latest=0.9.8（npm 无法覆盖 0.9.7，按用户指示升 0.9.8）。
+
+### Testing
+- Turbopack `next build`：成功（.next/BUILD_ID 生成，含 middleware 即 proxy）。
+- next start 生产模式：备份导入 200 + reasonix discover 正常（见上）。
+- registry 验证：dist-tags.latest=0.9.8，versions 含 0.9.8。
+- 全量测试 279/279、tsc、eslint 均通过（见上一轮）。
+
+### Notes
+- 未改 package.json 的 build script（保持 `env -u TURBOPACK next build --webpack`，作者 mac 环境可用）；Windows 本地构建/发布请用 `next build`（Turbopack）。
+- 改动文件：`progress.md`（本记录）。
+- 回滚：npm 0.9.8 已发布不可撤回（可发 0.9.9）；git 回滚 `git reset --hard d8c3832~1`。
