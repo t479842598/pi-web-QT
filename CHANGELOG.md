@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.12 — 2026-08-05
+
+### 修复
+- **内置模型名称编辑后保存不生效** — `BuiltinModelsDetail` 组件 Draft 接口缺少 `name` 字段，编辑后的名称未写入 `models.json`。新增 name 编辑框并将值正确合并到 overrides 持久化。
+
 ## 0.9.11 — 2026-08-05
 
 ### 关键修复
