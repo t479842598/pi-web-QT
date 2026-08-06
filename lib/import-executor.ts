@@ -107,14 +107,12 @@ async function runReasonixImport(
       cwd = homedir();
     } else {
       const inner = projectName.replace(/^-/, "");
-      if (process.platform === "win32") {
-        // Windows: detect drive-letter pattern (e.g. "C-Users-me-project" → C:\Users\me\project)
-        const segments = inner.split("-");
-        if (segments.length >= 2 && /^[a-zA-Z]$/.test(segments[0])) {
-          cwd = segments[0].toUpperCase() + ":\\" + segments.slice(1).join("\\");
-        } else {
-          cwd = "/" + inner.replace(/-/g, "/");
-        }
+      // pi encodes the resolved cwd as `--<path>--` with `/`, `\`, `:` → `-`.
+      // Reconstruct the original path from that encoding.
+      const segments = inner.split("-");
+      if (process.platform === "win32" && segments.length >= 2 && /^[a-zA-Z]$/.test(segments[0])) {
+        // Drive-letter prefix: `C-Users-me` → `C:\Users\me`
+        cwd = segments[0].toUpperCase() + ":\\" + segments.slice(1).join("\\");
       } else {
         cwd = "/" + inner.replace(/-/g, "/");
       }

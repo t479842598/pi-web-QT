@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type ElementType, type MouseEvent, type ReactNode } from "react";
+import { createContext, isValidElement, memo, useContext, useEffect, useMemo, useRef, useState, Children, type ElementType, type MouseEvent, type ReactNode } from "react";
 import { Check, Copy } from "@phosphor-icons/react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -54,7 +54,11 @@ function buildMarkdownComponents({ isStreaming, cwd, onOpenFile, onQuoteReply, q
     code({ className, children, ...props }: React.ComponentProps<'code'> & ExtraProps) {
       const lang = className?.replace("language-", "").toLowerCase() ?? "";
       const raw = String(children);
-      const isBlock = className?.includes("language-") || raw.includes("\n");
+      // Only treat an explicit language fence as a block: a code span that
+      // merely contains a newline (common in pasted/imported messages) must
+      // stay inline, otherwise react-markdown nests a <div> inside <p> and
+      // triggers hydration errors.
+      const isBlock = Boolean(className?.includes("language-"));
       if (isBlock) {
         if (lang === "mermaid") {
           return <MermaidBlock code={raw.replace(/\n$/, "")} isStreaming={isStreaming} />;
@@ -71,10 +75,25 @@ function buildMarkdownComponents({ isStreaming, cwd, onOpenFile, onQuoteReply, q
       );
     },
     pre({ children }: React.ComponentProps<'pre'> & ExtraProps) {
-      return <>{children}</>;
+      // Keep a block-level wrapper so a block code fence that follows a text
+      // paragraph without a blank line does not end up nested inside <p>
+      // (invalid HTML, hydration errors). The <code> child carries the actual
+      // CodeBlock rendering via the `code` component override.
+      return <div className="markdown-block-code">{children}</div>;
     },
     p({ children, node, ...props }: React.ComponentProps<'p'> & ExtraProps) {
+      // Defensive: if this paragraph unexpectedly contains block-level nodes
+      // (a code fence rendered without a blank-line separator — common in
+      // pasted/imported messages), rendering a <p> would nest <div>/<pre>
+      // inside <p> and break hydration. Fall back to a <div>.
       const pid = `${quoteScope}-p-${node?.position?.start?.offset ?? 0}`;
+      const hasBlockChild = Children.toArray(children).some(
+        (child) => isValidElement(child)
+          && (child.type === "div" || child.type === "pre" || child.type === "table" || child.type === "ul" || child.type === "ol"),
+      );
+      if (hasBlockChild) {
+        return <div className="markdown-block-wrap" {...props}>{children}</div>;
+      }
       if (!onQuoteReply) return <p {...props}>{children}</p>;
       return (
         <QuoteableParagraph pid={pid} onQuoteReply={onQuoteReply} onOpenFile={onOpenFile} cwd={cwd}>
@@ -202,9 +221,9 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
     <QuoteReplyScope>
       <div className={["markdown-body", className].filter(Boolean).join(" ")}>
         {streamingSplit ? (
-          parts.map((part) => (
+          parts.map((part, index) => (
             <MarkdownPart
-              key={part.id}
+              key={`${index}-${part.id}`}
               text={part.text}
               isStreaming={part.tail ? isStreaming : false}
               cwd={cwd}

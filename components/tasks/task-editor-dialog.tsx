@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { BookmarkSimple, Trash, X } from "@phosphor-icons/react";
 import { listTaskTemplates, saveTaskTemplate, deleteTaskTemplate } from "@/lib/task-api";
@@ -40,8 +40,19 @@ export function TaskEditorDialog({
   const [templateName, setTemplateName] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Initialize the form only once per open. The board's provider refetches the
+  // task/project list on a 60s timer, SSE nudges, and visibility/online events;
+  // every refetch mints a new `projects` array, which re-ran this effect while
+  // the user was typing and wiped a fresh task's title/prompt (task === null →
+  // fields reset to ""). The ref guard makes re-runs while open a no-op.
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
     setProject(task?.projectRoot ?? defaultProject ?? projects[0] ?? "");
     setTitle(task?.title ?? prefillTitle ?? "");
     setPrompt(task?.config?.prompt ?? prefillPrompt ?? "");

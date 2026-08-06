@@ -7,6 +7,7 @@ import { getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/
 import { collectProcessContentBlocks, splitAssistantContentBlocks } from "@/lib/process-content";
 import { MessageView } from "./MessageView";
 import { PlanReviewDialog } from "./PlanReviewDialog";
+import { ApprovalModal } from "./ApprovalModal";
 import { requestCreateTaskFromText } from "@/lib/task-compose-events";
 
 /** Fired after parking a task draft — AppShell listens and opens the board. */
@@ -175,6 +176,10 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands,
     planMode, handlePlanModeChange,
+    collaborationMode, tokenMode, toolApprovalMode,
+    handleCollaborationModeChange, handleTokenModeChange, handleToolApprovalModeChange,
+    approvalRequests, resolveApproval,
+    goalState, handleGoalStart, handleGoalPause, handleGoalResume, handleGoalStop,
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
@@ -215,13 +220,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     // execution prompt so the agent implements it with the normal toolset.
     setPlanReviewOpen(false);
     const plan = planReviewTextRef.current;
+    if (collaborationMode === "plan") handleCollaborationModeChange("normal");
     void handlePlanModeChange(false).then(() => {
       if (plan) {
         const execPrompt = t("tasks.planReviewExecutePrompt", { plan });
         void handleSend(execPrompt);
       }
     });
-  }, [handlePlanModeChange, handleSend, t]);
+  }, [handlePlanModeChange, handleSend, t, collaborationMode, handleCollaborationModeChange]);
   const planReviewTextRef = useRef<string | null>(null);
   useEffect(() => {
     planReviewTextRef.current = planReviewText;
@@ -235,8 +241,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
   const handlePlanExit = useCallback(() => {
     setPlanReviewOpen(false);
+    if (collaborationMode === "plan") handleCollaborationModeChange("normal");
     void handlePlanModeChange(false);
-  }, [handlePlanModeChange]);
+  }, [handlePlanModeChange, collaborationMode, handleCollaborationModeChange]);
 
   useEffect(() => {
     if (!extensionDialog || soundedExtensionDialogIdRef.current === extensionDialog.id) return;
@@ -413,7 +420,31 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       toolPreset={toolPreset}
       onToolPresetChange={session || isNew ? handleToolPresetChange : undefined}
       planMode={planMode}
-      onPlanModeChange={handlePlanModeChange}
+      onPlanModeChange={(enabled) => {
+        handlePlanModeChange(enabled);
+        if (enabled && collaborationMode !== "plan") handleCollaborationModeChange("plan");
+        else if (!enabled && collaborationMode === "plan") handleCollaborationModeChange("normal");
+      }}
+      collaborationMode={collaborationMode}
+      tokenMode={tokenMode}
+      toolApprovalMode={toolApprovalMode}
+      onCollaborationModeChange={(mode) => {
+        // Sync the legacy plan toggle (read-only toolset) with the new
+        // collaboration mode so the two entry points stay consistent.
+        handleCollaborationModeChange(mode);
+        if (mode === "plan" && !planMode) {
+          void handlePlanModeChange(true);
+        } else if (mode !== "plan" && planMode) {
+          void handlePlanModeChange(false);
+        }
+      }}
+      onTokenModeChange={handleTokenModeChange}
+      onToolApprovalModeChange={handleToolApprovalModeChange}
+      goalState={goalState}
+      onGoalStart={handleGoalStart}
+      onGoalPause={handleGoalPause}
+      onGoalResume={handleGoalResume}
+      onGoalStop={handleGoalStop}
       thinkingLevel={thinkingLevel}
       onThinkingLevelChange={session || isNew ? handleThinkingLevelChange : undefined}
       availableThinkingLevels={availableThinkingLevels}
@@ -531,6 +562,18 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           onFeedback={handlePlanFeedback}
           onExit={handlePlanExit}
           onClose={() => setPlanReviewOpen(false)}
+        />
+      )}
+
+      {approvalRequests.length > 0 && (
+        <ApprovalModal
+          request={approvalRequests[0] ?? null}
+          queuedCount={Math.max(0, approvalRequests.length - 1)}
+          busy={false}
+          onResolve={(approve, reason) => {
+            const active = approvalRequests[0];
+            if (active) void resolveApproval(active.id, approve, reason);
+          }}
         />
       )}
 

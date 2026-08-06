@@ -23,7 +23,10 @@ export function proxy(request: NextRequest) {
   }
 
   const password = process.env.PI_WEB_PASSWORD;
-  if (isWebPasswordEnabled(password) && !isValidBasicAuthorization(request.headers.get("authorization"), password)) {
+  // Development convenience: skip basic auth during `next dev` so local
+  // debugging doesn't need credentials. Production builds keep the gate.
+  const isDev = process.env.NODE_ENV === "development";
+  if (!isDev && isWebPasswordEnabled(password) && !isValidBasicAuthorization(request.headers.get("authorization"), password)) {
     return new NextResponse("Authentication required", {
       status: 401,
       headers: {

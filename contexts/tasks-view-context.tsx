@@ -60,7 +60,6 @@ export function TasksViewProvider({ children }: { children: ReactNode }) {
     const id = ++reqRef.current;
     try {
       const projectList = await listTaskProjectsApi();
-      setProjects(projectList);
       const lists = await Promise.all(
         projectList.map((project) => listTasks(project).catch(() => [] as WorkTask[])),
       );
@@ -68,7 +67,12 @@ export function TasksViewProvider({ children }: { children: ReactNode }) {
       // Drop stale responses; keep the previous list on transient error rather
       // than blanking the board.
       if (id !== reqRef.current) return;
-      setTasks(all);
+      // Content-level dedupe: refetch runs on a 60s timer, SSE nudges, and
+      // visibility/online events. When nothing changed, keep the previous
+      // array identity so consumers (board columns, editor dialog, notification
+      // diff) don't re-render / re-run effects on every empty poll.
+      setProjects((prev) => (sameJson(prev, projectList) ? prev : projectList));
+      setTasks((prev) => (sameJson(prev, all) ? prev : all));
     } catch {
       // ignore — a later event/refetch recovers
     }
@@ -191,4 +195,13 @@ function sendBrowserNotification(title: string, body: string): Promise<void> {
       resolve();
     }
   });
+}
+
+/**
+ * Content equality for refetch dedupe. Both arrays come from the same server
+ * serialization, so key order is stable; identical payloads mean nothing
+ * changed and the previous state identity is kept.
+ */
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }

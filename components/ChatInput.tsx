@@ -10,18 +10,21 @@ import {
   type AtQueryMatch, type FileIndexEntry,
 } from "@/lib/file-fuzzy";
 import { FolderIcon, getFileIcon } from "./FileIcons";
+import { FolderIcon as PhosphorFolderIcon } from "@phosphor-icons/react/Folder";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import { ArrowBendUpLeftIcon } from "@phosphor-icons/react/ArrowBendUpLeft";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/ArrowClockwise";
 import { ArrowElbowUpLeftIcon } from "@phosphor-icons/react/ArrowElbowUpLeft";
+import { EyeIcon } from "@phosphor-icons/react/Eye";
+import { FileTextIcon } from "@phosphor-icons/react/FileText";
 import { SortDescendingIcon } from "@phosphor-icons/react/SortDescending";
+import { TrashIcon } from "@phosphor-icons/react/Trash";
 
 import { CaretDownIcon } from "@phosphor-icons/react/CaretDown";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/ChatCircleText";
 import { CheckIcon } from "@phosphor-icons/react/Check";
-import { CompassIcon } from "@phosphor-icons/react/Compass";
 import { LightbulbIcon } from "@phosphor-icons/react/Lightbulb";
 import { LightningIcon } from "@phosphor-icons/react/Lightning";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react/MagnifyingGlass";
@@ -30,9 +33,11 @@ import { PlusIcon } from "@phosphor-icons/react/Plus";
 import { SquareIcon } from "@phosphor-icons/react/Square";
 import { StarIcon } from "@phosphor-icons/react/Star";
 import { StarFourIcon } from "@phosphor-icons/react/StarFour";
+import { TargetIcon } from "@phosphor-icons/react/Target";
 import { UploadSimpleIcon } from "@phosphor-icons/react/UploadSimple";
 import { ProviderIcon } from "./ProviderIcon";
 import { XIcon } from "@phosphor-icons/react/X";
+import { ModeControls } from "./ModeControls";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -66,6 +71,18 @@ interface Props {
   /** Plan mode: read-only analysis mode toggled from the attach menu. */
   planMode?: boolean;
   onPlanModeChange?: (enabled: boolean) => void;
+  // Chat modes (Reasonix port)
+  collaborationMode?: "normal" | "plan" | "goal";
+  tokenMode?: "full" | "economy" | "delivery";
+  toolApprovalMode?: "ask" | "auto" | "yolo";
+  onCollaborationModeChange?: (mode: "normal" | "plan" | "goal") => void;
+  onTokenModeChange?: (mode: "full" | "economy" | "delivery") => void;
+  onToolApprovalModeChange?: (mode: "ask" | "auto" | "yolo") => void;
+  goalState?: import("@/hooks/useAgentSession").GoalRuntimeState;
+  onGoalStart?: (text: string) => void;
+  onGoalPause?: () => void;
+  onGoalResume?: () => void;
+  onGoalStop?: () => void;
   thinkingLevel?: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   onThinkingLevelChange?: (level: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void;
   availableThinkingLevels?: string[] | null;
@@ -306,6 +323,9 @@ function QueuedMessageRow({ kind, text, label, index, total, onMove, onRecall, o
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelScopeWarnings, onModelChange,
   compactResult, toolPreset, onToolPresetChange, planMode = false, onPlanModeChange,
+  collaborationMode = "normal", tokenMode = "full", toolApprovalMode = "auto",
+  onCollaborationModeChange, onTokenModeChange, onToolApprovalModeChange,
+  goalState, onGoalStart, onGoalPause, onGoalResume, onGoalStop,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue, onMoveQueue, onRecallOne, onRequeueAt, onRemoveQueueItem,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
@@ -347,6 +367,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     skill: t("desktop.commandSkills"),
   };
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
+  // Long pastes are folded into a compact `[已粘贴文本 #N · X 行]` placeholder
+  // so the composer stays fast with huge pasted code (mirrors Reasonix). The
+  // raw text is kept here and re-expanded on send.
+  const [pastedBlocks, setPastedBlocks] = useState<Array<{ id: string; label: string; text: string }>>([]);
+  const [openPastedIds, setOpenPastedIds] = useState<string[]>([]);
+  const nextPasteIdRef = useRef(0);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [viewport, setViewport] = useState({ height: 0, width: 0, offsetTop: 0 });
@@ -364,7 +390,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [attachMenuRect, setAttachMenuRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [thinkingDropdownRect, setThinkingDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
-  const [controlsMenuOpen, setControlsMenuOpen] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => (
     draftKey ? getDraft(draftKey)?.images.map(draftImageToAttachedImage) ?? [] : []
   ));
@@ -549,6 +574,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const clearInput = useCallback(() => {
     setValue("");
     setAtQuery(null);
+    setPastedBlocks([]);
+    setOpenPastedIds([]);
     if (draftKey) clearDraft(draftKey);
     if (draftKeyRef.current && draftKeyRef.current !== draftKey) clearDraft(draftKeyRef.current);
     clearImages();
@@ -556,7 +583,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       textareaRef.current.style.height = "auto";
     }
   }, [clearImages, draftKey]);
-
   const handleMoveQueue = useCallback(async (kind: "steer" | "followUp", index: number, direction: -1 | 1) => {
     await onMoveQueue?.(kind, index, index + direction);
   }, [onMoveQueue]);
@@ -637,7 +663,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, []);
 
   const handleSend = useCallback(async () => {
-    const msg = value.trim();
+    // Re-expand folded paste placeholders back into their full text.
+    let finalValue = value;
+    if (pastedBlocks.length > 0) {
+      for (const block of pastedBlocks) {
+        finalValue = finalValue.split(block.label).join(block.text);
+      }
+    }
+    const msg = finalValue.trim();
     if (!msg && !attachedImages.length) return;
     if (isStreaming) return;
     onAudioUnlock?.();
@@ -671,7 +704,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     }
     onSend(msg, attachedImages.length ? attachedImages : undefined);
     clearInput();
-  }, [value, attachedImages, isStreaming, onBash, onBuiltinCommand, onSend, clearInput, onAudioUnlock, onRequeueAt]);
+  }, [value, pastedBlocks, attachedImages, isStreaming, onBash, onBuiltinCommand, onSend, clearInput, onAudioUnlock, onRequeueAt]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -886,6 +919,67 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       if (!ta) return;
       ta.focus();
       ta.setSelectionRange(nextValue.length, nextValue.length);
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    });
+  }, []);
+
+  /** Insert an @ token so the file-reference autocomplete opens. */
+  const insertAtTrigger = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart ?? ta.value.length;
+    const before = ta.value.slice(0, start);
+    const after = ta.value.slice(ta.selectionEnd ?? start);
+    const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
+    const newVal = before + sep + "@" + after;
+    setValue(newVal);
+    const pos = start + sep.length + 1;
+    updateAtQuery(newVal, pos);
+    requestAnimationFrame(() => {
+      if (!ta) return;
+      ta.setSelectionRange(pos, pos);
+      ta.focus();
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    });
+  }, []);
+
+  /** Insert a # token so the past-session reference menu opens. */
+  const insertSessionsTrigger = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart ?? ta.value.length;
+    const before = ta.value.slice(0, start);
+    const after = ta.value.slice(ta.selectionEnd ?? start);
+    const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
+    const newVal = before + sep + "#" + after;
+    setValue(newVal);
+    updateAtQuery(newVal, start + sep.length + 1);
+    requestAnimationFrame(() => {
+      if (!ta) return;
+      ta.setSelectionRange(start + sep.length + 1, start + sep.length + 1);
+      ta.focus();
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    });
+  }, []);
+
+  /** Insert a / token so the slash command menu opens. */
+  const insertSlashTrigger = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart ?? ta.value.length;
+    const before = ta.value.slice(0, start);
+    const after = ta.value.slice(ta.selectionEnd ?? start);
+    const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
+    const newVal = before + sep + "/" + after;
+    setValue(newVal);
+    const pos = start + sep.length + 1;
+    requestAnimationFrame(() => {
+      if (!ta) return;
+      ta.setSelectionRange(pos, pos);
+      ta.focus();
       ta.style.height = "auto";
       ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
     });
@@ -1112,11 +1206,42 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = Array.from(e.clipboardData?.items ?? []);
     const imageItems = items.filter((item) => item.type.startsWith("image/"));
-    if (!imageItems.length) return;
+    if (imageItems.length) {
+      e.preventDefault();
+      const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
+      processImageFiles(files);
+      return;
+    }
+    // Fold very long text pastes into a placeholder so the textarea does not
+    // choke on hundreds of lines of code (mirrors Reasonix's pasted blocks).
+    const textItem = items.find((item) => item.type.startsWith("text/plain"));
+    if (!textItem) return;
+    const text = e.clipboardData.getData("text/plain");
+    if (!text) return;
+    const lineCount = text.split(/\r?\n/).length;
+    const LONG_PASTE_MIN_CHARS = 2000;
+    const LONG_PASTE_MIN_LINES = 20;
+    if (text.length < LONG_PASTE_MIN_CHARS && lineCount < LONG_PASTE_MIN_LINES) return;
+
     e.preventDefault();
-    const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
-    processImageFiles(files);
-  }, [processImageFiles]);
+    const id = `paste-${++nextPasteIdRef.current}`;
+    const label = t("desktop.pastedLabel", { id: nextPasteIdRef.current, lines: lineCount });
+    const ta = textareaRef.current;
+    const start = ta?.selectionStart ?? value.length;
+    const end = ta?.selectionEnd ?? value.length;
+    const before = value.slice(0, start);
+    const after = value.slice(end);
+    const sep = before.length > 0 && !before.endsWith("\n") && !before.endsWith(" ") ? "\n\n" : "";
+    const newVal = before + sep + label + after;
+    setValue(newVal);
+    setPastedBlocks((prev) => [...prev, { id, label, text }]);
+    requestAnimationFrame(() => {
+      if (!ta) return;
+      const pos = start + sep.length + label.length;
+      ta.setSelectionRange(pos, pos);
+      ta.focus();
+    });
+  }, [processImageFiles, t, value]);
 
   useEffect(() => {
     if (historyActiveIndex >= (inputHistory?.length ?? 0)) {
@@ -1224,17 +1349,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
         setAttachMenuOpen(false);
       }
-      if (controlsMenuRef.current && !controlsMenuRef.current.contains(e.target as Node)) {
-        setControlsMenuOpen(false);
-      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
-
-  useEffect(() => {
-    if (!isMobile) setControlsMenuOpen(false);
-  }, [isMobile]);
 
   // Keep fixed selector panels anchored to the visual viewport while a mobile
   // keyboard changes its height. Without a reactive viewport value, the panel
@@ -1730,7 +1848,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             );
           })()}
           <div
-            className={`chat-input-shell ${isStreaming && (onSteer || onFollowUp) ? "is-streaming" : ""}`}
+            className={`chat-input-shell ${isStreaming && (onSteer || onFollowUp) ? "is-streaming" : ""} ${toolApprovalMode === "yolo" ? "is-yolo" : ""}`}
             onClick={(e) => {
               const target = e.target as HTMLElement;
               if (!target.closest("button, input, select, [role=button]")) textareaRef.current?.focus();
@@ -1773,26 +1891,146 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               )}
             </div>
           )}
+          {pastedBlocks.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+              {pastedBlocks.map((block) => {
+                const open = openPastedIds.includes(block.id);
+                return (
+                  <div key={block.id} style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "4px 8px",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    background: "var(--bg-secondary)",
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                  }}>
+                    <FileTextIcon size={12} aria-hidden="true" />
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-mono)" }}>
+                      {block.label}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setOpenPastedIds((prev) => open ? prev.filter((x) => x !== block.id) : [...prev, block.id])}
+                      title={t(open ? "desktop.pastedHidePreview" : "desktop.pastedShowPreview")}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex" }}
+                    >
+                      <EyeIcon size={12} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPastedBlocks((prev) => prev.filter((x) => x.id !== block.id));
+                        setValue((prevVal) => prevVal.split(block.label).join(""));
+                      }}
+                      title={t("desktop.pastedRemove")}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex" }}
+                    >
+                      <TrashIcon size={12} aria-hidden="true" />
+                    </button>
+                    {open && (
+                      <div style={{ position: "relative" }}>
+                        <pre style={{
+                          position: "absolute", left: 0, right: 0, top: "calc(100% + 4px)",
+                          zIndex: 50, maxHeight: 200, overflow: "auto",
+                          background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6,
+                          padding: "8px 10px", fontSize: 11, lineHeight: 1.5,
+                          whiteSpace: "pre-wrap", wordBreak: "break-word",
+                        }}>
+                          {block.text}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="chat-input-editor-row" style={{ borderColor: bashMode ? "var(--tool-bg)" : undefined }}>
-          {planMode && (
+          {collaborationMode === "goal" && goalState && goalState.status !== "idle" && (
             <span
               style={{
                 flexShrink: 0,
-                display: "inline-flex", alignItems: "center", gap: 5,
+                display: "inline-flex", alignItems: "center", gap: 6,
                 marginRight: 8,
                 padding: "2px 8px",
                 borderRadius: 6,
-                background: "color-mix(in srgb, var(--accent) 12%, transparent)",
-                color: "var(--accent)",
+                background: goalState.status === "complete"
+                  ? "color-mix(in srgb, var(--accent-green, #22c55e) 14%, transparent)"
+                  : goalState.status === "blocked" || goalState.status === "paused"
+                    ? "color-mix(in srgb, #f59e0b 14%, transparent)"
+                    : "color-mix(in srgb, var(--accent) 12%, transparent)",
+                color: goalState.status === "complete"
+                  ? "var(--accent-green, #22c55e)"
+                  : goalState.status === "blocked" || goalState.status === "paused"
+                    ? "#f59e0b"
+                    : "var(--accent)",
                 fontSize: 11,
                 fontWeight: 600,
                 whiteSpace: "nowrap",
                 userSelect: "none",
               }}
-              title={t("desktop.planModeHint")}
+              title={goalState.goalText ?? ""}
             >
-              <CompassIcon size={12} weight="fill" aria-hidden="true" />
-              {t("desktop.planModeBadge")}
+              <TargetIcon size={12} weight="fill" aria-hidden="true" />
+              {goalState.status === "running" && (
+                <span>
+                  {t("desktop.goalRunning")} · {goalState.turnsUsed}/{goalState.turnsLimit}
+                </span>
+              )}
+              {goalState.status === "complete" && <span>{t("desktop.goalComplete")}</span>}
+              {goalState.status === "blocked" && <span>{t("desktop.goalBlocked")}</span>}
+              {goalState.status === "paused" && <span>{t("desktop.goalPaused")}</span>}
+              {goalState.noProgressTurns > 0 && goalState.status === "running" && (
+                <span style={{ opacity: 0.8 }}>· {t("desktop.goalNoProgress", { n: goalState.noProgressTurns })}</span>
+              )}
+              {goalState.status === "running" && (
+                <button
+                  type="button"
+                  onClick={onGoalPause}
+                  title={t("desktop.goalPause")}
+                  aria-label={t("desktop.goalPause")}
+                  style={{
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    width: 16, height: 16, padding: 0,
+                    background: "none", border: "none", borderRadius: 4,
+                    color: "inherit", cursor: "pointer", fontSize: 11,
+                  }}
+                >
+                  {t("desktop.goalPauseShort")}
+                </button>
+              )}
+              {(goalState.status === "paused" || goalState.status === "blocked") && (
+                <button
+                  type="button"
+                  onClick={onGoalResume}
+                  title={t("desktop.goalResume")}
+                  aria-label={t("desktop.goalResume")}
+                  style={{
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    padding: "0 4px",
+                    background: "none", border: "none", borderRadius: 4,
+                    color: "inherit", cursor: "pointer", fontSize: 11, fontWeight: 600,
+                  }}
+                >
+                  {t("desktop.goalResumeShort")}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onGoalStop}
+                title={t("desktop.goalStop")}
+                aria-label={t("desktop.goalStop")}
+                style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  padding: "0 3px",
+                  background: "none", border: "none", borderRadius: 4,
+                  color: "inherit", cursor: "pointer", fontSize: 11,
+                  opacity: 0.75,
+                }}
+              >
+                ✕
+              </button>
             </span>
           )}
           <textarea
@@ -1849,10 +2087,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
         )}
 
+
+
         {/* Bottom bar: left | center (context) | right */}
         <div className="chat-input-toolbar" style={{
           display: isMobile ? "grid" : "flex",
-          gridTemplateColumns: isMobile ? "auto minmax(0, 1fr)" : undefined,
+          gridTemplateColumns: isMobile ? "auto auto minmax(0, 1fr)" : undefined,
           alignItems: "center",
           gap: 4,
         }}>
@@ -1861,12 +2101,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           <div ref={attachMenuRef} className="chat-input-toolbar-attach" style={{ position: "relative" }}>
             <button
               onClick={(e) => {
-                if (isStreaming) return;
                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                 setAttachMenuRect({ top: rect.top, left: rect.left, width: rect.width });
                 setAttachMenuOpen((v) => !v);
               }}
-              disabled={isStreaming}
               title={t("desktop.attachMenu")}
               aria-label={t("desktop.attachMenu")}
               aria-expanded={attachMenuOpen}
@@ -1875,34 +2113,33 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 width: 24, height: 24, padding: 0,
                 background: attachMenuOpen ? "var(--bg-hover)" : "none", border: "none",
                 borderRadius: 6,
-                color: planMode ? "var(--accent)" : (attachedImages.length ? "var(--accent)" : "var(--text-muted)"),
-                cursor: isStreaming ? "not-allowed" : "pointer",
-                opacity: isStreaming ? 0.5 : 1,
+                color: attachedImages.length ? "var(--accent)" : "var(--text-muted)",
+                cursor: "pointer",
                 transition: "background 0.12s, color 0.12s",
               }}
               onMouseEnter={(e) => {
-                if (isStreaming) return;
                 e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = (planMode || attachedImages.length) ? "var(--accent)" : "var(--text)";
+                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = attachMenuOpen ? "var(--bg-hover)" : "none";
-                e.currentTarget.style.color = (planMode || attachedImages.length) ? "var(--accent)" : "var(--text-muted)";
+                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text-muted)";
               }}
             >
               <PlusIcon size={14} />
             </button>
             {attachMenuOpen && attachMenuRect && (() => {
               const items: Array<{
-                id: "chat" | "plan" | "upload";
+                id: "upload" | "reference" | "sessions" | "slash";
                 label: string;
                 desc: string;
                 icon: typeof ChatCircleTextIcon;
                 active?: boolean;
               }> = [
-                { id: "chat", label: t("desktop.attachChat"), desc: t("desktop.attachChatDesc"), icon: ChatCircleTextIcon, active: !planMode },
-                { id: "plan", label: t("desktop.attachPlan"), desc: t("desktop.attachPlanDesc"), icon: CompassIcon, active: planMode },
                 { id: "upload", label: t("desktop.attachUpload"), desc: t("desktop.attachUploadDesc"), icon: UploadSimpleIcon },
+                { id: "reference", label: t("desktop.attachReference"), desc: t("desktop.attachReferenceDesc"), icon: PhosphorFolderIcon },
+                { id: "sessions", label: t("desktop.attachSessions"), desc: t("desktop.attachSessionsDesc"), icon: ChatCircleTextIcon },
+                { id: "slash", label: t("desktop.attachCommands"), desc: t("desktop.attachCommandsDesc"), icon: LightningIcon },
               ];
               const vh = window.visualViewport?.height ?? window.innerHeight;
               const vw = window.innerWidth;
@@ -1932,12 +2169,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       role="menuitem"
                       onClick={() => {
                         setAttachMenuOpen(false);
-                        if (item.id === "chat") {
-                          if (planMode) onPlanModeChange?.(false);
-                        } else if (item.id === "plan") {
-                          if (!planMode) onPlanModeChange?.(true);
-                        } else {
+                        if (item.id === "upload") {
                           fileInputRef.current?.click();
+                        } else if (item.id === "reference") {
+                          // Insert an @ token so the file-reference autocomplete opens.
+                          insertAtTrigger();
+                        } else if (item.id === "sessions") {
+                          insertSessionsTrigger();
+                        } else if (item.id === "slash") {
+                          insertSlashTrigger();
                         }
                       }}
                       style={{
@@ -1966,7 +2206,44 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             })()}
           </div>
           <div className="chat-input-toolbar-left" style={{ flex: "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
-            {!isStreaming && onThinkingLevelChange && (
+            {onCollaborationModeChange && onTokenModeChange && onToolApprovalModeChange && (
+              <ModeControls
+                collaborationMode={collaborationMode}
+                tokenMode={tokenMode}
+                toolApprovalMode={toolApprovalMode}
+                onCollaborationModeChange={onCollaborationModeChange}
+                onTokenModeChange={onTokenModeChange}
+                onToolApprovalModeChange={onToolApprovalModeChange}
+                disabled={isStreaming}
+              />
+            )}
+
+          </div>
+
+          {/* spacer */}
+          {!isMobile && <div className="chat-input-toolbar-spacer" style={{ flex: 1 }} />}
+
+          {/* RIGHT: thinking + tools preset + compact + sound (idle) | Stop + sound (streaming) */}
+          <div ref={controlsMenuRef} className="chat-input-toolbar-controls" style={{
+            flex: isMobile ? "1 1 auto" : "0 0 auto",
+            minWidth: isMobile ? 0 : undefined,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            position: "relative",
+            marginLeft: isMobile ? 0 : "auto",
+          }}>
+            <div className="chat-input-toolbar-actions" style={{
+              display: "flex",
+              alignItems: "center",
+              gap: isMobile ? 1 : 2,
+              ...(isMobile ? {
+                flex: "1 1 auto",
+                minWidth: 0,
+                justifyContent: "flex-end",
+              } : null),
+            }}>
+            {onThinkingLevelChange && (
               <div ref={thinkingDropdownRef} className="chat-input-toolbar-thinking" style={{ position: "relative" }}>
                 <button
                   onClick={(e) => { if (isStreaming) return; const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setThinkingDropdownRect({ top: rect.top, left: rect.left, width: rect.width }); setThinkingDropdownOpen((v) => !v); }}
@@ -1996,7 +2273,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   }}
                 >
                   <ThinkingLevelIcon level={thinkingLevel ?? "auto"} />
-                  {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{thinkingDisplayLabel}</span>}
+                  <span style={{ whiteSpace: "nowrap" }}>{thinkingDisplayLabel}</span>
                   <CaretDownIcon
                     size={11}
                     weight="bold"
@@ -2059,77 +2336,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   })()}
               </div>
             )}
-          </div>
-
-          {/* spacer */}
-          {!isMobile && <div className="chat-input-toolbar-spacer" style={{ flex: 1 }} />}
-
-          {/* RIGHT: thinking + tools preset + compact + sound (idle) | Stop + sound (streaming) */}
-          <div ref={controlsMenuRef} className="chat-input-toolbar-controls" style={{
-            flex: isMobile ? "1 1 auto" : "0 0 auto",
-            minWidth: isMobile ? 0 : undefined,
-            width: isMobile ? "100%" : undefined,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            position: "relative",
-            marginLeft: isMobile ? 0 : "auto",
-          }}>
-            {isMobile && (
-              <button
-                type="button"
-                title={controlsMenuOpen ? undefined : t("desktop.moreControls")}
-                aria-label={t("desktop.moreControls")}
-                aria-expanded={controlsMenuOpen}
-                aria-hidden={controlsMenuOpen || undefined}
-                tabIndex={controlsMenuOpen ? -1 : undefined}
-                onClick={() => {
-                  setModelDropdownOpen(false);
-                  setControlsMenuOpen(true);
-                }}
-                style={{
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minWidth: 32,
-                  height: 24,
-                  padding: "3px 5px",
-                  background: "none",
-                  border: "none",
-                  borderRadius: 6,
-                  color: "var(--text-muted)",
-                  cursor: controlsMenuOpen ? "default" : "pointer",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  display: controlsMenuOpen ? "none" : "flex",
-                  transition: "background 0.12s, color 0.12s",
-                }}
-                onMouseEnter={(e) => {
-                  if (controlsMenuOpen) return;
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                  e.currentTarget.style.color = "var(--text)";
-                }}
-                onMouseLeave={(e) => {
-                  if (controlsMenuOpen) return;
-                  e.currentTarget.style.background = "none";
-                  e.currentTarget.style.color = "var(--text-muted)";
-                }}
-              >
-                {t("desktop.more")}
-              </button>
-            )}
-            <div className="chat-input-toolbar-actions" style={{
-              display: "flex",
-              alignItems: "center",
-              gap: isMobile ? 1 : 2,
-              ...(isMobile ? {
-                flex: "1 1 auto",
-                minWidth: 0,
-                justifyContent: "flex-end",
-              } : null),
-            }}>
-            {(!isMobile || controlsMenuOpen) && !isStreaming && onToolPresetChange && (
-              <div ref={toolDropdownRef} className="chat-input-toolbar-tools" style={{ position: "relative" }}>
-                <button
+            {onToolPresetChange && toolPreset !== "full" && (
+              <div ref={toolDropdownRef} className="chat-input-toolbar-tools" style={{ position: "relative" }}>                <button
                   onClick={(e) => { if (isStreaming) return; const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setToolDropdownRect({ top: rect.top, left: rect.left, width: rect.width }); setToolDropdownOpen((v) => !v); }}
                   disabled={isStreaming}
                   title={t("desktop.changeToolPreset", { preset: toolPresetLabel })}
@@ -2158,7 +2366,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     e.currentTarget.style.color = "var(--text-muted)";
                   }}
                 >
-                  {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{toolPresetLabel}</span>}
+                  <span style={{ whiteSpace: "nowrap" }}>{toolPresetLabel}</span>
                   <CaretDownIcon
                     size={11}
                     weight="bold"
@@ -2558,43 +2766,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </button>
             )}
 
-            {isMobile && controlsMenuOpen && (
-              <button
-                type="button"
-                title={t("desktop.collapseControls")}
-                aria-label={t("desktop.collapseControls")}
-                aria-expanded={true}
-                onClick={() => {
-                  setToolDropdownOpen(false);
-                  setThinkingDropdownOpen(false);
-                  setControlsMenuOpen(false);
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 26,
-                  height: 24,
-                  padding: 0,
-                  marginLeft: 0,
-                  background: "var(--bg-hover)",
-                  border: "none",
-                  borderLeft: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
-                  borderRadius: "0 6px 6px 0",
-                  color: "var(--text)",
-                  cursor: "pointer",
-                  transition: "background 0.12s, color 0.12s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--bg-selected)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                }}
-              >
-                <XIcon size={13} />
-              </button>
-            )}
+
             </div>
           </div>
         </div>

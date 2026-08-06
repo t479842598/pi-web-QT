@@ -37,6 +37,7 @@ const tabs: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
   { id: "features", labelKey: "desktop.features", Icon: Lightning },
   { id: "usage", labelKey: "desktop.usage", Icon: ChartBar },
   { id: "backup", labelKey: "desktop.backup", Icon: Database },
+  // Import stays desktop-only for now (Windows/macOS path handling).
   { id: "import", labelKey: "desktop.importSessions", Icon: DownloadSimple },
 ];
 
@@ -161,7 +162,7 @@ export function SettingsModal({
               borderBottom: isMobile ? "1px solid var(--border)" : "none",
             }}
           >
-            {tabs.map(({ id, labelKey, Icon }) => {
+            {tabs.filter(({ id }) => !(isMobile && id === "import")).map(({ id, labelKey, Icon }) => {
               const disabled = (id === "skills" || id === "plugins") && !cwd;
               const active = activeTab === id;
               return (

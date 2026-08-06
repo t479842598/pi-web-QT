@@ -240,6 +240,66 @@ function repairTextBlocks<T extends { type: string }>(content: T[]): T[] {
   return changed ? repaired : content;
 }
 
+/** Per-text-block cap for title generation: tool outputs can be huge, and the
+ *  title model's context is smaller than the main model's. Truncating keeps a
+ *  40-message tail comfortably inside the budget. */
+const MAX_TITLE_TEXT_BLOCK = 600;
+/** Total cap for all text across the title input (safety net). */
+const MAX_TITLE_TOTAL_TEXT = 8_000;
+
+/** Trim oversized text blocks in the title input so the title model's context
+ *  is never exceeded (GLM code=10040 "model response context exceeded"). */
+function truncateTitleMessages(messages: AgentMessage[]): AgentMessage[] {
+  let total = 0;
+  return messages.map((message) => {
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) return message;
+    let changed = false;
+    const next = content.map((block) => {
+      if (block && typeof block === "object" && (block as { type?: unknown }).type === "text") {
+        const textBlock = block as { text?: string };
+        const text = typeof textBlock.text === "string" ? textBlock.text : "";
+        if (text.length > MAX_TITLE_TEXT_BLOCK) {
+          changed = true;
+          const trimmed = text.slice(0, MAX_TITLE_TEXT_BLOCK) + "\n…[truncated]";
+          total += trimmed.length;
+          return { ...textBlock, text: trimmed };
+        }
+        total += text.length;
+      }
+      return block;
+    });
+    return changed ? { ...message, content: next } as AgentMessage : message;
+  }).map((message) => {
+    // Second pass: if the total is still over the cap, hard-cut the tail.
+    if (total <= MAX_TITLE_TOTAL_TEXT) return message;
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) return message;
+    let remaining = MAX_TITLE_TOTAL_TEXT;
+    let changed = false;
+    const next = content.map((block) => {
+      if (block && typeof block === "object" && (block as { type?: unknown }).type === "text") {
+        const textBlock = block as { text?: string };
+        const text = typeof textBlock.text === "string" ? textBlock.text : "";
+        if (text.length <= remaining) {
+          remaining -= text.length;
+          return block;
+        }
+        if (remaining <= 0) {
+          changed = true;
+          return { ...textBlock, text: "" };
+        }
+        changed = true;
+        const cut = text.slice(0, remaining);
+        remaining = 0;
+        return { ...textBlock, text: cut };
+      }
+      return block;
+    });
+    return changed ? { ...message, content: next } as AgentMessage : message;
+  });
+}
+
 export async function generateSessionTitle(
   source: AgentSession,
   modelOverride?: Model<Api>,
@@ -259,7 +319,7 @@ export async function generateSessionTitle(
   if (!candidate.some((message) => message.role === "user")) {
     candidate = rawMessages;
   }
-  const sanitizedMessages = sanitizeTitleMessages(candidate);
+  const sanitizedMessages = truncateTitleMessages(sanitizeTitleMessages(candidate));
   const historyLength = sanitizedMessages.length;
   if (!sanitizedMessages.some((message) => message.role === "user")) {
     throw new Error("The session has no user messages to name");

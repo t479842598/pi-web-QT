@@ -72,9 +72,18 @@ function isReasonixMainSession(filename: string): boolean {
  * Reasonix: -Applications → pi: --Applications--
  * Reasonix: -Volumes-1T 原装-项目研发-pi-web-QT → pi: --Volumes-1T 原装-项目研发-pi-web-QT--
  */
+/**
+ * Convert a Reasonix project name to the pi session cwd directory encoding.
+ * pi encodes the resolved cwd as `--<path>--` with the leading slash removed
+ * and every `/`, `\`, `:` replaced by `-` (see getDefaultSessionDirPath in the
+ * SDK). On Windows `C:\Users\me\project` becomes `--C-Users-me-project--`.
+ */
 export function reasonixProjectToPiCwdDir(projectName: string): string {
   const inner = projectName.replace(/^-/, "");
-  return `--${inner}--`;
+  // Apply pi's cwd encoding: strip a leading slash and swap separators/drive
+  // colon for dashes, so the produced dir matches what the SDK actually uses.
+  const encoded = inner.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-");
+  return `--${encoded}--`;
 }
 
 // ============================================================================

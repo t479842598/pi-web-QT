@@ -1,6 +1,5 @@
 import type { Options as ReactMarkdownOptions } from "react-markdown";
 import rehypeKatex from "rehype-katex";
-import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -18,7 +17,10 @@ export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [rem
 export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = markdownRemarkPlugins;
 
 export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
-  rehypeRaw,
+  // rehypeRaw is intentionally NOT used: pasted messages can contain raw
+  // <p>/<div> HTML (e.g. copied error logs), which rehypeRaw would parse into
+  // real block elements nested inside markdown paragraphs — invalid DOM that
+  // breaks hydration. It also removes an XSS surface.
   [rehypeSanitize, markdownSanitizeSchema],
   [rehypeKatex, { throwOnError: false, strict: false }],
 ];

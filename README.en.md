@@ -65,7 +65,16 @@ The board's own **Task settings** button configures per-project execution (separ
 - The engine is a single server process (exclusive lock); interrupted tasks are recovered on restart (marked failed/interrupted, retryable).
 - Beta: desktop only; the mobile UI does not show the board.
 
-## Latest changes (2026-08-06 · v0.9.17-beta.1)
+## Latest changes (2026-08-06 · v0.9.17-beta.2)
+
+- **Chat mode system** (ported from Reasonix): the composer toolbar gains three mode controls — task mode (Normal / Plan / Goal), token profile (Lite / Balanced / Delivery) and tool approval (Ask / Auto / Yolo). Plan mode produces a read-only plan then shows a confirm card (Execute / Suggest / Exit); Goal mode auto-continues with a turn budget and stall detection; Lite narrows the toolset to save tokens; Delivery injects a verify-first instruction.
+- **Tool-call approval (real interception)**: in Ask mode, write-class tool calls are suspended before execution and a shelf card appears above the composer — allow, deny, or deny with a reason; parallel batches resolve one by one; 120s timeout auto-denies. Rules (deny > ask > allow) support `ToolName` / `ToolName(glob)` / `Bash(command:*)` and persist to `~/.pi/agent/settings.json`.
+- **Yolo red ring**: picking Yolo tints the composer border red as an "unrestricted" warning.
+- **Long-paste folding**: pasting >2000 chars / 20 lines collapses into a `[Pasted text #N · X lines]` card (preview / remove) so the composer stays fast; the full text is expanded when sending.
+- **Title-failure bubble + model picker**: failed title generation shows a floating bubble next to the session row with retry and a provider-grouped model picker.
+- **Fixes**: Markdown hydration errors (rehypeRaw removed), mode-instruction blocks no longer leak into user bubbles, batch title 500 / UI stall, model-picker duplicate keys and grouping, Windows import path mapping, idempotent approval resolves, and the mobile title bar (branch icon only + tap title for full text).
+
+## Previous changes (2026-08-06 · v0.9.17-beta.1)
 
 - **Fix 500 when generating titles for imported sessions** — auto-naming Reasonix-imported sessions no longer fails with `Cannot read properties of undefined (reading 'length')`. The import converter could emit text blocks missing the `text` field; both the importer and the title pipeline now handle this, including previously imported files.
 - **Faster title generation** — very long sessions (thousands of tool messages) now use only the most recent portion of the conversation, avoiding timeouts; falls back to the full transcript when the tail has no user message.

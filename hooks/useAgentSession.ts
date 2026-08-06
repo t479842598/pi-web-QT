@@ -16,6 +16,18 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { PendingRecoveryItem, QueueEntry, QueueEntryInput } from "@/lib/queue-store";
 import type { ChatDraftImage } from "@/lib/draft-store";
 import { createStreamUpdateScheduler, type StreamUpdateScheduler } from "@/lib/stream-update-scheduler";
+import {
+  buildModeSystemPrompt,
+  defaultModeSettings,
+  ECONOMY_TOOL_WHITELIST,
+  normalizeCollaborationMode,
+  normalizeTokenMode,
+  normalizeToolApprovalMode,
+  type CollaborationMode,
+  type ModeSettings,
+  type TokenMode,
+  type ToolApprovalMode,
+} from "@/lib/modes";
 
 export interface SessionData {
   sessionId: string;
@@ -87,6 +99,41 @@ export interface QueuedMessages {
   steering: string[];
   followUp: string[];
 }
+
+/** A tool-approval request waiting for the user (from the RPC wrapper). */
+export interface ApprovalRequestItem {
+  id: string;
+  toolName: string;
+  args: unknown;
+}
+
+export type GoalStatus = "idle" | "running" | "paused" | "blocked" | "complete";
+
+export interface GoalRuntimeState {
+  status: GoalStatus;
+  goalText: string | null;
+  turnsUsed: number;
+  turnsLimit: number;
+  noProgressTurns: number;
+  noProgressLimit: number;
+  tokensUsed: number;
+}
+
+/** Default turn quota for a goal run (mirrors Reasonix budgetClassSimple). */
+export const DEFAULT_GOAL_TURNS_LIMIT = 10;
+/** Pause after this many consecutive turns with no host-verifiable progress. */
+export const DEFAULT_GOAL_NO_PROGRESS_LIMIT = 4;
+
+/** Injected via followUp after every goal turn that is not done/blocked. */
+const GOAL_CONTINUE_INSTRUCTION =
+  `Continue pursuing the active goal. Do the next useful work, then report your disposition:\n` +
+  `- "continue" with the next concrete step;\n` +
+  `- "complete" only when fully done and verified;\n` +
+  `- "blocked" when only the user can unblock you.`;
+
+/** Assistant message markers that end or pause the goal loop. */
+const GOAL_COMPLETE_MARKERS = ["goal complete", "[goal: complete]", "goal is complete"];
+const GOAL_BLOCKED_MARKERS = ["goal blocked", "[goal: blocked]", "blocked:"];
 
 function normalizeQueuedMessages(q?: { steering?: string[]; followUp?: string[] } | null): QueuedMessages {
   return { steering: q?.steering ?? [], followUp: q?.followUp ?? [] };
@@ -192,6 +239,34 @@ const PLAN_MODE_INSTRUCTION =
   `- When you have enough understanding, produce a concrete, step-by-step implementation plan.\n` +
   `- Structure the plan with clear phases, the files involved, and any risks or open questions.\n` +
   `- Do not write code yet — the plan itself is the deliverable.`;
+
+/** Known mode-instruction block headers (from lib/modes buildModeSystemPrompt
+ *  and the legacy plan block). Used to strip the injected prefix from echoed
+ *  user messages so the chat bubble shows only what the user typed. */
+const MODE_BLOCK_MARKERS = [
+  "You are in PLAN MODE.",
+  "<economy-profile>",
+  "<delivery-profile>",
+  "<goal-profile>",
+];
+
+/** If `text` starts with a mode-instruction block followed by a blank line and
+ *  the user's own text, return just the user text; otherwise return as-is. */
+function stripModePrefix(text: string): string {
+  const trimmed = text.replace(/^\uFEFF/, "");
+  for (const marker of MODE_BLOCK_MARKERS) {
+    const idx = trimmed.indexOf(marker);
+    if (idx !== 0) continue;
+    // Skip the whole injected block up to the double newline + user content.
+    const sep = trimmed.indexOf("\n\n", marker.length);
+    if (sep >= 0) {
+      const rest = trimmed.slice(sep + 2);
+      if (rest.trim().length > 0) return rest;
+    }
+    return "";
+  }
+  return text;
+}
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
@@ -383,7 +458,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [modelScopeWarnings, setModelScopeWarnings] = useState<string[]>([]);
   const [newSessionModel, setNewSessionModel] = useState<SelectedModel | null>(null);
   const [newSessionDefaultModel, setNewSessionDefaultModel] = useState<SelectedModel | null>(null);
-  const [toolPreset, setToolPreset] = useState<"none" | "default" | "full" | "plan">("default");
+  const [toolPreset, setToolPreset] = useState<"none" | "default" | "full" | "plan">("full");
   // Plan mode pins the session to a read-only toolset and injects a plan-only
   // instruction into every prompt. Persists until explicitly exited.
   const [planMode, setPlanMode] = useState(false);
@@ -394,6 +469,77 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     planModeRef.current = planMode;
   }, [planMode]);
+  // ── Chat modes (Reasonix port) ───────────────────────────────────────────
+  // Loaded from /api/modes (~/.pi/agent/settings.json `modes`) so the
+  // selection survives page reloads and new sessions inherit the same defaults.
+  const [modeSettings, setModeSettings] = useState<ModeSettings>(() => defaultModeSettings());
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/modes")
+      .then((response) => (response.ok ? response.json() as Promise<ModeSettings> : null))
+      .then((loaded) => {
+        if (cancelled || !loaded) return;
+        setModeSettings({
+          collaborationMode: normalizeCollaborationMode(loaded.collaborationMode),
+          tokenMode: normalizeTokenMode(loaded.tokenMode),
+          toolApprovalMode: normalizeToolApprovalMode(loaded.toolApprovalMode),
+          permissionRules: {
+            allow: Array.isArray(loaded.permissionRules?.allow) ? loaded.permissionRules.allow : [],
+            ask: Array.isArray(loaded.permissionRules?.ask) ? loaded.permissionRules.ask : [],
+            deny: Array.isArray(loaded.permissionRules?.deny) ? loaded.permissionRules.deny : [],
+          },
+        });
+      })
+      .catch(() => { /* keep defaults on load failure */ });
+    return () => { cancelled = true; };
+  }, []);
+  const collaborationMode = modeSettings.collaborationMode;
+  const tokenMode = modeSettings.tokenMode;
+  const toolApprovalMode = modeSettings.toolApprovalMode;
+  const permissionRules = modeSettings.permissionRules;
+  const collaborationModeRef = useRef<CollaborationMode>(collaborationMode);
+  const tokenModeRef = useRef<TokenMode>(tokenMode);
+  const toolApprovalModeRef = useRef<ToolApprovalMode>(toolApprovalMode);
+  const permissionRulesRef = useRef(modeSettings.permissionRules);
+  const goalTextRef = useRef<string | null>(null);
+  const modeSettingsRef = useRef(modeSettings);
+  useEffect(() => {
+    modeSettingsRef.current = modeSettings;
+  }, [modeSettings]);
+  useEffect(() => {
+    toolApprovalModeRef.current = toolApprovalMode;
+  }, [toolApprovalMode]);
+  useEffect(() => {
+    permissionRulesRef.current = modeSettings.permissionRules;
+  }, [modeSettings.permissionRules]);
+  useEffect(() => {
+    collaborationModeRef.current = collaborationMode;
+  }, [collaborationMode]);
+  useEffect(() => {
+    tokenModeRef.current = tokenMode;
+  }, [tokenMode]);
+  /** Pending tool-approval requests surfaced by the RPC wrapper (SSE). */
+  const [approvalRequests, setApprovalRequests] = useState<ApprovalRequestItem[]>([]);
+  const approvalRequestsRef = useRef<ApprovalRequestItem[]>([]);
+  useEffect(() => {
+    approvalRequestsRef.current = approvalRequests;
+  }, [approvalRequests]);
+  // ── Goal mode runtime (Reasonix goal loop) ───────────────────────────────
+  const [goalState, setGoalState] = useState<GoalRuntimeState>({
+    status: "idle",
+    goalText: null,
+    turnsUsed: 0,
+    turnsLimit: DEFAULT_GOAL_TURNS_LIMIT,
+    noProgressTurns: 0,
+    noProgressLimit: DEFAULT_GOAL_NO_PROGRESS_LIMIT,
+    tokensUsed: 0,
+  });
+  const goalStateRef = useRef(goalState);
+  useEffect(() => {
+    goalStateRef.current = goalState;
+  }, [goalState]);
+  const goalLoopRunningRef = useRef(false);
+  const goalLastAssistantTokensRef = useRef(0);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption>("auto");
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; errorMessage?: string } | null>(null);
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
@@ -1132,6 +1278,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           scheduleEventStreamClose(sid);
         }
         if (wasRunning) onAgentEnd?.();
+        // Goal auto-continue: when in goal mode, keep driving the loop after
+        // the run settles idle (the loop itself decides to stop/pause/continue).
+        if (collaborationModeRef.current === "goal" && goalStateRef.current.status === "running") {
+          void goalActionsRef.current?.drive();
+        }
         break;
       }
       case "prompt_done": {
@@ -1150,6 +1301,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           settleUiStage();
           if (sid) scheduleEventStreamClose(sid);
         }
+        break;
+      }
+      case "tool_approval_request": {
+        // A tool call is waiting on the user. Surface it for the ApprovalModal.
+        const item: ApprovalRequestItem = {
+          id: String(event.id ?? ""),
+          toolName: String(event.toolName ?? ""),
+          args: event.args,
+        };
+        if (!item.id) break;
+        setApprovalRequests((prev) => (prev.some((r) => r.id === item.id) ? prev : [...prev, item]));
+        break;
+      }
+      case "tool_approval_resolved": {
+        // Server already settled this request (e.g. timeout auto-deny) — drop
+        // it from the UI queue so the modal does not stay stuck on a stale id.
+        const id = String(event.id ?? "");
+        if (!id) break;
+        setApprovalRequests((prev) => prev.filter((r) => r.id !== id));
         break;
       }
       case "prompt_error":
@@ -1198,7 +1368,33 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           // messages. The run's initial prompt also emits one, but handleSend
           // already appended it optimistically. Consume only the still-adjacent
           // optimistic bubble; later same-text queue deliveries must render.
-          const delivered = normalizeToolCalls(completed);
+          let delivered = normalizeToolCalls(completed);
+          // The server echoes back the full prompt, which includes the mode
+          // instruction block injected by handleSend (plan/goal/economy/…).
+          // Strip that prefix so the bubble matches what the user actually
+          // typed (and the optimistic copy) instead of showing the raw block.
+          if (delivered.role === "user" && "content" in delivered) {
+            const content = delivered.content;
+            if (typeof content === "string") {
+              if (MODE_BLOCK_MARKERS.some((m) => content.startsWith(m))) {
+                delivered = { ...delivered, content: stripModePrefix(content) };
+              }
+            } else if (Array.isArray(content)) {
+              const textBlocks = content.filter((b) => b.type === "text");
+              const firstText = textBlocks[0] as { text?: string } | undefined;
+              if (firstText && typeof firstText.text === "string" && MODE_BLOCK_MARKERS.some((block) => firstText.text?.startsWith(block))) {
+                delivered = {
+                  ...delivered,
+                  content: content.map((b, i) => {
+                    if (b.type !== "text" || i !== 0) return b;
+                    const raw = (b as { text?: string }).text ?? "";
+                    const stripped = stripModePrefix(raw);
+                    return { ...b, text: stripped };
+                  }),
+                };
+              }
+            }
+          }
           const deliveredKey = userMessageKey(delivered);
           const optimisticKey = optimisticUserMessageKeyRef.current;
           optimisticUserMessageKeyRef.current = null;
@@ -1300,8 +1496,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // Plan mode prefixes every prompt with a read-only instruction block.
     // The UI textarea keeps showing the user's own words; the injected block
     // only reaches the agent.
-    const effectiveMessage = planModeRef.current && !isSlashCommandPrompt
-      ? `${PLAN_MODE_INSTRUCTION}\n\n${message}`
+    const modeBlock = buildModeSystemPrompt({
+      collaborationMode: collaborationModeRef.current,
+      tokenMode: tokenModeRef.current,
+      goalText: collaborationModeRef.current === "goal" ? (goalTextRef.current ?? undefined) : undefined,
+    });
+    // Compatibility: the legacy plan toggle (T-009 unifies it into
+    // collaborationMode) still injects its read-only block when no mode block
+    // is otherwise active.
+    const planFallback = !modeBlock && planModeRef.current && !isSlashCommandPrompt
+      ? PLAN_MODE_INSTRUCTION
+      : "";
+    const effectiveMessage = (modeBlock || planFallback)
+      ? `${modeBlock || planFallback}\n\n${message}`
       : message;
     const sentMessage = effectiveMessage;
 
@@ -1316,6 +1523,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setMessages((prev) => [...prev, userMsg]);
     optimisticUserMessageKeyRef.current = userMessageKey(userMsg);
     promptRunIdRef.current = promptRunId;
+    // Goal mode: the first user message becomes the goal; the loop auto-continues.
+    if (collaborationModeRef.current === "goal" && !isSlashCommandPrompt) {
+      goalTextRef.current = trimmedMessage;
+      setGoalState((prev) => ({
+        ...prev,
+        status: "running",
+        goalText: trimmedMessage,
+        turnsUsed: 0,
+        noProgressTurns: 0,
+        tokensUsed: 0,
+      }));
+      goalLoopRunningRef.current = true;
+    }
     agentRunningRef.current = true;
     setAgentRunning(true);
     setAgentPhase(isSlashCommandPrompt ? { kind: "running_command" } : { kind: "waiting_model" });
@@ -1936,6 +2156,191 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [toolPreset]);
 
+  // ── Chat modes (Reasonix port) ───────────────────────────────────────────
+  const persistModeSettings = useCallback((next: ModeSettings) => {
+    setModeSettings(next);
+    void fetch("/api/modes", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    }).catch((error) => {
+      console.error("Failed to persist mode settings:", error);
+    });
+  }, []);
+
+  const handleCollaborationModeChange = useCallback((mode: CollaborationMode) => {
+    persistModeSettings({ ...modeSettingsRef.current, collaborationMode: normalizeCollaborationMode(mode) });
+    if (mode !== "goal") {
+      // Leaving goal mode stops the auto-continue loop.
+      goalTextRef.current = null;
+      goalLoopRunningRef.current = false;
+      setGoalState((prev) => (prev.status === "idle" ? prev : { ...prev, status: "idle", goalText: null }));
+    }
+  }, [persistModeSettings]);
+
+  const handleTokenModeChange = useCallback(async (mode: TokenMode) => {
+    persistModeSettings({ ...modeSettingsRef.current, tokenMode: normalizeTokenMode(mode) });
+    // Economy narrows the active toolset to the whitelist; leaving economy
+    // restores the preset's full toolset.
+    const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
+    if (!sid) return;
+    try {
+      if (mode === "economy" && !planModeRef.current) {
+        await sendAgentCommand(sid, { type: "set_tools", toolNames: [...ECONOMY_TOOL_WHITELIST] });
+      } else if (mode !== "economy") {
+        const restore = planModeRef.current ? PRESET_PLAN : getToolNamesForPreset(toolPreset === "plan" ? "default" : toolPreset);
+        await sendAgentCommand(sid, { type: "set_tools", toolNames: restore });
+      }
+    } catch (error) {
+      console.error("Failed to apply token mode tools:", error);
+    }
+  }, [persistModeSettings, toolPreset]);
+
+  const handleToolApprovalModeChange = useCallback(async (mode: ToolApprovalMode) => {
+    persistModeSettings({ ...modeSettingsRef.current, toolApprovalMode: normalizeToolApprovalMode(mode) });
+    const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
+    if (!sid) return;
+    try {
+      await sendAgentCommand(sid, { type: "set_approval_mode", mode: normalizeToolApprovalMode(mode) });
+    } catch (error) {
+      console.error("Failed to apply approval mode:", error);
+    }
+  }, [persistModeSettings]);
+
+  /** Persist permission rules and push them to the live session. */
+  const handlePermissionRulesChange = useCallback(async (rules: { allow: string[]; ask: string[]; deny: string[] }) => {
+    persistModeSettings({ ...modeSettingsRef.current, permissionRules: rules });
+    const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
+    if (!sid) return;
+    try {
+      await sendAgentCommand(sid, { type: "set_approval_policy", policy: rules });
+    } catch (error) {
+      console.error("Failed to apply permission rules:", error);
+    }
+  }, [persistModeSettings]);
+
+  /** Resolve a pending tool-approval request (allow / deny + reason). */
+  const resolveApproval = useCallback(async (id: string, approve: boolean, reason?: string) => {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    try {
+      await sendAgentCommand(sid, { type: "resolve_approval", id, approve, reason });
+    } catch (error) {
+      console.error("Failed to resolve approval:", error);
+    } finally {
+      // Always drop from the local queue: the server either resolved it (this
+      // call) or already settled it (timeout / earlier resolve) — keeping it
+      // would leave the modal stuck on a stale id.
+      setApprovalRequests((prev) => prev.filter((r) => r.id !== id));
+    }
+  }, []);
+
+  /** Set the active goal text (goal collaboration mode). */
+  const setActiveGoalText = useCallback((text: string | null) => {
+    goalTextRef.current = text;
+  }, []);
+
+  // ── Goal loop ────────────────────────────────────────────────────────────
+  /** Start a goal run: persists the goal text and arms the auto-continue loop. */
+  const handleGoalStart = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    goalTextRef.current = trimmed;
+    setGoalState((prev) => ({
+      ...prev,
+      status: "running",
+      goalText: trimmed,
+      turnsUsed: 0,
+      noProgressTurns: 0,
+    }));
+  }, []);
+
+  const handleGoalPause = useCallback(() => {
+    if (goalStateRef.current.status !== "running") return;
+    setGoalState((prev) => ({ ...prev, status: "paused" }));
+  }, []);
+
+  const handleGoalResume = useCallback(() => {
+    const state = goalStateRef.current;
+    if (state.status !== "paused" && state.status !== "blocked") return;
+    setGoalState((prev) => ({ ...prev, status: "running" }));
+    // Resume: kick the loop with a continue instruction.
+    const sid = sessionIdRef.current;
+    if (sid && !agentRunningRef.current) {
+      void sendAgentCommand(sid, { type: "follow_up", message: GOAL_CONTINUE_INSTRUCTION }).catch(() => {});
+    }
+  }, []);
+
+  const handleGoalStop = useCallback(() => {
+    goalLoopRunningRef.current = false;
+    goalTextRef.current = null;
+    setGoalState((prev) => ({ ...prev, status: "idle", goalText: null, turnsUsed: 0, noProgressTurns: 0 }));
+  }, []);
+
+  /**
+   * Goal auto-continue: called when the agent settles idle. Inspects the last
+   * assistant message for complete/blocked markers, enforces the turn budget
+   * and no-progress stall detection, then either stops, pauses, or continues.
+   */
+  const driveGoalLoop = useCallback(async () => {
+    const state = goalStateRef.current;
+    if (state.status !== "running") return;
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+
+    // Find the latest assistant text + count host-verifiable progress
+    // (tool results) since the goal started.
+    let lastText = "";
+    let toolCallsSinceStart = 0;
+    for (const msg of messages) {
+      if (msg.role === "assistant") {
+        const text = typeof msg.content === "string"
+          ? msg.content
+          : (msg.content as Array<{ type?: string; text?: string }> | undefined)?.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n") ?? "";
+        if (text) lastText = text;
+        const toolCalls = (msg.content as Array<{ type?: string }> | undefined)?.filter((b) => b.type === "toolCall").length ?? 0;
+        toolCallsSinceStart += toolCalls;
+      }
+    }
+    const lower = lastText.toLowerCase();
+
+    // Completion marker → stop the loop.
+    if (GOAL_COMPLETE_MARKERS.some((m) => lower.includes(m))) {
+      setGoalState((prev) => ({ ...prev, status: "complete", turnsUsed: prev.turnsUsed + 1 }));
+      goalTextRef.current = null;
+      return;
+    }
+    // Blocked marker → pause and wait for the user.
+    if (GOAL_BLOCKED_MARKERS.some((m) => lower.includes(m))) {
+      setGoalState((prev) => ({ ...prev, status: "blocked", turnsUsed: prev.turnsUsed + 1 }));
+      return;
+    }
+
+    const turnsUsed = state.turnsUsed + 1;
+    // No-progress detection: a turn with zero tool calls is treated as stalled.
+    const noProgressTurns = toolCallsSinceStart === 0 ? state.noProgressTurns + 1 : 0;
+    if (noProgressTurns >= state.noProgressLimit) {
+      setGoalState((prev) => ({ ...prev, status: "blocked", turnsUsed, noProgressTurns }));
+      return;
+    }
+    // Turn budget exhausted → pause for the user to extend or stop.
+    if (turnsUsed >= state.turnsLimit) {
+      setGoalState((prev) => ({ ...prev, status: "paused", turnsUsed, noProgressTurns }));
+      return;
+    }
+
+    setGoalState((prev) => ({ ...prev, turnsUsed, noProgressTurns }));
+    // Continue the goal with the next-turn instruction.
+    await sendAgentCommand(sid, { type: "follow_up", message: GOAL_CONTINUE_INSTRUCTION }).catch(() => {});
+  }, [messages]);
+
+  const goalActionsRef = useRef<{
+    drive: () => Promise<void>;
+  } | null>(null);
+  useEffect(() => {
+    goalActionsRef.current = { drive: driveGoalLoop };
+  }, [driveGoalLoop]);
+
   const scrollUserMsgToTop = useCallback(() => {
     const container = scrollContainerRef.current;
     const el = lastUserMsgRef.current;
@@ -1969,6 +2374,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     if (session) {
       sessionIdRef.current = session.id;
+      // Sync the persisted approval mode + policy to the live RPC session so
+      // the beforeToolCall hook starts with the user's configured posture.
+      const approvalMode = toolApprovalModeRef.current;
+      const rules = permissionRulesRef.current;
+      if (approvalMode !== "auto" || rules.allow.length || rules.ask.length || rules.deny.length) {
+        void sendAgentCommand(session.id, { type: "set_approval_mode", mode: approvalMode }).catch(() => {});
+        void sendAgentCommand(session.id, { type: "set_approval_policy", policy: rules }).catch(() => {});
+      }
       loadSession(session.id, true, true).then((agentState) => {
         if (agentState?.running) {
           if (agentState.state?.isBashRunning) {
@@ -2110,6 +2523,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
     planMode,
+    // Chat modes (Reasonix port)
+    collaborationMode, tokenMode, toolApprovalMode, permissionRules, modeSettings,
+    approvalRequests,
+    handleCollaborationModeChange, handleTokenModeChange, handleToolApprovalModeChange,
+    handlePermissionRulesChange, resolveApproval, setActiveGoalText,
+    goalState, handleGoalStart, handleGoalPause, handleGoalResume, handleGoalStop,
     slashCommands, slashCommandsLoading, queuedMessages, pendingRecovery, recoveryIsImport,
     notices: noticeState.visible, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection: isNew && newSessionModel === null,

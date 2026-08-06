@@ -206,6 +206,8 @@ export function SessionInfoBar({
                     type="button"
                     className="session-info-bar-popover-close"
                     onClick={closePanel}
+                    title={translate("i18n.close")}
+                    aria-label={translate("i18n.close")}
                   >
                     ✕
                   </button>
@@ -257,6 +259,8 @@ export function SessionInfoBar({
                     type="button"
                     className="session-info-bar-popover-close"
                     onClick={closePanel}
+                    title={translate("i18n.close")}
+                    aria-label={translate("i18n.close")}
                   >
                     ✕
                   </button>
