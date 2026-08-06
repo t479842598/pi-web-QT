@@ -230,19 +230,29 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
   // 批量生成标题
   // ========================================================================
 
+  // 并发上限：同时跑太多标题请求会挤占资源、拖慢整体并容易超时。
+  // 用并发池并行 + 单条失败跳过，互不牵连（修复"一个在生成其他就 500"）。
   const generateTitles = useCallback(async () => {
     if (importedIds.length === 0) return;
     setGeneratingTitles(true);
     setTitleProgress({ done: 0, total: importedIds.length });
-    for (let i = 0; i < importedIds.length; i++) {
-      try {
-        await fetch(`/api/sessions/${encodeURIComponent(importedIds[i])}/auto-name`, { method: "POST" });
-      } catch { /* skip errors */ }
-      setTitleProgress({ done: i + 1, total: importedIds.length });
-      if (i < importedIds.length - 1) {
-        await new Promise(r => setTimeout(r, 500));
+
+    const CONCURRENCY = 4;
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < importedIds.length) {
+        const index = nextIndex++;
+        const id = importedIds[index];
+        if (!id) continue;
+        try {
+          await fetch(`/api/sessions/${encodeURIComponent(id)}/auto-name`, { method: "POST" });
+        } catch { /* skip errors */ }
+        setTitleProgress({ done: index + 1, total: importedIds.length });
       }
-    }
+    };
+    const workers = Array.from({ length: Math.min(CONCURRENCY, importedIds.length) }, worker);
+    await Promise.all(workers);
+
     setGeneratingTitles(false);
     onSessionsChanged?.();
   }, [importedIds, onSessionsChanged]);

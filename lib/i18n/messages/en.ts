@@ -386,6 +386,8 @@ export const enLocale = {
     "desktop.unableToOpenWorkspace": "Unable to open this workspace",
     "desktop.rename": "Rename",
     "desktop.generateTitle": "Generate title",
+    "desktop.generateAllTitles": "Generate titles for all sessions in this project",
+    "desktop.generatingTitlesProgress": "Generating titles… {done}/{total}",
     "desktop.generatingTitle": "Generating title...",
     "desktop.titleNeedsMessages": "No messages to generate a title from",
     "desktop.expandForks": "Expand forks",

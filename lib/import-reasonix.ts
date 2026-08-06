@@ -162,7 +162,7 @@ export function convertReasonixLine(
   const id = genEntryId();
 
   if (role === "user") {
-    const text = typeof obj.content === "string" ? obj.content : JSON.stringify(obj.content);
+    const text = (typeof obj.content === "string" ? obj.content : JSON.stringify(obj.content)) ?? "";
     const msgTs = obj.createdAt ? new Date(obj.createdAt).toISOString() : timestamp;
     return {
       entry: {
@@ -230,7 +230,7 @@ export function convertReasonixLine(
   }
 
   if (role === "tool") {
-    const text = typeof obj.content === "string" ? obj.content : JSON.stringify(obj.content);
+    const text = (typeof obj.content === "string" ? obj.content : JSON.stringify(obj.content)) ?? "";
     return {
       entry: {
         type: "message",
@@ -250,7 +250,7 @@ export function convertReasonixLine(
 
   // 兜底：有 content 就当 user 消息
   if (obj.content) {
-    const text = typeof obj.content === "string" ? obj.content : JSON.stringify(obj.content);
+    const text = (typeof obj.content === "string" ? obj.content : JSON.stringify(obj.content)) ?? "";
     return {
       entry: {
         type: "message",

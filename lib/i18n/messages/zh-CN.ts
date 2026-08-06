@@ -386,6 +386,8 @@ export const zhCNLocale = {
     "desktop.unableToOpenWorkspace": "无法打开此工作区",
     "desktop.rename": "重命名",
     "desktop.generateTitle": "生成标题",
+    "desktop.generateAllTitles": "批量生成当前项目所有会话的标题",
+    "desktop.generatingTitlesProgress": "正在批量生成标题… {done}/{total}",
     "desktop.generatingTitle": "正在生成标题…",
     "desktop.titleNeedsMessages": "会话暂无消息，无法生成标题",
     "desktop.expandForks": "展开分支",

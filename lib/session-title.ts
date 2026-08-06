@@ -9,6 +9,10 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 
 const TITLE_TIMEOUT_MS = 90_000;
 const MAX_TITLE_LENGTH = 80;
+/** Cap the number of messages sent to the title model so very long sessions
+ *  (imported sessions can have thousands of tool messages) generate quickly
+ *  instead of timing out. The tail of a conversation carries the current goal. */
+const MAX_TITLE_MESSAGES = 40;
 
 const TITLE_PROMPT = `Create a concise title for this session based on the conversation above.
 
@@ -190,23 +194,50 @@ export function sanitizeTitleMessages(messages: AgentMessage[]): AgentMessage[] 
       });
 
       if (content.length > 0) {
-        sanitized.push({ ...message, content });
+        sanitized.push({ ...message, content: repairTextBlocks(content) });
       }
       continue;
     }
 
     if (message.role === "toolResult") {
       if (expectedToolResultIds?.delete(message.toolCallId)) {
-        sanitized.push(message);
+        sanitized.push(repairMessageTextBlocks(message));
       }
       continue;
     }
 
     expectedToolResultIds = undefined;
-    sanitized.push(message);
+    sanitized.push(repairMessageTextBlocks(message));
   }
 
   return sanitized;
+}
+
+/**
+ * Providers read `block.text.length` when serializing text blocks; sessions
+ * imported from other tools can contain `{"type":"text"}` blocks with a
+ * missing `text` field, which previously crashed title generation with
+ * "Cannot read properties of undefined (reading 'length')". Patch those
+ * blocks in place (keeping the message reference when nothing is broken).
+ */
+function repairMessageTextBlocks(message: AgentMessage): AgentMessage {
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return message;
+  const repaired = repairTextBlocks(content as Array<{ type: string }>);
+  if (repaired === content) return message;
+  return { ...message, content: repaired } as AgentMessage;
+}
+
+function repairTextBlocks<T extends { type: string }>(content: T[]): T[] {
+  let changed = false;
+  const repaired = content.map((block) => {
+    if (block.type === "text" && typeof (block as { text?: unknown }).text !== "string") {
+      changed = true;
+      return { ...block, text: "" } as T;
+    }
+    return block;
+  });
+  return changed ? repaired : content;
 }
 
 export async function generateSessionTitle(
@@ -216,7 +247,19 @@ export async function generateSessionTitle(
   const sourceAgent = source.agent;
   await sourceAgent.waitForIdle();
 
-  const sanitizedMessages = sanitizeTitleMessages(sourceAgent.state.messages);
+  // Keep only the tail of long conversations: imported sessions can contain
+  // thousands of toolResult messages that bloat the context and slow or time
+  // out title generation. The most recent turn carries the current goal.
+  // If the tail happens to be all tool messages, fall back to the full
+  // transcript so we never claim the session has no user messages.
+  const rawMessages = sourceAgent.state.messages;
+  let candidate = rawMessages.length > MAX_TITLE_MESSAGES
+    ? rawMessages.slice(rawMessages.length - MAX_TITLE_MESSAGES)
+    : rawMessages;
+  if (!candidate.some((message) => message.role === "user")) {
+    candidate = rawMessages;
+  }
+  const sanitizedMessages = sanitizeTitleMessages(candidate);
   const historyLength = sanitizedMessages.length;
   if (!sanitizedMessages.some((message) => message.role === "user")) {
     throw new Error("The session has no user messages to name");

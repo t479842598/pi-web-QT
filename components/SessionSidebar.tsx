@@ -681,8 +681,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     // Pi will be spawned lazily when the user sends the first message.
     const tempId = typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-    onNewSession?.(tempId, selectedCwd);
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;    onNewSession?.(tempId, selectedCwd);
   }, [selectedCwd, onNewSession]);
 
   const recentProjects = getRecentProjects(allSessions);
@@ -695,6 +694,40 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const filteredSessions = selectedProject
     ? allSessions.filter((s) => (s.projectRoot ?? s.cwd) === selectedProject)
     : allSessions;
+
+  // 批量生成当前项目所有会话的标题（并发池并行，单条失败跳过）
+  const [batchNaming, setBatchNaming] = useState(false);
+  const [batchNameProgress, setBatchNameProgress] = useState({ done: 0, total: 0 });
+
+  const handleBatchAutoName = useCallback(async () => {
+    if (batchNaming) return;
+    const ids = filteredSessions
+      .filter((s) => s.messageCount > 0)
+      .map((s) => s.id);
+    if (ids.length === 0) return;
+
+    setBatchNaming(true);
+    setBatchNameProgress({ done: 0, total: ids.length });
+
+    const CONCURRENCY = 4;
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < ids.length) {
+        const index = nextIndex++;
+        const id = ids[index];
+        if (!id) continue;
+        try {
+          await fetch(`/api/sessions/${encodeURIComponent(id)}/auto-name`, { method: "POST" });
+        } catch { /* skip errors */ }
+        setBatchNameProgress({ done: index + 1, total: ids.length });
+      }
+    };
+    const workers = Array.from({ length: Math.min(CONCURRENCY, ids.length) }, worker);
+    await Promise.all(workers);
+
+    setBatchNaming(false);
+    void loadSessions(false);
+  }, [batchNaming, filteredSessions, loadSessions]);
   const showWorktreeSwitcher = Boolean(
     worktreeState?.isGit
     && worktreeState.isTopLevel
@@ -1018,6 +1051,40 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
           >
             <Plus size={13} weight="regular" aria-hidden="true" />
+          </button>
+          <button
+            onClick={() => void handleBatchAutoName()}
+            disabled={batchNaming || !selectedCwd || filteredSessions.filter((s) => s.messageCount > 0).length === 0}
+            title={batchNaming
+              ? `${t("desktop.generatingTitlesProgress", { done: batchNameProgress.done, total: batchNameProgress.total })}`
+              : t("desktop.generateAllTitles")}
+            aria-label={t("desktop.generateAllTitles")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 26, height: 26, padding: 0,
+              background: "none",
+              border: "none",
+              color: "var(--text-dim)",
+              cursor: batchNaming ? "default" : "pointer",
+              borderRadius: 5,
+              flexShrink: 0,
+              opacity: (!selectedCwd || filteredSessions.filter((s) => s.messageCount > 0).length === 0) ? 0.5 : 1,
+              transition: "color 0.3s, background 0.3s",
+            }}
+            onMouseEnter={(e) => { if (!batchNaming) { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; } }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+          >
+            {batchNaming ? (
+              <svg
+                style={{ animation: "spin 1s linear infinite" }}
+                width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <Sparkle size={13} weight="regular" aria-hidden="true" />
+            )}
           </button>
           <button
             onClick={() => loadSessions(false)}
