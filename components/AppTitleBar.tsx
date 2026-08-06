@@ -8,6 +8,7 @@ import {
   List,
   Moon,
   SidebarSimple,
+  SquaresFour,
   Sun,
 } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
@@ -23,6 +24,8 @@ interface AppTitleBarProps {
   toggleTheme: (origin?: { x: number; y: number }) => void;
   isMobile: boolean;
   showChat: boolean;
+  showTasks: boolean;
+  onToggleTasks: () => void;
   systemPrompt: string | null;
   activeTopPanel: "system" | "session" | null;
 
@@ -94,6 +97,8 @@ export function AppTitleBar({
   toggleTheme,
   isMobile,
   showChat,
+  showTasks,
+  onToggleTasks,
   systemPrompt,
   activeTopPanel,
 
@@ -194,6 +199,27 @@ export function AppTitleBar({
         </div>
 
 
+
+        {/* Task board toggle — desktop only */}
+        {!isMobile && (
+          <button
+            className="app-no-drag"
+            onClick={onToggleTasks}
+            title={showTasks ? translate("desktop.hideTaskBoard") : translate("desktop.showTaskBoard")}
+            aria-label={showTasks ? translate("desktop.hideTaskBoard") : translate("desktop.showTaskBoard")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 36, height: 36, padding: 0,
+              background: showTasks ? "var(--bg-selected)" : "none", border: "none",
+              color: showTasks ? "var(--text)" : "var(--text-muted)",
+              cursor: "pointer", flexShrink: 0, transition: "background 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = showTasks ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = showTasks ? "var(--text)" : "var(--text-muted)"; }}
+          >
+            <SquaresFour size={16} aria-hidden="true" />
+          </button>
+        )}
 
         {/* File panel toggle */}
         <button

@@ -17,10 +17,57 @@
 - A browsable folder picker for loading a project without manually entering a path.
 - File explorer and preview for source, diffs, images, audio, PDF, and DOCX files.
 - Model, OAuth/API-key, skill, plugin, theme, language, and Git worktree management in the browser.
+- Task board (Beta, desktop only): four-column kanban that runs each task as an agent in its own git worktree branch, with review, merge, archive and per-project settings.
 - Mobile layout keeps the selected model and send action visible, while long project and repository labels truncate instead of causing horizontal scrolling.
+
+## Task board (Beta)
+
+On desktop, click the board button (four-square icon) in the title bar to toggle between chat and the task board. The board turns "delegate work to an agent" into a trackable pipeline: create → start → run → review → merge → done.
+
+### Status columns
+
+| Column | Statuses | Meaning |
+| --- | --- | --- |
+| Todo | `todo` | Created, waiting to start |
+| In progress | `queued` / `preparing` / `running` | Queued, setting up the worktree, agent running |
+| Attention | `awaiting_input` / `review` / `merging` / `failed` | Needs you: waiting for input, review, merging, failed |
+| Done | `done` / `canceled` | Finished or canceled (canceled hidden by default, toggle in Filter) |
+
+### Workflow
+
+1. **New task** — pick a project, write a title and a prompt (task description). Save recurring prompts as templates.
+2. **Start** — click **Start** on the card; the engine creates a dedicated branch (`task/<id>-<slug>`) under the project's `-worktrees` directory and runs the agent there. You can also drag a todo card onto the **In progress** column to start it, or use **Start all** to queue every todo of the project.
+3. **Running / cancel** — cancel anytime while running; tasks that need your input flip to *awaiting input*.
+4. **Review** — when the agent finishes, the task moves to **Attention** (a red badge appears in the board title; a system notification fires while the window is inactive). Open the detail drawer to inspect changed files, diffs and the full timeline; projects with a preflight command show an acceptance red/green light.
+   - **Merge** — accept the result (auto or manual commit message; optionally delete the worktree). The agent merges inside its session; the task then lands in **Done**.
+   - **Return** — send it back with feedback to keep working.
+5. **Archive** — archive finished/failed/canceled tasks (hidden by default, toggle in Filter); **Archive all** clears the Done column.
+6. **Failures** — failed tasks show the error; **Retry** relaunches on a new run generation, or **Edit** then restart; canceled tasks can be **re-queued**.
+
+### Task settings
+
+The board's own **Task settings** button configures per-project execution (separate from the main Settings modal):
+
+| Setting | Meaning |
+| --- | --- |
+| Auto-process queued tasks | Start tasks as soon as they are queued |
+| Max concurrent tasks | Per-project execution limit (0 = unlimited) |
+| Merge strategy | Merge commit or squash |
+| Delete worktree after merge (default) | Auto-clean worktree + branch after merge |
+| Preflight command | Command run in the worktree before review (acceptance check, e.g. `npm test`) |
+| Init command | Command run in the worktree before the agent starts (e.g. `pnpm install`) |
+| Stage prompts | Extra instructions per stage: work / retry / return / merge |
+
+### Notes & limits
+
+- Tasks are stored under `~/.pi/agent/tasks/` (JSONL, atomic writes); task sessions live with your other sessions and are browsable from the sessions list.
+- Each task runs in its own git worktree branch; task agents are explicitly constrained not to commit/push other branches or checkouts.
+- The engine is a single server process (exclusive lock); interrupted tasks are recovered on restart (marked failed/interrupted, retryable).
+- Beta: desktop only; the mobile UI does not show the board.
 
 ## Latest changes (2026-08-05)
 
+- **Task board (Beta, desktop)** — a new title-bar button toggles a four-column kanban (Todo / In progress / Attention / Done) that runs each task as an agent in its own git worktree branch: drag-to-start, detail drawer (timeline / diff / changed files), review & merge, return with feedback, archive, task templates, per-project task settings (concurrency / merge strategy / preflight / init command / stage prompts), system notifications, and full i18n + theme support. Tasks are stored under `~/.pi/agent/tasks/` (JSONL).
 - **Builtin model config persistence fix** — edits to builtin provider models (context window / max output / reasoning / thinking map / name / hidden) now persist as field-level `modelOverrides` instead of whole-model replacement entries, so untouched fields are never reset. All `models.json` mutations are serialized behind a file lock with atomic writes; local saves and the global Save button can no longer overwrite each other.
 - **Draft protection** — switching providers, clicking the global Save, or closing Settings first flushes pending builtin model edits; on failure the draft is kept and an error is shown instead of silently dropping changes. Historical `models[]` configs remain supported with custom/transport fields preserved.
 

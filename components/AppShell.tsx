@@ -10,6 +10,8 @@ import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { SettingsModal, type SettingsTab } from "./SettingsModal";
+import { TasksViewProvider } from "@/contexts/tasks-view-context";
+import { TasksBoard, TasksBoardTitle } from "./tasks/tasks-board";
 import { AppTitleBar } from "./AppTitleBar";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { useTheme } from "@/hooks/useTheme";
@@ -431,6 +433,13 @@ export function AppShell() {
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
   const showChat = !initialCwdPending && (selectedSession !== null || effectiveNewSessionCwd !== null);
   const projectTrustCwd = selectedSession?.cwd ?? effectiveNewSessionCwd;
+
+  // Task board view toggle (desktop only — the button is hidden on mobile).
+  const [showTasks, setShowTasks] = useState(false);
+  const handleToggleTasks = useCallback(() => {
+    if (isMobile) return;
+    setShowTasks((v) => !v);
+  }, [isMobile]);
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
 
@@ -514,7 +523,7 @@ export function AppShell() {
   );
 
   return (
-    <>
+    <TasksViewProvider>
     <style>{`
       @media (max-width: 640px) {
         .sidebar-overlay-backdrop.sidebar-mobile-pending {
@@ -536,6 +545,8 @@ export function AppShell() {
         toggleTheme={toggleTheme}
         isMobile={isMobile}
         showChat={showChat}
+        showTasks={showTasks}
+        onToggleTasks={handleToggleTasks}
         systemPrompt={systemPrompt}
         activeTopPanel={activeTopPanel}
         topPanelPos={topPanelPos}
@@ -633,7 +644,12 @@ export function AppShell() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Chat content */}
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-          {showChat ? (
+          {showTasks ? (
+            <>
+              <TasksBoardTitle />
+              <TasksBoard activeProject={activeCwd ?? undefined} />
+            </>
+          ) : showChat ? (
             <ChatWindow
               key={sessionKey}
               session={selectedSession}
@@ -774,6 +790,6 @@ export function AppShell() {
       />
     )}
     </div>
-  </>
+    </TasksViewProvider>
   );
 }
