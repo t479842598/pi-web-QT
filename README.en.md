@@ -65,6 +65,13 @@ The board's own **Task settings** button configures per-project execution (separ
 - The engine is a single server process (exclusive lock); interrupted tasks are recovered on restart (marked failed/interrupted, retryable).
 - Beta: desktop only; the mobile UI does not show the board.
 
+## Latest changes (2026-08-06 · v0.9.17-beta.1)
+
+- **Fix 500 when generating titles for imported sessions** — auto-naming Reasonix-imported sessions no longer fails with `Cannot read properties of undefined (reading 'length')`. The import converter could emit text blocks missing the `text` field; both the importer and the title pipeline now handle this, including previously imported files.
+- **Faster title generation** — very long sessions (thousands of tool messages) now use only the most recent portion of the conversation, avoiding timeouts; falls back to the full transcript when the tail has no user message.
+- **Batch title generation** — a new "Generate titles" button in the session list header names all sessions in the current project in parallel with live progress, then refreshes automatically.
+- **Parallel title generation after import** — the import-complete "generate titles" action now runs concurrently instead of serially with 500ms pauses; individual failures are skipped without affecting the rest.
+
 ## Latest changes (2026-08-05)
 
 - **Task board (Beta, desktop)** — a new title-bar button toggles a four-column kanban (Todo / In progress / Attention / Done) that runs each task as an agent in its own git worktree branch: drag-to-start, detail drawer (timeline / diff / changed files), review & merge, return with feedback, archive, task templates, per-project task settings (concurrency / merge strategy / preflight / init command / stage prompts), system notifications, and full i18n + theme support. Tasks are stored under `~/.pi/agent/tasks/` (JSONL).
