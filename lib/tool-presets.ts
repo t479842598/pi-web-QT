@@ -4,11 +4,13 @@ export interface ToolEntry {
   active: boolean;
 }
 
-export type ToolPreset = "none" | "default" | "full";
+export type ToolPreset = "none" | "default" | "full" | "plan";
 
 export const PRESET_NONE: string[] = [];
 export const PRESET_DEFAULT: string[] = ["read", "bash", "edit", "write"];
 export const PRESET_FULL: string[] = ["bash", "read", "edit", "write", "grep", "find", "ls"];
+/** Read-only preset for plan mode — analysis only, no file mutation. */
+export const PRESET_PLAN: string[] = ["read", "grep", "find", "ls"];
 
 const BUILTIN_TOOL_NAMES = new Set(PRESET_FULL);
 
@@ -22,6 +24,7 @@ export function getPresetFromTools(tools: ToolEntry[]): ToolPreset {
     .sort()
     .join(",");
 
+  if (active === [...PRESET_PLAN].sort().join(",")) return "plan";
   if (active === [...PRESET_DEFAULT].sort().join(",")) return "default";
   if (active === [...PRESET_FULL].sort().join(",")) return "full";
   return "default";
@@ -30,5 +33,6 @@ export function getPresetFromTools(tools: ToolEntry[]): ToolPreset {
 export function getToolNamesForPreset(preset: ToolPreset): string[] {
   if (preset === "none") return [...PRESET_NONE];
   if (preset === "full") return [...PRESET_FULL];
+  if (preset === "plan") return [...PRESET_PLAN];
   return [...PRESET_DEFAULT];
 }

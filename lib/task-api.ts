@@ -72,10 +72,15 @@ export async function deleteTaskApi(id: number, projectRoot: string, deleteWorkt
 }
 
 /** start | cancel | retry | requeue */
-export async function taskAction(id: number, projectRoot: string, action: "start" | "cancel" | "retry" | "requeue"): Promise<void> {
+export async function taskAction(
+  id: number,
+  projectRoot: string,
+  action: "start" | "cancel" | "retry" | "requeue",
+  extras?: { reason?: string | null; note?: string | null },
+): Promise<void> {
   await request<{ ok: boolean }>(
     `/api/tasks/${id}/${action}?projectRoot=${encodeURIComponent(projectRoot)}`,
-    { method: "POST", body: JSON.stringify({}) },
+    { method: "POST", body: JSON.stringify({ ...extras }) },
   );
 }
 
@@ -92,6 +97,14 @@ export async function taskMerge(id: number, projectRoot: string, message: string
   await request<{ ok: boolean }>(
     `/api/tasks/${id}/merge?projectRoot=${encodeURIComponent(projectRoot)}`,
     { method: "POST", body: JSON.stringify({ message, deleteWorktree }) },
+  );
+}
+
+/** complete — accept a reviewed task that changed nothing (no merge). */
+export async function taskComplete(id: number, projectRoot: string, deleteWorktree: boolean): Promise<void> {
+  await request<{ ok: boolean }>(
+    `/api/tasks/${id}/complete?projectRoot=${encodeURIComponent(projectRoot)}`,
+    { method: "POST", body: JSON.stringify({ deleteWorktree }) },
   );
 }
 

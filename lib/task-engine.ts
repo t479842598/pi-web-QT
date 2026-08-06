@@ -209,6 +209,7 @@ export function createTask(draft: WorkTaskDraft): WorkTask {
     workBranch: null,
     verdict: null,
     resultSummary: null,
+    userNote: null,
     filesChanged: null,
     additions: null,
     deletions: null,
@@ -479,7 +480,11 @@ function buildLaunchPrompt(task: WorkTask, settings: WorkTaskFolderSettings): st
     `- Do NOT run "git add", "git commit", "git push" or "git merge" unless the task explicitly asks you to. Leave git alone.\n` +
     `- Do NOT modify files outside this worktree.\n` +
     `- When you are done, write a short "Result summary" paragraph describing what you changed.\n\n`;
-  return header + base + (stage ? `\n\n${stage}` : "");
+  const note = task.userNote?.trim();
+  const noteBlock = note
+    ? `User note on this (re)start:\n${note}\n\n`
+    : "";
+  return header + noteBlock + base + (stage ? `\n\n${stage}` : "");
 }
 
 // ─── Session event handling ─────────────────────────────────────────────────
@@ -686,7 +691,7 @@ function decodeProjectDir(name: string): string {
   return "/" + name.split("--").map((seg) => decodeURIComponent(seg)).join("/");
 }
 
-export async function cancelTask(id: number, projectRoot: string): Promise<void> {
+export async function cancelTask(id: number, projectRoot: string, reason?: string | null): Promise<void> {
   const task = loadTask(projectRoot, id);
   if (!task) return;
   const eng = getEngineState();
@@ -706,22 +711,41 @@ export async function cancelTask(id: number, projectRoot: string): Promise<void>
       finishedAt: nowIso(),
     });
   }
-  appendTaskEvent(projectRoot, { taskId: id, kind: "canceled", actor: "user" });
+  appendTaskEvent(projectRoot, {
+    taskId: id,
+    kind: "canceled",
+    actor: "user",
+    payload: reason ? { reason } : null,
+  });
 }
 
-export async function retryTask(id: number, projectRoot: string): Promise<void> {
+export async function retryTask(id: number, projectRoot: string, note?: string | null): Promise<void> {
   const task = loadTask(projectRoot, id);
   if (!task || task.status !== "failed") return;
-  const next = { ...task, status: "queued" as WorkTaskStatus, runSeq: task.runSeq + 1, lastError: null, failureReason: null };
-  persist(next, "queued", "user", { retry: true });
+  const next = {
+    ...task,
+    status: "queued" as WorkTaskStatus,
+    runSeq: task.runSeq + 1,
+    lastError: null,
+    failureReason: null,
+    userNote: note ?? task.userNote,
+  };
+  persist(next, "queued", "user", { retry: true, note: note ?? null });
   nudgePump(projectRoot);
 }
 
-export async function requeueTask(id: number, projectRoot: string): Promise<void> {
+export async function requeueTask(id: number, projectRoot: string, note?: string | null): Promise<void> {
   const task = loadTask(projectRoot, id);
   if (!task || task.status !== "canceled") return;
-  const next = { ...task, status: "todo" as WorkTaskStatus, lastError: null, failureReason: null };
-  persist(next, "requeued", "user");
+  const next = {
+    ...task,
+    status: "todo" as WorkTaskStatus,
+    lastError: null,
+    failureReason: null,
+    userNote: note ?? task.userNote,
+  };
+  persist(next, "requeued", "user", { note: note ?? null });
+  nudgePump(projectRoot);
 }
 
 export async function returnTask(id: number, projectRoot: string, feedback: string): Promise<void> {
@@ -761,6 +785,35 @@ export async function reorderTasks(projectRoot: string, orderedIds: number[]): P
 }
 
 // ─── Merge ──────────────────────────────────────────────────────────────────
+
+/**
+ * Accept a reviewed task that changed nothing (filesChanged === 0): there is
+ * no merge to dispatch and no commit to write, so the only decision left is
+ * what happens to the (empty) worktree. Settles synchronously to `done`.
+ */
+export async function completeTask(id: number, projectRoot: string, deleteWorktree: boolean): Promise<void> {
+  const task = loadTask(projectRoot, id);
+  if (!task || task.status !== "review") return;
+  if (task.filesChanged !== 0) {
+    throw new Error("Task has changes to merge; use merge instead");
+  }
+  casStatus(id, task.runSeq, ["review"], "done", {
+    finishedAt: nowIso(),
+  });
+  appendTaskEvent(projectRoot, { taskId: id, kind: "completed", actor: "user", payload: { deleteWorktree } });
+  if (deleteWorktree) {
+    try {
+      if (task.worktreePath) {
+        await removeWorktree(projectRoot, task.worktreePath, true).catch(() => undefined);
+      }
+      if (task.workBranch) {
+        await runShellIn(projectRoot, `git branch -D ${JSON.stringify(task.workBranch)}`).catch(() => undefined);
+      }
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
+}
 
 export async function mergeTask(id: number, projectRoot: string, message: string | null, deleteWorktree: boolean): Promise<void> {
   const task = loadTask(projectRoot, id);

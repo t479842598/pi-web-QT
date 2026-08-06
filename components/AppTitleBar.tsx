@@ -25,6 +25,7 @@ interface AppTitleBarProps {
   isMobile: boolean;
   showChat: boolean;
   showTasks: boolean;
+  tasksBoardEnabled: boolean;
   onToggleTasks: () => void;
   systemPrompt: string | null;
   activeTopPanel: "system" | "session" | null;
@@ -98,6 +99,7 @@ export function AppTitleBar({
   isMobile,
   showChat,
   showTasks,
+  tasksBoardEnabled,
   onToggleTasks,
   systemPrompt,
   activeTopPanel,
@@ -200,8 +202,8 @@ export function AppTitleBar({
 
 
 
-        {/* Task board toggle — desktop only */}
-        {!isMobile && (
+        {/* Task board toggle — desktop only, hidden when the feature is off */}
+        {!isMobile && tasksBoardEnabled && (
           <button
             className="app-no-drag"
             onClick={onToggleTasks}

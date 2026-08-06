@@ -11,7 +11,7 @@ import type {
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
-import { getToolNamesForPreset, type ToolEntry } from "@/lib/tool-presets";
+import { getToolNamesForPreset, PRESET_PLAN, type ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { PendingRecoveryItem, QueueEntry, QueueEntryInput } from "@/lib/queue-store";
 import type { ChatDraftImage } from "@/lib/draft-store";
@@ -153,7 +153,7 @@ export interface UseAgentSessionOptions {
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
   onSystemPromptChange?: (prompt: string | null) => void;
   onSessionStatsPanelOpen?: () => void;
-  setToolPreset?: (preset: "none" | "default" | "full") => void;
+  setToolPreset?: (preset: "none" | "default" | "full" | "plan") => void;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -182,6 +182,16 @@ const AGENT_STATE_RECONCILE_MS = 15_000;
 // SSE route can emit `connected`. Five seconds is not enough for a cold
 // Turbopack route or a session with several extensions.
 const EVENT_STREAM_CONNECT_TIMEOUT_MS = 30_000;
+
+/** Injected ahead of every prompt while plan mode is active. Read-only
+ *  analysis contract — the toolset (read/grep/find/ls) enforces it too. */
+const PLAN_MODE_INSTRUCTION =
+  `You are in PLAN MODE. Work as a read-only planning assistant.\n` +
+  `- Analyze, read, search and reason about the codebase; do NOT modify any files.\n` +
+  `- Do NOT run shell commands that mutate state, install packages, or start servers.\n` +
+  `- When you have enough understanding, produce a concrete, step-by-step implementation plan.\n` +
+  `- Structure the plan with clear phases, the files involved, and any risks or open questions.\n` +
+  `- Do not write code yet — the plan itself is the deliverable.`;
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
@@ -373,7 +383,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [modelScopeWarnings, setModelScopeWarnings] = useState<string[]>([]);
   const [newSessionModel, setNewSessionModel] = useState<SelectedModel | null>(null);
   const [newSessionDefaultModel, setNewSessionDefaultModel] = useState<SelectedModel | null>(null);
-  const [toolPreset, setToolPreset] = useState<"none" | "default" | "full">("default");
+  const [toolPreset, setToolPreset] = useState<"none" | "default" | "full" | "plan">("default");
+  // Plan mode pins the session to a read-only toolset and injects a plan-only
+  // instruction into every prompt. Persists until explicitly exited.
+  const [planMode, setPlanMode] = useState(false);
+  const prePlanPresetRef = useRef<"none" | "default" | "full">("default");
+  // Ref mirror so handleSend can read plan mode without re-binding (keeps the
+  // React Compiler's memoization stable across the large hook body).
+  const planModeRef = useRef(false);
+  useEffect(() => {
+    planModeRef.current = planMode;
+  }, [planMode]);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption>("auto");
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; errorMessage?: string } | null>(null);
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
@@ -1277,6 +1297,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     resetStreamUpdates();
     rpcPromptPendingRef.current = true;
 
+    // Plan mode prefixes every prompt with a read-only instruction block.
+    // The UI textarea keeps showing the user's own words; the injected block
+    // only reaches the agent.
+    const effectiveMessage = planModeRef.current && !isSlashCommandPrompt
+      ? `${PLAN_MODE_INSTRUCTION}\n\n${message}`
+      : message;
+    const sentMessage = effectiveMessage;
+
     const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));
     const userMsg: AgentMessage = {
       role: "user",
@@ -1317,7 +1345,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           promptRequestStarted = true;
           await sendAgentCommand(sid, {
             type: "prompt",
-            message,
+            message: sentMessage,
             ...(piImages?.length ? { images: piImages } : {}),
           });
           promoteNewSession(1, message);
@@ -1328,7 +1356,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         promptRequestStarted = true;
         await sendAgentCommand(session.id, {
           type: "prompt",
-          message,
+          message: sentMessage,
           ...(piImages?.length ? { images: piImages } : {}),
         });
       }
@@ -1869,7 +1897,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, []);
 
-  const handleToolPresetChange = useCallback(async (preset: "none" | "default" | "full") => {
+  const handleToolPresetChange = useCallback(async (preset: "none" | "default" | "full" | "plan") => {
     const toolNames = getToolNamesForPreset(preset);
     setToolPresetState(preset);
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
@@ -1880,6 +1908,33 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to set tools:", e);
     }
   }, [setToolPresetState]);
+
+  // ── Plan mode ────────────────────────────────────────────────────────────
+  const handlePlanModeChange = useCallback(async (enabled: boolean) => {
+    const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
+    if (enabled) {
+      // Remember the active preset so exiting plan mode can restore it.
+      prePlanPresetRef.current = toolPreset === "plan" ? "default" : toolPreset;
+      setPlanMode(true);
+      if (sid) {
+        try {
+          await sendAgentCommand(sid, { type: "set_tools", toolNames: [...PRESET_PLAN] });
+        } catch (e) {
+          console.error("Failed to enter plan mode:", e);
+        }
+      }
+    } else {
+      setPlanMode(false);
+      if (sid) {
+        const restore = prePlanPresetRef.current;
+        try {
+          await sendAgentCommand(sid, { type: "set_tools", toolNames: getToolNamesForPreset(restore) });
+        } catch (e) {
+          console.error("Failed to exit plan mode:", e);
+        }
+      }
+    }
+  }, [toolPreset]);
 
   const scrollUserMsgToTop = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -2054,6 +2109,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
+    planMode,
     slashCommands, slashCommandsLoading, queuedMessages, pendingRecovery, recoveryIsImport,
     notices: noticeState.visible, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection: isNew && newSessionModel === null,
@@ -2069,7 +2125,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleRecallQueue, resolveRecovery, exportQueueData, importQueueData, stageQueueImport,
     moveQueuedMessage, recallQueuedMessage, requeueAt, removeQueuedMessage,
     handleBuiltinSlashCommand,
-    handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages,
+    handleToolPresetChange, handleThinkingLevelChange, handlePlanModeChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages,
     dispatch, setAgentRunning, setForkingEntryId,
     handleLeafChange,
     // Subscriptions

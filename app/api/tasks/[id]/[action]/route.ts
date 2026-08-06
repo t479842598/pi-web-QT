@@ -4,6 +4,7 @@ import { loadTask } from "@/lib/task-store";
 import {
   archiveTask,
   cancelTask,
+  completeTask,
   mergeTask,
   requeueTask,
   retryTask,
@@ -19,7 +20,7 @@ import {
  *   merge   → { message: string|null, deleteWorktree: boolean }
  *   archive → { archived: boolean }
  */
-const ACTIONS = new Set(["start", "cancel", "retry", "requeue", "return", "merge", "archive"]);
+const ACTIONS = new Set(["start", "cancel", "retry", "requeue", "return", "merge", "complete", "archive"]);
 
 export async function POST(req: Request) {
   if (!isApiRequestAllowed(req)) {
@@ -49,15 +50,21 @@ export async function POST(req: Request) {
       case "start":
         await startTask(id, projectRoot);
         break;
-      case "cancel":
-        await cancelTask(id, projectRoot);
+      case "cancel": {
+        const reason = typeof body.reason === "string" ? body.reason.trim() : null;
+        await cancelTask(id, projectRoot, reason || null);
         break;
-      case "retry":
-        await retryTask(id, projectRoot);
+      }
+      case "retry": {
+        const note = typeof body.note === "string" ? body.note.trim() : null;
+        await retryTask(id, projectRoot, note || null);
         break;
-      case "requeue":
-        await requeueTask(id, projectRoot);
+      }
+      case "requeue": {
+        const note = typeof body.note === "string" ? body.note.trim() : null;
+        await requeueTask(id, projectRoot, note || null);
         break;
+      }
       case "return": {
         const feedback = typeof body.feedback === "string" ? body.feedback : "";
         if (!feedback.trim()) {
@@ -70,6 +77,11 @@ export async function POST(req: Request) {
         const message = typeof body.message === "string" ? body.message : null;
         const deleteWorktree = body.deleteWorktree !== false;
         await mergeTask(id, projectRoot, message, deleteWorktree);
+        break;
+      }
+      case "complete": {
+        const deleteWorktree = body.deleteWorktree !== false;
+        await completeTask(id, projectRoot, deleteWorktree);
         break;
       }
       case "archive": {

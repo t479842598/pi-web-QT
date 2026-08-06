@@ -84,6 +84,9 @@ export interface WorkTask {
   verdict: string | null;
   /** Agent-written summary shown on the card in review. */
   resultSummary: string | null;
+  /** User note attached to the most recent retry/requeue — injected into the
+   *  launch prompt of the next run. */
+  userNote: string | null;
   filesChanged: number | null;
   additions: number | null;
   deletions: number | null;
@@ -193,9 +196,14 @@ export function columnForStatus(status: WorkTaskStatus): BoardColumnId {
 }
 
 /**
- * Bucket tasks into the four columns, preserving list order (backend returns
- * board order: sort_order, id). Canceled tasks are dropped unless
- * `showCanceled`, archived ones unless `showArchived`.
+ * Bucket tasks into the four columns, freshest first. Every column is sorted
+ * by `updatedAt` descending (whatever just moved sits on top). The sort is
+ * stable and the backend hands rows over in board order (sort_order, id), so
+ * equal timestamps keep that order — which is exactly what preserves a
+ * pending-column drag: `reorder` stamps the whole column with one timestamp,
+ * the rows tie, and the fallback is their freshly written sort_order.
+ * Canceled tasks are dropped unless `showCanceled`, archived ones unless
+ * `showArchived`.
  */
 export function groupTasksByColumn(
   tasks: WorkTask[],
@@ -213,13 +221,23 @@ export function groupTasksByColumn(
     if (task.archivedAt != null && !showArchived) continue;
     grouped[columnForStatus(task.status)].push(task);
   }
-  grouped.done.sort((a, b) => {
-    const aCanceled = a.status === "canceled" ? 1 : 0;
-    const bCanceled = b.status === "canceled" ? 1 : 0;
-    if (aCanceled !== bCanceled) return aCanceled - bCanceled;
-    return (b.finishedAt ?? "").localeCompare(a.finishedAt ?? "");
-  });
+  for (const column of BOARD_COLUMN_IDS) {
+    grouped[column].sort((a, b) =>
+      (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""),
+    );
+  }
   return grouped;
+}
+
+/**
+ * Whether a reviewed task has nothing for a merge to take: when the run
+ * settled, the engine diffed its worktree against the recorded base and found
+ * no changed file. Only `0` counts — `null` means the engine could not read
+ * the stats, and merging stays the safe default there. The board uses this to
+ * offer "complete" in place of "merge".
+ */
+export function hasNothingToMerge(task: WorkTask): boolean {
+  return task.status === "review" && task.filesChanged === 0;
 }
 
 /** Built-in fallback settings (project → global → built-in). */

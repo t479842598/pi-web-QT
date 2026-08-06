@@ -13,6 +13,9 @@ interface TaskEditorDialogProps {
   task: WorkTask | null;
   /** Preselected project for a create (the board's folder filter). */
   defaultProject: string | null;
+  /** Prefill for a create from a message (title + prompt seed). */
+  prefillTitle?: string;
+  prefillPrompt?: string;
   /** Selectable projects (board's allProjects list). */
   projects: string[];
   onSubmit: (projectRoot: string, title: string, config: { prompt: string; agentType?: string | null; modelId?: string | null; thinkingLevel?: string | null }) => Promise<void>;
@@ -24,6 +27,8 @@ export function TaskEditorDialog({
   task,
   defaultProject,
   projects,
+  prefillTitle,
+  prefillPrompt,
   onSubmit,
 }: TaskEditorDialogProps) {
   const { t } = useI18n();
@@ -38,10 +43,10 @@ export function TaskEditorDialog({
   useEffect(() => {
     if (!open) return;
     setProject(task?.projectRoot ?? defaultProject ?? projects[0] ?? "");
-    setTitle(task?.title ?? "");
-    setPrompt(task?.config?.prompt ?? "");
+    setTitle(task?.title ?? prefillTitle ?? "");
+    setPrompt(task?.config?.prompt ?? prefillPrompt ?? "");
     void listTaskTemplates().then(setTemplates).catch(() => undefined);
-  }, [open, task, defaultProject, projects]);
+  }, [open, task, defaultProject, projects, prefillTitle, prefillPrompt]);
 
   if (!open) return null;
 

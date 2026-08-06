@@ -18,6 +18,7 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 import type { WorkTask } from "@/lib/task-types";
+import { hasNothingToMerge } from "@/lib/task-types";
 
 export function statusLabelKey(status: WorkTask["status"]): string {
   switch (status) {
@@ -223,7 +224,9 @@ export function TaskCard({
         primary = { icon: Prohibit, label: t("tasks.actionCancel"), onClick: onCancel };
         break;
       case "review":
-        primary = { icon: GitMerge, label: t("tasks.actionMerge"), onClick: onMerge };
+        primary = hasNothingToMerge(task)
+          ? { icon: Check, label: t("tasks.actionComplete"), onClick: onMerge }
+          : { icon: GitMerge, label: t("tasks.actionMerge"), onClick: onMerge };
         break;
       case "merging":
         break;

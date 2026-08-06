@@ -19,13 +19,17 @@ import {
 } from "@phosphor-icons/react";
 import {
   groupTasksByColumn,
+  hasNothingToMerge,
   type WorkTask,
 } from "@/lib/task-types";
 import { COLUMN_META, columnLabelKey, emptyLabelKey, BOARD_COLUMN_IDS } from "./board-columns";
 import { StatusChip, TaskCard } from "./task-card";
+import { TaskCancelDialog } from "./task-cancel-dialog";
+import { TaskCompleteDialog } from "./task-complete-dialog";
 import { TaskDetailSheet } from "./task-detail-sheet";
 import { TaskEditorDialog } from "./task-editor-dialog";
 import { TaskMergeDialog } from "./task-merge-dialog";
+import { TaskRestartDialog, type TaskRestartKind } from "./task-restart-dialog";
 import { TaskSettingsDialog } from "./task-settings-dialog";
 import { TaskTranscriptDialog } from "./task-transcript-dialog";
 import {
@@ -34,6 +38,11 @@ import {
   taskReorder,
   taskStartAll,
 } from "@/lib/task-api";
+import {
+  consumePendingTaskDraft,
+  CREATE_TASK_FROM_TEXT_EVENT,
+  type CreateTaskFromTextDetail,
+} from "@/lib/task-compose-events";
 
 const ALL_FOLDERS = "__all__";
 
@@ -150,9 +159,33 @@ export function TasksBoard({ activeProject }: TasksBoardProps) {
   // Dialog state
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTask, setEditorTask] = useState<WorkTask | null>(null);
+  // "Task from message" prefill — consumed on mount and on the live event.
+  const [editorPrefill, setEditorPrefill] = useState<CreateTaskFromTextDetail | null>(null);
+  useEffect(() => {
+    const consume = () => {
+      const draft = consumePendingTaskDraft();
+      if (!draft) return;
+      setEditorTask(null);
+      setEditorPrefill(draft);
+      setEditorOpen(true);
+    };
+    consume();
+    window.addEventListener(CREATE_TASK_FROM_TEXT_EVENT, consume);
+    return () => window.removeEventListener(CREATE_TASK_FROM_TEXT_EVENT, consume);
+  }, []);
   const [detailTaskId, setDetailTaskId] = useState<number | null>(null);
   const [mergeTask, setMergeTask] = useState<WorkTask | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
+  // Stopping a task asks why (optional) — reached from the card and the drawer.
+  const [cancelTask, setCancelTask] = useState<WorkTask | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  // Restarting asks for an optional note — retry for failed, requeue for canceled.
+  const [restartTask, setRestartTask] = useState<WorkTask | null>(null);
+  const [restartKind, setRestartKind] = useState<TaskRestartKind>("retry");
+  const [restartOpen, setRestartOpen] = useState(false);
+  // A reviewed task that changed nothing settles via complete instead of merge.
+  const [completeTask, setCompleteTask] = useState<WorkTask | null>(null);
+  const [completeOpen, setCompleteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sessionTaskId, setSessionTaskId] = useState<number | null>(null);
   const [sessionOpen, setSessionOpen] = useState(false);
@@ -517,11 +550,29 @@ export function TasksBoard({ activeProject }: TasksBoardProps) {
                     setDetailTaskId(task.id);
                   }}
                   onStart={() => void act(() => taskAction(task.id, task.projectRoot, "start"))}
-                  onCancel={() => void act(() => taskAction(task.id, task.projectRoot, "cancel"))}
-                  onRetry={() => void act(() => taskAction(task.id, task.projectRoot, "retry"))}
-                  onRequeue={() => void act(() => taskAction(task.id, task.projectRoot, "requeue"))}
+                  onCancel={() => {
+                    setCancelTask(task);
+                    setCancelOpen(true);
+                  }}
+                  onRetry={() => {
+                    setRestartTask(task);
+                    setRestartKind("retry");
+                    setRestartOpen(true);
+                  }}
+                  onRequeue={() => {
+                    setRestartTask(task);
+                    setRestartKind("requeue");
+                    setRestartOpen(true);
+                  }}
                   onViewSession={() => openSession(task)}
-                  onMerge={() => openMerge(task)}
+                  onMerge={() => {
+                    if (hasNothingToMerge(task)) {
+                      setCompleteTask(task);
+                      setCompleteOpen(true);
+                    } else {
+                      openMerge(task);
+                    }
+                  }}
                   onArchive={() => void act(() => taskArchive(task.id, task.projectRoot, task.archivedAt == null))}
                   onEdit={() => {
                     setEditorTask(task);
@@ -617,8 +668,10 @@ export function TasksBoard({ activeProject }: TasksBoardProps) {
         open={editorOpen}
         onOpenChange={setEditorOpen}
         task={editorTask}
-        defaultProject={folderFilter ?? activeProject ?? null}
+        defaultProject={editorPrefill?.projectRoot ?? folderFilter ?? activeProject ?? null}
         projects={allProjects}
+        prefillTitle={editorPrefill ? editorPrefill.text.slice(0, 80) : undefined}
+        prefillPrompt={editorPrefill ? editorPrefill.text : undefined}
         onSubmit={async (projectRoot, title, config) => {
           await act(async () => {
             const { createTaskApi } = await import("@/lib/task-api");
@@ -627,6 +680,7 @@ export function TasksBoard({ activeProject }: TasksBoardProps) {
             else await createTaskApi({ projectRoot, title, config });
           });
           setEditorOpen(false);
+          setEditorPrefill(null);
         }}
       />
       <TaskDetailSheet
@@ -639,11 +693,45 @@ export function TasksBoard({ activeProject }: TasksBoardProps) {
           setEditorTask(task);
           setEditorOpen(true);
         }}
+        onCancel={(task) => {
+          setCancelTask(task);
+          setCancelOpen(true);
+        }}
+        onRetry={(task) => {
+          setRestartTask(task);
+          setRestartKind("retry");
+          setRestartOpen(true);
+        }}
+        onRequeue={(task) => {
+          setRestartTask(task);
+          setRestartKind("requeue");
+          setRestartOpen(true);
+        }}
+        onComplete={(task) => {
+          setCompleteTask(task);
+          setCompleteOpen(true);
+        }}
       />
       <TaskMergeDialog
         open={mergeOpen}
         onOpenChange={setMergeOpen}
         task={mergeTask}
+      />
+      <TaskCancelDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        task={cancelTask}
+      />
+      <TaskRestartDialog
+        open={restartOpen}
+        onOpenChange={setRestartOpen}
+        task={restartTask}
+        kind={restartKind}
+      />
+      <TaskCompleteDialog
+        open={completeOpen}
+        onOpenChange={setCompleteOpen}
+        task={completeTask}
       />
       <TaskTranscriptDialog
         open={sessionOpen && sessionTask != null}

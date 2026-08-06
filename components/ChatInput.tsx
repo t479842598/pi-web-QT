@@ -19,7 +19,9 @@ import { SortDescendingIcon } from "@phosphor-icons/react/SortDescending";
 
 import { CaretDownIcon } from "@phosphor-icons/react/CaretDown";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
+import { ChatCircleTextIcon } from "@phosphor-icons/react/ChatCircleText";
 import { CheckIcon } from "@phosphor-icons/react/Check";
+import { CompassIcon } from "@phosphor-icons/react/Compass";
 import { LightbulbIcon } from "@phosphor-icons/react/Lightbulb";
 import { LightningIcon } from "@phosphor-icons/react/Lightning";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react/MagnifyingGlass";
@@ -28,6 +30,7 @@ import { PlusIcon } from "@phosphor-icons/react/Plus";
 import { SquareIcon } from "@phosphor-icons/react/Square";
 import { StarIcon } from "@phosphor-icons/react/Star";
 import { StarFourIcon } from "@phosphor-icons/react/StarFour";
+import { UploadSimpleIcon } from "@phosphor-icons/react/UploadSimple";
 import { ProviderIcon } from "./ProviderIcon";
 import { XIcon } from "@phosphor-icons/react/X";
 
@@ -58,8 +61,11 @@ interface Props {
   modelScopeWarnings?: string[];
   onModelChange?: (provider: string, modelId: string) => void;
   compactResult?: CompactResultInfo | null;
-  toolPreset?: "none" | "default" | "full";
+  toolPreset?: "none" | "default" | "full" | "plan";
   onToolPresetChange?: (preset: "none" | "default" | "full") => void;
+  /** Plan mode: read-only analysis mode toggled from the attach menu. */
+  planMode?: boolean;
+  onPlanModeChange?: (enabled: boolean) => void;
   thinkingLevel?: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   onThinkingLevelChange?: (level: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void;
   availableThinkingLevels?: string[] | null;
@@ -299,7 +305,7 @@ function QueuedMessageRow({ kind, text, label, index, total, onMove, onRecall, o
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelScopeWarnings, onModelChange,
-  compactResult, toolPreset, onToolPresetChange,
+  compactResult, toolPreset, onToolPresetChange, planMode = false, onPlanModeChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue, onMoveQueue, onRecallOne, onRequeueAt, onRemoveQueueItem,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
@@ -354,6 +360,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [toolDropdownRect, setToolDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [attachMenuRect, setAttachMenuRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [thinkingDropdownRect, setThinkingDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [controlsMenuOpen, setControlsMenuOpen] = useState(false);
@@ -386,6 +394,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const modelSearchRef = useRef<HTMLInputElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
   const controlsMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -1193,7 +1202,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     return thinkingLevelMap[lvl] ?? thinkingLevelLabels[lvl];
   })();
   const toolPresetKey = Object.entries(TOOL_PRESET_MAP).find(([, value]) => value === (toolPreset ?? "default"))?.[0] as typeof TOOL_PRESETS[number] | undefined;
-  const toolPresetLabel = toolPresetLabels[toolPresetKey ?? "default"];
+  // Plan mode is driven by the attach menu, not the preset dropdown — show its
+  // own label while keeping the dropdown's three options untouched.
+  const toolPresetLabel = toolPreset === "plan" ? t("desktop.planModeLabel") : toolPresetLabels[toolPresetKey ?? "default"];
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -1209,6 +1220,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       }
       if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
         setThinkingDropdownOpen(false);
+      }
+      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
+        setAttachMenuOpen(false);
       }
       if (controlsMenuRef.current && !controlsMenuRef.current.contains(e.target as Node)) {
         setControlsMenuOpen(false);
@@ -1760,6 +1774,27 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             </div>
           )}
           <div className="chat-input-editor-row" style={{ borderColor: bashMode ? "var(--tool-bg)" : undefined }}>
+          {planMode && (
+            <span
+              style={{
+                flexShrink: 0,
+                display: "inline-flex", alignItems: "center", gap: 5,
+                marginRight: 8,
+                padding: "2px 8px",
+                borderRadius: 6,
+                background: "color-mix(in srgb, var(--accent) 12%, transparent)",
+                color: "var(--accent)",
+                fontSize: 11,
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+                userSelect: "none",
+              }}
+              title={t("desktop.planModeHint")}
+            >
+              <CompassIcon size={12} weight="fill" aria-hidden="true" />
+              {t("desktop.planModeBadge")}
+            </span>
+          )}
           <textarea
             ref={textareaRef}
             value={value}
@@ -1822,20 +1857,25 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           gap: 4,
         }}>
 
-          {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
-          <div className="chat-input-toolbar-left" style={{ flex: "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
+          {/* LEFT: attach menu (chat / plan / upload) + model selector (idle) */}
+          <div ref={attachMenuRef} className="chat-input-toolbar-attach" style={{ position: "relative" }}>
             <button
-              className="chat-input-toolbar-attach"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={(e) => {
+                if (isStreaming) return;
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setAttachMenuRect({ top: rect.top, left: rect.left, width: rect.width });
+                setAttachMenuOpen((v) => !v);
+              }}
               disabled={isStreaming}
-              title={t("desktop.attachImage")}
-              aria-label={t("desktop.attachImage")}
+              title={t("desktop.attachMenu")}
+              aria-label={t("desktop.attachMenu")}
+              aria-expanded={attachMenuOpen}
               style={{
                 flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                 width: 24, height: 24, padding: 0,
-                background: "none", border: "none",
+                background: attachMenuOpen ? "var(--bg-hover)" : "none", border: "none",
                 borderRadius: 6,
-                color: attachedImages.length ? "var(--accent)" : "var(--text-muted)",
+                color: planMode ? "var(--accent)" : (attachedImages.length ? "var(--accent)" : "var(--text-muted)"),
                 cursor: isStreaming ? "not-allowed" : "pointer",
                 opacity: isStreaming ? 0.5 : 1,
                 transition: "background 0.12s, color 0.12s",
@@ -1843,15 +1883,89 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               onMouseEnter={(e) => {
                 if (isStreaming) return;
                 e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text)";
+                e.currentTarget.style.color = (planMode || attachedImages.length) ? "var(--accent)" : "var(--text)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = "none";
-                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text-muted)";
+                e.currentTarget.style.background = attachMenuOpen ? "var(--bg-hover)" : "none";
+                e.currentTarget.style.color = (planMode || attachedImages.length) ? "var(--accent)" : "var(--text-muted)";
               }}
             >
               <PlusIcon size={14} />
             </button>
+            {attachMenuOpen && attachMenuRect && (() => {
+              const items: Array<{
+                id: "chat" | "plan" | "upload";
+                label: string;
+                desc: string;
+                icon: typeof ChatCircleTextIcon;
+                active?: boolean;
+              }> = [
+                { id: "chat", label: t("desktop.attachChat"), desc: t("desktop.attachChatDesc"), icon: ChatCircleTextIcon, active: !planMode },
+                { id: "plan", label: t("desktop.attachPlan"), desc: t("desktop.attachPlanDesc"), icon: CompassIcon, active: planMode },
+                { id: "upload", label: t("desktop.attachUpload"), desc: t("desktop.attachUploadDesc"), icon: UploadSimpleIcon },
+              ];
+              const vh = window.visualViewport?.height ?? window.innerHeight;
+              const vw = window.innerWidth;
+              const panelW = 220;
+              const l = Math.min(attachMenuRect.left, vw - panelW - 8);
+              const b = vh - attachMenuRect.top + 6;
+              return (
+                <div
+                  role="menu"
+                  style={{
+                    position: "fixed",
+                    left: l,
+                    bottom: b,
+                    zIndex: 1200,
+                    width: panelW,
+                    background: "var(--bg-panel)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 12,
+                    boxShadow: "0 12px 32px rgba(0,0,0,0.22)",
+                    padding: 4,
+                  }}
+                >
+                  {items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAttachMenuOpen(false);
+                        if (item.id === "chat") {
+                          if (planMode) onPlanModeChange?.(false);
+                        } else if (item.id === "plan") {
+                          if (!planMode) onPlanModeChange?.(true);
+                        } else {
+                          fileInputRef.current?.click();
+                        }
+                      }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        width: "100%", padding: "8px 10px",
+                        background: item.active ? "var(--bg-selected)" : "none",
+                        border: "none", borderRadius: 8,
+                        cursor: "pointer", textAlign: "left",
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={(e) => { if (!item.active) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = item.active ? "var(--bg-selected)" : "none"; }}
+                    >
+                      <item.icon size={16} weight={item.active ? "fill" : "regular"} color={item.active ? "var(--accent)" : "var(--text-muted)"} aria-hidden="true" />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: "block", fontSize: 12.5, fontWeight: 550, color: "var(--text)" }}>{item.label}</span>
+                        <span style={{ display: "block", fontSize: 10.5, color: "var(--text-muted)", marginTop: 1, lineHeight: 1.4 }}>{item.desc}</span>
+                      </span>
+                      {item.active ? (
+                        <CheckIcon size={12} weight="bold" color="var(--accent)" aria-hidden="true" />
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+          <div className="chat-input-toolbar-left" style={{ flex: "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
             {!isStreaming && onThinkingLevelChange && (
               <div ref={thinkingDropdownRef} className="chat-input-toolbar-thinking" style={{ position: "relative" }}>
                 <button

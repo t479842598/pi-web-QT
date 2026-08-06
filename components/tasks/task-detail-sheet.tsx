@@ -7,6 +7,7 @@ import {
   ArrowClockwise,
   ArrowUUpLeft,
   Archive,
+  Check,
   GitBranch,
   GitCommit,
   GitDiff,
@@ -28,6 +29,7 @@ import {
   getTaskDiff,
 } from "@/lib/task-api";
 import type { WorkTask, WorkTaskEvent, WorkTaskChangedFile } from "@/lib/task-types";
+import { hasNothingToMerge } from "@/lib/task-types";
 import { StatusChip } from "./task-card";
 
 interface TaskDetailSheetProps {
@@ -38,6 +40,11 @@ interface TaskDetailSheetProps {
   onViewSession: (task: WorkTask) => void;
   onMerge: (task: WorkTask) => void;
   onEdit: (task: WorkTask) => void;
+  /** Ask-why/ask-note transitions — the board owns the dialogs. */
+  onCancel: (task: WorkTask) => void;
+  onRetry: (task: WorkTask) => void;
+  onRequeue: (task: WorkTask) => void;
+  onComplete: (task: WorkTask) => void;
 }
 
 /** Translated label for a timeline event kind; falls back to the raw kind. */
@@ -57,6 +64,10 @@ export function TaskDetailSheet({
   onViewSession,
   onMerge,
   onEdit,
+  onCancel,
+  onRetry,
+  onRequeue,
+  onComplete,
 }: TaskDetailSheetProps) {
   const { t } = useI18n();
   const { refetch } = useTasksView();
@@ -168,21 +179,26 @@ export function TaskDetailSheet({
       case "preparing":
       case "running":
       case "awaiting_input":
-        zoneButtons.push({ label: t("tasks.actionCancel"), icon: Prohibit, onClick: () => void act(() => taskAction(task.id, projectRoot, "cancel")), danger: true });
+        zoneButtons.push({ label: t("tasks.actionCancel"), icon: Prohibit, onClick: () => onCancel(task), danger: true });
         break;
       case "review":
-        zoneButtons.push({ label: t("tasks.actionMerge"), icon: GitCommit, onClick: () => onMerge(task), filled: true });
+        zoneButtons.push({
+          label: hasNothingToMerge(task) ? t("tasks.actionComplete") : t("tasks.actionMerge"),
+          icon: hasNothingToMerge(task) ? Check : GitCommit,
+          onClick: () => (hasNothingToMerge(task) ? onComplete(task) : onMerge(task)),
+          filled: true,
+        });
         zoneButtons.push({ label: t("tasks.actionReturn"), icon: ArrowUUpLeft, onClick: () => setReturnOpen(true) });
         break;
       case "failed":
-        zoneButtons.push({ label: t("tasks.actionRetry"), icon: ArrowClockwise, onClick: () => void act(() => taskAction(task.id, projectRoot, "retry")), filled: true });
+        zoneButtons.push({ label: t("tasks.actionRetry"), icon: ArrowClockwise, onClick: () => onRetry(task), filled: true });
         zoneButtons.push({ label: t("tasks.actionEdit"), icon: PencilSimpleLine, onClick: () => onEdit(task) });
         break;
       case "done":
         zoneButtons.push({ label: t("tasks.actionArchive"), icon: Archive, onClick: () => void act(() => taskArchive(task.id, projectRoot, true)) });
         break;
       case "canceled":
-        zoneButtons.push({ label: t("tasks.actionRequeue"), icon: ArrowUUpLeft, onClick: () => void act(() => taskAction(task.id, projectRoot, "requeue")), filled: true });
+        zoneButtons.push({ label: t("tasks.actionRequeue"), icon: ArrowUUpLeft, onClick: () => onRequeue(task), filled: true });
         break;
       default:
         break;

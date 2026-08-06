@@ -18,13 +18,17 @@ import { useI18n } from "@/hooks/useI18n";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionTreeNode } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
+import { formatTokenCount } from "@/lib/token-format";
 import { useCallback, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BranchNavigator } from "./BranchNavigator";
+import { ProjectGitActions } from "./ProjectGitActions";
 
 export interface SessionInfoBarProps {
   onViewFullHistory?: () => void;
+  /** Working directory — enables the Git push / stash actions. */
+  cwd?: string | null;
   systemPrompt: string | null;
   sessionStats: SessionStatsInfo | null;
   contextUsage: { percent: number | null; contextWindow: number; tokens: number | null } | null;
@@ -43,16 +47,11 @@ export interface SessionInfoBarProps {
   showSoundLabel?: boolean;
 }
 
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
-
 type SessionCopyField = "file" | "id";
 
 export function SessionInfoBar({
   onViewFullHistory,
+  cwd,
   systemPrompt,
   sessionStats,
   contextUsage,
@@ -149,6 +148,10 @@ export function SessionInfoBar({
 
   return (
     <div className="session-info-bar">
+      {/* Left: git push / stash (project scope) */}
+      {cwd && (
+        <ProjectGitActions cwd={cwd} />
+      )}
       {/* Left: sound / history / branches / system prompt */}
       {onSoundToggle && (
         <button

@@ -12,6 +12,7 @@ import { TabBar, type Tab } from "./TabBar";
 import { SettingsModal, type SettingsTab } from "./SettingsModal";
 import { TasksViewProvider } from "@/contexts/tasks-view-context";
 import { TasksBoard, TasksBoardTitle } from "./tasks/tasks-board";
+import { OPEN_TASKS_VIEW_EVENT } from "./ChatWindow";
 import { AppTitleBar } from "./AppTitleBar";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { useTheme } from "@/hooks/useTheme";
@@ -440,8 +441,39 @@ export function AppShell() {
     if (isMobile) return;
     setShowTasks((v) => !v);
   }, [isMobile]);
+
+  // Feature toggles: whether the Tasks board is enabled at all. When off, the
+  // toolbar button is hidden and the board view is force-closed.
+  const [tasksBoardEnabled, setTasksBoardEnabled] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/features")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (typeof data.tasksBoard === "boolean") {
+          setTasksBoardEnabled(data.tasksBoard);
+          if (!data.tasksBoard) setShowTasks(false);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
+
+  // "Task from message": AppShell opens the board view when the event fires
+  // (ChatWindow parks the draft in the compose buffer first).
+  useEffect(() => {
+    const open = () => {
+      if (isMobile) return;
+      setShowTasks(true);
+    };
+    window.addEventListener(OPEN_TASKS_VIEW_EVENT, open);
+    return () => window.removeEventListener(OPEN_TASKS_VIEW_EVENT, open);
+  }, [isMobile]);
 
   useEffect(() => {
     setProjectTrust(null);
@@ -546,6 +578,7 @@ export function AppShell() {
         isMobile={isMobile}
         showChat={showChat}
         showTasks={showTasks}
+        tasksBoardEnabled={tasksBoardEnabled}
         onToggleTasks={handleToggleTasks}
         systemPrompt={systemPrompt}
         activeTopPanel={activeTopPanel}
@@ -644,7 +677,7 @@ export function AppShell() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Chat content */}
         <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-          {showTasks ? (
+          {showTasks && tasksBoardEnabled ? (
             <>
               <TasksBoardTitle />
               <TasksBoard activeProject={activeCwd ?? undefined} />

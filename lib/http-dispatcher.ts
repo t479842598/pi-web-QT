@@ -69,3 +69,15 @@ export function configureHttpDispatcher(
   if (globalThis.fetch === originalGlobalFetch) undici.install?.();
   dispatcherGlobal.__piWebHttpDispatcherConfigured = true;
 }
+
+/**
+ * Reconfigure the global Undici dispatcher at runtime.
+ * Useful when proxy settings have changed after the initial configuration.
+ * Calls configureHttpDispatcher after resetting the configured flag.
+ */
+export function reconfigureHttpDispatcher(
+  timeoutMs: number = DEFAULT_HTTP_IDLE_TIMEOUT_MS,
+): void {
+  dispatcherGlobal.__piWebHttpDispatcherConfigured = false;
+  configureHttpDispatcher(timeoutMs);
+}

@@ -1,6 +1,11 @@
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
+  // Apply proxy settings from ~/.pi/agent/settings.json before the global
+  // Undici dispatcher is created so EnvHttpProxyAgent sees them on boot.
+  const { readProxyConfig, applyProxyEnv } = await import("@/lib/proxy-config");
+  applyProxyEnv(readProxyConfig());
+
   const { configureHttpDispatcher } = await import("@/lib/http-dispatcher");
   configureHttpDispatcher();
 
