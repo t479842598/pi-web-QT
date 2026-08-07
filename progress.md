@@ -1105,3 +1105,25 @@ GitHub 已推送 d8c3832（main + tag v0.9.8）。npm 发布前发现 build 障�
 - `progress.md`：本记录。
 
 回滚方式：`git reset --hard f91cd41~1`；npm 0.9.9 已发布不可撤回。
+
+## 2026-08-07 - Task: 覆盖回线上版本（qt/beta v0.9.17-beta.3）并重新适配 Reasonix 导入
+
+### What was done
+本地 main 此前含 90 个 fork 提交 + 未提交的 APPDATA 适配补丁（lib/import-sources.ts），且混入了 origin/main 合并（6b75ae3）。按用户要求：先记录适配方案，再把线上版本拉取覆盖本地，最后重新适配导入。
+
+1. 记录：`docs/reasonix-import-adaptation.md`（完整适配历史 + APPDATA 补丁说明）+ lrnev 记忆 patterns-246e34011353。
+2. 备份：`git branch backup/pre-reset-20260807`（含未提交 APPDATA 补丁的完整工作树，可无损恢复）。
+3. 覆盖：`git fetch qt && git reset --hard qt/beta`（= fc5fe82, v0.9.17-beta.3，即线上运行中的 @qt4798/pi-web 版本；origin/main 上游 v0.8.7 无导入功能）。
+4. 重新适配：重放 patch_import_sources.py 时发现两个问题——
+   - 脚本 Python 转义 bug：`[\/]` 被解析成单反斜杠，与 TS 源码双反斜杠永不匹配（已修复）；
+   - 脚本只覆盖 2 个函数，而完整适配共 5 处改动（reasonixHomeDirs 定义、多根遍历、docstring、import 精简），单独运行会产生引用未定义 reasonixHomeDirs 的坏文件。
+   最终直接 `git restore --source=backup/pre-reset-20260807 --worktree -- lib/import-sources.ts` 恢复完整适配。
+
+### Testing
+- `tsc --noEmit` 全量 0 错误
+- 运行时冒烟：discoverReasonix() available=true，从 %APPDATA%/reasonix/projects 发现 75 会话
+- 本机 ~/.reasonix 只有 locks，数据全在 %APPDATA%\reasonix —— 无 APPDATA 适配则导入不可用
+
+### Notes
+- lib/import-sources.ts 当前为未提交修改（相对 qt/beta +314/-278）
+- 恢复点：backup/pre-reset-20260807（含原 6b75ae3 合并状态）
