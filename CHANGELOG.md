@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.9.17 — 2026-08-07（正式版）
+## v0.9.7 — 2026-08-07（正式版）
 
 ### 升级
 - **底层 pi 升级到 0.84.0** — `@earendil-works/pi-*` 四包 0.83.0 → 0.84.0（随上游 agegr/pi-web v0.8.7）。适配了 0.84 的 API 变化：`Theme` 构造收紧（`PlainTextTheme` 补 `selectedBg`）、`apiKeyAuth.login()` 需要 `req.signal`（含测试断言）。
