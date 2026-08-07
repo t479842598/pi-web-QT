@@ -1,6 +1,6 @@
 {
   "name": "@qt4798/pi-web",
-  "version": "0.9.7",
+  "version": "0.9.17",
   "description": "Web workspace for the pi coding agent",
   "homepage": "https://github.com/t479842598/pi-web-QT#readme",
   "repository": {
@@ -68,8 +68,8 @@
     "@earendil-works/pi-coding-agent": {
       "undici": "^8.10.0"
     },
-    "node-domexception": "npm:@profoundlogic/node-domexception@1.0.2",
-    "intersection-observer": "npm:noop2@2.0.0"
+    "intersection-observer": "npm:noop2@2.0.0",
+    "node-domexception": "npm:@profoundlogic/node-domexception@1.0.2"
   },
   "allowScripts": {
     "@google/genai@1.52.0": true,

@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.9.7 — 2026-08-07（正式版）
+## v0.9.17 — 2026-08-07（正式版）
 
 ### 升级
 - **底层 pi 升级到 0.84.0** — `@earendil-works/pi-*` 四包 0.83.0 → 0.84.0（随上游 agegr/pi-web v0.8.7）。适配了 0.84 的 API 变化：`Theme` 构造收紧（`PlainTextTheme` 补 `selectedBg`）、`apiKeyAuth.login()` 需要 `req.signal`（含测试断言）。
@@ -10,6 +10,9 @@
 - **display math 规范化**（上游 #332）— 行内 `$$…$$`、多行公式、嵌套列表里的公式（粘连开/闭分隔符、懒续行缩进）都能被 remark-math 正确解析，不再出现公式吞掉后续文本或整段渲染成 KaTeX 错误块。
 - **编辑用户消息恢复图片**（上游 #336）— 「从这里编辑」现在把消息的文本与图片一起回填到撰写栏：图片恢复为待发送附件，文本恢复到输入框。
 - **随屏滚动完善**（上游 #333 部分）— streaming 期间仅在接近底部时跟随输出（用户上翻后不再被拉走），`scrollUserMsgToTop` 增加底部边界钳制。
+
+### 导入修复（Windows）
+- **Windows 导入会话不识别修复** — Reasonix 数据根目录新增 `%APPDATA%/reasonix`（Windows 桌面版 v1.x / Go/Wails 布局）与 `~/.reasonix` 双根发现：`reasonixHomeDirs()` 去重候选，projects 布局 + sessions 平铺布局跨根扫描合并，Windows 下 `discover` 实测可发现 43 个会话（历史 mac/CLI 布局不受影响）。
 
 ### 说明
 - 上游 #321 Catppuccin 文件图标未合并：QT 已有更全的自研图标体系（latte/mocha 各 656 个），跳过。
@@ -225,7 +228,6 @@
 
 ### 其他
 - 新增依赖 `@phosphor-icons/react`（图标库）。
-- 完整迁移清单与验证见 `progress.md`。
 
 ## 0.9.0 — 2026-08-03
 

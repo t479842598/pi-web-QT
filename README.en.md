@@ -65,7 +65,17 @@ The board's own **Task settings** button configures per-project execution (separ
 - The engine is a single server process (exclusive lock); interrupted tasks are recovered on restart (marked failed/interrupted, retryable).
 - Beta: desktop only; the mobile UI does not show the board.
 
-## Latest changes (2026-08-07 · v0.9.17-beta.3)
+## Latest changes (2026-08-07 · v0.9.17 stable)
+
+- **Windows session import no longer unrecognized**: Reasonix data roots now span both `%APPDATA%/reasonix` (Windows desktop v1.x / Go/Wails layout) and `~/.reasonix` — `reasonixHomeDirs()` dedupes candidates, projects + flat sessions layouts are scanned across roots and merged. Verified 43 discoverable sessions on Windows; mac/CLI layouts are unaffected.
+- **Pi upgraded to 0.84.0**: all four `@earendil-works/pi-*` packages 0.83.0 → 0.84.0 (synced with upstream agegr/pi-web v0.8.7), adapting 0.84's `Theme` constructor and `apiKeyAuth.login(signal)` API.
+- **Per-session mode/policy isolation**: task mode, token profile, tool approval and permission rules are now saved per conversation — new chats inherit globals, existing chats keep their own settings, switching chats no longer overwrites each other (new `modesPerSession` in settings.json; old sessions fall back to the global default automatically).
+- **display math normalization** (upstream #332): multi-line formulas, formulas inside nested lists, and glued `$$` delimiters no longer swallow following text or render as KaTeX error blocks.
+- **Edit message restores images** (upstream #336): “Edit here” now fills both text and images back into the composer — images become pending attachments again.
+- **Follow-scroll polish** (upstream #333): streaming only auto-follows while near the bottom; scrolling up to read history is no longer yanked by streaming output.
+- Version now leaves beta (stable).
+
+## Previous changes (2026-08-07 · v0.9.17-beta.3)
 
 - **Zero install-time warnings**: provider icons are now inlined components, so `@lobehub/icons` is gone and npm no longer auto-installs the `@lobehub/ui` / `antd` / `@emoji-mart/react` chain — no more `ERESOLVE overriding peer dependency` and `deprecated intersection-observer` warnings during install (see "npm 11 install notes").
 - **undici fix now runs at runtime**: the `postinstall` hook is gone; `pi-web` applies the undici CVE fix at startup and `dev`/`start` scripts apply it before launching, so installing no longer requires approving install scripts.
