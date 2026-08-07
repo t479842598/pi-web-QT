@@ -87,7 +87,18 @@
 - 引擎由服务器进程持有（单实例锁），重启后自动恢复中断的任务（标记为失败/中断，可重试）。
 - Beta 阶段：仅在桌面端显示入口；移动端不可用。
 
-## 最新更新（2026-08-06 · v0.9.17-beta.2）
+## 最新更新（2026-08-07 · v0.9.17-beta.3）
+
+- **生成标题不再超时（524）**：会话运行中点「生成标题」最多等待空闲 10 秒后直接用当前对话快照生成，模型调用超时收紧到 80 秒，总时长稳在 Cloudflare 100 秒网关超时内。
+- **默认任务模式改为常规**：新对话默认不再继承「计划」。
+- **任务看板开关实时生效**：设置-功能里关闭/打开任务看板立即同步顶部入口与看板视图，无需刷新页面。
+- **settings.json 并发写保护**：模式、功能开关、标题模型共用同一文件锁（proper-lockfile + 原子写），并发保存不再互相覆盖丢配置。
+- **设置-功能页新增模式默认项**：可配置默认任务模式（常规 / 计划 / 目标）、默认运行档位（轻量 / 均衡 / 交付，默认均衡）、默认工具权限（批准 / 自动 / Yolo），已打开的对话立即生效、新对话自动继承。
+- **SPA 导航修复**：地址栏 `?session=` ↔ `?cwd=` 切换项目无需整页刷新；全新项目（尚无会话）仍保留在项目列表；新会话创建后立即出现在侧栏。
+- **安装提示清零**：供应商图标改为内置组件，移除 `@lobehub/icons` 依赖，不再被 npm 自动安装 `@lobehub/ui` / `antd` / `@emoji-mart/react` 整条链——安装时不再出现 `ERESOLVE overriding peer dependency` 与 `deprecated intersection-observer` 警告（详情见「安装提示（npm 11）」）。
+- **undici 修复改为运行时执行**：移除 `postinstall` 钩子，`pi-web` 启动与 dev/start 脚本执行前自动应用 undici CVE 修复，安装不再要求审批安装脚本。
+
+## 历史更新（2026-08-06 · v0.9.17-beta.2）
 
 - **对话框模式系统**（移植自 Reasonix）：输入框工具栏新增三组模式控件——任务模式（常规 / 计划 / 目标）、运行档位（轻量 / 均衡 / 交付）、工具权限（批准 / 自动 / Yolo）。计划模式只读产出计划后弹出确认卡（开始执行 / 提出建议 / 退出）；目标模式输入目标后自动持续推进，带轮次预算与无进展检测；轻量档位收窄工具集省 token，交付档位强制验收指令。
 - **工具调用审批（真拦截）**：权限为「批准」时，agent 的写类工具调用在真正执行前挂起，输入框上方弹出审批卡，可允许 / 拒绝 / 附理由拒绝；规则（deny > ask > allow）支持 `ToolName` / `ToolName(glob)` / `Bash(command:*)`，持久化到 settings.json。
@@ -138,15 +149,28 @@
 
 ## 安装提示（npm 11）
 
-使用 npm ≥ 11 安装本包时可能出现两类提示，均为**提示性警告，不影响安装与运行**：
+自 **v0.9.17-beta.3 起**，`ERESOLVE overriding peer dependency` 与 `deprecated intersection-observer` 两类提示已消除：供应商图标改为内置（不再依赖 `@lobehub/icons`，从而不再被 npm 自动安装 `@lobehub/ui` / `antd` / `@emoji-mart/react` 整条链）。新装本包时仅剩以下两类**提示性警告，均不影响安装与运行**：
 
-- `ERESOLVE overriding peer dependency`：上游 `@lobehub/ui` 依赖的 `@emoji-mart/react@1.1.1` 的 peer 声明仅到 React 18，而本包使用 React 19。npm 会自动 override 并继续安装（实际兼容）。如需彻底消除，可在你的项目 `package.json` 添加：
+- `deprecated node-domexception`：来自 `@google/genai` → `google-auth-library` 的传递依赖 `fetch-blob`。它只是旧版 Node 的 polyfill，Node ≥ 18 原生自带 `DOMException`，运行时完全用不到。上游未修复前无法从包侧移除。
 
-  ```json
-  "overrides": { "@emoji-mart/react": { "react": "$react" } }
+- `allow-scripts`：npm ≥ 11.16 新增的安装脚本审批提示（`@google/genai` / `protobufjs` / `sharp` 等传递依赖的 preinstall/postinstall/install 脚本）。当前版本**只提示、不拦截**（脚本照常执行），未来版本可能改为默认拦截。想消除提示可在你的项目执行：
+
+  ```bash
+  npm approve-scripts --allow-scripts-pending   # 先查看待审批清单
+  npm approve-scripts @google/genai protobufjs sharp   # 逐个批准并写入你的 package.json
   ```
 
-- `allow-scripts`：npm 11 新增的安装脚本审批提示（sharp / protobufjs / @google/genai 等）。本项目已在包内声明 `allowScripts`，若你的 npm 仍提示，可执行 `npm approve-scripts --all` 审批，或在安装命令加 `--allow-scripts=sharp,protobufjs,@google/genai`。
+  或在项目 `package.json` 声明：
+
+  ```json
+  "allowScripts": {
+    "@google/genai@1.52.0": true,
+    "protobufjs@7.6.5": true,
+    "sharp@0.34.5": true
+  }
+  ```
+
+  注意该字段按 `包名@精确版本` 匹配，版本升级后需同步更新。
 
 ## 历史更新（2026-08-03）
 

@@ -65,7 +65,18 @@ The board's own **Task settings** button configures per-project execution (separ
 - The engine is a single server process (exclusive lock); interrupted tasks are recovered on restart (marked failed/interrupted, retryable).
 - Beta: desktop only; the mobile UI does not show the board.
 
-## Latest changes (2026-08-06 · v0.9.17-beta.2)
+## Latest changes (2026-08-07 · v0.9.17-beta.3)
+
+- **Zero install-time warnings**: provider icons are now inlined components, so `@lobehub/icons` is gone and npm no longer auto-installs the `@lobehub/ui` / `antd` / `@emoji-mart/react` chain — no more `ERESOLVE overriding peer dependency` and `deprecated intersection-observer` warnings during install (see "npm 11 install notes").
+- **undici fix now runs at runtime**: the `postinstall` hook is gone; `pi-web` applies the undici CVE fix at startup and `dev`/`start` scripts apply it before launching, so installing no longer requires approving install scripts.
+- **Title generation no longer times out (524)**: generating a title while the session is still running waits at most 10s for idle then snapshots the current conversation; the model call timeout is tightened to 80s, keeping the total comfortably under the Cloudflare 100s gateway timeout.
+- **Default mode is now Normal**: new chats default to Normal task mode instead of inheriting Plan.
+- **Task board toggle takes effect immediately**: turning the task board on/off in Settings > Features syncs the toolbar entry and board view without a page refresh.
+- **settings.json concurrency protection**: the modes, features, and title-model modules now share one file lock (proper-lockfile + atomic writes), so concurrent saves can no longer overwrite each other and drop config.
+- **Default mode settings UI**: Settings > Features can now set the default task mode (Normal / Plan / Goal), token profile (Lite / Balanced / Delivery, default Balanced) and tool approval (Ask / Auto / Yolo); already-open chats apply the changes immediately and new chats inherit them.
+- **SPA navigation robustness**: switching projects via the address bar (`?session=` ↔ `?cwd=`) is honored without a full reload; a brand-new project folder with no sessions yet stays in the project list; created sessions appear in the sidebar promptly.
+
+## Previous changes (2026-08-06 · v0.9.17-beta.2)
 
 - **Chat mode system** (ported from Reasonix): the composer toolbar gains three mode controls — task mode (Normal / Plan / Goal), token profile (Lite / Balanced / Delivery) and tool approval (Ask / Auto / Yolo). Plan mode produces a read-only plan then shows a confirm card (Execute / Suggest / Exit); Goal mode auto-continues with a turn budget and stall detection; Lite narrows the toolset to save tokens; Delivery injects a verify-first instruction.
 - **Tool-call approval (real interception)**: in Ask mode, write-class tool calls are suspended before execution and a shelf card appears above the composer — allow, deny, or deny with a reason; parallel batches resolve one by one; 120s timeout auto-denies. Rules (deny > ask > allow) support `ToolName` / `ToolName(glob)` / `Bash(command:*)` and persist to `~/.pi/agent/settings.json`.
@@ -99,6 +110,31 @@ The board's own **Task settings** button configures per-project execution (separ
 - Display settings again include the fixed QT palettes: Gruvbox, Nord, Tokyo Night, Solarized, One Dark, Dracula, and Catppuccin. They coexist with Pi JSON themes and support light, dark, and system modes.
 - The mobile composer is now 52px high. It keeps a 16px input font to prevent iOS Safari zoom, while tighter line height and letter spacing make the text read smaller.
 - Production serving no longer relies on Turbopack development chunks, and quoteable Markdown table rows render with valid table DOM.
+
+## npm 11 install notes
+
+Since **v0.9.17-beta.3** the `ERESOLVE overriding peer dependency` and `deprecated intersection-observer` warnings are gone: provider icons are inlined (no more `@lobehub/icons`, so npm no longer auto-installs the `@lobehub/ui` / `antd` / `@emoji-mart/react` chain). Two **informational** warnings may remain — both harmless:
+
+- `deprecated node-domexception`: pulled in transitively by `@google/genai` → `google-auth-library` → `fetch-blob`. It is a polyfill for older Node versions; Node ≥ 18 ships `DOMException` natively, so it is unused at runtime. It cannot be removed from the package side until the upstream fix lands.
+
+- `allow-scripts`: npm ≥ 11.16's install-script approval notice (`@google/genai` / `protobufjs` / `sharp` etc. transitive lifecycle scripts). Current versions only warn (scripts still run); future versions may block by default. To clear the notice in your project:
+
+  ```bash
+  npm approve-scripts --allow-scripts-pending   # view pending list first
+  npm approve-scripts @google/genai protobufjs sharp   # approve and write to your package.json
+  ```
+
+  Or declare in your project `package.json`:
+
+  ```json
+  "allowScripts": {
+    "@google/genai@1.52.0": true,
+    "protobufjs@7.6.5": true,
+    "sharp@0.34.5": true
+  }
+  ```
+
+  Note this field matches `package@exact-version`; update it after version bumps.
 
 ## Requirements
 

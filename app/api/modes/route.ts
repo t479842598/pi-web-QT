@@ -33,7 +33,7 @@ export async function PUT(req: Request) {
           }
         : current.permissionRules,
     };
-    writeModeSettings(next);
+    await writeModeSettings(next);
     return NextResponse.json({ success: true, modes: next });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

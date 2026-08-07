@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { ArrowLeft } from "@phosphor-icons/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getInitialNavigation } from "@/lib/initial-navigation";
@@ -42,7 +42,9 @@ type SessionCopyField = "file" | "id";
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
+  // Recomputes when the URL changes so SPA navigation between projects
+  // (?session=... <-> ?cwd=...) is honored instead of only the initial mount.
+  const initialNavigation = useMemo(() => getInitialNavigation(searchParams), [searchParams]);
   const { isDark, toggleTheme } = useTheme();
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -206,7 +208,7 @@ export function AppShell() {
     chatInputRef.current?.insertText(buildFileLineMentionText(relativePath, startLine, endLine));
   }, []);
 
-  const [initialSessionId] = useState<string | null>(() => initialNavigation.sessionId);
+  const [initialSessionId, setInitialSessionId] = useState<string | null>(() => initialNavigation.sessionId);
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
   const [initialCwdStatus, setInitialCwdStatus] = useState<"idle" | "validating" | "ready" | "error">(
     () => initialNavigation.requestedCwd ? "validating" : "idle",
@@ -216,6 +218,22 @@ export function AppShell() {
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
   // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
   const suppressCwdBumpRef = useRef(false);
+
+  // Re-apply URL navigation when it changes after mount (SPA route between
+  // projects: ?session=<a> -> ?cwd=<b> or another ?session=). Without this the
+  // app would keep showing the previous project until a full page reload.
+  const appliedNavigationKeyRef = useRef<string>("");
+  useEffect(() => {
+    const key = `${initialNavigation.requestedCwd ?? ""}|${initialNavigation.sessionId ?? ""}`;
+    if (appliedNavigationKeyRef.current === key) return;
+    appliedNavigationKeyRef.current = key;
+
+    // Reset the session-restore gate so the sidebar re-resolves the new URL.
+    setInitialSessionId(initialNavigation.sessionId);
+    setInitialSessionRestored(!initialNavigation.sessionId);
+    if (!initialNavigation.requestedCwd) setInitialCwdStatus("idle");
+    setInitialCwdError(null);
+  }, [initialNavigation]);
 
   // Validate and adopt a cwd requested via ?cwd= URL parameter, opening a new
   // session in that directory instead of restoring a ?session=.
@@ -255,9 +273,11 @@ export function AppShell() {
   }, [initialNavigation]);
 
   const handleCwdChange = useCallback((cwd: string | null, projectRoot?: string | null) => {
-    setActiveCwd(cwd);
-    // Skip if cwd is null (initial mount) or during the initial URL restore.
+    // A null cwd (initial mount / transient prop gap during session creation)
+    // must never clobber the effective workspace, otherwise the tab title and
+    // the sidebar session list lose the current project until a refresh.
     if (!cwd) return;
+    setActiveCwd(cwd);
     if (suppressCwdBumpRef.current) {
       suppressCwdBumpRef.current = false;
       return;
@@ -300,10 +320,12 @@ export function AppShell() {
       // onCwdChange effect firing after setSelectedCwd in the sidebar
       suppressCwdBumpRef.current = true;
     }
-    // Skip router.replace when restoring from URL — the param is already correct
-    // and calling replace in production Next.js triggers a Suspense remount loop
+    // Skip the address-bar update when restoring from URL — the param is
+    // already correct. Use history.replaceState (not router.replace): the
+    // router call triggers a Suspense remount loop in production, which reset
+    // the whole UI and lost the workspace.
     if (!isRestore) {
-      router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
+      window.history.replaceState(null, "", `?session=${encodeURIComponent(session.id)}`);
     }
   }, [router, isMobile]);
 
@@ -314,7 +336,7 @@ export function AppShell() {
     setSystemPrompt(null);
     setActiveTopPanel(null);
     if (isMobile) setSidebarOpen(false);
-    router.replace("/", { scroll: false });
+    window.history.replaceState(null, "", "/");
   }, [router, isMobile]);
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
@@ -342,9 +364,26 @@ export function AppShell() {
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
+    // Keep the effective workspace in sync with the session's project. Without
+    // this, switching to a brand-new project (no sessions yet) and sending the
+    // first message left activeCwd null — the sidebar list went empty and the
+    // tab title lost the project name until a refresh.
+    if (session.cwd) setActiveCwd(session.cwd);
     setRefreshKey((k) => k + 1);
     hydrateSelectedSession(session.id);
-    router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
+    // Update the address bar without going through Next.js router: router.replace
+    // on this route triggers a Suspense remount loop in production (see the
+    // comment in handleSelectSession), which reset the whole UI and lost the
+    // workspace — the sidebar list went empty and the tab title reset until a
+    // full page reload. history.replaceState is a pure address-bar update.
+    window.history.replaceState(null, "", `?session=${encodeURIComponent(session.id)}`);
+    // The session file is written asynchronously by the agent backend, so a
+    // list refresh right now may scan before the file exists and the sidebar
+    // keeps showing the old list (or "no sessions") until the cache expires.
+    // Re-trigger the list refresh after the file has had time to land so the
+    // new session appears promptly. 6s clears the 5s list cache AND gives the
+    // backend enough time to flush the session file with its first message.
+    window.setTimeout(() => setRefreshKey((k) => k + 1), 6000);
   }, [router, hydrateSelectedSession]);
 
   const handleAgentEnd = useCallback(() => {
@@ -361,7 +400,7 @@ export function AppShell() {
       id: newSessionId,
     }));
     hydrateSelectedSession(newSessionId);
-    router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
+    window.history.replaceState(null, "", `?session=${encodeURIComponent(newSessionId)}`);
   }, [router, hydrateSelectedSession]);
 
   const handleInitialRestoreDone = useCallback(() => {
@@ -377,7 +416,7 @@ export function AppShell() {
       setSessionKey((k) => k + 1);
       setSystemPrompt(null);
       setActiveTopPanel(null);
-      router.replace("/", { scroll: false });
+      window.history.replaceState(null, "", "/");
     }
   }, [router, selectedSession]);
 
@@ -443,11 +482,13 @@ export function AppShell() {
   }, [isMobile]);
 
   // Feature toggles: whether the Tasks board is enabled at all. When off, the
-  // toolbar button is hidden and the board view is force-closed.
+  // toolbar button is hidden and the board view is force-closed. Reloads when
+  // the settings "Features" tab broadcasts FEATURES_CHANGED_EVENT so toggling
+  // there takes effect in real time without a page refresh.
   const [tasksBoardEnabled, setTasksBoardEnabled] = useState(true);
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/features")
+    const load = () => fetch("/api/features")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data) return;
@@ -457,8 +498,12 @@ export function AppShell() {
         }
       })
       .catch(() => {});
+    load();
+    const onFeaturesChanged = () => load();
+    window.addEventListener("pi:features-changed", onFeaturesChanged);
     return () => {
       cancelled = true;
+      window.removeEventListener("pi:features-changed", onFeaturesChanged);
     };
   }, []);
   // While restoring initial session from URL, don't show the placeholder

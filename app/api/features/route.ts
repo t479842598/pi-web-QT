@@ -14,7 +14,7 @@ export async function PUT(req: Request) {
     const next: FeaturesConfig = {
       tasksBoard: typeof body.tasksBoard === "boolean" ? body.tasksBoard : current.tasksBoard,
     };
-    writeFeaturesConfig(next);
+    await writeFeaturesConfig(next);
     return NextResponse.json({ success: true, features: next });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

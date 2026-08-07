@@ -7,7 +7,11 @@ import {
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
-const TITLE_TIMEOUT_MS = 90_000;
+const TITLE_TIMEOUT_MS = 80_000;
+/** Max time to wait for the source session to become idle before snapshotting.
+ *  The app is frequently deployed behind Cloudflare (100s gateway timeout), so
+ *  idle-wait + model call must stay comfortably under that ceiling. */
+const TITLE_IDLE_WAIT_TIMEOUT_MS = 10_000;
 const MAX_TITLE_LENGTH = 80;
 /** Cap the number of messages sent to the title model so very long sessions
  *  (imported sessions can have thousands of tool messages) generate quickly
@@ -305,7 +309,15 @@ export async function generateSessionTitle(
   modelOverride?: Model<Api>,
 ): Promise<GeneratedSessionTitle> {
   const sourceAgent = source.agent;
-  await sourceAgent.waitForIdle();
+  // The source session may still be running (e.g. the user just sent a
+  // message). Waiting indefinitely would exceed the Cloudflare 100s gateway
+  // timeout (HTTP 524) whenever the session takes longer than that to finish.
+  // Wait a bounded amount of time, then snapshot the current messages — the
+  // title is derived from the conversation tail, which is already complete.
+  await Promise.race([
+    sourceAgent.waitForIdle(),
+    new Promise((resolve) => setTimeout(resolve, TITLE_IDLE_WAIT_TIMEOUT_MS)),
+  ]);
 
   // Keep only the tail of long conversations: imported sessions can contain
   // thousands of toolResult messages that bloat the context and slow or time

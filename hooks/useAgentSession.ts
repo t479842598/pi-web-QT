@@ -472,10 +472,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // ── Chat modes (Reasonix port) ───────────────────────────────────────────
   // Loaded from /api/modes (~/.pi/agent/settings.json `modes`) so the
   // selection survives page reloads and new sessions inherit the same defaults.
+  // Re-loads when the settings "Features" tab broadcasts MODES_CHANGED_EVENT so
+  // default changes take effect in real time on already-open chats.
   const [modeSettings, setModeSettings] = useState<ModeSettings>(() => defaultModeSettings());
   useEffect(() => {
     let cancelled = false;
-    void fetch("/api/modes")
+    const load = () => fetch("/api/modes")
       .then((response) => (response.ok ? response.json() as Promise<ModeSettings> : null))
       .then((loaded) => {
         if (cancelled || !loaded) return;
@@ -491,7 +493,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
       })
       .catch(() => { /* keep defaults on load failure */ });
-    return () => { cancelled = true; };
+    load();
+    const onModesChanged = () => load();
+    window.addEventListener("pi:modes-changed", onModesChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("pi:modes-changed", onModesChanged);
+    };
   }, []);
   const collaborationMode = modeSettings.collaborationMode;
   const tokenMode = modeSettings.tokenMode;

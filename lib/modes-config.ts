@@ -4,17 +4,14 @@
 // Mirrors the existing features-config read/write pattern.
 // ============================================================================
 
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { writePrivateFileAtomicSync } from "./atomic-file";
+import {
+  mutateSettingsJson,
+  readSettingsJsonUnlocked,
+} from "./settings-lock";
 import {
   normalizeCollaborationMode,
   normalizeTokenMode,
   normalizeToolApprovalMode,
-  type CollaborationMode,
-  type TokenMode,
-  type ToolApprovalMode,
   type ModeSettings,
   defaultModeSettings,
 } from "./modes";
@@ -26,21 +23,9 @@ export { defaultModeSettings };
 
 const MODES_KEY = "modes";
 
-function getSettingsPath(): string {
-  return join(getAgentDir(), "settings.json");
-}
 
 function readSettingsJson(): Record<string, unknown> {
-  const path = getSettingsPath();
-  if (!existsSync(path)) return {};
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
+  return readSettingsJsonUnlocked();
 }
 
 /** Mode & permission settings from ~/.pi/agent/settings.json (`modes` key). */
@@ -64,16 +49,17 @@ export function readModeSettings(): ModeSettings {
   };
 }
 
-/** Persist mode & permission settings into settings.json (atomic write). */
-export function writeModeSettings(settings: ModeSettings): void {
-  const file = readSettingsJson();
-  file[MODES_KEY] = {
-    collaborationMode: normalizeCollaborationMode(settings.collaborationMode),
-    tokenMode: normalizeTokenMode(settings.tokenMode),
-    toolApprovalMode: normalizeToolApprovalMode(settings.toolApprovalMode),
-    permissionRules: settings.permissionRules,
-  };
-  writePrivateFileAtomicSync(getSettingsPath(), JSON.stringify(file, null, 2));
+/** Persist mode & permission settings into settings.json (locked atomic write). */
+export async function writeModeSettings(settings: ModeSettings): Promise<void> {
+  await mutateSettingsJson((file) => {
+    file[MODES_KEY] = {
+      collaborationMode: normalizeCollaborationMode(settings.collaborationMode),
+      tokenMode: normalizeTokenMode(settings.tokenMode),
+      toolApprovalMode: normalizeToolApprovalMode(settings.toolApprovalMode),
+      permissionRules: settings.permissionRules,
+    };
+    return { settings: file };
+  });
 }
 
 export { type Policy };

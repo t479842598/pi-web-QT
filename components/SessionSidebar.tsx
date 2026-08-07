@@ -91,9 +91,12 @@ function formatRelativeTime(dateStr: string, t: (key: string, params?: Record<st
 
 /**
  * Return all projects (deduped by projectRoot so worktrees collapse into their
- * main repo) sorted by most recent session activity.
+ * main repo) sorted by most recent session activity. The currently selected
+ * cwd and any explicitly picked project are always included — even when they
+ * have no sessions yet — so a freshly picked project folder shows up in the
+ * list instead of vanishing after switching away.
  */
-function getRecentProjects(sessions: SessionInfo[]): string[] {
+function getRecentProjects(sessions: SessionInfo[], currentCwd?: string | null, pickedProjects: string[] = []): string[] {
   const latestByRoot = new Map<string, string>(); // projectRoot -> most recent modified
   for (const s of sessions) {
     const root = s.projectRoot ?? s.cwd;
@@ -102,6 +105,15 @@ function getRecentProjects(sessions: SessionInfo[]): string[] {
     if (!prev || s.modified > prev) {
       latestByRoot.set(root, s.modified);
     }
+  }
+  // A selected/picked project with no sessions yet must still appear, so
+  // switching back to it is possible. Give it the newest timestamp so it
+  // floats to top.
+  const alwaysShow = new Set<string>();
+  if (currentCwd) alwaysShow.add(currentCwd);
+  for (const picked of pickedProjects) alwaysShow.add(picked);
+  for (const project of alwaysShow) {
+    if (!latestByRoot.has(project)) latestByRoot.set(project, "\uffff");
   }
   return [...latestByRoot.entries()]
     .sort((a, b) => b[1].localeCompare(a[1]))
@@ -265,6 +277,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
+  // Projects the user has explicitly picked (folder picker / project list /
+  // new-session). Kept separate from allSessions so a brand-new project with
+  // no sessions yet still appears in the project dropdown — otherwise it would
+  // vanish right after switching away, which is exactly what users hit when
+  // they picked a fresh folder, started chatting, then could not find the
+  // project in the list anymore.
+  const [pickedProjects, setPickedProjects] = useState<string[]>([]);
+  const rememberPickedProject = useCallback((cwd: string | null) => {
+    if (!cwd) return;
+    setPickedProjects((prev) => (prev.includes(cwd) ? prev : [...prev, cwd]));
+  }, []);
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [workspaceProjectDropdownOpen, setWorkspaceProjectDropdownOpen] = useState<"title" | "welcome" | null>(null);
@@ -449,6 +472,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     return match?.projectRoot ?? cwd;
   }, [worktreeState, allSessions]);
 
+  // Remember every cwd the user lands on (picker / project list / worktree /
+  // session click) so projects without sessions stay in the project list.
+  useEffect(() => {
+    if (selectedCwd) rememberPickedProject(selectedCwd);
+  }, [selectedCwd, rememberPickedProject]);
+
   // Notify parent only when the effective cwd actually changes (not when
   // projectRootFor identity changes due to session/worktree refreshes).
   const lastNotifiedCwdRef = useRef<string | null>(null);
@@ -523,10 +552,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         // Session not found — notify parent so it can show the placeholder
         onInitialRestoreDone?.();
       }
-      const projects = getRecentProjects(allSessions);
+      // Honour a cwd passed in via the URL (?cwd=...) instead of blindly
+      // picking the most-recent project. Otherwise a freshly opened project
+      // (which has no sessions yet and is not in getRecentProjects) would be
+      // replaced by an unrelated project once allSessions loads — the sidebar
+      // then filters to the wrong project and new sessions stay invisible.
+      if (selectedCwdProp) {
+        setSelectedCwd(selectedCwdProp);
+        return;
+      }
+      const projects = getRecentProjects(allSessions, null);
       if (projects.length > 0) setSelectedCwd(projects[0]);
     }
-  }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
+  }, [allSessions, selectedCwd, initialSessionId, selectedCwdProp, onSelectSession, onInitialRestoreDone]);
+
+  // Re-arm the URL restore when the user navigates to a different ?session=
+  // through SPA routes — otherwise restoredRef stays true and the new session
+  // is never opened.
+  useEffect(() => {
+    if (initialSessionId) restoredRef.current = false;
+  }, [initialSessionId]);
 
   const commitCustomPath = useCallback(async (candidate: string) => {
     const path = candidate.trim();
@@ -686,13 +731,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;    onNewSession?.(tempId, selectedCwd);
   }, [selectedCwd, onNewSession]);
 
-  const recentProjects = getRecentProjects(allSessions);
+  const selectedProject = projectRootFor(selectedCwd);
+  const recentProjects = getRecentProjects(allSessions, selectedCwd ? projectRootFor(selectedCwd) ?? selectedCwd : null, pickedProjects);
   const visibleProjects = projectFilter.trim()
     ? recentProjects.filter((p) => p.toLowerCase().includes(projectFilter.trim().toLowerCase()))
     : recentProjects;
 
   // Sessions of every worktree in the selected project are shown together
-  const selectedProject = projectRootFor(selectedCwd);
   const filteredSessions = selectedProject
     ? allSessions.filter((s) => (s.projectRoot ?? s.cwd) === selectedProject)
     : allSessions;
