@@ -79,7 +79,7 @@ interface Props {
   forking?: boolean;
   onNavigate?: (entryId: string) => void;
   prevAssistantEntryId?: string;
-  onEditContent?: (content: string) => void;
+  onEditContent?: (message: UserMessage) => void;
   showTimestamp?: boolean;
   prevTimestamp?: number;
   sessionId?: string;
@@ -164,7 +164,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   forking?: boolean;
   onNavigate?: (entryId: string) => void;
   prevAssistantEntryId?: string;
-  onEditContent?: (content: string) => void;
+  onEditContent?: (message: UserMessage) => void;
   onCreateTask?: (text: string, cwd: string | undefined) => void;
 }) {
   const { t } = useI18n();
@@ -297,7 +297,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             }}>
               {canNavigate && (
                 <button
-                  onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(content); }}
+                  onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(message); }}
                   title={t("desktop.editFromHere")}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center",

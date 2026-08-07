@@ -559,6 +559,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [compactError, setCompactError] = useState<string | null>(null);
   const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
+  const [promptAnchorActive, setPromptAnchorActive] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommandInfo[]>([]);
   const [slashCommandsLoading, setSlashCommandsLoading] = useState(false);
   const [noticeState, dispatchNotice] = useReducer(noticeReducer, { visible: [], pending: [] });
@@ -1204,6 +1205,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   useEffect(() => {
     agentRunningRef.current = agentRunning;
+    if (!agentRunning) setPromptAnchorActive(false);
   }, [agentRunning]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -1549,6 +1551,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setAgentPhase(isSlashCommandPrompt ? { kind: "running_command" } : { kind: "waiting_model" });
     dispatch({ type: "start" });
     pendingScrollToUserRef.current = true;
+    setPromptAnchorActive(true);
     completionScrollAllowedRef.current = true;
 
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
@@ -2354,8 +2357,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const el = lastUserMsgRef.current;
     if (!container || !el) return;
     const elAbsTop = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+    const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const targetTop = Math.min(Math.max(0, elAbsTop - 16), maxScrollTop);
+    isNearBottomRef.current = targetTop >= maxScrollTop - SCROLL_BOTTOM_THRESHOLD;
     ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
-    container.scrollTo({ top: elAbsTop - 16, behavior: "smooth" });
+    container.scrollTo({ top: targetTop, behavior: "smooth" });
   }, []);
 
   const markUserScrollIntent = useCallback((event: Event) => {
@@ -2542,6 +2548,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     isAutoModelSelection: isNew && newSessionModel === null,
     agentPhase,
     isNew,
+    promptAnchorActive,
     branchTree,
     // Refs
     sessionIdRef, eventSourceRef, messagesEndRef, scrollContainerRef,
