@@ -88,7 +88,7 @@ export async function PUT(req: Request) {
       }
     }
 
-    setTitleModel(value);
+    await setTitleModel(value);
     return NextResponse.json({ value: value ?? null });
   } catch (error) {
     return NextResponse.json(

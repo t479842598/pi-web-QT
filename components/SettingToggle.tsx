@@ -39,8 +39,8 @@ export function SettingToggle({
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
-  label: string;
-  description?: string;
+  label: ReactNode;
+  description?: ReactNode;
 }) {
   const trackBg = checked ? "var(--accent)" : "color-mix(in srgb, var(--border) 70%, var(--bg))";
   const thumbLeft = checked ? TOGGLE_WIDTH - THUMB_SIZE - THUMB_OFFSET : THUMB_OFFSET;

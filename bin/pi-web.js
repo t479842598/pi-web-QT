@@ -10,6 +10,17 @@ const fs = require("fs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { parseLaunchOptions } = require("./pi-web-options");
 
+// Apply the undici CVE fix (formerly a postinstall hook). Running it here —
+// before the pi agent's undici can be loaded — keeps installs quiet under
+// npm >= 11.16's allow-scripts policy and survives installs that skip scripts.
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require("./fix-pi-agent-undici").applyUndiciFix();
+} catch {
+  // Best-effort; the app still starts with the shrinkwrapped undici if the
+  // fix cannot be applied.
+}
+
 const pkgDir = path.join(__dirname, "..");
 const nextDir = path.join(pkgDir, ".next");
 

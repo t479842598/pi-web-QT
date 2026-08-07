@@ -61,3 +61,7 @@ ref-repos
 
 # pi todo tool local state
 /.pi/
+
+# local port/temp data files (not part of the project)
+/可用端口列表.txt
+/可用端口清单.tsv

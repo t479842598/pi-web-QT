@@ -1,7 +1,10 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { writePrivateFileAtomicSync } from "./atomic-file";
+import {
+  mutateSettingsJson,
+  readSettingsJsonUnlocked,
+} from "./settings-lock";
 
 /**
  * Global "title generation model" setting (titleModel in ~/.pi/agent/settings.json).
@@ -30,21 +33,9 @@ export interface TitleModelData {
   models: TitleModelOption[];
 }
 
-function getSettingsPath(): string {
-  return join(getAgentDir(), "settings.json");
-}
 
 function readSettingsJson(): Record<string, unknown> {
-  const path = getSettingsPath();
-  if (!existsSync(path)) return {};
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
+  return readSettingsJsonUnlocked();
 }
 
 /** Current global title model (`provider/modelId`) or null when unset. */
@@ -53,15 +44,16 @@ export function getTitleModel(): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-/** Set (or clear with null) the global title model. */
-export function setTitleModel(value: string | null): void {
-  const settings = readSettingsJson();
-  if (value === null || value === "") {
-    delete settings[TITLE_MODEL_KEY];
-  } else {
-    settings[TITLE_MODEL_KEY] = value;
-  }
-  writePrivateFileAtomicSync(getSettingsPath(), JSON.stringify(settings, null, 2));
+/** Set (or clear with null) the global title model (locked atomic write). */
+export async function setTitleModel(value: string | null): Promise<void> {
+  await mutateSettingsJson((settings) => {
+    if (value === null || value === "") {
+      delete settings[TITLE_MODEL_KEY];
+    } else {
+      settings[TITLE_MODEL_KEY] = value;
+    }
+    return { settings };
+  });
 }
 
 export function readModelsJson(): Record<string, unknown> {

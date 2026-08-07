@@ -8,8 +8,22 @@ type DispatcherGlobal = typeof globalThis & {
 };
 
 const dispatcherGlobal = globalThis as DispatcherGlobal;
-const originalGlobalFetch = globalThis.fetch;
 const ignoreUndiciDispatcherError = (): void => {};
+
+/** The dispatcher currently installed as the global one (for graceful close on reconfigure). */
+let currentDispatcher: undici.Dispatcher | null = null;
+
+function installGlobalDispatcher(dispatcher: undici.Dispatcher): void {
+  undici.setGlobalDispatcher(dispatcher);
+  // Gracefully close the previous dispatcher after swapping so in-flight
+  // requests finish first; repeated proxy saves otherwise leak an entire
+  // EnvHttpProxyAgent connection pool per save.
+  const previous = currentDispatcher;
+  currentDispatcher = dispatcher;
+  if (previous) {
+    previous.close().catch(() => {});
+  }
+}
 
 export function parseHttpIdleTimeoutMs(value: unknown): number | undefined {
   if (typeof value === "string") {
@@ -63,9 +77,28 @@ export function configureHttpDispatcher(
     clientFactory: createUndiciClient,
     factory: createUndiciOriginDispatcher,
   }));
-  undici.setGlobalDispatcher(dispatcher);
+  installGlobalDispatcher(dispatcher);
 
-  // Do not replace an intentional fetch override installed after this module.
-  if (globalThis.fetch === originalGlobalFetch) undici.install?.();
+  // Do NOT call undici.install() here. Node's native global fetch is already
+  // an undici implementation that reads the global dispatcher on every call,
+  // so setGlobalDispatcher() alone is enough for HTTP(S)_PROXY to take effect.
+  // install() swaps globalThis.Response/Request/Headers/fetch/WebSocket for
+  // undici's own classes; Next.js classes like NextResponse capture the
+  // *previous* Response at module-load time, so after a runtime install()
+  // every route handler fails its `instanceof Response` check with
+  // "Expected an instance of Response to be returned" (500, empty body) —
+  // this is the proxy-save crash: the whole API dies until the server restarts.
   dispatcherGlobal.__piWebHttpDispatcherConfigured = true;
+}
+
+/**
+ * Reconfigure the global Undici dispatcher at runtime.
+ * Useful when proxy settings have changed after the initial configuration.
+ * Calls configureHttpDispatcher after resetting the configured flag.
+ */
+export function reconfigureHttpDispatcher(
+  timeoutMs: number = DEFAULT_HTTP_IDLE_TIMEOUT_MS,
+): void {
+  dispatcherGlobal.__piWebHttpDispatcherConfigured = false;
+  configureHttpDispatcher(timeoutMs);
 }

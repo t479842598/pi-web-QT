@@ -11,6 +11,9 @@ import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
+import { readModeSettings } from "./modes-config";
+import { decide, policyFromStrings, type Policy } from "./permission";
+import { READ_ONLY_TOOL_NAMES } from "./modes";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem } from "./types";
@@ -30,6 +33,13 @@ type EventListener = (event: AgentEvent) => void;
 type PendingUiResponse = {
   resolve: (response: ExtensionUiResponse) => void;
   cancel: () => void;
+};
+
+/** A tool-approval request waiting on the user. */
+type PendingApproval = {
+  resolve: (verdict: { approve: boolean; reason?: string }) => void;
+  timer: NodeJS.Timeout;
+  toolName: string;
 };
 
 type CustomUiComponent = {
@@ -78,7 +88,7 @@ class PlainTextTheme extends Theme {
   constructor() {
     super(
       { thinkingXhigh: "" } as ConstructorParameters<typeof Theme>[0],
-      {} as ConstructorParameters<typeof Theme>[1],
+      { selectedBg: "" } as ConstructorParameters<typeof Theme>[1],
       "truecolor",
     );
   }
@@ -113,6 +123,32 @@ function withExtensionTools(session: AgentSessionLike, toolNames: string[]): str
   return [...new Set([...toolNames, ...extensionToolNames])];
 }
 
+/**
+ * Compact tool-call args for the approval UI: keep short scalar fields, drop
+ * large payloads (file contents, base64, long text). The full args stay on the
+ * server; only a safe preview crosses the SSE boundary.
+ */
+function summarizeApprovalArgs(args: unknown): unknown {
+  if (args === null || typeof args !== "object") return args;
+  const input = args as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined || value === null) continue;
+    if (key === "content" || key === "data" || key === "newString" || key === "oldString") continue;
+    if (typeof value === "string") {
+      out[key] = value.length > 200 ? `${value.slice(0, 200)}…` : value;
+      continue;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      out[key] = value;
+      continue;
+    }
+    // Nested objects are summarized as a marker to avoid deep serialization.
+    out[key] = Array.isArray(value) ? `[array:${value.length}]` : "[object]";
+  }
+  return out;
+}
+
 // ============================================================================
 // AgentSessionWrapper
 // Wraps AgentSession with the same interface the rest of the app expects
@@ -139,8 +175,20 @@ export class AgentSessionWrapper {
   private onDestroyCallback: (() => void) | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private _alive = true;
+  private approvalPolicy: Policy = policyFromStrings(readModeSettings().permissionRules);
+  private approvalMode: "ask" | "auto" | "yolo" = readModeSettings().toolApprovalMode;
+  private pendingApprovals = new Map<string, PendingApproval>();
+  private approvalSeq = 0;
+  private approvalHookInstalled = false;
 
-  constructor(public readonly inner: AgentSessionLike, public readonly cwd: string) {}
+  constructor(public readonly inner: AgentSessionLike, public readonly cwd: string) {
+    // Existing conversations keep their own approval mode/policy (per-session
+    // override in settings.json `modesPerSession`); brand-new sessions fall
+    // back to the global defaults.
+    const perSession = readModeSettings(inner.sessionId);
+    this.approvalMode = perSession.toolApprovalMode;
+    this.approvalPolicy = policyFromStrings(perSession.permissionRules);
+  }
 
   get sessionId(): string {
     return this.inner.sessionId;
@@ -159,6 +207,7 @@ export class AgentSessionWrapper {
   }
 
   start(): void {
+    this.installApprovalHook();
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       if (event.type === "agent_end") {
         invalidateSessionListCache();
@@ -184,6 +233,93 @@ export class AgentSessionWrapper {
       return;
     }
     this.queueRecovery = loadQueue(this.sessionFile);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool approval — wraps agent.beforeToolCall (installed by AgentSession for
+  // extension tool_call forwarding). We keep the SDK handler as the tail of the
+  // chain: run the policy gate first, then delegate to the original handler so
+  // extensions still see every tool call.
+  // ---------------------------------------------------------------------------
+
+  /** Update the approval mode at runtime (ask | auto | yolo). */
+  setApprovalMode(mode: "ask" | "auto" | "yolo"): void {
+    this.approvalMode = mode;
+  }
+
+  /** Update the permission policy at runtime (deny > ask > allow rules). */
+  setApprovalPolicy(policy: Policy): void {
+    this.approvalPolicy = policy;
+  }
+
+  private installApprovalHook(): void {
+    if (this.approvalHookInstalled || !this.inner.agent?.beforeToolCall) return;
+    this.approvalHookInstalled = true;
+    const original = this.inner.agent.beforeToolCall;
+    this.inner.agent.beforeToolCall = async (context) => {
+      const toolName = context.toolCall?.name ?? "";
+      const args = context.args;
+      const decision = decide(this.approvalPolicy, toolName, {
+        mode: this.approvalMode,
+        readOnly: READ_ONLY_TOOL_NAMES.has(toolName.toLowerCase()),
+        args,
+      });
+      if (decision === "deny") {
+        return { block: true, reason: `Denied by policy rule: ${toolName} is not permitted.` };
+      }
+      if (decision === "ask") {
+        const approved = await this.askForApproval(toolName, args);
+        if (!approved.approve) {
+          return { block: true, reason: approved.reason || `Rejected by user: ${toolName}` };
+        }
+      }
+      return original ? original(context) : undefined;
+    };
+  }
+
+  private askForApproval(toolName: string, args: unknown): Promise<{ approve: boolean; reason?: string }> {
+    return new Promise((resolve) => {
+      const id = `approval-${++this.approvalSeq}`;
+      // Timeout: auto-deny after 120s so a stale request cannot hang the loop.
+      const timer = setTimeout(() => {
+        this.pendingApprovals.delete(id);
+        this.emit({
+          type: "tool_approval_resolved",
+          id,
+          approve: false,
+          reason: `Approval request timed out after 120s: ${toolName}`,
+        });
+        resolve({ approve: false, reason: `Approval request timed out after 120s: ${toolName}` });
+      }, 120_000);
+      this.pendingApprovals.set(id, { resolve, timer, toolName });
+      this.emit({
+        type: "tool_approval_request",
+        id,
+        toolName,
+        args: summarizeApprovalArgs(args),
+      });
+    });
+  }
+
+  private resolveApproval(id: string, approve: boolean, reason?: string): boolean {
+    const pending = this.pendingApprovals.get(id);
+    if (!pending) return false;
+    this.pendingApprovals.delete(id);
+    clearTimeout(pending.timer);
+    pending.resolve({ approve, reason });
+    return true;
+  }
+
+  private rejectAllApprovals(reason: string): void {
+    for (const [id, pending] of this.pendingApprovals) {
+      this.pendingApprovals.delete(id);
+      clearTimeout(pending.timer);
+      pending.resolve({ approve: false, reason });
+    }
+  }
+
+  getPendingApprovals(): Array<{ id: string; toolName: string }> {
+    return Array.from(this.pendingApprovals.entries()).map(([id, p]) => ({ id, toolName: p.toolName }));
   }
 
   private pendingRecoveryView(): PendingRecoveryItem[] {
@@ -817,6 +953,36 @@ export class AgentSessionWrapper {
         return null;
       }
 
+      case "resolve_approval": {
+        // Idempotent: a resolve arriving after the request was already
+        // resolved (parallel tool batches resolve one-by-one, and the UI may
+        // retry) must not throw. Return whether this call actually resolved.
+        const resolved = this.resolveApproval(command.id as string, Boolean(command.approve), command.reason as string | undefined);
+        return { resolved };
+      }
+
+      case "set_approval_mode": {
+        const mode = command.mode as "ask" | "auto" | "yolo";
+        if (mode !== "ask" && mode !== "auto" && mode !== "yolo") {
+          throw new Error(`Invalid approval mode: ${String(mode)}`);
+        }
+        this.setApprovalMode(mode);
+        return null;
+      }
+
+      case "set_approval_policy": {
+        const input = command.policy as { allow?: string[]; ask?: string[]; deny?: string[] } | undefined;
+        this.setApprovalPolicy(policyFromStrings(input));
+        return null;
+      }
+
+      case "get_approval_state": {
+        return {
+          mode: this.approvalMode,
+          pending: this.getPendingApprovals(),
+        };
+      }
+
       case "extension_ui_response": {
         this.resolveExtensionUiResponse(command as ExtensionUiResponse);
         return null;
@@ -866,6 +1032,7 @@ export class AgentSessionWrapper {
     for (const id of Array.from(this.activeCustomUis.keys())) this.closeCustomUi(id, undefined);
     this.pendingUiResponses.clear();
     this.pendingUiRequests.clear();
+    this.rejectAllApprovals("Session closed while approval was pending");
     try {
       this.inner.dispose();
     } finally {

@@ -1,6 +1,6 @@
 {
   "name": "@qt4798/pi-web",
-  "version": "0.9.15",
+  "version": "0.9.17",
   "description": "Web workspace for the pi coding agent",
   "homepage": "https://github.com/t479842598/pi-web-QT#readme",
   "repository": {
@@ -28,24 +28,22 @@
     "package.json"
   ],
   "scripts": {
-    "dev": "next dev -H 127.0.0.1 -p 0 --turbopack",
-    "dev:lan": "next dev -H 0.0.0.0 -p 0 --turbopack",
+    "dev": "node bin/fix-pi-agent-undici.js && next dev -H 127.0.0.1 -p 0 --turbopack",
+    "dev:lan": "node bin/fix-pi-agent-undici.js && next dev -H 0.0.0.0 -p 0 --turbopack",
     "build": "env -u TURBOPACK next build --webpack",
-    "start": "next start -H 127.0.0.1 -p 0",
-    "start:lan": "next start -H 0.0.0.0 -p 0",
+    "start": "node bin/fix-pi-agent-undici.js && next start -H 127.0.0.1 -p 0",
+    "start:lan": "node bin/fix-pi-agent-undici.js && next start -H 0.0.0.0 -p 0",
     "lint": "eslint .",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
-    "postinstall": "node bin/fix-pi-agent-undici.js",
     "test": "node --experimental-strip-types --test $(find app components hooks lib -name '*.test.mjs' -print)"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.83.0",
-    "@earendil-works/pi-ai": "0.83.0",
-    "@earendil-works/pi-coding-agent": "0.83.0",
-    "@earendil-works/pi-tui": "0.83.0",
+    "@earendil-works/pi-agent-core": "0.84.0",
+    "@earendil-works/pi-ai": "0.84.0",
+    "@earendil-works/pi-coding-agent": "0.84.0",
+    "@earendil-works/pi-tui": "0.84.0",
     "@fontsource/ia-writer-quattro": "^5.3.0",
     "@fontsource/lilex": "^5.3.0",
-    "@lobehub/icons": "^5.6.0",
     "@phosphor-icons/react": "^2.1.10",
     "@types/react-syntax-highlighter": "^15.5.13",
     "adm-zip": "^0.6.0",
@@ -67,18 +65,17 @@
   },
   "overrides": {
     "undici": "^8.10.0",
-    "@emoji-mart/react": {
-      "react": "$react"
-    },
     "@earendil-works/pi-coding-agent": {
       "undici": "^8.10.0"
-    }
+    },
+    "intersection-observer": "npm:noop2@2.0.0",
+    "node-domexception": "npm:@profoundlogic/node-domexception@1.0.2"
   },
   "allowScripts": {
     "@google/genai@1.52.0": true,
     "protobufjs@7.6.5": true,
     "sharp@0.34.5": true,
-    "unrs-resolver@1.11.1": true
+    "unrs-resolver@1.12.2": true
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
@@ -90,6 +87,7 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "16.2.12",
     "jiti": "^2.7.0",
+    "lightningcss": "^1.33.0",
     "postcss": "^8",
     "tailwindcss": "^4.2.2",
     "to-ico": "^1.1.5",

@@ -214,6 +214,14 @@ body {
   min-width: 0;
 }
 
+/* On narrow screens show only the git-branch icon in the title bar, keeping
+   the centered session title fully visible. */
+@media (max-width: 640px) {
+  .worktree-title-label {
+    display: none;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 4px;
   height: 4px;
@@ -445,6 +453,16 @@ pre, code {
 }
 .chat-input-shell.is-streaming:focus-within {
   border-color: var(--accent-blue);
+}
+/* Yolo approval mode: red ring around the whole composer as a visible
+   "unrestricted" warning. */
+.chat-input-shell.is-yolo {
+  border-color: color-mix(in srgb, #ef4444 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, #ef4444 18%, transparent);
+}
+.chat-input-shell.is-yolo:focus-within {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 1px color-mix(in srgb, #ef4444 30%, transparent);
 }
 .chat-input-streaming-overlay {
   position: absolute;
@@ -1242,6 +1260,11 @@ span.linenumber {
 @keyframes drop-zone-in {
   from { opacity: 0; transform: scale(0.97); }
   to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes plan-card-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes drop-icon-float {

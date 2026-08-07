@@ -1,11 +1,17 @@
 "use client";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { AgentMessage, AssistantContentBlock, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage } from "@/lib/types";
+import type { AgentMessage, AssistantContentBlock, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { collectProcessContentBlocks, splitAssistantContentBlocks } from "@/lib/process-content";
 import { MessageView } from "./MessageView";
+import { PlanReviewDialog } from "./PlanReviewDialog";
+import { ApprovalModal } from "./ApprovalModal";
+import { requestCreateTaskFromText } from "@/lib/task-compose-events";
+
+/** Fired after parking a task draft — AppShell listens and opens the board. */
+export const OPEN_TASKS_VIEW_EVENT = "pi:open-tasks-view";
 import { ProcessGroup } from "./ProcessGroup";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { QueueRecoveryDialog } from "./QueueRecoveryDialog";
@@ -135,13 +141,20 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   }, [onAgentEnd]);
 
   // 稳定化 onEditContent 引用，配合 React.memo 防止历史消息重渲染
-  const handleEditContent = useCallback((content: string) => {
-    chatInputRef?.current?.insertIfEmpty(content);
+  const handleEditContent = useCallback((message: UserMessage) => {
+    chatInputRef?.current?.replaceMessage(message);
   }, [chatInputRef]);
 
   const handleQuoteReply = useCallback((quote: string) => {
     chatInputRef?.current?.prependText(quote);
   }, [chatInputRef]);
+
+  // "Turn this message into a work task": park the text + the session's cwd
+  // in the compose buffer and open the task board pre-filled.
+  const handleCreateTask = useCallback((text: string, cwd: string | undefined) => {
+    requestCreateTaskFromText({ text, projectRoot: cwd ?? null });
+    window.dispatchEvent(new Event(OPEN_TASKS_VIEW_EVENT));
+  }, []);
 
   const {
     loading, error, messages, entryIds, streamState,
@@ -162,6 +175,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     moveQueuedMessage, recallQueuedMessage, requeueAt, removeQueuedMessage,
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands,
+    planMode, handlePlanModeChange,
+    collaborationMode, tokenMode, toolApprovalMode,
+    handleCollaborationModeChange, handleTokenModeChange, handleToolApprovalModeChange,
+    approvalRequests, resolveApproval,
+    goalState, handleGoalStart, handleGoalPause, handleGoalResume, handleGoalStop,
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
@@ -171,6 +189,61 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   useEffect(() => {
     if (pendingRecovery.length === 0) setRecoveryDismissed(false);
   }, [pendingRecovery.length]);
+
+  // ── Plan review: after a plan-mode run settles, ask what to do next ──────
+  const [planReviewOpen, setPlanReviewOpen] = useState(false);
+  const [planReviewText, setPlanReviewText] = useState<string | null>(null);
+  const wasPlanRunningRef = useRef(false);
+  useEffect(() => {
+    if (!planMode) {
+      wasPlanRunningRef.current = false;
+      return;
+    }
+    if (agentRunning) {
+      wasPlanRunningRef.current = true;
+      return;
+    }
+    // Edge: plan mode + just went idle → show the review dialog once.
+    if (wasPlanRunningRef.current) {
+      wasPlanRunningRef.current = false;
+      const last = [...messages].reverse().find((m) => m.role === "assistant");
+      const text = last && typeof last.content === "string"
+        ? last.content
+        : last?.content?.filter((b) => b.type === "text").map((b) => b.text).join("\n") ?? null;
+      setPlanReviewText(text || null);
+      setPlanReviewOpen(true);
+    }
+  }, [agentRunning, planMode, messages]);
+
+  const handlePlanExecute = useCallback(() => {
+    // Exit plan mode, then re-send the last assistant plan text as an
+    // execution prompt so the agent implements it with the normal toolset.
+    setPlanReviewOpen(false);
+    const plan = planReviewTextRef.current;
+    if (collaborationMode === "plan") handleCollaborationModeChange("normal");
+    void handlePlanModeChange(false).then(() => {
+      if (plan) {
+        const execPrompt = t("tasks.planReviewExecutePrompt", { plan });
+        void handleSend(execPrompt);
+      }
+    });
+  }, [handlePlanModeChange, handleSend, t, collaborationMode, handleCollaborationModeChange]);
+  const planReviewTextRef = useRef<string | null>(null);
+  useEffect(() => {
+    planReviewTextRef.current = planReviewText;
+  }, [planReviewText]);
+
+  const handlePlanFeedback = useCallback((text: string) => {
+    // Send suggestions back, staying in plan mode for another pass.
+    setPlanReviewOpen(false);
+    void handleSteer(text);
+  }, [handleSteer]);
+
+  const handlePlanExit = useCallback(() => {
+    setPlanReviewOpen(false);
+    if (collaborationMode === "plan") handleCollaborationModeChange("normal");
+    void handlePlanModeChange(false);
+  }, [handlePlanModeChange, collaborationMode, handleCollaborationModeChange]);
 
   useEffect(() => {
     if (!extensionDialog || soundedExtensionDialogIdRef.current === extensionDialog.id) return;
@@ -346,6 +419,32 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       compactResult={compactResult}
       toolPreset={toolPreset}
       onToolPresetChange={session || isNew ? handleToolPresetChange : undefined}
+      planMode={planMode}
+      onPlanModeChange={(enabled) => {
+        handlePlanModeChange(enabled);
+        if (enabled && collaborationMode !== "plan") handleCollaborationModeChange("plan");
+        else if (!enabled && collaborationMode === "plan") handleCollaborationModeChange("normal");
+      }}
+      collaborationMode={collaborationMode}
+      tokenMode={tokenMode}
+      toolApprovalMode={toolApprovalMode}
+      onCollaborationModeChange={(mode) => {
+        // Sync the legacy plan toggle (read-only toolset) with the new
+        // collaboration mode so the two entry points stay consistent.
+        handleCollaborationModeChange(mode);
+        if (mode === "plan" && !planMode) {
+          void handlePlanModeChange(true);
+        } else if (mode !== "plan" && planMode) {
+          void handlePlanModeChange(false);
+        }
+      }}
+      onTokenModeChange={handleTokenModeChange}
+      onToolApprovalModeChange={handleToolApprovalModeChange}
+      goalState={goalState}
+      onGoalStart={handleGoalStart}
+      onGoalPause={handleGoalPause}
+      onGoalResume={handleGoalResume}
+      onGoalStop={handleGoalStop}
       thinkingLevel={thinkingLevel}
       onThinkingLevelChange={session || isNew ? handleThinkingLevelChange : undefined}
       availableThinkingLevels={availableThinkingLevels}
@@ -454,6 +553,30 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
         />
       )}
 
+      {planMode && (
+        <PlanReviewDialog
+          open={planReviewOpen}
+          planText={planReviewText}
+          busy={agentRunning}
+          onExecute={handlePlanExecute}
+          onFeedback={handlePlanFeedback}
+          onExit={handlePlanExit}
+          onClose={() => setPlanReviewOpen(false)}
+        />
+      )}
+
+      {approvalRequests.length > 0 && (
+        <ApprovalModal
+          request={approvalRequests[0] ?? null}
+          queuedCount={Math.max(0, approvalRequests.length - 1)}
+          busy={false}
+          onResolve={(approve, reason) => {
+            const active = approvalRequests[0];
+            if (active) void resolveApproval(active.id, approve, reason);
+          }}
+        />
+      )}
+
       {isEmptyNew ? (
         <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto">
           <div className="w-full max-w-[820px]">
@@ -539,6 +662,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             >
               <SessionInfoBar
                 onViewFullHistory={onViewFullHistory}
+                cwd={messageCwd}
                 systemPrompt={systemPrompt}
                 sessionStats={sessionStats}
                 contextUsage={contextUsage}
@@ -647,6 +771,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     prevAssistantEntryId={agentRunning ? undefined : prevAssistantEntryId}
                     onEditContent={handleEditContent}
                     onQuoteReply={handleQuoteReply}
+                    onCreateTask={handleCreateTask}
                     showTimestamp={showTimestamp}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
@@ -915,6 +1040,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           <div className="session-info-bar-inner">
             <SessionInfoBar
               onViewFullHistory={onViewFullHistory}
+              cwd={messageCwd}
               systemPrompt={systemPrompt}
               sessionStats={sessionStats}
               contextUsage={contextUsage}

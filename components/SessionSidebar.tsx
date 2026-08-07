@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, useCallback, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, CaretDown, CaretRight, Check, DownloadSimple, FolderOpen, GitBranch, Lightning, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash, UploadSimple } from "@phosphor-icons/react";
+import { ArrowClockwise, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, Lightning, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash, UploadSimple, X } from "@phosphor-icons/react";
 import type { SessionInfo } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
@@ -23,6 +23,8 @@ interface Props {
   explorerRefreshKey?: number;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
+  /** Open the settings modal (used by the title-generation failure banner). */
+  onOpenSettings?: (tab?: string) => void;
   workspaceControlsHosts?: {
     title?: HTMLElement | null;
     welcome?: HTMLElement | null;
@@ -89,9 +91,12 @@ function formatRelativeTime(dateStr: string, t: (key: string, params?: Record<st
 
 /**
  * Return all projects (deduped by projectRoot so worktrees collapse into their
- * main repo) sorted by most recent session activity.
+ * main repo) sorted by most recent session activity. The currently selected
+ * cwd and any explicitly picked project are always included — even when they
+ * have no sessions yet — so a freshly picked project folder shows up in the
+ * list instead of vanishing after switching away.
  */
-function getRecentProjects(sessions: SessionInfo[]): string[] {
+function getRecentProjects(sessions: SessionInfo[], currentCwd?: string | null, pickedProjects: string[] = []): string[] {
   const latestByRoot = new Map<string, string>(); // projectRoot -> most recent modified
   for (const s of sessions) {
     const root = s.projectRoot ?? s.cwd;
@@ -100,6 +105,15 @@ function getRecentProjects(sessions: SessionInfo[]): string[] {
     if (!prev || s.modified > prev) {
       latestByRoot.set(root, s.modified);
     }
+  }
+  // A selected/picked project with no sessions yet must still appear, so
+  // switching back to it is possible. Give it the newest timestamp so it
+  // floats to top.
+  const alwaysShow = new Set<string>();
+  if (currentCwd) alwaysShow.add(currentCwd);
+  for (const picked of pickedProjects) alwaysShow.add(picked);
+  for (const project of alwaysShow) {
+    if (!latestByRoot.has(project)) latestByRoot.set(project, "\uffff");
   }
   return [...latestByRoot.entries()]
     .sort((a, b) => b[1].localeCompare(a[1]))
@@ -257,12 +271,23 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 
 
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onOpenSettings, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
+  // Projects the user has explicitly picked (folder picker / project list /
+  // new-session). Kept separate from allSessions so a brand-new project with
+  // no sessions yet still appears in the project dropdown — otherwise it would
+  // vanish right after switching away, which is exactly what users hit when
+  // they picked a fresh folder, started chatting, then could not find the
+  // project in the list anymore.
+  const [pickedProjects, setPickedProjects] = useState<string[]>([]);
+  const rememberPickedProject = useCallback((cwd: string | null) => {
+    if (!cwd) return;
+    setPickedProjects((prev) => (prev.includes(cwd) ? prev : [...prev, cwd]));
+  }, []);
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [workspaceProjectDropdownOpen, setWorkspaceProjectDropdownOpen] = useState<"title" | "welcome" | null>(null);
@@ -447,6 +472,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     return match?.projectRoot ?? cwd;
   }, [worktreeState, allSessions]);
 
+  // Remember every cwd the user lands on (picker / project list / worktree /
+  // session click) so projects without sessions stay in the project list.
+  useEffect(() => {
+    if (selectedCwd) rememberPickedProject(selectedCwd);
+  }, [selectedCwd, rememberPickedProject]);
+
   // Notify parent only when the effective cwd actually changes (not when
   // projectRootFor identity changes due to session/worktree refreshes).
   const lastNotifiedCwdRef = useRef<string | null>(null);
@@ -521,10 +552,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         // Session not found — notify parent so it can show the placeholder
         onInitialRestoreDone?.();
       }
-      const projects = getRecentProjects(allSessions);
+      // Honour a cwd passed in via the URL (?cwd=...) instead of blindly
+      // picking the most-recent project. Otherwise a freshly opened project
+      // (which has no sessions yet and is not in getRecentProjects) would be
+      // replaced by an unrelated project once allSessions loads — the sidebar
+      // then filters to the wrong project and new sessions stay invisible.
+      if (selectedCwdProp) {
+        setSelectedCwd(selectedCwdProp);
+        return;
+      }
+      const projects = getRecentProjects(allSessions, null);
       if (projects.length > 0) setSelectedCwd(projects[0]);
     }
-  }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
+  }, [allSessions, selectedCwd, initialSessionId, selectedCwdProp, onSelectSession, onInitialRestoreDone]);
+
+  // Re-arm the URL restore when the user navigates to a different ?session=
+  // through SPA routes — otherwise restoredRef stays true and the new session
+  // is never opened.
+  useEffect(() => {
+    if (initialSessionId) restoredRef.current = false;
+  }, [initialSessionId]);
 
   const commitCustomPath = useCallback(async (candidate: string) => {
     const path = candidate.trim();
@@ -681,20 +728,56 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     // Pi will be spawned lazily when the user sends the first message.
     const tempId = typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-    onNewSession?.(tempId, selectedCwd);
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;    onNewSession?.(tempId, selectedCwd);
   }, [selectedCwd, onNewSession]);
 
-  const recentProjects = getRecentProjects(allSessions);
+  const selectedProject = projectRootFor(selectedCwd);
+  const recentProjects = getRecentProjects(allSessions, selectedCwd ? projectRootFor(selectedCwd) ?? selectedCwd : null, pickedProjects);
   const visibleProjects = projectFilter.trim()
     ? recentProjects.filter((p) => p.toLowerCase().includes(projectFilter.trim().toLowerCase()))
     : recentProjects;
 
   // Sessions of every worktree in the selected project are shown together
-  const selectedProject = projectRootFor(selectedCwd);
   const filteredSessions = selectedProject
     ? allSessions.filter((s) => (s.projectRoot ?? s.cwd) === selectedProject)
     : allSessions;
+
+  // 批量生成当前项目所有会话的标题（并发池并行，单条失败跳过）
+  const [batchNaming, setBatchNaming] = useState(false);
+  const [batchNameProgress, setBatchNameProgress] = useState({ done: 0, total: 0 });
+
+  const handleBatchAutoName = useCallback(async () => {
+    if (batchNaming) return;
+    const ids = filteredSessions
+      .filter((s) => s.messageCount > 0)
+      .map((s) => s.id);
+    if (ids.length === 0) return;
+
+    setBatchNaming(true);
+    setBatchNameProgress({ done: 0, total: ids.length });
+
+    // Conservative concurrency: title generation is a full model call per
+    // session; 4 parallel runs frequently tripped provider rate limits /
+    // context errors and stalled the UI. 2 keeps progress steady.
+    const CONCURRENCY = 2;
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < ids.length) {
+        const index = nextIndex++;
+        const id = ids[index];
+        if (!id) continue;
+        try {
+          await fetch(`/api/sessions/${encodeURIComponent(id)}/auto-name`, { method: "POST" });
+        } catch { /* skip errors */ }
+        setBatchNameProgress({ done: index + 1, total: ids.length });
+      }
+    };
+    const workers = Array.from({ length: Math.min(CONCURRENCY, ids.length) }, worker);
+    await Promise.all(workers);
+
+    setBatchNaming(false);
+    void loadSessions(false);
+  }, [batchNaming, filteredSessions, loadSessions]);
   const showWorktreeSwitcher = Boolean(
     worktreeState?.isGit
     && worktreeState.isTopLevel
@@ -903,7 +986,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               }}
             >
               <GitBranch size={16} weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" />
-              <PathLabel text={compactWorktreeLabel ?? ""} style={{ flex: 1, minWidth: 0, color: "inherit", direction: "ltr", fontFamily: "inherit" }} />
+              <span className="worktree-title-label"><PathLabel text={compactWorktreeLabel ?? ""} style={{ flex: 1, minWidth: 0, color: "inherit", direction: "ltr", fontFamily: "inherit" }} /></span>
               {showWorktreeSwitcher && <CaretDown size={12} weight="regular" style={{ flexShrink: 0, transition: "transform 0.12s", transform: isWorktreeDropdownOpen ? "rotate(180deg)" : "none" }} aria-hidden="true" />}
             </button>
             <AnimatedDropdown open={showWorktreeSwitcher && isWorktreeDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden" }}>
@@ -1018,6 +1101,40 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
           >
             <Plus size={13} weight="regular" aria-hidden="true" />
+          </button>
+          <button
+            onClick={() => void handleBatchAutoName()}
+            disabled={batchNaming || !selectedCwd || filteredSessions.filter((s) => s.messageCount > 0).length === 0}
+            title={batchNaming
+              ? `${t("desktop.generatingTitlesProgress", { done: batchNameProgress.done, total: batchNameProgress.total })}`
+              : t("desktop.generateAllTitles")}
+            aria-label={t("desktop.generateAllTitles")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 26, height: 26, padding: 0,
+              background: "none",
+              border: "none",
+              color: "var(--text-dim)",
+              cursor: batchNaming ? "default" : "pointer",
+              borderRadius: 5,
+              flexShrink: 0,
+              opacity: (!selectedCwd || filteredSessions.filter((s) => s.messageCount > 0).length === 0) ? 0.5 : 1,
+              transition: "color 0.3s, background 0.3s",
+            }}
+            onMouseEnter={(e) => { if (!batchNaming) { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; } }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+          >
+            {batchNaming ? (
+              <svg
+                style={{ animation: "spin 1s linear infinite" }}
+                width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <Sparkle size={13} weight="regular" aria-hidden="true" />
+            )}
           </button>
           <button
             onClick={() => loadSessions(false)}
@@ -1577,6 +1694,7 @@ function SessionTreeItem({
   onSelectSession,
   onRenamed,
   onSessionDeleted,
+  onOpenSettings,
   depth,
 }: {
   node: SessionTreeNode;
@@ -1586,6 +1704,7 @@ function SessionTreeItem({
   onSelectSession: (s: SessionInfo) => void;
   onRenamed?: () => void;
   onSessionDeleted?: (id: string) => void;
+  onOpenSettings?: (tab?: string) => void;
   depth: number;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -1613,6 +1732,7 @@ function SessionTreeItem({
           onClick={() => onSelectSession(node.session)}
           onRenamed={onRenamed}
           onDeleted={(id) => onSessionDeleted?.(id)}
+          onOpenSettings={onOpenSettings}
           depth={depth}
           hasChildren={hasChildren}
           collapsed={collapsed}
@@ -1631,6 +1751,7 @@ function SessionTreeItem({
               onSelectSession={onSelectSession}
               onRenamed={onRenamed}
               onSessionDeleted={onSessionDeleted}
+              onOpenSettings={onOpenSettings}
               depth={depth + 1}
             />
           ))}
@@ -1713,6 +1834,7 @@ function SessionItem({
   onClick,
   onRenamed,
   onDeleted,
+  onOpenSettings,
   depth = 0,
   hasChildren = false,
   collapsed = false,
@@ -1725,6 +1847,7 @@ function SessionItem({
   onClick: () => void;
   onRenamed?: () => void;
   onDeleted?: (id: string) => void;
+  onOpenSettings?: (tab?: string) => void;
   depth?: number;
   hasChildren?: boolean;
   collapsed?: boolean;
@@ -1742,6 +1865,21 @@ function SessionItem({
   const [autoNameError, setAutoNameError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const renameMeasureRef = useRef<HTMLSpanElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [titleModelPickerOpen, setTitleModelPickerOpen] = useState(false);
+  const [titleModels, setTitleModels] = useState<Array<{ id: string; name?: string; provider?: string }>>([]);
+  const [titleModelLoading, setTitleModelLoading] = useState(false);
+  const [titleModelSaving, setTitleModelSaving] = useState(false);
+  // Group models by provider, mirroring the composer's model picker layout.
+  const titleModelGroups = useMemo(() => {
+    const map = new Map<string, Array<{ id: string; name?: string; provider?: string }>>();
+    for (const m of titleModels) {
+      const p = m.provider || "other";
+      const list = map.get(p);
+      if (list) list.push(m); else map.set(p, [m]);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [titleModels]);
 
   const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
 
@@ -1796,6 +1934,51 @@ function SessionItem({
     }
   }, [autoNaming, session.id, session.messageCount, onRenamed]);
 
+  /** Open the title-model picker (loads the model list from /api/models). */
+  const openTitleModelPicker = useCallback(async () => {
+    setTitleModelPickerOpen(true);
+    setTitleModelLoading(true);
+    try {
+      const response = await fetch(`/api/models?cwd=${encodeURIComponent(session.cwd || "")}`);
+      const body = (await response.json().catch(() => ({}))) as { modelList?: Array<{ id: string; name?: string; provider?: string }> };
+      setTitleModels(body.modelList ?? []);
+    } catch {
+      setTitleModels([]);
+    } finally {
+      setTitleModelLoading(false);
+    }
+  }, [session.cwd]);
+
+  /** Save the chosen title model to settings. */
+  const saveTitleModel = useCallback(async (modelId: string) => {
+    setTitleModelSaving(true);
+    try {
+      await fetch("/api/settings/title-model", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId }),
+      });
+      setTitleModelPickerOpen(false);
+      setAutoNameError(null);
+      // Retry immediately with the new model.
+      setAutoNaming(true);
+      try {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/auto-name`, { method: "POST" });
+        const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string };
+        if (!response.ok || !body.title) throw new Error(body.error || `HTTP ${response.status}`);
+        onRenamed?.();
+      } catch (error) {
+        setAutoNameError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setAutoNaming(false);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setTitleModelSaving(false);
+    }
+  }, [session.id, onRenamed]);
+
   const performDelete = useCallback(async () => {
     setDeleting(true);
     try {
@@ -1832,6 +2015,7 @@ function SessionItem({
 
   return (
     <div
+      ref={rowRef}
       onClick={confirmDelete || renaming ? undefined : onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
@@ -2125,6 +2309,166 @@ function SessionItem({
                 </span>
               )}
             </div>
+
+            {/* Title-generation failure — shown as a floating bubble to the
+                right of the session row (the row container clips overflow, so
+                this uses fixed positioning anchored to the row's rect). */}
+            {autoNameError && rowRef.current && (() => {
+              const rect = rowRef.current.getBoundingClientRect();
+              return (
+                <div
+                  style={{
+                    position: "fixed",
+                    top: Math.max(8, rect.top + rect.height / 2 - 34),
+                    left: rect.right + 10,
+                    zIndex: 3000,
+                    width: 300,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    background: "var(--bg-panel)",
+                    border: "1px solid color-mix(in srgb, #ef4444 40%, var(--border))",
+                    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+                    animation: "plan-card-in 0.15s ease-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 650, color: "#ef4444", flex: 1, minWidth: 0 }}>
+                      {t("desktop.titleGenerationFailed")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAutoNameError(null)}
+                      aria-label={t("i18n.close")}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2, display: "flex" }}
+                    >
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--text-muted)", wordBreak: "break-word", marginBottom: 8 }}>
+                    {autoNameError}
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={handleAutoName}
+                      disabled={autoNaming}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 4,
+                        padding: "5px 10px", borderRadius: 6,
+                        background: "#ef4444", border: "none",
+                        color: "#fff", fontSize: 11.5, fontWeight: 600,
+                        cursor: autoNaming ? "default" : "pointer",
+                      }}
+                    >
+                      <ArrowClockwise size={11} aria-hidden="true" />
+                      {t("desktop.retry")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openTitleModelPicker}
+                      disabled={titleModelSaving}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 4,
+                        padding: "5px 10px", borderRadius: 6,
+                        background: "none", border: "1px solid var(--border)",
+                        color: "var(--text)", fontSize: 11.5,
+                        cursor: titleModelSaving ? "default" : "pointer",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+                    >
+                      <Cpu size={11} aria-hidden="true" />
+                      {t("desktop.changeTitleModel")}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Title-model picker modal */}
+            {titleModelPickerOpen && (
+              <div
+                style={{
+                  position: "fixed", inset: 0, zIndex: 3100,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "rgba(0,0,0,0.4)",
+                  padding: 16,
+                }}
+                onMouseDown={(e) => { if (e.target === e.currentTarget) setTitleModelPickerOpen(false); }}
+              >
+                <div
+                  role="dialog"
+                  aria-label={t("desktop.changeTitleModel")}
+                  style={{
+                    width: "min(420px, calc(100vw - 32px))",
+                    maxHeight: "min(70vh, 480px)",
+                    display: "flex", flexDirection: "column",
+                    background: "var(--bg-panel)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 12,
+                    boxShadow: "0 16px 40px rgba(0,0,0,0.3)",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
+                    <Cpu size={15} aria-hidden="true" />
+                    <span style={{ fontSize: 13, fontWeight: 650, color: "var(--text)", flex: 1 }}>
+                      {t("desktop.changeTitleModel")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setTitleModelPickerOpen(false)}
+                      aria-label={t("i18n.close")}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 3, display: "flex" }}
+                    >
+                      <X size={14} aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div style={{ padding: "8px 6px", overflowY: "auto", flex: 1 }}>
+                    {titleModelLoading ? (
+                      <div style={{ padding: "12px 8px", fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.loading")}</div>
+                    ) : titleModels.length === 0 ? (
+                      <div style={{ padding: "12px 8px", fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.noModels")}</div>
+                    ) : (
+                      titleModelGroups.map(([provider, models]) => (
+                        <div key={provider}>
+                          <div style={{ padding: "6px 10px 4px", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "capitalize" }}>
+                            {provider}
+                          </div>
+                          {models.map((model) => {
+                            // Same model id can exist under several providers —
+                            // key by provider+id so React never collides.
+                            const modelKey = `${model.provider || "other"}\u0000${model.id}`;
+                            return (
+                              <button
+                                key={modelKey}
+                                type="button"
+                                onClick={() => { void saveTitleModel(model.id); }}
+                                disabled={titleModelSaving}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 8,
+                                  width: "100%", padding: "7px 10px",
+                                  background: "none", border: "none", borderRadius: 7,
+                                  color: "var(--text)", fontSize: 12.5,
+                                  cursor: titleModelSaving ? "default" : "pointer",
+                                  textAlign: "left",
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+                              >
+                                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {model.name || model.id}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

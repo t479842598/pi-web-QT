@@ -8,6 +8,7 @@ import {
   List,
   Moon,
   SidebarSimple,
+  SquaresFour,
   Sun,
 } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
@@ -23,6 +24,9 @@ interface AppTitleBarProps {
   toggleTheme: (origin?: { x: number; y: number }) => void;
   isMobile: boolean;
   showChat: boolean;
+  showTasks: boolean;
+  tasksBoardEnabled: boolean;
+  onToggleTasks: () => void;
   systemPrompt: string | null;
   activeTopPanel: "system" | "session" | null;
 
@@ -94,6 +98,9 @@ export function AppTitleBar({
   toggleTheme,
   isMobile,
   showChat,
+  showTasks,
+  tasksBoardEnabled,
+  onToggleTasks,
   systemPrompt,
   activeTopPanel,
 
@@ -109,6 +116,7 @@ export function AppTitleBar({
   onWorkspaceControlsHostChange,
 }: AppTitleBarProps) {
   const { t: translate } = useI18n();
+  const [titleModalOpen, setTitleModalOpen] = useState(false);
 
   return (
     <>
@@ -178,22 +186,55 @@ export function AppTitleBar({
           }}
         >
           {sessionTitle && (
-            <span
+            <button
+              type="button"
+              onClick={() => setTitleModalOpen(true)}
+              title={isMobile ? sessionTitle : undefined}
               style={{
+                display: "block",
+                maxWidth: "100%",
                 fontSize: 12,
                 fontWeight: 500,
                 color: "var(--text-muted)",
                 whiteSpace: "nowrap",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: "2px 6px",
+                borderRadius: 5,
               }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
             >
               {sessionTitle}
-            </span>
+            </button>
           )}
         </div>
 
 
+
+        {/* Task board toggle — desktop only, hidden when the feature is off */}
+        {!isMobile && tasksBoardEnabled && (
+          <button
+            className="app-no-drag"
+            onClick={onToggleTasks}
+            title={showTasks ? translate("desktop.hideTaskBoard") : translate("desktop.showTaskBoard")}
+            aria-label={showTasks ? translate("desktop.hideTaskBoard") : translate("desktop.showTaskBoard")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 36, height: 36, padding: 0,
+              background: showTasks ? "var(--bg-selected)" : "none", border: "none",
+              color: showTasks ? "var(--text)" : "var(--text-muted)",
+              cursor: "pointer", flexShrink: 0, transition: "background 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = showTasks ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = showTasks ? "var(--text)" : "var(--text-muted)"; }}
+          >
+            <SquaresFour size={16} aria-hidden="true" />
+          </button>
+        )}
 
         {/* File panel toggle */}
         <button
@@ -424,6 +465,42 @@ export function AppTitleBar({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Full session-title popover — the title bar truncates long titles,
+          especially on mobile; click the title to read it in full. */}
+      {titleModalOpen && sessionTitle && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 3000,
+            display: "flex", alignItems: "flex-start", justifyContent: "center",
+            paddingTop: 48,
+            background: "rgba(0,0,0,0.35)",
+          }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setTitleModalOpen(false); }}
+        >
+          <div
+            role="dialog"
+            aria-label={sessionTitle}
+            style={{
+              maxWidth: "min(560px, calc(100vw - 32px))",
+              maxHeight: "min(60vh, 400px)",
+              overflow: "auto",
+              background: "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 12,
+              boxShadow: "0 16px 40px rgba(0,0,0,0.3)",
+              padding: "14px 18px",
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: "var(--text)",
+              wordBreak: "break-word",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {sessionTitle}
+          </div>
         </div>
       )}
     </>

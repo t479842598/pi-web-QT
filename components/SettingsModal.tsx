@@ -1,18 +1,21 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { ChatCenteredText, Cpu, Database, DownloadSimple, Monitor, Plug, Stack, X } from "@phosphor-icons/react";
+import { ChatCenteredText, ChartBar, Cpu, Database, DownloadSimple, Lightning, Monitor, Network, Plug, Stack, X } from "@phosphor-icons/react";
 import { BackupConfig } from "./BackupConfig";
 import { ChatConfig } from "./ChatConfig";
 import { DisplayConfig } from "./DisplayConfig";
+import { FeaturesConfig } from "./FeaturesConfig";
 import { ImportSessionsConfig } from "./ImportSessionsConfig";
 import { ModelsConfig } from "./ModelsConfig";
 import { PluginsConfig } from "./PluginsConfig";
+import { ProxyConfig } from "./ProxyConfig";
 import { SkillsConfig } from "./SkillsConfig";
+import { UsageConfig } from "./UsageConfig";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 
-export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins" | "backup" | "import";
+export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins" | "proxy" | "features" | "usage" | "backup" | "import";
 
 interface SettingsModalProps {
   initialTab?: SettingsTab;
@@ -30,7 +33,11 @@ const tabs: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
   { id: "models", labelKey: "desktop.models", Icon: Cpu },
   { id: "skills", labelKey: "desktop.skills", Icon: Stack },
   { id: "plugins", labelKey: "desktop.plugins", Icon: Plug },
+  { id: "proxy", labelKey: "desktop.proxy", Icon: Network },
+  { id: "features", labelKey: "desktop.features", Icon: Lightning },
+  { id: "usage", labelKey: "desktop.usage", Icon: ChartBar },
   { id: "backup", labelKey: "desktop.backup", Icon: Database },
+  // Import stays desktop-only for now (Windows/macOS path handling).
   { id: "import", labelKey: "desktop.importSessions", Icon: DownloadSimple },
 ];
 
@@ -155,7 +162,7 @@ export function SettingsModal({
               borderBottom: isMobile ? "1px solid var(--border)" : "none",
             }}
           >
-            {tabs.map(({ id, labelKey, Icon }) => {
+            {tabs.filter(({ id }) => !(isMobile && id === "import")).map(({ id, labelKey, Icon }) => {
               const disabled = (id === "skills" || id === "plugins") && !cwd;
               const active = activeTab === id;
               return (
@@ -224,6 +231,15 @@ export function SettingsModal({
               <PluginsConfig cwd={cwd} sessionId={sessionId} embedded onReloadedAction={onSessionReloadedAction} />
             </div>
           )}
+          <div style={{ display: activeTab === "proxy" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
+            <ProxyConfig />
+          </div>
+          <div style={{ display: activeTab === "features" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
+            <FeaturesConfig />
+          </div>
+          <div style={{ display: activeTab === "usage" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
+            <UsageConfig sessionId={sessionId} cwd={cwd} />
+          </div>
           <div style={{ display: activeTab === "backup" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <BackupConfig cwd={cwd} />
           </div>

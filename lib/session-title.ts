@@ -7,8 +7,16 @@ import {
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
-const TITLE_TIMEOUT_MS = 90_000;
+const TITLE_TIMEOUT_MS = 80_000;
+/** Max time to wait for the source session to become idle before snapshotting.
+ *  The app is frequently deployed behind Cloudflare (100s gateway timeout), so
+ *  idle-wait + model call must stay comfortably under that ceiling. */
+const TITLE_IDLE_WAIT_TIMEOUT_MS = 10_000;
 const MAX_TITLE_LENGTH = 80;
+/** Cap the number of messages sent to the title model so very long sessions
+ *  (imported sessions can have thousands of tool messages) generate quickly
+ *  instead of timing out. The tail of a conversation carries the current goal. */
+const MAX_TITLE_MESSAGES = 40;
 
 const TITLE_PROMPT = `Create a concise title for this session based on the conversation above.
 
@@ -190,23 +198,110 @@ export function sanitizeTitleMessages(messages: AgentMessage[]): AgentMessage[] 
       });
 
       if (content.length > 0) {
-        sanitized.push({ ...message, content });
+        sanitized.push({ ...message, content: repairTextBlocks(content) });
       }
       continue;
     }
 
     if (message.role === "toolResult") {
       if (expectedToolResultIds?.delete(message.toolCallId)) {
-        sanitized.push(message);
+        sanitized.push(repairMessageTextBlocks(message));
       }
       continue;
     }
 
     expectedToolResultIds = undefined;
-    sanitized.push(message);
+    sanitized.push(repairMessageTextBlocks(message));
   }
 
   return sanitized;
+}
+
+/**
+ * Providers read `block.text.length` when serializing text blocks; sessions
+ * imported from other tools can contain `{"type":"text"}` blocks with a
+ * missing `text` field, which previously crashed title generation with
+ * "Cannot read properties of undefined (reading 'length')". Patch those
+ * blocks in place (keeping the message reference when nothing is broken).
+ */
+function repairMessageTextBlocks(message: AgentMessage): AgentMessage {
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return message;
+  const repaired = repairTextBlocks(content as Array<{ type: string }>);
+  if (repaired === content) return message;
+  return { ...message, content: repaired } as AgentMessage;
+}
+
+function repairTextBlocks<T extends { type: string }>(content: T[]): T[] {
+  let changed = false;
+  const repaired = content.map((block) => {
+    if (block.type === "text" && typeof (block as { text?: unknown }).text !== "string") {
+      changed = true;
+      return { ...block, text: "" } as T;
+    }
+    return block;
+  });
+  return changed ? repaired : content;
+}
+
+/** Per-text-block cap for title generation: tool outputs can be huge, and the
+ *  title model's context is smaller than the main model's. Truncating keeps a
+ *  40-message tail comfortably inside the budget. */
+const MAX_TITLE_TEXT_BLOCK = 600;
+/** Total cap for all text across the title input (safety net). */
+const MAX_TITLE_TOTAL_TEXT = 8_000;
+
+/** Trim oversized text blocks in the title input so the title model's context
+ *  is never exceeded (GLM code=10040 "model response context exceeded"). */
+function truncateTitleMessages(messages: AgentMessage[]): AgentMessage[] {
+  let total = 0;
+  return messages.map((message) => {
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) return message;
+    let changed = false;
+    const next = content.map((block) => {
+      if (block && typeof block === "object" && (block as { type?: unknown }).type === "text") {
+        const textBlock = block as { text?: string };
+        const text = typeof textBlock.text === "string" ? textBlock.text : "";
+        if (text.length > MAX_TITLE_TEXT_BLOCK) {
+          changed = true;
+          const trimmed = text.slice(0, MAX_TITLE_TEXT_BLOCK) + "\n…[truncated]";
+          total += trimmed.length;
+          return { ...textBlock, text: trimmed };
+        }
+        total += text.length;
+      }
+      return block;
+    });
+    return changed ? { ...message, content: next } as AgentMessage : message;
+  }).map((message) => {
+    // Second pass: if the total is still over the cap, hard-cut the tail.
+    if (total <= MAX_TITLE_TOTAL_TEXT) return message;
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) return message;
+    let remaining = MAX_TITLE_TOTAL_TEXT;
+    let changed = false;
+    const next = content.map((block) => {
+      if (block && typeof block === "object" && (block as { type?: unknown }).type === "text") {
+        const textBlock = block as { text?: string };
+        const text = typeof textBlock.text === "string" ? textBlock.text : "";
+        if (text.length <= remaining) {
+          remaining -= text.length;
+          return block;
+        }
+        if (remaining <= 0) {
+          changed = true;
+          return { ...textBlock, text: "" };
+        }
+        changed = true;
+        const cut = text.slice(0, remaining);
+        remaining = 0;
+        return { ...textBlock, text: cut };
+      }
+      return block;
+    });
+    return changed ? { ...message, content: next } as AgentMessage : message;
+  });
 }
 
 export async function generateSessionTitle(
@@ -214,9 +309,29 @@ export async function generateSessionTitle(
   modelOverride?: Model<Api>,
 ): Promise<GeneratedSessionTitle> {
   const sourceAgent = source.agent;
-  await sourceAgent.waitForIdle();
+  // The source session may still be running (e.g. the user just sent a
+  // message). Waiting indefinitely would exceed the Cloudflare 100s gateway
+  // timeout (HTTP 524) whenever the session takes longer than that to finish.
+  // Wait a bounded amount of time, then snapshot the current messages — the
+  // title is derived from the conversation tail, which is already complete.
+  await Promise.race([
+    sourceAgent.waitForIdle(),
+    new Promise((resolve) => setTimeout(resolve, TITLE_IDLE_WAIT_TIMEOUT_MS)),
+  ]);
 
-  const sanitizedMessages = sanitizeTitleMessages(sourceAgent.state.messages);
+  // Keep only the tail of long conversations: imported sessions can contain
+  // thousands of toolResult messages that bloat the context and slow or time
+  // out title generation. The most recent turn carries the current goal.
+  // If the tail happens to be all tool messages, fall back to the full
+  // transcript so we never claim the session has no user messages.
+  const rawMessages = sourceAgent.state.messages;
+  let candidate = rawMessages.length > MAX_TITLE_MESSAGES
+    ? rawMessages.slice(rawMessages.length - MAX_TITLE_MESSAGES)
+    : rawMessages;
+  if (!candidate.some((message) => message.role === "user")) {
+    candidate = rawMessages;
+  }
+  const sanitizedMessages = truncateTitleMessages(sanitizeTitleMessages(candidate));
   const historyLength = sanitizedMessages.length;
   if (!sanitizedMessages.some((message) => message.role === "user")) {
     throw new Error("The session has no user messages to name");

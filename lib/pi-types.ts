@@ -5,6 +5,10 @@ import type {
   SlashCommandInfo,
   Theme,
 } from "@earendil-works/pi-coding-agent";
+import type {
+  BeforeToolCallContext,
+  BeforeToolCallResult,
+} from "@earendil-works/pi-agent-core";
 
 export interface ContextUsage {
   percent: number | null;
@@ -15,6 +19,25 @@ export interface ContextUsage {
 export interface ModelLike {
   id: string;
   provider: string;
+}
+
+/** Structural subset of pi-agent-core's BeforeToolCallResult. */
+export type BeforeToolCallResultLike = BeforeToolCallResult;
+
+/** Structural subset of pi-agent-core's BeforeToolCallContext. */
+export type BeforeToolCallContextLike = BeforeToolCallContext;
+
+/**
+ * The subset of the Agent interface the wrapper touches. `beforeToolCall` is
+ * installed by AgentSession for extension tool_call forwarding; the approval
+ * hook wraps it (keeps a reference and calls it after the policy gate).
+ */
+export interface AgentHookLike {
+  state?: { systemPrompt?: string; thinkingLevel?: string };
+  beforeToolCall?: (
+    context: BeforeToolCallContext,
+    signal?: AbortSignal,
+  ) => Promise<BeforeToolCallResult | undefined>;
 }
 
 export interface ToolInfo {
@@ -123,7 +146,7 @@ export interface AgentSessionLike {
   readonly modelRuntime: { getModel: (provider: string, modelId: string) => ModelLike | undefined };
   readonly sessionManager: SessionManager;
   readonly settingsManager: SettingsManager;
-  readonly agent: { state?: { systemPrompt?: string; thinkingLevel?: string } };
+  readonly agent: AgentHookLike;
   readonly extensionRunner: ExtensionRunnerLike;
   readonly promptTemplates: readonly PromptTemplateLike[];
   readonly resourceLoader: ResourceLoaderLike;
