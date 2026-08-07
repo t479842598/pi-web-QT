@@ -181,7 +181,14 @@ export class AgentSessionWrapper {
   private approvalSeq = 0;
   private approvalHookInstalled = false;
 
-  constructor(public readonly inner: AgentSessionLike, public readonly cwd: string) {}
+  constructor(public readonly inner: AgentSessionLike, public readonly cwd: string) {
+    // Existing conversations keep their own approval mode/policy (per-session
+    // override in settings.json `modesPerSession`); brand-new sessions fall
+    // back to the global defaults.
+    const perSession = readModeSettings(inner.sessionId);
+    this.approvalMode = perSession.toolApprovalMode;
+    this.approvalPolicy = policyFromStrings(perSession.permissionRules);
+  }
 
   get sessionId(): string {
     return this.inner.sessionId;

@@ -474,33 +474,42 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // selection survives page reloads and new sessions inherit the same defaults.
   // Re-loads when the settings "Features" tab broadcasts MODES_CHANGED_EVENT so
   // default changes take effect in real time on already-open chats.
+  // Per-session overrides (modesPerSession) are loaded per session id so each
+  // existing conversation remembers its own mode/policy choices; the global
+  // default remains the fallback for new sessions.
   const [modeSettings, setModeSettings] = useState<ModeSettings>(() => defaultModeSettings());
+  const modeSessionIdRef = useRef<string | null>(session?.id ?? null);
+  modeSessionIdRef.current = session?.id ?? null;
   useEffect(() => {
     let cancelled = false;
-    const load = () => fetch("/api/modes")
-      .then((response) => (response.ok ? response.json() as Promise<ModeSettings> : null))
-      .then((loaded) => {
-        if (cancelled || !loaded) return;
-        setModeSettings({
-          collaborationMode: normalizeCollaborationMode(loaded.collaborationMode),
-          tokenMode: normalizeTokenMode(loaded.tokenMode),
-          toolApprovalMode: normalizeToolApprovalMode(loaded.toolApprovalMode),
-          permissionRules: {
-            allow: Array.isArray(loaded.permissionRules?.allow) ? loaded.permissionRules.allow : [],
-            ask: Array.isArray(loaded.permissionRules?.ask) ? loaded.permissionRules.ask : [],
-            deny: Array.isArray(loaded.permissionRules?.deny) ? loaded.permissionRules.deny : [],
-          },
-        });
-      })
-      .catch(() => { /* keep defaults on load failure */ });
-    load();
-    const onModesChanged = () => load();
+    const load = () => {
+      const sessionId = modeSessionIdRef.current;
+      const qs = sessionId ? `?session=${encodeURIComponent(sessionId)}` : "";
+      return fetch(`/api/modes${qs}`)
+        .then((response) => (response.ok ? response.json() as Promise<ModeSettings> : null))
+        .then((loaded) => {
+          if (cancelled || !loaded) return;
+          setModeSettings({
+            collaborationMode: normalizeCollaborationMode(loaded.collaborationMode),
+            tokenMode: normalizeTokenMode(loaded.tokenMode),
+            toolApprovalMode: normalizeToolApprovalMode(loaded.toolApprovalMode),
+            permissionRules: {
+              allow: Array.isArray(loaded.permissionRules?.allow) ? loaded.permissionRules.allow : [],
+              ask: Array.isArray(loaded.permissionRules?.ask) ? loaded.permissionRules.ask : [],
+              deny: Array.isArray(loaded.permissionRules?.deny) ? loaded.permissionRules.deny : [],
+            },
+          });
+        })
+        .catch(() => { /* keep defaults on load failure */ });
+    };
+    void load();
+    const onModesChanged = () => void load();
     window.addEventListener("pi:modes-changed", onModesChanged);
     return () => {
       cancelled = true;
       window.removeEventListener("pi:modes-changed", onModesChanged);
     };
-  }, []);
+  }, [session?.id]);
   const collaborationMode = modeSettings.collaborationMode;
   const tokenMode = modeSettings.tokenMode;
   const toolApprovalMode = modeSettings.toolApprovalMode;
@@ -2168,9 +2177,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [toolPreset]);
 
   // ── Chat modes (Reasonix port) ───────────────────────────────────────────
+  // Persist to the current session's per-session override (modesPerSession) so
+  // each conversation keeps its own mode; before a session exists the global
+  // defaults are written instead.
   const persistModeSettings = useCallback((next: ModeSettings) => {
     setModeSettings(next);
-    void fetch("/api/modes", {
+    const sessionId = sessionIdRef.current ?? null;
+    const qs = sessionId ? `?session=${encodeURIComponent(sessionId)}` : "";
+    void fetch(`/api/modes${qs}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(next),
