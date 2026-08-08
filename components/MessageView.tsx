@@ -36,6 +36,9 @@ import type {
 
 const MAX_THINKING_CACHE_ENTRIES = 100;
 const thinkingContentCache = new Map<string, Promise<string>>();
+/** Deferred thinking may still be written when a cross-device client fetches it. */
+const THINKING_LOAD_RETRY_ATTEMPTS = 5;
+const THINKING_LOAD_RETRY_MS = 2000;
 
 function loadThinkingContent(sessionId: string, entryId: string, blockIndex: number): Promise<string> {
   const key = `${sessionId}:${entryId}:${blockIndex}`;
@@ -740,15 +743,25 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    try {
-      setContent(await loadThinkingContent(sessionId, entryId, blockIndex));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
+    // Retry briefly: a cross-device message may arrive before the deferred
+    // thinking entry finished writing to disk.
+    let attempts = THINKING_LOAD_RETRY_ATTEMPTS;
+    const load = () => {
+      setLoading(true);
+      setError(null);
+      void loadThinkingContent(sessionId!, entryId!, blockIndex)
+        .then((value) => { setContent(value); setLoading(false); })
+        .catch((err) => {
+          if (attempts > 1) {
+            attempts--;
+            setTimeout(load, THINKING_LOAD_RETRY_MS);
+          } else {
+            setLoading(false);
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        });
+    };
+    load();
   };
 
   if (contentOnly) {
@@ -806,6 +819,7 @@ function ThinkingContentBody({ block, sessionId, entryId, blockIndex, isStreamin
 
   useEffect(() => {
     let cancelled = false;
+    let attempts = THINKING_LOAD_RETRY_ATTEMPTS;
     if (!block.deferred) {
       setLoading(false);
       return;
@@ -815,12 +829,27 @@ function ThinkingContentBody({ block, sessionId, entryId, blockIndex, isStreamin
       setError(t("desktop.thinkingContentUnavailable"));
       return;
     }
-    setLoading(true);
-    setError(null);
-    void loadThinkingContent(sessionId, entryId, blockIndex)
-      .then((value) => { if (!cancelled) setContent(value); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    // Cross-device sync: the thinking entry may still be written to disk when
+    // this client fetches it (e.g. the message came over the event bus from
+    // another device). Retry briefly instead of showing a permanent error.
+    const load = () => {
+      if (cancelled) return;
+      setLoading(true);
+      setError(null);
+      void loadThinkingContent(sessionId, entryId, blockIndex)
+        .then((value) => { if (!cancelled) { setContent(value); setLoading(false); } })
+        .catch((err) => {
+          if (cancelled) return;
+          if (attempts > 1) {
+            attempts--;
+            setTimeout(load, THINKING_LOAD_RETRY_MS);
+          } else {
+            setLoading(false);
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        });
+    };
+    load();
     return () => { cancelled = true; };
   }, [block.deferred, blockIndex, entryId, sessionId, t]);
 
