@@ -20,33 +20,44 @@ function notify() { listeners.forEach((cb) => cb()); }
 
 const KEY_MODE = "pi-theme-mode";
 const KEY_THEME = "pi-theme";
+/** Light/dark independent theme memory (each mode keeps its own theme). */
+const KEY_THEME_LIGHT = "pi-theme-light";
+const KEY_THEME_DARK = "pi-theme-dark";
 const KEY_BORDER_DEPTH = "pi-border-depth";
 
-/** Migration: extract base name from old per-mode keys (e.g. "gruvbox-dark" → "gruvbox"). */
-function migrateOldTheme(): string | null {
+/** Legacy migration: fold a single-value theme key into the per-mode keys. */
+function migrateLegacyTheme(mode: ResolvedMode): string | null {
   try {
-    const oldDark = localStorage.getItem("pi-theme-dark");
-    const oldLight = localStorage.getItem("pi-theme-light");
-
-    for (const old of [oldDark, oldLight]) {
-      if (!old || old === "dark" || old === "light") continue;
-      const base = old.replace(/-dark$/i, "").replace(/-light$/i, "");
-      if (base && base !== old) {
-        localStorage.setItem(KEY_THEME, base);
-        localStorage.removeItem("pi-theme-dark");
-        localStorage.removeItem("pi-theme-light");
-        return base;
-      }
+    const legacy = localStorage.getItem(KEY_THEME);
+    if (!legacy || legacy === "dark" || legacy === "light") return null;
+    const key = mode === "dark" ? KEY_THEME_DARK : KEY_THEME_LIGHT;
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(key, legacy);
     }
-    const v = oldDark || oldLight;
-    if (v && v !== "dark" && v !== "light") {
-      localStorage.setItem(KEY_THEME, v);
-      localStorage.removeItem("pi-theme-dark");
-      localStorage.removeItem("pi-theme-light");
-      return v;
-    }
+    localStorage.removeItem(KEY_THEME);
+    return legacy;
   } catch {}
   return null;
+}
+
+/** Read the theme for a resolved mode; per-mode keys win, legacy single key migrates. */
+function readThemeForMode(mode: ResolvedMode): string {
+  try {
+    const key = mode === "dark" ? KEY_THEME_DARK : KEY_THEME_LIGHT;
+    const v = localStorage.getItem(key);
+    if (v) return v;
+    const migrated = migrateLegacyTheme(mode);
+    if (migrated) return migrated;
+  } catch {}
+  return "";
+}
+
+/** Write the theme for a resolved mode and drop the legacy single key. */
+function writeThemeForMode(mode: ResolvedMode, name: string): void {
+  try {
+    localStorage.setItem(mode === "dark" ? KEY_THEME_DARK : KEY_THEME_LIGHT, name);
+    localStorage.removeItem(KEY_THEME);
+  } catch {}
 }
 
 function readMode(): ThemeMode {
@@ -55,18 +66,6 @@ function readMode(): ThemeMode {
     if (v === "dark" || v === "light" || v === "system") return v;
   } catch {}
   return "dark";
-}
-
-function readTheme(): string {
-  try {
-    if (localStorage.getItem(KEY_THEME) === null) {
-      const migrated = migrateOldTheme();
-      if (migrated) return migrated;
-    }
-    const v = localStorage.getItem(KEY_THEME);
-    if (v) return v;
-  } catch {}
-  return "";
 }
 
 function readBorderDepth(): number {
@@ -113,7 +112,7 @@ function getThemeSnapshot(): string {
   if (typeof document === "undefined") return "";
   const dt = document.documentElement.dataset.theme;
   if (dt) return dt;
-  return readTheme();
+  return readThemeForMode(resolveEffectiveMode(getModeSnapshot()));
 }
 
 function getServerSnapshot(): ThemeMode { return "dark"; }
@@ -131,6 +130,10 @@ const THEME_CSS_VARS = [
   "--git-status-added-bg", "--git-status-modified-bg", "--git-status-deleted-bg",
   "--user-bg", "--assistant-bg", "--tool-bg",
   "--hatch-color",
+  "--status-error", "--status-warning", "--status-success", "--status-info",
+  "--status-error-bg", "--status-warning-bg", "--status-success-bg", "--status-info-bg",
+  "--status-error-border", "--status-warning-border", "--status-success-border", "--status-info-border",
+  "--syntax-keyword", "--syntax-string", "--syntax-number", "--syntax-function", "--syntax-comment",
 ];
 
 /**
@@ -332,7 +335,7 @@ export function useTheme() {
     applyModeAndTheme(rmode, t).finally(() => {
       applyingRef.current = false;
       try { localStorage.setItem(KEY_MODE, m); } catch {}
-      try { localStorage.setItem(KEY_THEME, t); } catch {}
+      writeThemeForMode(rmode, t);
       applyBorderDepth(readBorderDepth());
       notify();
     });
@@ -345,7 +348,7 @@ export function useTheme() {
     return subscribeSystemColorScheme(() => {
       if (getModeSnapshot() === "system") {
         const newResolved = getSystemPrefersDark() ? "dark" : "light";
-        const tn = readTheme();
+        const tn = readThemeForMode(newResolved);
         syncDOM(newResolved, "system", tn);
         applyModeAndTheme(newResolved, tn);
         applyBorderDepth(readBorderDepth());
@@ -361,7 +364,7 @@ export function useTheme() {
 
     try {
       await applyModeAndTheme(resolvedMode, name);
-      try { localStorage.setItem(KEY_THEME, name); } catch {}
+      writeThemeForMode(resolvedMode, name);
       const m = getModeSnapshot();
       syncDOM(resolvedMode, m, name);
       applyBorderDepth(readBorderDepth());
@@ -377,7 +380,7 @@ export function useTheme() {
     applyingRef.current = true;
 
     const rmode = resolveEffectiveMode(nextMode);
-    const tn = readTheme();
+    const tn = readThemeForMode(rmode);
 
     try {
       await applyModeAndTheme(rmode, tn);

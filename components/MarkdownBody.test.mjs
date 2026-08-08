@@ -110,8 +110,9 @@ test("Prism token colors follow theme CSS variables", async () => {
   const markdownSource = await readFile(new URL("./MarkdownBody.tsx", import.meta.url), "utf8");
   const fileViewerSource = await readFile(new URL("./FileViewer.tsx", import.meta.url), "utf8");
 
-  assert.match(themeSource, /keyword: \{ color: "var\(--accent\)" \}/);
-  assert.match(themeSource, /string: \{ color: "var\(--accent-orange\)" \}/);
+  // Semantic syntax tokens with fallbacks to the legacy accent-based vars.
+  assert.match(themeSource, /keyword: \{ color: "var\(--syntax-keyword, var\(--accent\)\)" \}/);
+  assert.match(themeSource, /string: \{ color: "var\(--syntax-string, var\(--accent-orange\)\)" \}/);
   for (const source of [markdownSource, fileViewerSource]) {
     assert.match(source, /style=\{prismTheme\}/);
     assert.doesNotMatch(source, /react-syntax-highlighter\/dist\/cjs\/styles\/prism/);

@@ -204,6 +204,26 @@ function resolveBuiltinTheme(name: string, variant: ThemeVariant): ResolvedTheme
     "--assistant-bg": colors.assistantBg,
     "--tool-bg": colors.toolBg,
     "--hatch-color": colors.subtle,
+    // Semantic status tokens
+    "--status-error": colors.red,
+    "--status-warning": colors.orange,
+    "--status-success": colors.green,
+    "--status-info": colors.accent,
+    "--status-error-bg": `color-mix(in srgb, ${colors.red} 14%, var(--bg))`,
+    "--status-warning-bg": `color-mix(in srgb, ${colors.orange} 14%, var(--bg))`,
+    "--status-success-bg": `color-mix(in srgb, ${colors.green} 14%, var(--bg))`,
+    "--status-info-bg": `color-mix(in srgb, ${colors.accent} 14%, var(--bg))`,
+    "--status-error-border": `color-mix(in srgb, ${colors.red} 45%, var(--bg))`,
+    "--status-warning-border": `color-mix(in srgb, ${colors.orange} 45%, var(--bg))`,
+    "--status-success-border": `color-mix(in srgb, ${colors.green} 45%, var(--bg))`,
+    "--status-info-border": `color-mix(in srgb, ${colors.accent} 45%, var(--bg))`,
+    // Syntax highlighting tokens (derived from the palette; OpenChamber themes
+    // override via their converted syntax colors).
+    "--syntax-keyword": colors.accent,
+    "--syntax-string": colors.orange,
+    "--syntax-number": colors.accent,
+    "--syntax-function": colors.accent,
+    "--syntax-comment": colors.dim,
   };
   return { name, isDark: variant === "dark", cssVars };
 }
@@ -476,6 +496,30 @@ function mapToCssVars(
     ? `rgba(${hexToRgb(accent)?.join(",") || "100,193,182"},0.16)`
     : `rgba(${hexToRgb(accent)?.join(",") || "13,148,136"},0.12)`;
 
+  // Semantic status tokens (pi CLI colors.error/success/warning, fallback to
+  // accent-derived defaults so the default theme never renders with empty vars)
+  css["--status-error"] = error;
+  css["--status-warning"] = warning;
+  css["--status-success"] = success;
+  css["--status-info"] = accent;
+  css["--status-error-bg"] = `color-mix(in srgb, ${error} 14%, var(--bg))`;
+  css["--status-warning-bg"] = `color-mix(in srgb, ${warning} 14%, var(--bg))`;
+  css["--status-success-bg"] = `color-mix(in srgb, ${success} 14%, var(--bg))`;
+  css["--status-info-bg"] = `color-mix(in srgb, ${accent} 14%, var(--bg))`;
+  css["--status-error-border"] = `color-mix(in srgb, ${error} 45%, var(--bg))`;
+  css["--status-warning-border"] = `color-mix(in srgb, ${warning} 45%, var(--bg))`;
+  css["--status-success-border"] = `color-mix(in srgb, ${success} 45%, var(--bg))`;
+  css["--status-info-border"] = `color-mix(in srgb, ${accent} 45%, var(--bg))`;
+
+  // Syntax tokens from pi CLI vars (keyword/string/number/function are not
+  // standard pi CLI tokens; derive from accent/orange/dim with sensible roles;
+  // OpenChamber format themes populate colors.keyword/string/... explicitly)
+  css["--syntax-keyword"] = colors.keyword || accent;
+  css["--syntax-string"] = colors.string || orange;
+  css["--syntax-number"] = colors.number || accent;
+  css["--syntax-function"] = colors.function || accent;
+  css["--syntax-comment"] = colors.comment || dim;
+
   return css;
 }
 
@@ -612,6 +656,12 @@ function parseOpenChamberThemeFile(json: Record<string, unknown>): PiTheme | nul
       warning: str(status.warning) || "#d97706",
       userMessageBg: userMessageBg || bg0,
       toolSuccessBg: toolBg || bg0,
+      // Syntax highlighting tokens from the layered theme's syntax.base
+      keyword: str((colors.syntax as Record<string, Record<string, string>> | undefined)?.base?.keyword) || accent,
+      string: str((colors.syntax as Record<string, Record<string, string>> | undefined)?.base?.string) || "",
+      number: str((colors.syntax as Record<string, Record<string, string>> | undefined)?.base?.number) || "",
+      function: str((colors.syntax as Record<string, Record<string, string>> | undefined)?.base?.function) || "",
+      comment: str((colors.syntax as Record<string, Record<string, string>> | undefined)?.base?.comment) || "",
     },
   };
 }
