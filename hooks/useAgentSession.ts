@@ -89,11 +89,19 @@ type AgentStateResponse = {
   isPromptRunning?: boolean;
   isBashRunning?: boolean;
   isCompacting?: boolean;
+  phase?: "waiting_model" | "running_command" | null;
   extensionStatuses?: ExtensionStatusItem[];
   extensionWidgets?: ExtensionWidgetItem[];
   queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
   pendingRecovery?: PendingRecoveryItem[] | null;
 };
+
+function phaseFromServerState(state: AgentStateResponse | undefined): AgentPhase {
+  if (!state) return null;
+  if (state.phase === "running_command" || state.isBashRunning) return { kind: "running_command" };
+  if (state.phase === "waiting_model" || state.isStreaming || state.isPromptRunning || state.isCompacting) return { kind: "waiting_model" };
+  return null;
+}
 
 export interface QueuedMessages {
   steering: string[];
@@ -207,19 +215,23 @@ export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" 
 
 const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
 const USER_SCROLL_INTENT_MS = 1200;
-// Height of the blank spacer rendered below the last message while the agent
-// runs (see ChatWindow). scrollToBottom backs this exact height off so the
-// LAST MESSAGE lands at the viewport bottom; render and backoff MUST agree,
+// Height of the blank spacer rendered below the last message (see ChatWindow).
+// It is ALWAYS rendered — not just while the agent runs — because the keep-out
+// scroll target below needs physical room to scroll into: with no trailing
+// space, `scrollTo` clamps at the content end and the last message ends up
+// pressed against (or covered by) ChatInput. render and backoff MUST agree,
 // so both sides consume this single constant.
-export const AGENT_RUNNING_SPACER_PX = 96;
+export const CHAT_BOTTOM_SPACER_PX = 96;
 // Distance from the bottom of the scroll container within which live-follow
 // scrolling is active. Larger values make follow more lenient; smaller values
 // require the user to stay closer to the bottom.
 const SCROLL_BOTTOM_THRESHOLD = 150;
 // Keep-out gap between the last message and the scroll container's bottom
 // edge when auto-scrolling, so the last message is never hidden behind the
-// fixed ChatInput bar below the list.
-const BOTTOM_KEEP_OUT_PX = 32;
+// fixed ChatInput bar below the list. 88px ≈ the composer's top row, so the
+// last line of live-followed content sits visibly clear of the input box
+// instead of hugging (or being covered by) it.
+export const BOTTOM_KEEP_OUT_PX = 88;
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
 const PROMPT_SETTLE_MAX_MS = 20_000;
@@ -433,6 +445,40 @@ type SlashCommandsResponse = {
   commands?: SlashCommandInfo[];
 };
 
+/** localStorage key for the last-seen global mode defaults (system settings). */
+const GLOBAL_MODES_CACHE_KEY = "pi-web:modes-global-default";
+
+function readCachedGlobalModeSettings(): ModeSettings | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(GLOBAL_MODES_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const rules = parsed.permissionRules as { allow?: unknown; ask?: unknown; deny?: unknown } | undefined;
+    return {
+      collaborationMode: normalizeCollaborationMode(parsed.collaborationMode),
+      tokenMode: normalizeTokenMode(parsed.tokenMode),
+      toolApprovalMode: normalizeToolApprovalMode(parsed.toolApprovalMode),
+      permissionRules: {
+        allow: Array.isArray(rules?.allow) ? (rules.allow as string[]) : [],
+        ask: Array.isArray(rules?.ask) ? (rules.ask as string[]) : [],
+        deny: Array.isArray(rules?.deny) ? (rules.deny as string[]) : [],
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function cacheGlobalModeSettings(settings: ModeSettings): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(GLOBAL_MODES_CACHE_KEY, JSON.stringify(settings));
+  } catch {
+    // Best-effort cache; privacy mode and quota must not break chat startup.
+  }
+}
+
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
@@ -440,6 +486,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   } = opts;
 
   const isNew = session === null && newSessionCwd !== null;
+  const modelContextKey = `${session?.id ?? "new"}\0${newSessionCwd ?? session?.cwd ?? ""}`;
 
   const [data, setData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(!isNew);
@@ -477,7 +524,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Per-session overrides (modesPerSession) are loaded per session id so each
   // existing conversation remembers its own mode/policy choices; the global
   // default remains the fallback for new sessions.
-  const [modeSettings, setModeSettings] = useState<ModeSettings>(() => defaultModeSettings());
+  const [modeSettings, setModeSettings] = useState<ModeSettings>(() => readCachedGlobalModeSettings() ?? defaultModeSettings());
   const modeSessionIdRef = useRef<string | null>(session?.id ?? null);
   modeSessionIdRef.current = session?.id ?? null;
   useEffect(() => {
@@ -489,7 +536,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         .then((response) => (response.ok ? response.json() as Promise<ModeSettings> : null))
         .then((loaded) => {
           if (cancelled || !loaded) return;
-          setModeSettings({
+          const next = {
             collaborationMode: normalizeCollaborationMode(loaded.collaborationMode),
             tokenMode: normalizeTokenMode(loaded.tokenMode),
             toolApprovalMode: normalizeToolApprovalMode(loaded.toolApprovalMode),
@@ -498,7 +545,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               ask: Array.isArray(loaded.permissionRules?.ask) ? loaded.permissionRules.ask : [],
               deny: Array.isArray(loaded.permissionRules?.deny) ? loaded.permissionRules.deny : [],
             },
-          });
+          };
+          setModeSettings(next);
+          // Cache the global defaults so a brand-new chat shows the system
+          // defaults immediately instead of the hard-coded fallback until the
+          // first async /api/modes round-trip completes.
+          if (!sessionId) cacheGlobalModeSettings(next);
         })
         .catch(() => { /* keep defaults on load failure */ });
     };
@@ -607,6 +659,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const newSessionPromotedRef = useRef(false);
   const promptRunIdRef = useRef(0);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
+  const modelSwitchIdRef = useRef(0);
+  const modelLoadGenerationRef = useRef(0);
+  const modelLoadAbortRef = useRef<AbortController | null>(null);
+  const modelContextKeyRef = useRef(modelContextKey);
+  modelContextKeyRef.current = modelContextKey;
   const newSessionModelOverrideRef = useRef<SelectedModel | null>(null);
   const thinkingLevelOverrideRef = useRef<ThinkingLevelOption | null>(null);
   const streamUpdateSchedulerRef = useRef<StreamUpdateScheduler<Partial<AgentMessage>> | null>(null);
@@ -690,7 +747,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setActiveLeafId(d.leafId);
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
-      setCurrentModelOverride(null);
+      // A model_change entry can lag the live set_model result during a reload.
+      // Keep the optimistic selection until the persisted context agrees with it.
+      setCurrentModelOverride((override) => {
+        if (!override) return null;
+        return d.context.model
+          && override.provider === d.context.model.provider
+          && override.modelId === d.context.model.modelId
+          ? null
+          : override;
+      });
       setError(null);
       if (d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
         setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
@@ -969,12 +1035,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const addNotice = useCallback((notice: { id?: string; message: string; type?: NoticeType }) => {
     const message = notice.message.trim();
     if (!message) return;
+    const type = notice.type ?? "info";
+    if (type === "error" || type === "warning") {
+      void fetch("/api/logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level: type, source: "agent-notice", sessionId: sessionIdRef.current ?? undefined, message }),
+      }).catch(() => {});
+    }
     dispatchNotice({
       type: "add",
       notice: {
         id: notice.id ?? createNoticeId(),
         message,
-        type: notice.type ?? "info",
+        type,
       },
     });
   }, []);
@@ -1028,8 +1102,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [addNotice, opts.chatInputRef]);
 
+  // Streaming live-follow scheduler state. `cancelStreamingScroll` must exist
+  // before settleUiStage (which cancels pending follow-up frames on settle).
+  const streamingScrollRafRef = useRef<number | null>(null);
+  const cancelStreamingScroll = useCallback(() => {
+    if (streamingScrollRafRef.current !== null) {
+      cancelAnimationFrame(streamingScrollRafRef.current);
+      streamingScrollRafRef.current = null;
+    }
+  }, []);
+
   const settleUiStage = useCallback(() => {
     resetStreamUpdates();
+    cancelStreamingScroll();
     const wasRunning = agentRunningRef.current;
     agentRunningRef.current = false;
     setAgentRunning(false);
@@ -1037,7 +1122,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setRetryInfo(null);
     dispatch({ type: "end" });
     return wasRunning;
-  }, [resetStreamUpdates]);
+  }, [cancelStreamingScroll, resetStreamUpdates]);
 
   const notifyPromptStage = useCallback((runId: number) => {
     if (notifiedPromptRunIdRef.current === runId) return false;
@@ -1077,7 +1162,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           rpcPromptPendingRef.current = Boolean(state?.isPromptRunning);
           agentRunningRef.current = true;
           setAgentRunning(true);
-          setAgentPhase(state?.isStreaming ? { kind: "waiting_model" } : { kind: "running_command" });
+          setAgentPhase(phaseFromServerState(state));
           return;
         }
 
@@ -1167,10 +1252,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // flight) — everything in it is stale, drop it.
       if (promptRunIdRef.current !== runId) return;
       const state = data.state;
-      // Mirror compaction state unconditionally: a missed compaction_end
-      // would otherwise leave the "Stop compaction" UI stuck. No state
-      // (wrapper destroyed) means nothing is compacting.
+      // Mirror the server snapshot before deciding whether to settle. This is
+      // the convergence path after a lost SSE terminal event.
       setIsCompacting(state?.isCompacting ?? false);
+      setAgentPhase(phaseFromServerState(state));
       setQueuedMessages(normalizeQueuedMessages(state?.queuedMessages));
       setPendingRecovery(state?.pendingRecovery ?? []);
       const busy = data.running && state
@@ -1222,16 +1307,32 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const container = scrollContainerRef.current;
     const end = messagesEndRef.current;
     if (!container || !end) return;
-    // The end sentinel sits BELOW the agent-running spacer. scrollIntoView on
-    // the sentinel would put that blank spacer in the viewport — hence the
-    // blank screen while streaming during a run. Back off by the spacer so
-    // the LAST MESSAGE lands just above the viewport bottom with a keep-out
-    // gap (BOTTOM_KEEP_OUT_PX) so it is not hidden behind ChatInput.
+    // The end sentinel sits BELOW the keep-out spacer. scrollIntoView on the
+    // sentinel would put that blank spacer in the viewport — hence the blank
+    // screen while streaming during a run. Back off by the spacer so the LAST
+    // MESSAGE lands just above the viewport bottom with a keep-out gap
+    // (BOTTOM_KEEP_OUT_PX) so it is not hidden behind ChatInput.
     const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
-    const spacerH = agentRunningRef.current ? AGENT_RUNNING_SPACER_PX : 0;
+    const spacerH = CHAT_BOTTOM_SPACER_PX;
     const target = Math.max(0, endInContainer - spacerH - container.clientHeight + BOTTOM_KEEP_OUT_PX);
     container.scrollTo({ top: target, behavior });
   }, []);
+
+  // Streaming live-follow. A single rAF can run before React commits the new
+  // streaming DOM (concurrent rendering), measuring the stale layout and
+  // leaving the viewport a frame behind the growing thinking/text block. The
+  // double rAF runs after commit AND layout; the event merge prevents a burst
+  // of message_update events from scheduling redundant frames.
+  const scheduleStreamingScroll = useCallback(() => {
+    if (streamingScrollRafRef.current !== null) return;
+    streamingScrollRafRef.current = requestAnimationFrame(() => {
+      streamingScrollRafRef.current = null;
+      requestAnimationFrame(() => {
+        if (!isNearBottomRef.current || !agentRunningRef.current) return;
+        scrollToBottom("auto");
+      });
+    });
+  }, [scrollToBottom]);
 
   const handleAgentEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
@@ -1243,6 +1344,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setAgentRunning(true);
         setAgentPhase({ kind: "waiting_model" });
         dispatch({ type: "start" });
+        // Pin the viewport to the newest content as soon as the run starts so
+        // the first returned token is visible without an extra manual scroll.
+        scheduleStreamingScroll();
         break;
       case "agent_end": {
         resetStreamUpdates();
@@ -1341,6 +1445,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setApprovalRequests((prev) => prev.filter((r) => r.id !== id));
         break;
       }
+      case "opencode_zen_switch":
+        if (!event.sessionId || event.sessionId === sessionIdRef.current) {
+          addNotice({ type: "success", message: `OpenCode Zen 已切换账号和代理：${String(event.to ?? "unknown")}` });
+        }
+        break;
       case "prompt_error":
         addNotice({ type: "error", message: (event.errorMessage as string | undefined) ?? "Command failed" });
         break;
@@ -1369,11 +1478,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setAgentPhase((prev) => (prev === null ? prev : null));
         // Live-follow the streaming output only when the user is already near
         // the bottom of the message list. If they scrolled up, leave them there.
-        if (isNearBottomRef.current) {
-          // Defer the scroll so React has time to update the DOM with the new
-          // streaming content; otherwise scrollTo may target stale layout.
-          requestAnimationFrame(() => scrollToBottom("auto"));
-        }
+        // Double-rAF (commit + layout) keeps the viewport pinned to the newest
+        // token; the scheduler merges the message_update burst into one frame.
+        scheduleStreamingScroll();
         break;
       }
       case "message_end": {
@@ -1460,6 +1567,28 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           followUp: [...((event.followUp as string[] | undefined) ?? [])],
         });
         break;
+      case "state_sync": {
+        const state = event.state as AgentStateResponse | undefined;
+        if (!state) break;
+        setIsCompacting(state.isCompacting ?? false);
+        setAgentPhase(phaseFromServerState(state));
+        setQueuedMessages(normalizeQueuedMessages(state.queuedMessages));
+        setPendingRecovery(state.pendingRecovery ?? []);
+        if (state.contextUsage !== undefined) setContextUsage(state.contextUsage ?? null);
+        if (state.systemPrompt !== undefined) setSystemPrompt(state.systemPrompt ?? null);
+        if (state.extensionStatuses !== undefined) setExtensionStatuses(state.extensionStatuses ?? []);
+        if (state.extensionWidgets !== undefined) setExtensionWidgets(state.extensionWidgets ?? []);
+        const busy = Boolean(state.isStreaming || state.isPromptRunning || state.isBashRunning || state.isCompacting);
+        if (busy) {
+          agentRunningRef.current = true;
+          setAgentRunning(true);
+          dispatch({ type: "start" });
+        } else if (agentRunningRef.current && !rpcPromptPendingRef.current) {
+          const sid = sessionIdRef.current;
+          if (sid) void finishPromptWithoutStream(sid, promptRunIdRef.current);
+        }
+        break;
+      }
       case "auto_retry_start":
         setRetryInfo({ attempt: event.attempt as number, maxAttempts: event.maxAttempts as number, errorMessage: event.errorMessage as string | undefined });
         break;
@@ -1490,15 +1619,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [
     addNotice,
     cancelEventStreamGrace,
+    cancelStreamingScroll,
+    finishPromptWithoutStream,
     handleExtensionUiRequest,
     loadSession,
     notifyPromptStage,
     onAgentEnd,
     scheduleEventStreamClose,
+    scheduleStreamingScroll,
     settleUiStage,
     queueStreamUpdate,
     resetStreamUpdates,
-    scrollToBottom,
   ]);
   handleAgentEventRef.current = handleAgentEvent;
 
@@ -1721,13 +1852,26 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
     const sid = sessionIdRef.current;
     if (!sid) return;
+    const switchId = ++modelSwitchIdRef.current;
+    const previousModel = currentModelOverride ?? data?.context.model ?? null;
+    const selectedModel = { provider, modelId };
+    // Update the picker immediately; a slow cold-start or persisted model_change
+    // entry must not make a successful click look ignored.
+    setCurrentModelOverride(selectedModel);
     try {
       await sendAgentCommand(sid, { type: "set_model", provider, modelId });
-      setCurrentModelOverride({ provider, modelId });
     } catch (e) {
       console.error("Failed to set model:", e);
+      if (modelSwitchIdRef.current === switchId) {
+        setCurrentModelOverride(
+          previousModel && (previousModel.provider !== provider || previousModel.modelId !== modelId)
+            ? previousModel
+            : null,
+        );
+        addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
+      }
     }
-  }, [isNew, setNewSessionModel]);
+  }, [addNotice, currentModelOverride, data?.context.model, isNew, setNewSessionModel]);
 
   const handleCompact = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -1748,31 +1892,49 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [isCompacting, loadSession]);
 
   const loadModels = useCallback(async (signal?: AbortSignal) => {
+    const generation = ++modelLoadGenerationRef.current;
+    const requestContextKey = modelContextKey;
     const modelCwd = newSessionCwd ?? session?.cwd ?? "";
     const modelsUrl = modelCwd ? `/api/models?cwd=${encodeURIComponent(modelCwd)}` : "/api/models";
-    const res = await fetch(modelsUrl, signal ? { signal } : undefined);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const d = await res.json() as ModelsResponse;
-    setModelNames(d.models);
-    setModelThinkingLevels(d.thinkingLevels ?? {});
-    setModelThinkingLevelMaps(d.thinkingLevelMaps ?? {});
-    setModelScopeWarnings(d.modelScopeWarnings ?? []);
-    const nextModelList = d.modelList ?? [];
-    setModelList(nextModelList);
-    if (isNew && !sessionIdRef.current) {
-      const match = d.defaultModel
-        ? nextModelList.find((m) => m.id === d.defaultModel?.modelId && m.provider === d.defaultModel?.provider)
-        : undefined;
-      const displayModel = match ?? nextModelList[0];
-      setNewSessionDefaultModel(displayModel ? { provider: displayModel.provider, modelId: displayModel.id } : null);
-      const pinnedThinkingLevel = displayModel
-        ? d.thinkingLevelPins?.[`${displayModel.provider}/${displayModel.id}`]
-        : undefined;
-      if (thinkingLevelOverrideRef.current === null) {
-        setThinkingLevel((pinnedThinkingLevel as ThinkingLevelOption | undefined) ?? "auto");
+    const previousController = modelLoadAbortRef.current;
+    previousController?.abort();
+    const controller = new AbortController();
+    modelLoadAbortRef.current = controller;
+    const forwardAbort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", forwardAbort, { once: true });
+    try {
+      const res = await fetch(modelsUrl, { signal: controller.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json() as ModelsResponse;
+      // Fetch cancellation is the fast path; the generation/context guards are
+      // still required because an already-resolved response may race a cwd or
+      // session change and AbortController cannot undo that callback.
+      if (generation !== modelLoadGenerationRef.current || requestContextKey !== modelContextKeyRef.current) return;
+      setModelNames(d.models);
+      setModelThinkingLevels(d.thinkingLevels ?? {});
+      setModelThinkingLevelMaps(d.thinkingLevelMaps ?? {});
+      setModelScopeWarnings(d.modelScopeWarnings ?? []);
+      const nextModelList = d.modelList ?? [];
+      setModelList(nextModelList);
+      if (isNew && !sessionIdRef.current) {
+        const match = d.defaultModel
+          ? nextModelList.find((m) => m.id === d.defaultModel?.modelId && m.provider === d.defaultModel?.provider)
+          : undefined;
+        const displayModel = match ?? nextModelList[0];
+        setNewSessionDefaultModel(displayModel ? { provider: displayModel.provider, modelId: displayModel.id } : null);
+        const pinnedThinkingLevel = displayModel
+          ? d.thinkingLevelPins?.[`${displayModel.provider}/${displayModel.id}`]
+          : undefined;
+        if (thinkingLevelOverrideRef.current === null) {
+          setThinkingLevel((pinnedThinkingLevel as ThinkingLevelOption | undefined) ?? "auto");
+        }
       }
+    } finally {
+      signal?.removeEventListener("abort", forwardAbort);
+      if (modelLoadAbortRef.current === controller) modelLoadAbortRef.current = null;
     }
-  }, [isNew, newSessionCwd, session?.cwd]);
+  }, [isNew, modelContextKey, newSessionCwd, session?.cwd]);
 
   const handleBuiltinSlashCommand = useCallback(async (text: string): Promise<BuiltinSlashCommandResult> => {
     if (!text.startsWith("/")) return { handled: false };
@@ -1971,7 +2133,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             rpcPromptPendingRef.current = Boolean(state.isPromptRunning);
             agentRunningRef.current = true;
             setAgentRunning(true);
-            setAgentPhase(state.isStreaming ? { kind: "waiting_model" } : { kind: "running_command" });
+            setAgentPhase(phaseFromServerState(state));
             dispatch({ type: "start" });
             void connectEvents(sid);
             if (!state.isStreaming && state.isPromptRunning) void waitForPromptSettlement(sid);
@@ -2422,7 +2584,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             rpcPromptPendingRef.current = Boolean(agentState.state.isPromptRunning);
             agentRunningRef.current = true;
             setAgentRunning(true);
-            setAgentPhase(agentState.state.isStreaming ? { kind: "waiting_model" } : { kind: "running_command" });
+            setAgentPhase(phaseFromServerState(agentState.state));
             dispatch({ type: "start" });
             void connectEvents(session.id);
             if (!agentState.state.isStreaming && agentState.state.isPromptRunning) {
@@ -2490,14 +2652,40 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         pendingScrollToUserRef.current = false;
         initialScrollDoneRef.current = true;
         scrollUserMsgToTop();
-      } else if (!initialScrollDoneRef.current) {
-        initialScrollDoneRef.current = true;
+      } else if (loading || !initialScrollDoneRef.current) {
+        // Re-anchor to the bottom on every batch while the initial session
+        // load is still in flight: the first scroll runs on partial content
+        // and can be clamped before the list finishes growing, which would
+        // leave the last message pressed against ChatInput.
+        if (!loading) initialScrollDoneRef.current = true;
         scrollToBottom("instant");
       } else if (!agentRunningRef.current && (completionScrollAllowedRef.current || isNearBottomRef.current)) {
         scrollToBottom("smooth");
       }
     }
-  }, [messages.length, agentRunning, scrollToBottom, scrollUserMsgToTop]);
+  }, [messages.length, loading, agentRunning, scrollToBottom, scrollUserMsgToTop]);
+
+  // Settle correction: deferred thinking/media content keeps laying out after
+  // `loading` flips false, so the anchor scroll above may still be stale.
+  // Once the dust settles, if the user is still parked at the bottom, re-run
+  // scrollToBottom so the LAST MESSAGE sits at the keep-out gap above
+  // ChatInput instead of hugging (or being covered by) it.
+  const settleScrollDoneRef = useRef(false);
+  useEffect(() => {
+    if (loading) {
+      settleScrollDoneRef.current = false;
+      return;
+    }
+    if (settleScrollDoneRef.current || messages.length === 0) return;
+    settleScrollDoneRef.current = true;
+    const timer = window.setTimeout(() => {
+      if (agentRunningRef.current) return; // the streaming follow owns the scroll
+      if (completionScrollAllowedRef.current || isNearBottomRef.current) {
+        scrollToBottom("instant");
+      }
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [loading, messages.length, scrollToBottom]);
 
   // Load model list
   useEffect(() => {
@@ -2559,7 +2747,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     goalState, handleGoalStart, handleGoalPause, handleGoalResume, handleGoalStop,
     slashCommands, slashCommandsLoading, queuedMessages, pendingRecovery, recoveryIsImport,
     notices: noticeState.visible, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
-    isAutoModelSelection: isNew && newSessionModel === null,
     agentPhase,
     isNew,
     promptAnchorActive,

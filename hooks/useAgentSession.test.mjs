@@ -99,3 +99,22 @@ test("coalesces streaming message snapshots and drops stale queued updates", () 
   assert.match(agentEndSource, /resetStreamUpdates\(\)/);
   assert.match(updatesSource, /resetStreamUpdates\(\);\s*dispatch\(\{ type: "reset"/s);
 });
+
+test("new chats initialize mode defaults from the cached system settings", () => {
+  assert.match(source, /readCachedGlobalModeSettings\(\) \?\? defaultModeSettings\(\)/);
+  assert.match(source, /cacheGlobalModeSettings\(next\)/);
+  assert.match(source, /if \(!sessionId\) cacheGlobalModeSettings/);
+});
+
+test("guards model list writes by request generation and context", () => {
+  const loadSource = source.slice(
+    source.indexOf("const loadModels = useCallback"),
+    source.indexOf("const handleBuiltinSlashCommand"),
+  );
+  assert.match(loadSource, /modelLoadGenerationRef/);
+  assert.match(loadSource, /modelLoadAbortRef/);
+  assert.match(loadSource, /requestContextKey/);
+  assert.match(loadSource, /generation !== modelLoadGenerationRef\.current/);
+  assert.match(loadSource, /requestContextKey !== modelContextKeyRef\.current/);
+  assert.match(loadSource, /signal: controller\.signal/);
+});

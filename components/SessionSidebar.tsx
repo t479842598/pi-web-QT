@@ -2,12 +2,15 @@
 
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, Lightning, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash, UploadSimple, X } from "@phosphor-icons/react";
+import { ArrowClockwise, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, Lightning, MagnifyingGlass, PencilSimple, Plug, Plus, Sparkle, Stack, Trash, UploadSimple, X } from "@phosphor-icons/react";
 import type { SessionInfo } from "@/lib/types";
+import type { SessionStatsInfo } from "@/lib/pi-types";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { QuickChangesPanel } from "./QuickChangesPanel";
+import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
+import { samePath } from "@/lib/paths";
 
 interface Props {
   selectedSessionId: string | null;
@@ -25,6 +28,7 @@ interface Props {
   onAtMentions?: (relativePaths: string[]) => void;
   /** Open the settings modal (used by the title-generation failure banner). */
   onOpenSettings?: (tab?: string) => void;
+  selectedSessionStats?: SessionStatsInfo | null;
   workspaceControlsHosts?: {
     title?: HTMLElement | null;
     welcome?: HTMLElement | null;
@@ -271,7 +275,7 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 
 
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onOpenSettings, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -362,6 +366,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   const initialLoadDone = useRef(false);
   useEffect(() => {
+    setExplorerOpen(loadExplorerOpen());
+  }, []);
+
+  useEffect(() => {
     const isFirst = !initialLoadDone.current;
     initialLoadDone.current = true;
     loadSessions(isFirst);
@@ -389,10 +397,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           signal: currentController.signal,
         });
         if (!response.ok || !active || controller !== currentController) return;
-        const data = await response.json() as { runningSessionIds?: string[] };
+        const data = await response.json() as { runningSessionIds?: string[]; sessions?: Array<{ id: string; running: boolean }> };
         if (!active || controller !== currentController) return;
         runningSnapshotAuthoritativeRef.current = true;
-        setRunningSessionIds(new Set(data.runningSessionIds ?? []));
+        setRunningSessionIds(new Set((data.sessions ?? []).filter((session) => session.running).map((session) => session.id)));
       } catch (error) {
         if ((error as DOMException).name !== "AbortError") console.warn("Failed to poll running sessions", error);
       } finally {
@@ -420,6 +428,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
+  }, []);
+
+  useEffect(() => {
+    const source = new EventSource("/api/agent/running/events");
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { sessions?: Array<{ id: string; running: boolean }>; runningSessionIds?: string[] };
+        const ids = data.sessions
+          ? data.sessions.filter((session) => session.running).map((session) => session.id)
+          : data.runningSessionIds ?? [];
+        runningSnapshotAuthoritativeRef.current = true;
+        setRunningSessionIds(new Set(ids));
+      } catch {
+        // EventSource reconnects; a malformed frame must not alter state.
+      }
+    };
+    return () => source.close();
   }, []);
 
   useEffect(() => {
@@ -467,8 +492,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (worktreeState && worktreeState.forCwd === cwd) return worktreeState.projectRoot;
     // Any path in the loaded worktree list belongs to that project — covers
     // worktrees without sessions, so switching to them keeps the row mounted.
-    if (worktreeState?.worktrees.some((w) => w.path === cwd)) return worktreeState.projectRoot;
-    const match = allSessions.find((s) => s.cwd === cwd);
+    if (worktreeState?.worktrees.some((w) => samePath(w.path, cwd))) return worktreeState.projectRoot;
+    const match = allSessions.find((s) => samePath(s.cwd, cwd));
     return match?.projectRoot ?? cwd;
   }, [worktreeState, allSessions]);
 
@@ -810,7 +835,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Build parent-child tree within the filtered set
   const sessionTree = buildSessionTree(filteredSessions);
 
-  const currentWt = worktreeState?.worktrees.find((w) => w.path === selectedCwd)
+  const currentWt = worktreeState?.worktrees.find((w) => samePath(w.path, selectedCwd ?? ""))
     ?? worktreeState?.worktrees.find((w) => w.isMain)
     ?? null;
   const compactProjectLabel = selectedCwd
@@ -992,7 +1017,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             <AnimatedDropdown open={showWorktreeSwitcher && isWorktreeDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden" }}>
               <div style={{ maxHeight: "min(40vh, 300px)", overflowY: "auto" }}>
                 {worktreeState?.worktrees.map((wt) => {
-                  const isCurrent = wt.path === selectedCwd || (wt.isMain && !worktreeState.worktrees.some((w) => w.path === selectedCwd));
+                  const isCurrent = samePath(wt.path, selectedCwd ?? "") || (wt.isMain && !worktreeState.worktrees.some((w) => samePath(w.path, selectedCwd ?? "")));
                   return (
                     <button key={wt.path} onClick={() => { setSelectedCwd(wt.path); setWtDropdownOpen(false); setWorkspaceWorktreeDropdownOpen(null); setWtError(null); }} title={wt.path} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 10px", background: "var(--bg)", border: "none", borderBottom: "1px solid var(--border)", color: isCurrent ? "var(--text)" : "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 11, fontFamily: "var(--font-mono)" }}>
                       {isCurrent ? <Check size={10} color="var(--accent)" weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" /> : <span style={{ width: 10, flexShrink: 0 }} />}
@@ -1245,7 +1270,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             project share the same list anyway. */}
         {!hasWorkspaceControlsHosts && showWorktreeSwitcher && (() => {
           if (!worktreeState) return null;
-          const currentWt = worktreeState.worktrees.find((w) => w.path === selectedCwd)
+          const currentWt = worktreeState.worktrees.find((w) => samePath(w.path, selectedCwd ?? ""))
             ?? worktreeState.worktrees.find((w) => w.isMain);
           return (
             <div ref={wtDropdownRef} style={{ position: "relative", marginTop: 6 }}>
@@ -1303,7 +1328,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               >
                   <div style={{ maxHeight: "min(40vh, 300px)", overflowY: "auto" }}>
                     {worktreeState.worktrees.map((wt) => {
-                      const isCurrent = wt.path === selectedCwd || (wt.isMain && !worktreeState.worktrees.some((w) => w.path === selectedCwd));
+                      const isCurrent = samePath(wt.path, selectedCwd ?? "") || (wt.isMain && !worktreeState.worktrees.some((w) => samePath(w.path, selectedCwd ?? "")));
                       if (wtConfirmRemove === wt.path) {
                         return (
                           <div key={wt.path} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: "1px solid var(--border)", background: "rgba(239,68,68,0.06)" }}>
@@ -1560,6 +1585,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               unreadSessionIds={unreadSessionIds}
               onSelectSession={handleSelectSessionFromList}
               onRenamed={loadSessions}
+              selectedSessionStats={selectedSessionStats}
               onSessionDeleted={(id) => {
                 onSessionDeleted?.(id);
                 loadSessions();
@@ -1584,7 +1610,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         >
           <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
             <button
-              onClick={() => setExplorerOpen((v) => !v)}
+              onClick={() => setExplorerOpen((open) => {
+                const next = !open;
+                saveExplorerOpen(next);
+                return next;
+              })}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -1681,6 +1711,28 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           onOpenFile={onOpenFile ?? (() => {})}
         />
       )}
+      {onOpenSettings && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 5, padding: "7px 8px", borderTop: "1px solid var(--border)", flexShrink: 0, marginTop: "auto" }}>
+          {[
+            { tab: "models", label: t("desktop.models"), Icon: Cpu },
+            { tab: "skills", label: t("desktop.skills"), Icon: Stack },
+            { tab: "plugins", label: t("desktop.plugins"), Icon: Plug },
+          ].map(({ tab, label, Icon }) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => onOpenSettings(tab)}
+              title={label}
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, minWidth: 0, padding: "6px 4px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text-muted)", cursor: "pointer", fontSize: 10.5 }}
+              onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; }}
+              onMouseLeave={(event) => { event.currentTarget.style.background = "var(--bg-panel)"; event.currentTarget.style.color = "var(--text-muted)"; }}
+            >
+              <Icon size={13} aria-hidden="true" />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
     </>
   );
@@ -1694,7 +1746,7 @@ function SessionTreeItem({
   onSelectSession,
   onRenamed,
   onSessionDeleted,
-  onOpenSettings,
+  selectedSessionStats,
   depth,
 }: {
   node: SessionTreeNode;
@@ -1704,7 +1756,7 @@ function SessionTreeItem({
   onSelectSession: (s: SessionInfo) => void;
   onRenamed?: () => void;
   onSessionDeleted?: (id: string) => void;
-  onOpenSettings?: (tab?: string) => void;
+  selectedSessionStats?: SessionStatsInfo | null;
   depth: number;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -1732,7 +1784,8 @@ function SessionTreeItem({
           onClick={() => onSelectSession(node.session)}
           onRenamed={onRenamed}
           onDeleted={(id) => onSessionDeleted?.(id)}
-          onOpenSettings={onOpenSettings}
+          selectedSessionId={selectedSessionId}
+          selectedSessionStats={selectedSessionStats}
           depth={depth}
           hasChildren={hasChildren}
           collapsed={collapsed}
@@ -1751,7 +1804,7 @@ function SessionTreeItem({
               onSelectSession={onSelectSession}
               onRenamed={onRenamed}
               onSessionDeleted={onSessionDeleted}
-              onOpenSettings={onOpenSettings}
+              selectedSessionStats={selectedSessionStats}
               depth={depth + 1}
             />
           ))}
@@ -1834,7 +1887,8 @@ function SessionItem({
   onClick,
   onRenamed,
   onDeleted,
-  onOpenSettings,
+  selectedSessionId,
+  selectedSessionStats,
   depth = 0,
   hasChildren = false,
   collapsed = false,
@@ -1847,7 +1901,8 @@ function SessionItem({
   onClick: () => void;
   onRenamed?: () => void;
   onDeleted?: (id: string) => void;
-  onOpenSettings?: (tab?: string) => void;
+  selectedSessionId?: string | null;
+  selectedSessionStats?: SessionStatsInfo | null;
   depth?: number;
   hasChildren?: boolean;
   collapsed?: boolean;
@@ -1882,6 +1937,8 @@ function SessionItem({
   }, [titleModels]);
 
   const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
+  const hasMessages = session.messageCount > 0
+    || (session.id === selectedSessionId && (selectedSessionStats?.userMessages ?? 0) > 0);
 
   // A two-pixel overlay gives the otherwise native one-pixel input caret a
   // clearer visual weight while the title is edited in place.
@@ -1915,7 +1972,7 @@ function SessionItem({
 
   const handleAutoName = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (autoNaming || session.messageCount === 0) return;
+    if (autoNaming || !hasMessages) return;
     setAutoNaming(true);
     setAutoNameError(null);
     try {
@@ -1932,7 +1989,7 @@ function SessionItem({
     } finally {
       setAutoNaming(false);
     }
-  }, [autoNaming, session.id, session.messageCount, onRenamed]);
+  }, [autoNaming, hasMessages, session.id, onRenamed]);
 
   /** Open the title-model picker (loads the model list from /api/models). */
   const openTitleModelPicker = useCallback(async () => {
@@ -2203,10 +2260,10 @@ function SessionItem({
                 <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
                 <button
                   onClick={handleAutoName}
-                  disabled={autoNaming || session.messageCount === 0}
+                  disabled={autoNaming || !hasMessages}
                   title={
                     autoNameError ??
-                    (session.messageCount === 0
+                    (!hasMessages
                       ? t("desktop.titleNeedsMessages")
                       : autoNaming
                         ? t("desktop.generatingTitle")
@@ -2219,13 +2276,13 @@ function SessionItem({
                     background: "none", border: "none",
                     borderRadius: 4,
                     color: autoNameError ? "#ef4444" : "var(--text-dim)",
-                    cursor: autoNaming || session.messageCount === 0 ? "default" : "pointer",
+                    cursor: autoNaming || !hasMessages ? "default" : "pointer",
                     flexShrink: 0,
-                    opacity: autoNaming ? 0.7 : session.messageCount === 0 ? 0.35 : 1,
+                    opacity: autoNaming ? 0.7 : !hasMessages ? 0.35 : 1,
                     transition: "color 0.12s",
                   }}
                   onMouseEnter={(e) => {
-                    if (autoNaming || session.messageCount === 0) return;
+                    if (autoNaming || !hasMessages) return;
                     e.currentTarget.style.color = autoNameError ? "#ef4444" : "var(--accent)";
                   }}
                   onMouseLeave={(e) => {

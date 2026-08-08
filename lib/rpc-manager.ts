@@ -1,5 +1,5 @@
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
@@ -18,6 +18,8 @@ import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS } from "./custom-ui-terminal";
+import { recordErrorLog } from "./error-log";
+import { configureOpenCodeZenRuntime, createOpenCodeZenFetch, getOpenCodeZenPrimaryKey, isOpenCodeZenProvider, OPENCODE_ZEN_PROVIDER_IDS, subscribeOpenCodeZenSwitch } from "./opencode-zen";
 
 // ============================================================================
 // Types
@@ -29,6 +31,18 @@ export interface AgentEvent {
 }
 
 type EventListener = (event: AgentEvent) => void;
+
+type RunningSnapshot = {
+  id: string;
+  running: boolean;
+  isStreaming: boolean;
+  isPromptRunning: boolean;
+  isCompacting: boolean;
+  isBashRunning: boolean;
+  phase: "waiting_model" | "running_command" | null;
+};
+
+type RunningListener = (snapshots: RunningSnapshot[]) => void;
 
 type PendingUiResponse = {
   resolve: (response: ExtensionUiResponse) => void;
@@ -162,6 +176,7 @@ export class AgentSessionWrapper {
   private extensionStatuses = new Map<string, string>();
   private extensionWidgets = new Map<string, ExtensionWidgetItem>();
   private promptRunning = false;
+  private promptPhase: "waiting_model" | "running_command" | null = null;
   private extensionsBound = false;
   private extensionBindingPromise: Promise<void> | null = null;
   private extensionBindingError: unknown = null;
@@ -180,6 +195,7 @@ export class AgentSessionWrapper {
   private pendingApprovals = new Map<string, PendingApproval>();
   private approvalSeq = 0;
   private approvalHookInstalled = false;
+  private opencodeSwitchUnsubscribe: (() => void) | null = null;
 
   constructor(public readonly inner: AgentSessionLike, public readonly cwd: string) {
     // Existing conversations keep their own approval mode/policy (per-session
@@ -206,10 +222,29 @@ export class AgentSessionWrapper {
     return this._alive && (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning);
   }
 
+  runtimeSnapshot(): RunningSnapshot {
+    const isStreaming = this.inner.isStreaming;
+    const isPromptRunning = this.promptRunning;
+    const isCompacting = this.inner.isCompacting;
+    const isBashRunning = this.inner.isBashRunning;
+    return {
+      id: this.sessionId,
+      running: this.isRunning(),
+      isStreaming,
+      isPromptRunning,
+      isCompacting,
+      isBashRunning,
+      phase: isBashRunning ? "running_command" : this.promptPhase ?? ((isStreaming || isPromptRunning || isCompacting) ? "waiting_model" : null),
+    };
+  }
+
   start(): void {
     this.installApprovalHook();
+    this.opencodeSwitchUnsubscribe = subscribeOpenCodeZenSwitch((event) => {
+      this.emit({ type: "opencode_zen_switch", ...event });
+    });
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
-      if (event.type === "agent_end") {
+      if (event.type === "agent_end" || event.type === "message_end" || event.type === "entry_appended" || event.type === "session_info_changed") {
         invalidateSessionListCache();
       }
       if (event.type === "agent_end" || event.type === "agent_settled" || event.type === "auto_compaction_end" || event.type === "compaction_end") {
@@ -219,8 +254,10 @@ export class AgentSessionWrapper {
         this.reconcileQueue(event.steering as string[] | undefined, event.followUp as string[] | undefined);
       }
       this.emit(event);
+      notifyRunningChange();
     });
     this.resetIdleTimer();
+    notifyRunningChange();
   }
 
   loadQueueRecovery(): void {
@@ -426,6 +463,7 @@ export class AgentSessionWrapper {
     this.queueMirror = [];
     this.persistQueue();
     this.promptRunning = true;
+    this.promptPhase = "waiting_model";
     void this.bootstrapQueuedRun(entries);
   }
 
@@ -437,6 +475,7 @@ export class AgentSessionWrapper {
         await this.inner.prompt(entry.text, entry.images?.length ? { images: entry.images } : undefined);
       } catch (error) {
         this.promptRunning = false;
+        this.promptPhase = null;
         this.resetIdleTimer();
         invalidateSessionListCache();
         this.emit({ type: "prompt_error", errorMessage: error instanceof Error ? error.message : String(error) });
@@ -445,6 +484,7 @@ export class AgentSessionWrapper {
       }
     }
     this.promptRunning = false;
+    this.promptPhase = null;
     this.resetIdleTimer();
     this.emit({ type: "prompt_done" });
   }
@@ -606,16 +646,21 @@ export class AgentSessionWrapper {
           this.hintQueueImages(streamingBehavior === "followUp" ? "followUp" : "steer", promptImages);
         }
         this.promptRunning = true;
+        this.promptPhase = String(command.message ?? "").trimStart().startsWith("/") ? "running_command" : "waiting_model";
+        notifyRunningChange();
         this.inner.prompt(command.message as string, {
           ...(promptImages?.length ? { images: promptImages } : {}),
           ...(streamingBehavior ? { streamingBehavior } : {}),
           source: "rpc",
         }).then(() => {
           this.promptRunning = false;
+          this.promptPhase = null;
           this.resetIdleTimer();
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
+          notifyRunningChange();
         }).catch((error) => {
           this.promptRunning = false;
+          this.promptPhase = null;
           this.resetIdleTimer();
           invalidateSessionListCache();
           this.emit({
@@ -623,6 +668,7 @@ export class AgentSessionWrapper {
             errorMessage: error instanceof Error ? error.message : String(error),
           });
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
+          notifyRunningChange();
         });
         return null;
       }
@@ -641,6 +687,7 @@ export class AgentSessionWrapper {
           isPromptRunning: this.promptRunning,
           isBashRunning: this.inner.isBashRunning,
           isCompacting: this.inner.isCompacting,
+          phase: this.runtimeSnapshot().phase,
           model: model ? { id: model.id, provider: model.provider } : undefined,
           messageCount: 0,
           pendingMessageCount: this.inner.pendingMessageCount,
@@ -877,14 +924,26 @@ export class AgentSessionWrapper {
       case "steer": {
         const steerImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         this.hintQueueImages("steer", steerImages);
-        await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
+        this.promptPhase = "waiting_model";
+        notifyRunningChange();
+        try {
+          await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
+        } finally {
+          notifyRunningChange();
+        }
         return null;
       }
 
       case "follow_up": {
         const followImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         this.hintQueueImages("followUp", followImages);
-        await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
+        this.promptPhase = "waiting_model";
+        notifyRunningChange();
+        try {
+          await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
+        } finally {
+          notifyRunningChange();
+        }
         return null;
       }
 
@@ -1009,11 +1068,13 @@ export class AgentSessionWrapper {
         } finally {
           this.resetIdleTimer();
           invalidateSessionListCache();
+          notifyRunningChange();
         }
       }
 
       case "abort_bash": {
         this.inner.abortBash();
+        notifyRunningChange();
         return null;
       }
 
@@ -1028,6 +1089,8 @@ export class AgentSessionWrapper {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.inner.isBashRunning) this.inner.abortBash();
     this.unsubscribe?.();
+    this.opencodeSwitchUnsubscribe?.();
+    this.opencodeSwitchUnsubscribe = null;
     for (const pending of this.pendingUiResponses.values()) pending.cancel();
     for (const id of Array.from(this.activeCustomUis.keys())) this.closeCustomUi(id, undefined);
     this.pendingUiResponses.clear();
@@ -1037,6 +1100,7 @@ export class AgentSessionWrapper {
       this.inner.dispose();
     } finally {
       this.onDestroyCallback?.();
+      notifyRunningChange();
     }
   }
 
@@ -1408,7 +1472,7 @@ declare global {
   var __piSessions: Map<string, AgentSessionWrapper> | undefined;
   var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> | undefined;
   var __piStartingSessionCwds: Map<string, number> | undefined;
-  var __piRunningListeners: Set<(ids: string[]) => void> | undefined;
+  var __piRunningListeners: Set<RunningListener> | undefined;
 }
 
 function getRegistry(): Map<string, AgentSessionWrapper> {
@@ -1461,6 +1525,32 @@ export function getRpcSession(sessionId: string): AgentSessionWrapper | undefine
   return getRegistry().get(sessionId);
 }
 
+/** Apply the current OpenCode Zen pool key to already-running sessions without
+ * touching the shared auth.json credential. The request fetch wrapper still
+ * rotates keys per call; this only satisfies the SDK's configured-auth guard.
+ *
+ * A single session must never fail a settings save: the config file is already
+ * persisted by the caller, so sync problems only degrade that session's auth
+ * snapshot and are recorded (redacted) for the error log instead. */
+export async function syncOpenCodeZenRuntime(): Promise<void> {
+  const apiKey = getOpenCodeZenPrimaryKey();
+  await Promise.allSettled(Array.from(getRegistry().values()).map(async (session) => {
+    if (!session.isAlive()) return;
+    try {
+      if (apiKey) await configureOpenCodeZenRuntime(session.inner.modelRuntime);
+      else await Promise.all(OPENCODE_ZEN_PROVIDER_IDS.map((provider) => session.inner.modelRuntime.removeRuntimeApiKey(provider)));
+    } catch (error) {
+      recordErrorLog({
+        level: "warning",
+        source: "opencode-zen-sync",
+        provider: "opencode",
+        sessionId: session.sessionId,
+        message: `OpenCode Zen runtime 同步失败：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }));
+}
+
 export function hasBusyRpcSessionForCwd(cwd: string): boolean {
   const targetCwd = normalizeRpcCwd(cwd);
   if (getStartingSessionCwds().has(targetCwd)) return true;
@@ -1478,12 +1568,44 @@ export async function destroyRpcSessionsForCwd(cwd: string): Promise<number> {
   return sessions.length;
 }
 
-export function getRunningRpcSessionIds(): string[] {
-  const ids = new Set<string>();
+export function getRunningRpcSessionSnapshots(): ReturnType<AgentSessionWrapper["runtimeSnapshot"]>[] {
+  const snapshots: ReturnType<AgentSessionWrapper["runtimeSnapshot"]>[] = [];
   for (const [sessionId, session] of getRegistry()) {
-    if (session.isRunning()) ids.add(session.sessionId || sessionId);
+    if (!session.isAlive()) continue;
+    const snapshot = session.runtimeSnapshot();
+    if (snapshot.running) snapshots.push({ ...snapshot, id: snapshot.id || sessionId });
   }
-  return [...ids];
+  return snapshots;
+}
+
+export function subscribeRunningSessions(listener: RunningListener): () => void {
+  globalThis.__piRunningListeners ??= new Set();
+  globalThis.__piRunningListeners.add(listener);
+  return () => globalThis.__piRunningListeners?.delete(listener);
+}
+
+let lastRunningSnapshot = "";
+
+function notifyRunningChange(): void {
+  const listeners = globalThis.__piRunningListeners;
+  if (!listeners || listeners.size === 0) {
+    // A future subscriber receives its own initial snapshot (the SSE route
+    // sends one on connect). Reset the dedupe key so the first transition
+    // after a reconnect is never swallowed as "unchanged".
+    lastRunningSnapshot = "";
+    return;
+  }
+  const snapshots = getRunningRpcSessionSnapshots();
+  const serialized = JSON.stringify(snapshots);
+  if (serialized === lastRunningSnapshot) return;
+  lastRunningSnapshot = serialized;
+  for (const listener of listeners) {
+    try { listener(snapshots); } catch { /* disconnected SSE clients are ignored */ }
+  }
+}
+
+export function getRunningRpcSessionIds(): string[] {
+  return getRunningRpcSessionSnapshots().map((snapshot) => snapshot.id);
 }
 
 /**
@@ -1546,6 +1668,7 @@ export async function startRpcSession(
       agentDir,
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
+    if (getOpenCodeZenPrimaryKey()) await configureOpenCodeZenRuntime(services.modelRuntime);
     const scope = await resolveVisibleModels(
       services.modelRuntime,
       services.settingsManager.getEnabledModels(),
@@ -1570,6 +1693,19 @@ export async function startRpcSession(
       ...(initial.scopedModels.length > 0 ? { scopedModels: initial.scopedModels } : {}),
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
+
+    // AgentSession's public factory does not expose a per-provider fetch hook,
+    // but its Agent stream function is intentionally mutable. Wrap only the
+    // OpenCode provider so other providers keep the normal transport.
+    const agent = (inner as unknown as { agent: { streamFunction: StreamFn } }).agent;
+    const baseStream = agent.streamFunction;
+    agent.streamFunction = (model, context, options) => baseStream(
+      model,
+      context,
+      isOpenCodeZenProvider(model.provider)
+        ? { ...options, fetch: createOpenCodeZenFetch(options?.fetch as typeof globalThis.fetch | undefined, options?.sessionId) }
+        : options,
+    );
 
     const persistedPreferences = await persistExplicitStartupPreferences(
       services.settingsManager,

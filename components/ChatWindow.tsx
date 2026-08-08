@@ -17,7 +17,7 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { QueueRecoveryDialog } from "./QueueRecoveryDialog";
 import { SessionInfoBar } from "./SessionInfoBar";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
-import { useAgentSession, AGENT_RUNNING_SPACER_PX, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
+import { useAgentSession, CHAT_BOTTOM_SPACER_PX, BOTTOM_KEEP_OUT_PX, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -163,7 +163,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     isCompacting, compactError, compactResult, displayModel: displayModelValue, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages, pendingRecovery, recoveryIsImport,
     notices, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
-    isAutoModelSelection,
     agentPhase,
     isNew,
     branchTree, activeLeafId: branchActiveLeafId, handleLeafChange,
@@ -271,11 +270,19 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const scrollToBottomAfterProcessExpansion = useCallback(() => {
     window.requestAnimationFrame(() => {
       const container = scrollContainerRef.current;
-      if (!container) return;
-      container.scrollTop = container.scrollHeight;
+      const end = messagesEndRef.current;
+      if (!container || !end) return;
+      // Same keep-out math as useAgentSession.scrollToBottom: back off the
+      // persistent bottom spacer (sentinel sits BELOW it) and land the LAST
+      // MESSAGE BOTTOM_KEEP_OUT_PX above the container bottom instead of
+      // scrolling to the absolute bottom (which would hug the ChatInput).
+      const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+      const spacerH = CHAT_BOTTOM_SPACER_PX;
+      const target = Math.max(0, endInContainer - spacerH - container.clientHeight + BOTTOM_KEEP_OUT_PX);
+      container.scrollTo({ top: target, behavior: "auto" });
       updateChatFades();
     });
-  }, [scrollContainerRef, updateChatFades]);
+  }, [messagesEndRef, scrollContainerRef, updateChatFades]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -411,7 +418,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
       isStreaming={agentRunning}
       model={displayModelValue}
-      isAutoModelSelection={isAutoModelSelection}
       modelNames={modelNames}
       modelList={modelList}
       modelScopeWarnings={modelScopeWarnings}
@@ -985,17 +991,18 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               </div>
             )}
 
-            {agentRunning && (
-              /* Room below the last message while the agent runs so it is not
-                 hidden behind ChatInput. A full-viewport spacer makes
-                 scrollToBottom land on blank space (the end sentinel sits
-                 BELOW the spacer) — keep it small and let scrollToBottom back
-                 it off so the LAST MESSAGE, not the spacer, sits at the
-                 viewport bottom. (Same approach as upstream PR #372; height
-                 shared with useAgentSession's backoff via
-                 AGENT_RUNNING_SPACER_PX.) */
-              <div style={{ height: AGENT_RUNNING_SPACER_PX }} />
-            )}
+            {/* Keep-out room below the last message so scrollToBottom has
+                 physical space to land the LAST MESSAGE above ChatInput.
+                 Always rendered (not only while the agent runs): without
+                 trailing space the browser clamps the scroll at the content
+                 end and the last line hugs — or is covered by — the input.
+                 A full-viewport spacer makes scrollToBottom land on blank
+                 space (the end sentinel sits BELOW the spacer) — keep it
+                 small and let scrollToBottom back it off so the LAST MESSAGE,
+                 not the spacer, sits at the viewport bottom. (Same approach
+                 as upstream PR #372; height shared with useAgentSession's
+                 backoff via CHAT_BOTTOM_SPACER_PX.) */}
+              <div style={{ height: CHAT_BOTTOM_SPACER_PX }} />
 
               <div ref={messagesEndRef} />
               </div>
@@ -1146,11 +1153,11 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
               display: "flex",
               alignItems: "center",
               gap: 10,
-              minHeight: 60,
-              height: 60,
-              maxHeight: 60,
+              minHeight: 44,
+              maxHeight: 180,
               marginBottom: index === notices.length - 1 ? 0 : 6,
-              overflow: "hidden",
+              overflowY: "auto",
+              overflowX: "hidden",
               borderRadius: 14,
               border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
               background: "var(--bg)",
@@ -1160,7 +1167,7 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
               boxShadow: floating
                 ? "0 1px 2px rgba(15,23,42,0.05), 0 10px 28px -14px rgba(15,23,42,0.24)"
                 : "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
-              fontSize: 18,
+              fontSize: 13,
               lineHeight: 1.45,
               transformOrigin: "top center",
               animation: notice.exiting
@@ -1178,7 +1185,7 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
                 flexShrink: 0,
               }}
             />
-            <span style={{ padding: "14px 0", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span style={{ padding: "10px 0", minWidth: 0, maxWidth: "100%", overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
               {notice.message}
             </span>
           </div>
