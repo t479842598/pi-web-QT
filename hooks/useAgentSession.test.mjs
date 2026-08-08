@@ -146,3 +146,17 @@ test("mode instruction block injects once per mode composition", () => {
   // Mode composition changes reset the signature so a fresh block can apply.
   assert.match(source, /injectedModeSignatureRef\.current = \{ sessionKey: "", signature: "" \}/);
 });
+
+test("non-empty queue_update schedules a get_state reconcile (self-heal missed drain)", () => {
+  const queueCase = source.slice(
+    source.indexOf('case "queue_update":'),
+    source.indexOf('case "state_sync":'),
+  );
+  assert.match(queueCase, /scheduleQueueReconcile\(\)/);
+  assert.match(queueCase, /clearQueueReconcile\(\)/);
+  assert.match(source, /const scheduleQueueReconcile = useCallback/);
+  assert.match(source, /queueReconcileTimerRef\.current = setTimeout/);
+  // The reconcile reads back get_state and overwrites queuedMessages.
+  assert.match(source, /data\.state\?\.queuedMessages !== undefined/);
+  assert.match(source, /setQueuedMessages\(normalizeQueuedMessages\(data\.state\.queuedMessages\)\)/);
+});

@@ -652,6 +652,36 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [pendingRecovery, setPendingRecovery] = useState<PendingRecoveryItem[]>([]);
   const [recoveryIsImport, setRecoveryIsImport] = useState(false);
 
+  // Queue reconciliation: the empty queue_update can be lost during an SSE
+  // drop/reconnect window (the bus does not replay history), which leaves
+  // stale "queued" chips on a device that never saw the drain. After a non-empty
+  // queue_update, quietly re-check get_state so a missed drain self-heals.
+  const queueReconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleQueueReconcile = useCallback(() => {
+    if (queueReconcileTimerRef.current) clearTimeout(queueReconcileTimerRef.current);
+    queueReconcileTimerRef.current = setTimeout(async () => {
+      queueReconcileTimerRef.current = null;
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+      try {
+        const response = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
+        if (!response.ok) return;
+        const data = await response.json() as { state?: AgentStateResponse };
+        if (data.state?.queuedMessages !== undefined) {
+          setQueuedMessages(normalizeQueuedMessages(data.state.queuedMessages));
+        }
+      } catch {
+        // Best-effort; the next event or interval reconciles again.
+      }
+    }, 8000);
+  }, []);
+  const clearQueueReconcile = useCallback(() => {
+    if (queueReconcileTimerRef.current) {
+      clearTimeout(queueReconcileTimerRef.current);
+      queueReconcileTimerRef.current = null;
+    }
+  }, []);
+
   const eventSourceRef = useRef<EventSource | null>(null);
   const eventSourceSessionIdRef = useRef<string | null>(null);
   const eventConnectionAttemptRef = useRef<EventStreamConnectionAttempt | null>(null);
@@ -1585,6 +1615,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           steering: [...((event.steering as string[] | undefined) ?? [])],
           followUp: [...((event.followUp as string[] | undefined) ?? [])],
         });
+        // A non-empty queue means messages are parked; the drain event may be
+        // lost on this device (SSE drop), so schedule a get_state self-heal.
+        if (((event.steering as string[] | undefined) ?? []).length > 0
+          || ((event.followUp as string[] | undefined) ?? []).length > 0) {
+          scheduleQueueReconcile();
+        } else {
+          clearQueueReconcile();
+        }
         break;
       case "state_sync": {
         const state = event.state as AgentStateResponse | undefined;
@@ -1649,6 +1687,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     settleUiStage,
     queueStreamUpdate,
     resetStreamUpdates,
+    scheduleQueueReconcile,
+    clearQueueReconcile,
   ]);
   handleAgentEventRef.current = handleAgentEvent;
 
@@ -2669,6 +2709,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // cleanup once during development before mounting the real effect.
       // Resetting still prevents an unmounted session from committing stale UI.
       resetStreamUpdates();
+      clearQueueReconcile();
       cancelEventStreamGrace();
       closeEvents();
     };
