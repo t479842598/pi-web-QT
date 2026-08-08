@@ -447,6 +447,47 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     return () => source.close();
   }, []);
 
+  // Cross-client session list sync: any whitelisted session event (message
+  // end, new entry, session info change) invalidates the list. Throttled so a
+  // burst of streaming updates triggers at most one reload per 2s, and only
+  // the ones that can change list shape/state drive a refetch.
+  useEffect(() => {
+    const source = new EventSource("/api/events");
+    const LIST_REFRESH_EVENT_TYPES = new Set([
+      "message_end",
+      "agent_end",
+      "entry_appended",
+      "session_info_changed",
+      "agent_settled",
+      "auto_compaction_end",
+      "compaction_end",
+    ]);
+    let throttleTimer: ReturnType<typeof setTimeout> | null = null;
+    let scheduled = false;
+    const scheduleReload = () => {
+      if (scheduled) return;
+      scheduled = true;
+      throttleTimer = setTimeout(() => {
+        scheduled = false;
+        void loadSessions(false);
+      }, 2000);
+    };
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { type?: string } | null;
+        if (data && data.type && LIST_REFRESH_EVENT_TYPES.has(data.type)) {
+          scheduleReload();
+        }
+      } catch {
+        // EventSource reconnects; a malformed frame must not alter state.
+      }
+    };
+    return () => {
+      source.close();
+      if (throttleTimer) clearTimeout(throttleTimer);
+    };
+  }, [loadSessions]);
+
   useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;
     const completedInBackground = [...previous].filter((id) => !runningSessionIds.has(id) && id !== selectedSessionId);

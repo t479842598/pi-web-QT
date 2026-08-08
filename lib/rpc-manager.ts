@@ -44,6 +44,35 @@ type RunningSnapshot = {
 
 type RunningListener = (snapshots: RunningSnapshot[]) => void;
 
+/** A session event broadcast to every connected client (cross-client sync). */
+export type SessionBusEvent = {
+  type: string;
+  sessionId: string;
+  payload?: unknown;
+};
+
+type SessionBusListener = (event: SessionBusEvent) => void;
+
+/**
+ * Events worth broadcasting to other clients. Streaming `message_update`
+ * carries the full accumulated message; the bus coalesces it separately.
+ */
+const SESSION_BUS_EVENT_TYPES = new Set([
+  "message_update",
+  "message_end",
+  "agent_end",
+  "entry_appended",
+  "session_info_changed",
+  "queue_update",
+  "prompt_done",
+  "agent_settled",
+  "auto_compaction_end",
+  "compaction_end",
+]);
+
+/** Coalescing window for streaming message_update on the bus (mirrors SSE). */
+const SESSION_BUS_COALESCE_MS = 80;
+
 type PendingUiResponse = {
   resolve: (response: ExtensionUiResponse) => void;
   cancel: () => void;
@@ -252,6 +281,9 @@ export class AgentSessionWrapper {
       }
       if (event.type === "queue_update") {
         this.reconcileQueue(event.steering as string[] | undefined, event.followUp as string[] | undefined);
+      }
+      if (SESSION_BUS_EVENT_TYPES.has(event.type)) {
+        broadcastSessionBusEvent(event.type, this.sessionId, event);
       }
       this.emit(event);
       notifyRunningChange();
@@ -1473,6 +1505,7 @@ declare global {
   var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> | undefined;
   var __piStartingSessionCwds: Map<string, number> | undefined;
   var __piRunningListeners: Set<RunningListener> | undefined;
+  var __piSessionBusListeners: Set<SessionBusListener> | undefined;
 }
 
 function getRegistry(): Map<string, AgentSessionWrapper> {
@@ -1606,6 +1639,63 @@ function notifyRunningChange(): void {
 
 export function getRunningRpcSessionIds(): string[] {
   return getRunningRpcSessionSnapshots().map((snapshot) => snapshot.id);
+}
+
+// ─── Cross-client session event bus ────────────────────────────────────────
+
+/** Subscribe to session events broadcast across all clients. */
+export function subscribeSessionBus(listener: SessionBusListener): () => void {
+  globalThis.__piSessionBusListeners ??= new Set();
+  globalThis.__piSessionBusListeners.add(listener);
+  return () => globalThis.__piSessionBusListeners?.delete(listener);
+}
+
+/** Number of live bus subscribers (for tests / diagnostics). */
+export function getSessionBusListenersCount(): number {
+  return globalThis.__piSessionBusListeners?.size ?? 0;
+}
+
+// Per-session message_update coalescing: only the latest accumulated update
+// is delivered after the window, so a burst of stream chunks produces one bus
+// event instead of O(n) frames (each carrying the whole message so far).
+const busCoalesceState = new Map<string, { timer: NodeJS.Timeout; event: SessionBusEvent }>();
+
+function publishSessionBus(event: SessionBusEvent): void {
+  const listeners = globalThis.__piSessionBusListeners;
+  if (!listeners || listeners.size === 0) return;
+  for (const listener of listeners) {
+    try { listener(event); } catch { /* a failing listener must not break others */ }
+  }
+}
+
+/**
+ * Deliver an event to the bus. `message_update` events are coalesced per
+ * sessionId; every other whitelisted event flushes immediately.
+ */
+function broadcastSessionBusEvent(type: string, sessionId: string, payload: unknown): void {
+  const listeners = globalThis.__piSessionBusListeners;
+  if (!listeners || listeners.size === 0) return;
+
+  if (type !== "message_update") {
+    publishSessionBus({ type, sessionId, payload });
+    return;
+  }
+
+  const key = sessionId;
+  const existing = busCoalesceState.get(key);
+  const event: SessionBusEvent = { type, sessionId, payload };
+  if (existing) {
+    clearTimeout(existing.timer);
+    existing.event = event;
+  } else {
+    busCoalesceState.set(key, { event, timer: setTimeout(() => {
+      const pending = busCoalesceState.get(key);
+      if (pending) {
+        busCoalesceState.delete(key);
+        publishSessionBus(pending.event);
+      }
+    }, SESSION_BUS_COALESCE_MS) });
+  }
 }
 
 /**

@@ -235,7 +235,11 @@ export const BOTTOM_KEEP_OUT_PX = 88;
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
 const PROMPT_SETTLE_MAX_MS = 20_000;
-const EVENT_STREAM_IDLE_GRACE_MS = 30_000;
+const EVENT_STREAM_IDLE_GRACE_MS = 120_000;
+// Cross-client sync: while the direct SSE is open it is the primary channel
+// for this session's events; once it closes after the idle grace window the
+// global /api/events bus takes over, so OTHER clients' changes still reach an
+// idle tab in seconds without a manual refresh.
 const AGENT_STATE_RECONCILE_MS = 15_000;
 // Opening an inactive session may load its resources and extensions before the
 // SSE route can emit `connected`. Five seconds is not enough for a cold
@@ -1632,6 +1636,28 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     resetStreamUpdates,
   ]);
   handleAgentEventRef.current = handleAgentEvent;
+
+  // Cross-client message sync. The global /api/events stream carries session
+  // events from OTHER clients (and from this client while its direct SSE is
+  // closed). Filter by the current session and skip while the direct SSE is
+  // OPEN — it already delivers the same wrapper events, and re-feeding them
+  // would double-render. When the direct SSE is closed (idle grace window
+  // elapsed), the bus is the only live channel and keeps the view in sync.
+  useEffect(() => {
+    const source = new EventSource("/api/events");
+    source.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data) as { type?: string; sessionId?: string; payload?: unknown } | null;
+        if (!data || !data.type || !data.payload) return;
+        if (data.sessionId !== sessionIdRef.current) return;
+        if (eventSourceRef.current?.readyState === EventSource.OPEN) return;
+        handleAgentEventRef.current?.(data.payload as AgentEvent);
+      } catch {
+        // Ignore malformed frames; EventSource reconnects by itself.
+      }
+    };
+    return () => source.close();
+  }, []);
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     const trimmedMessage = message.trim();

@@ -26,7 +26,7 @@ test("keeps the session event stream open through the idle grace window", () => 
     source.indexOf('case "prompt_done"'),
   );
 
-  assert.match(source, /const EVENT_STREAM_IDLE_GRACE_MS = 30_000/);
+  assert.match(source, /const EVENT_STREAM_IDLE_GRACE_MS = 120_000/);
   assert.match(graceSource, /setTimeout\(\(\) => void checkServerIdle\(\), EVENT_STREAM_IDLE_GRACE_MS\)/);
   assert.match(graceSource, /fetch\(`\/api\/agent\/\$\{encodeURIComponent\(sid\)\}`\)/);
   assert.match(graceSource, /closeEvents\(\)/);
@@ -117,4 +117,15 @@ test("guards model list writes by request generation and context", () => {
   assert.match(loadSource, /generation !== modelLoadGenerationRef\.current/);
   assert.match(loadSource, /requestContextKey !== modelContextKeyRef\.current/);
   assert.match(loadSource, /signal: controller\.signal/);
+});
+
+test("consumes global /api/events bus for the current session when direct SSE is closed", () => {
+  const busSource = source.slice(
+    source.indexOf("// Cross-client message sync."),
+    source.indexOf("const handleSend = useCallback"),
+  );
+  assert.match(busSource, /new EventSource\("\/api\/events"\)/);
+  assert.match(busSource, /data\.sessionId !== sessionIdRef\.current/);
+  assert.match(busSource, /eventSourceRef\.current\?\.readyState === EventSource\.OPEN/);
+  assert.match(busSource, /handleAgentEventRef\.current\?\.\(data\.payload as AgentEvent\)/);
 });
