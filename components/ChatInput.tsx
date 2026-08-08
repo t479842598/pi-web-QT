@@ -4,6 +4,7 @@ import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, f
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
+import type { SnippetItem } from "@/lib/snippet-store";
 import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
 import {
   isBase64ImageWithinLimits,
@@ -11,8 +12,8 @@ import {
 } from "@/lib/image-attachments";
 import { droppedFilePaths, droppedFileReference } from "@/lib/dropped-files";
 import {
-  buildEntriesFromFiles, buildAtInsertText, extractAtQuery, filterFileEntries,
-  type AtQueryMatch, type FileIndexEntry,
+  buildEntriesFromFiles, buildAtInsertText, extractAtQuery, filterFileEntries, extractSnippetQuery,
+  type AtQueryMatch, type FileIndexEntry, type SnippetQueryMatch,
 } from "@/lib/file-fuzzy";
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { FolderIcon as PhosphorFolderIcon } from "@phosphor-icons/react/Folder";
@@ -837,6 +838,64 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     setAtQuery(extractAtQuery(text.slice(0, pos)));
   }, [cwd]);
 
+  // ── `#` snippet autocomplete ─────────────────────────────────────────────
+  const [snippetQuery, setSnippetQuery] = useState<SnippetQueryMatch | null>(null);
+  const snippetQueryRef = useRef(snippetQuery);
+  snippetQueryRef.current = snippetQuery;
+  const [snippets, setSnippets] = useState<SnippetItem[]>([]);
+  const snippetsLoadedRef = useRef(false);
+  const loadSnippets = useCallback(async () => {
+    try {
+      const response = await fetch("/api/snippets");
+      if (!response.ok) return;
+      const data = await response.json() as { snippets?: SnippetItem[] };
+      setSnippets(data.snippets ?? []);
+      snippetsLoadedRef.current = true;
+    } catch {
+      // Snippets unavailable — `#` simply does not autocomplete.
+    }
+  }, []);
+  useEffect(() => {
+    void loadSnippets();
+    const onChanged = () => void loadSnippets();
+    window.addEventListener("pi:snippets-changed", onChanged);
+    return () => window.removeEventListener("pi:snippets-changed", onChanged);
+  }, [loadSnippets]);
+
+  const snippetQueryText = snippetQuery?.query ?? null;
+  const snippetMatches = React.useMemo(() => {
+    if (snippetQueryText === null || snippetsLoadedRef.current === false) return [];
+    const q = snippetQueryText.toLowerCase();
+    return snippets.filter((s) => s.name.toLowerCase().includes(q));
+  }, [snippetQueryText, snippets]);
+  const [snippetActiveIndex, setSnippetActiveIndex] = useState(0);
+  useEffect(() => { setSnippetActiveIndex(0); }, [snippetQueryText]);
+
+  const updateSnippetQuery = useCallback((text: string, cursor: number | null) => {
+    const pos = cursor ?? text.length;
+    const match = extractSnippetQuery(text.slice(0, pos));
+    setSnippetQuery(match);
+    if (match) setSnippetActiveIndex(0);
+  }, []);
+
+  const applySnippet = useCallback((snippet: SnippetItem) => {
+    const q = snippetQueryRef.current;
+    if (!q) return;
+    const before = value.slice(0, q.start);
+    const after = value.slice(q.end);
+    setValue(before + snippet.content + after);
+    setSnippetQuery(null);
+    const target = before.length + snippet.content.length;
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) { ta.focus(); ta.setSelectionRange(target, target); }
+    });
+  }, [value]);
+  const applySnippetAt = useCallback((index: number) => {
+    const snippet = snippetMatches[index];
+    if (snippet) applySnippet(snippet);
+  }, [snippetMatches, applySnippet]);
+
   const atQueryText = atQuery?.query ?? null;
   const atLocalMatches: FileIndexEntry[] = React.useMemo(() => (
     atQueryText !== null && fileIndex && fileIndex.cwd === cwd
@@ -1230,6 +1289,30 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
 
+      // `#` snippet menu — same navigation as @.
+      if (snippetQuery !== null && snippetMatches.length > 0 && !isComposing) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSnippetActiveIndex((i) => Math.min(Math.max(0, snippetMatches.length - 1), i + 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSnippetActiveIndex((i) => Math.max(0, i - 1));
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSnippetQuery(null);
+          return;
+        }
+        if ((e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) && snippetMatches[snippetActiveIndex]) {
+          e.preventDefault();
+          applySnippetAt(snippetActiveIndex);
+          return;
+        }
+      }
+
       if (e.key === "ArrowUp" && !isComposing && !isStreaming && (inputHistory?.length ?? 0) > 0 && value.trim().length === 0) {
         e.preventDefault();
         setSlashMenuOpen(false);
@@ -1261,7 +1344,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
     },
-    [isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, inputShortcut, cwd, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+    [isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, snippetQuery, snippetMatches, snippetActiveIndex, applySnippetAt, inputShortcut, cwd, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
   const handleInput = useCallback(() => {
@@ -2004,6 +2087,61 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             );
           })()}
+          {snippetQuery !== null && snippetMatches.length > 0 && (
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: "calc(100% + 8px)",
+                zIndex: 120,
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                boxShadow: "0 -6px 20px rgba(0,0,0,0.12)",
+                overflow: "hidden",
+                maxHeight: "min(30vh, 240px)",
+              }}
+            >
+              <div
+                style={{
+                  padding: "4px 8px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600 }}>
+                  {snippetMatches.length} {t("desktop.snippetMatches")}
+                </span>
+              </div>
+              <div style={{ maxHeight: "min(26vh, 210px)", overflowY: "auto" }}>
+                {snippetMatches.map((snippet, index) => (
+                  <button
+                    key={snippet.id}
+                    type="button"
+                    onMouseEnter={() => setSnippetActiveIndex(index)}
+                    onClick={() => applySnippetAt(index)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, width: "100%",
+                      padding: "6px 10px",
+                      background: index === snippetActiveIndex ? "var(--bg-selected)" : "none",
+                      border: "none",
+                      color: index === snippetActiveIndex ? "var(--accent)" : "var(--text)",
+                      cursor: "pointer", fontSize: 12, textAlign: "left",
+                    }}
+                  >
+                    <span style={{ color: "var(--accent)", fontFamily: "var(--font-mono)", fontSize: 11 }}>#</span>
+                    <span style={{ fontWeight: 600, flexShrink: 0 }}>{snippet.name}</span>
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-muted)", fontSize: 11 }}>
+                      {snippet.content.split("\n")[0]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div
             className={`chat-input-shell ${isStreaming && (onSteer || onFollowUp) ? "is-streaming" : ""} ${toolApprovalMode === "yolo" ? "is-yolo" : ""}`}
             onClick={(e) => {
@@ -2197,6 +2335,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             onChange={(e) => {
               setValue(e.target.value);
               updateAtQuery(e.target.value, e.target.selectionStart);
+              updateSnippetQuery(e.target.value, e.target.selectionStart);
             }}
             onSelect={(e) => {
               const el = e.currentTarget;

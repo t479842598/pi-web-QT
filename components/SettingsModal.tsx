@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { ChatCenteredText, ChartBar, Cpu, Database, DownloadSimple, Lightning, List, Monitor, Network, Plug, Stack, X } from "@phosphor-icons/react";
+import { ChatCenteredText, ChartBar, Cpu, Database, DownloadSimple, Lightning, List, ListBullets, Monitor, Network, Plug, Stack, X } from "@phosphor-icons/react";
 import { BackupConfig } from "./BackupConfig";
 import { ChatConfig } from "./ChatConfig";
 import { DisplayConfig } from "./DisplayConfig";
@@ -12,12 +12,13 @@ import { PluginsConfig } from "./PluginsConfig";
 import { ProxyConfig } from "./ProxyConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { LogsConfig } from "./LogsConfig";
+import { SnippetsConfig } from "./SnippetsConfig";
 import { OpenCodeZenConfig } from "./OpenCodeZenConfig";
 import { UsageConfig } from "./UsageConfig";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 
-export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins" | "opencode-zen" | "proxy" | "features" | "logs" | "usage" | "backup" | "import";
+export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins" | "opencode-zen" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import";
 
 interface SettingsModalProps {
   initialTab?: SettingsTab;
@@ -39,6 +40,7 @@ const tabs: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
   { id: "proxy", labelKey: "desktop.proxy", Icon: Network },
   { id: "features", labelKey: "desktop.features", Icon: Lightning },
   { id: "logs", labelKey: "desktop.logs", Icon: List },
+  { id: "snippets", labelKey: "desktop.snippets", Icon: ListBullets },
   { id: "usage", labelKey: "desktop.usage", Icon: ChartBar },
   { id: "backup", labelKey: "desktop.backup", Icon: Database },
   // Import stays desktop-only for now (Windows/macOS path handling).
@@ -255,6 +257,9 @@ export function SettingsModal({
           </div>
           <div style={{ display: activeTab === "logs" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <LogsConfig />
+          </div>
+          <div style={{ display: activeTab === "snippets" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
+            <SnippetsConfig />
           </div>
           <div style={{ display: activeTab === "usage" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <UsageConfig sessionId={sessionId} cwd={cwd} />

@@ -43,6 +43,21 @@ export function extractAtQuery(textBeforeCursor: string): AtQueryMatch | null {
   return null;
 }
 
+export interface SnippetQueryMatch {
+  start: number;
+  end: number;
+  query: string;
+}
+
+/** Detect a `#name` snippet token before the caret (line start or after space).
+ *  `##` (markdown heading) and bare `#` do not trigger. */
+export function extractSnippetQuery(textBeforeCursor: string): SnippetQueryMatch | null {
+  const match = /(?:^|[\s(])(#[\w-]+)$/.exec(textBeforeCursor);
+  if (!match) return null;
+  const start = textBeforeCursor.length - match[1].length;
+  return { start, end: textBeforeCursor.length, query: match[1].slice(1) };
+}
+
 function pathDepth(p: string): number {
   let depth = 0;
   for (let i = 0; i < p.length; i++) {
