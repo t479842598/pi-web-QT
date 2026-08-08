@@ -19,9 +19,8 @@ import { FolderIcon as PhosphorFolderIcon } from "@phosphor-icons/react/Folder";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import { listTasks } from "@/lib/task-api";
-import type { GitStatusResponse } from "@/lib/git-types";
 import { StackIcon } from "@phosphor-icons/react/Stack";
-import { GitBranchIcon } from "@phosphor-icons/react/GitBranch";
+import { SparkleIcon } from "@phosphor-icons/react/Sparkle";
 import { ArrowBendUpLeftIcon } from "@phosphor-icons/react/ArrowBendUpLeft";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/ArrowClockwise";
 import { ArrowElbowUpLeftIcon } from "@phosphor-icons/react/ArrowElbowUpLeft";
@@ -126,6 +125,14 @@ const TOOL_PRESETS = ["off", "default", "full"] as const;
 const TOOL_PRESET_MAP: Record<"off" | "default" | "full", "none" | "default" | "full"> = { off: "none", default: "default", full: "full" };
 const COMPOSITION_END_ENTER_GRACE_MS = 100;
 const MODEL_OPTION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+const DRAFT_PRESETS: Array<{ labelKey: string }> = [
+  { labelKey: "desktop.presetReviewChanges" },
+  { labelKey: "desktop.presetExplainProject" },
+  { labelKey: "desktop.presetWriteTests" },
+  { labelKey: "desktop.presetRefactor" },
+  { labelKey: "desktop.presetFixBug" },
+];
 
 function compareModelOptions(a: ModelOption, b: ModelOption): number {
   return MODEL_OPTION_COLLATOR.compare(a.name || a.modelId, b.name || b.modelId)
@@ -1481,36 +1488,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     return () => { cancelled = true; };
   }, [modelDropdownOpen]);
 
-  // ── Pending git changes bar ───────────────────────────────────────────────
-  // Shows uncommitted change counts (+/-) for the current cwd, refreshed on a
-  // short interval while the agent is running (files mutate as it works).
-  const [gitStats, setGitStats] = useState<{ files: number; additions: number; deletions: number } | null>(null);
-  useEffect(() => {
-    if (!cwd) { setGitStats(null); return; }
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const response = await fetch(`/api/git/status?${new URLSearchParams({ cwd }).toString()}`);
-        if (!response.ok) return;
-        const data = await response.json() as GitStatusResponse;
-        if (cancelled) return;
-        if (!data.isGitRepository) { setGitStats(null); return; }
-        setGitStats({
-          files: data.files.length,
-          additions: data.additions,
-          deletions: data.deletions,
-        });
-      } catch {
-        if (!cancelled) setGitStats(null);
-      }
-    };
-    void load();
-    const interval = setInterval(() => { if (isStreaming) void load(); }, 5000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [cwd, isStreaming]);
-
-
+  // ── Task status row (input-bar summary) ───────────────────────────────────
+  // Mirrors OpenChamber's StatusRow: a compact strip of active work. Reads the
+  // project's task board for the current cwd and refreshes on task changes.
   const [taskStats, setTaskStats] = useState<{ running: number; todo: number } | null>(null);
+  const [presetOpen, setPresetOpen] = useState(false);
   useEffect(() => {
     if (!cwd) { setTaskStats(null); return; }
     let cancelled = false;
@@ -1588,33 +1570,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {taskStats.running > 0 && <span style={{ color: "var(--accent)" }}>{taskStats.running} {t("desktop.taskRunning")}</span>}
             {taskStats.running > 0 && taskStats.todo > 0 && <span aria-hidden="true">·</span>}
             {taskStats.todo > 0 && <span>{taskStats.todo} {t("desktop.taskTodo")}</span>}
-          </button>
-        )}
-        {gitStats && gitStats.files > 0 && (
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent("pi:open-tasks-view"))}
-            title={t("desktop.gitPendingHint")}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              marginBottom: 8,
-              marginLeft: 6,
-              padding: "3px 10px",
-              borderRadius: 999,
-              border: "1px solid var(--border)",
-              background: "var(--bg-panel)",
-              color: "var(--text-muted)",
-              fontSize: 11,
-              cursor: "pointer",
-              transition: "border-color 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; }}
-          >
-            <GitBranchIcon size={12} aria-hidden="true" />
-            <span>{gitStats.files} {t("desktop.gitPending")}</span>
-            {gitStats.additions > 0 && <span style={{ color: "var(--git-status-added)" }}>+{gitStats.additions}</span>}
-            {gitStats.deletions > 0 && <span style={{ color: "var(--git-status-deleted)" }}>−{gitStats.deletions}</span>}
           </button>
         )}
         {modelScopeWarnings && modelScopeWarnings.length > 0 && (
@@ -2067,9 +2022,79 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               alignItems: "stretch",
               gap: 0,
               padding: 0,
+              position: "relative",
               transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
             } as React.CSSProperties}
           >
+          {!isStreaming && (
+            <div style={{ position: "absolute", top: -13, right: isMobile ? 12 : 16, zIndex: 40 }}>
+              <button
+                type="button"
+                onClick={() => setPresetOpen((v) => !v)}
+                title={t("desktop.presetToggle")}
+                aria-label={t("desktop.presetToggle")}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 24, height: 24,
+                  borderRadius: "50%",
+                  border: `1px solid ${presetOpen ? "var(--accent)" : "var(--border)"}`,
+                  background: presetOpen ? "color-mix(in srgb, var(--accent) 12%, var(--bg-panel))" : "var(--bg-panel)",
+                  color: presetOpen ? "var(--accent)" : "var(--text-muted)",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+                  transition: "color 0.12s, border-color 0.12s, background 0.12s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+                onMouseLeave={(e) => { if (!presetOpen) { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; } }}
+              >
+                <SparkleIcon size={13} weight={presetOpen ? "fill" : "regular"} aria-hidden="true" />
+              </button>
+              {presetOpen && (
+                <div
+                  style={{
+                    position: "absolute", right: 0, top: "calc(100% + 8px)",
+                    display: "flex", gap: 6, flexWrap: "wrap",
+                    maxWidth: "min(380px, calc(100vw - 24px))",
+                    padding: 8,
+                    background: "var(--bg-panel)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  {DRAFT_PRESETS.map((preset) => (
+                    <button
+                      key={preset.labelKey}
+                      type="button"
+                      onClick={() => {
+                        const text = t(preset.labelKey);
+                        setValue(text);
+                        setDraft(draftKey ?? "", { value: text, images: [] });
+                        setPresetOpen(false);
+                        requestAnimationFrame(() => textareaRef.current?.focus());
+                      }}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 999,
+                        border: "1px solid var(--border)",
+                        background: "var(--bg)",
+                        color: "var(--text-muted)",
+                        fontSize: 11,
+                        whiteSpace: "nowrap",
+                        cursor: "pointer",
+                        transition: "border-color 0.12s, color 0.12s",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+                    >
+                      {t(preset.labelKey)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {isStreaming && <div className="chat-input-streaming-overlay hatch-45" aria-hidden="true" />}
           {isStreaming && (onSteer || onFollowUp) && (
             <div className="chat-input-streaming-actions">
