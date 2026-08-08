@@ -686,9 +686,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 onAbortCompaction={handleAbortCompaction}
                 isCompacting={isCompacting}
                 compactError={compactError}
-                branchTree={branchTree}
-                branchActiveLeafId={branchActiveLeafId}
-                onBranchLeafChange={handleLeafChange}
+                // Branch entry point lives in the bottom SessionInfoBar only;
+                // rendering it in both bars would duplicate the button.
               />
             </div>
           </div>

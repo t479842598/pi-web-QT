@@ -684,7 +684,7 @@ export const enLocale = {
     "desktop.previewFile": "Preview {file}",
     "desktop.branches": "Branches",
     "desktop.noActiveSession": "No active session",
-    "desktop.sessionHasNoBranches": "This session has no branches",
+    "desktop.sessionHasNoBranches": "No branches yet — use Edit from here or Fork on a message to create one",
     "desktop.copyMessage": "Copy message",
     "desktop.copyPlainText": "Copy as plain text",
     "desktop.createTaskFromMessage": "Create task from message",

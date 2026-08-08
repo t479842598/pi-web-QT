@@ -118,13 +118,11 @@ export function SessionInfoBar({
   const hasSystemPrompt = systemPrompt !== null && systemPrompt !== "";
   const hasStats = sessionStats && t && (t.input > 0 || t.output > 0);
 
-  const hasBranching = hasSession && onBranchLeafChange && (() => {
-    const tree = branchTree ?? [];
-    function check(nodes: SessionTreeNode[]): boolean {
-      return nodes.some((node) => node.children.length > 1 || check(node.children));
-    }
-    return check(tree);
-  })();
+  // Always surface the branch navigator: for a linear session the tree has no
+  // branch point yet, so a branch-existence check hides the only entry point
+  // users would use to discover navigate/fork. The popover shows a hint when
+  // the session has no branches.
+  const hasBranching = hasSession && onBranchLeafChange;
 
   // Tooltip for stats button
   const tooltipParts: string[] = [];

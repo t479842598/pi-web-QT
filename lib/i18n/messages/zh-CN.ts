@@ -684,7 +684,7 @@ export const zhCNLocale = {
     "desktop.previewFile": "预览 {file}",
     "desktop.branches": "分支",
     "desktop.noActiveSession": "没有活动会话",
-    "desktop.sessionHasNoBranches": "此会话没有分支",
+    "desktop.sessionHasNoBranches": "此会话暂无分支 —— 对任意消息点「从这里继续」或「分叉」后会出现分支树",
     "desktop.copyMessage": "复制消息",
     "desktop.copyPlainText": "复制纯文本",
     "desktop.createTaskFromMessage": "创建任务",
