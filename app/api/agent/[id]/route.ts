@@ -27,6 +27,13 @@ export async function POST(
       return NextResponse.json({ success: true, data: result });
     }
 
+    // Abort-style commands only make sense for a live session. When the wrapper
+    // is gone (idle-reaped) there is nothing to stop, so answer immediately
+    // instead of paying a full cold start (~20s model listing) just to abort.
+    if (body.type === "abort" || body.type === "abort_bash" || body.type === "clear_queue") {
+      return NextResponse.json({ success: true, data: null });
+    }
+
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });

@@ -621,7 +621,7 @@ export class AgentSessionWrapper {
       void this.shutdown().catch((error) => {
         console.error("[pi-web] failed to shut down idle session:", error instanceof Error ? error.message : error);
       });
-    }, 10 * 60 * 1000);
+    }, 30 * 60 * 1000);
   }
 
   private persistBashOnlySession(): void {

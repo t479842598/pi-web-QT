@@ -8,6 +8,31 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { readModelsJson } from "./settings-title-model";
 import { getEffectiveOverrides } from "./builtin-model-overrides";
 
+// ─── Model list cache ──────────────────────────────────────────────────────
+// modelRuntime.getAvailable() may hit the network (a provider's model listing)
+// and take seconds. Every RPC session startup resolves it, so a cold wrapper
+// recreation can stall message send / SSE connect by 20s+. Cache the raw list
+// briefly (same TTL as /api/models); models are read back from the registry
+// per call, so a stale entry only delays seeing brand-new upstream models.
+const AVAILABLE_MODELS_TTL_MS = 60_000;
+let availableModelsCache: { data: readonly Model<Api>[]; at: number } | null = null;
+
+async function getAvailableModels(modelRuntime: ModelRuntime): Promise<readonly Model<Api>[]> {
+  const now = Date.now();
+  if (availableModelsCache && now - availableModelsCache.at < AVAILABLE_MODELS_TTL_MS) {
+    return availableModelsCache.data;
+  }
+  const data = await modelRuntime.getAvailable();
+  availableModelsCache = { data, at: now };
+  return data;
+}
+
+/** Drop the model-list cache (called when models.json changes). */
+export function invalidateAvailableModelsCache(): void {
+  availableModelsCache = null;
+}
+
+
 /**
  * Uses pi's resolver so pi-web accepts the same enabledModels globs, fuzzy
  * references, and thinking pins as the CLI rather than maintaining a second
@@ -62,13 +87,13 @@ export async function resolveVisibleModels(
   const warnings: string[] = [];
 
   if (cleanedPatterns.length === 0) {
-    visible = await modelRuntime.getAvailable();
+    visible = await getAvailableModels(modelRuntime);
   } else {
     const result = await resolveModelScopeWithDiagnostics(cleanedPatterns, modelRuntime);
     scopedModels = result.scopedModels;
     visible = result.scopedModels.length > 0
       ? result.scopedModels.map((s) => s.model)
-      : await modelRuntime.getAvailable();
+      : await getAvailableModels(modelRuntime);
     warnings.push(...result.diagnostics.map((d) => d.message));
     for (const scopedModel of scopedModels) {
       if (scopedModel.thinkingLevel) {
