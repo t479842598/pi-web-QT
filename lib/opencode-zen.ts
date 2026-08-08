@@ -49,6 +49,11 @@ export interface SafeOpenCodeZenConfig {
 const CONFIG_FILE = "opencode-zen.json";
 const DEFAULT_COOLDOWN_MS = 60_000;
 const MAX_COOLDOWN_MS = 10 * 60_000;
+/* 全池 429 全败后，把参与账号的长冷却压缩到此值，避免一个坏请求打瘫整池（后续请求 503） */
+const SHORT_COOLDOWN_MS = 10_000;
+/* 单请求主循环最多尝试的账号数：避免一个坏请求把全池账号都打冷；
+ * 超过上限时剩余账号留给后续请求，全败后另有最近成功账号回退兜底 */
+const MAX_ATTEMPTS = 3;
 
 export interface OpenCodeZenSwitchEvent {
   sessionId?: string;
@@ -62,6 +67,8 @@ type RuntimeState = {
   activeIndex: number;
   cooldownUntil: Map<string, number>;
   dispatchers: Map<string, Dispatcher>;
+  /** 最近一次成功的账号 id：全败后回退硬试的目标 */
+  lastSuccessId?: string;
   lastSwitch?: SafeOpenCodeZenConfig["lastSwitch"];
 };
 
@@ -395,17 +402,28 @@ function fetchUrl(input: FetchInput): string {
   return typeof input === "string" || input instanceof URL ? input.toString() : input.url;
 }
 
-function nextAccount(state: RuntimeState, excludedIds: ReadonlySet<string> = new Set()): OpenCodeZenAccount | null {
+function nextAccount(state: RuntimeState, excludedIds: ReadonlySet<string> = new Set(), ignoreCooldown = false): OpenCodeZenAccount | null {
   const now = Date.now();
   const total = state.config.accounts.length;
   if (total === 0) return null;
+  /* 冷却中且冷却最早过期（最接近可用）的账号，供 ignoreCooldown 兜底硬试 */
+  let earliest: { account: OpenCodeZenAccount; index: number; until: number } | null = null;
   for (let offset = 0; offset < total; offset++) {
     const index = (state.activeIndex + offset) % total;
     const account = state.config.accounts[index];
     if (!account.enabled || !account.apiKey || excludedIds.has(account.id)) continue;
-    if ((state.cooldownUntil.get(account.id) ?? 0) > now) continue;
+    const until = state.cooldownUntil.get(account.id) ?? 0;
+    if (until > now) {
+      if (!earliest || until < earliest.until) earliest = { account, index, until };
+      continue;
+    }
     state.activeIndex = (index + 1) % total;
     return account;
+  }
+  /* 冷却池兜底：全池都在冷却时忽略冷却，取最早过期的账号硬试（对应 codex-proxy 的 PickIgnoringCooldown） */
+  if (ignoreCooldown && earliest) {
+    state.activeIndex = (earliest.index + 1) % total;
+    return earliest.account;
   }
   return null;
 }
@@ -447,36 +465,46 @@ export function createOpenCodeZenFetch(
   sessionId?: string,
   configOverride?: OpenCodeZenConfig,
 ): typeof globalThis.fetch {
+  /* 池状态挂在闭包上（每个 fetch 实例一套运行时态）：覆盖配置时跨请求共享冷却/最近成功账号，
+   * 生产（无覆盖）则共享全局态。注意不能放到每次请求内重建，否则冷却与回退记忆全部丢失。 */
+  const state: RuntimeState = configOverride
+    ? { config: normalizeConfig(configOverride), activeIndex: 0, cooldownUntil: new Map(), dispatchers: new Map() }
+    : getState();
   return async (input, init) => {
     if (!isOpenCodeTarget(input)) return baseFetch(input, init);
-    const state: RuntimeState = configOverride
-      ? { config: normalizeConfig(configOverride), activeIndex: 0, cooldownUntil: new Map(), dispatchers: new Map() }
-      : getState();
     const accounts = state.config.accounts.filter((account) => account.enabled && account.apiKey);
     if (accounts.length === 0) {
       return new Response("OpenCode Zen accounts are unavailable", { status: 503 });
     }
 
-    const body = await replayableBody(input, init);
-    const requestHasBody = input instanceof Request ? input.body !== null : init?.body !== undefined && init.body !== null;
-    const canReplay = !requestHasBody || body !== undefined;
-    const triedAccountIds = new Set<string>();
-    let account = nextAccount(state, triedAccountIds);
-    if (!account) return new Response("OpenCode Zen accounts are cooling down", { status: 503, headers: { "Retry-After": String(Math.ceil(state.config.cooldownMs / 1000)) } });
-    let lastResponse: Response | null = null;
-    let switchedFrom: string | undefined;
-    const attempts = state.config.autoSwitch && canReplay ? Math.max(accounts.length, 1) : 1;
-
-    for (let attempt = 0; attempt < attempts && account; attempt++) {
-      triedAccountIds.add(account.id);
+    /* 发送辅助：带账号 Key 与（如有）独立代理 dispatcher 发请求 */
+    const send = async (account: OpenCodeZenAccount): Promise<Response> => {
       const requestInit = requestInitFor(input, init, state, account, body);
-      const response = requestInit.dispatcher
+      return requestInit.dispatcher
         ? await undiciFetch(
           fetchUrl(input),
           requestInit as unknown as Parameters<typeof undiciFetch>[1],
         ) as unknown as Response
         : await baseFetch(input, requestInit);
-      if (response.status !== 429 || !state.config.autoSwitch || attempt === attempts - 1) {
+    };
+
+    const body = await replayableBody(input, init);
+    const requestHasBody = input instanceof Request ? input.body !== null : init?.body !== undefined && init.body !== null;
+    const canReplay = !requestHasBody || body !== undefined;
+    const triedAccountIds = new Set<string>();
+    /* 全池都在冷却时仍取最早过期的账号硬试（冷却池兜底），不直接 503 */
+    let account = nextAccount(state, triedAccountIds) ?? nextAccount(state, triedAccountIds, true);
+    if (!account) return new Response("OpenCode Zen accounts are cooling down", { status: 503, headers: { "Retry-After": String(Math.ceil(state.config.cooldownMs / 1000)) } });
+    let lastResponse: Response | null = null;
+    let switchedFrom: string | undefined;
+    /* 单请求最多尝试 MAX_ATTEMPTS 个账号，剩余账号留给后续请求，避免一个坏请求把全池打冷 */
+    const attempts = state.config.autoSwitch && canReplay ? Math.min(Math.max(accounts.length, 1), MAX_ATTEMPTS) : 1;
+
+    for (let attempt = 0; attempt < attempts && account; attempt++) {
+      triedAccountIds.add(account.id);
+      const response = await send(account);
+      if (response.status !== 429 || !state.config.autoSwitch) {
+        if (response.ok) state.lastSuccessId = account.id;
         if (response.ok && switchedFrom) notifyOpenCodeZenSwitch({ sessionId, from: switchedFrom, to: account.note, statusCode: 429 });
         return response;
       }
@@ -484,12 +512,44 @@ export function createOpenCodeZenFetch(
       lastResponse = new Response(responseBody, { status: response.status, statusText: response.statusText, headers: response.headers });
       const previous = account;
       state.cooldownUntil.set(previous.id, Date.now() + state.config.cooldownMs);
-      account = nextAccount(state, triedAccountIds);
+      if (attempt === attempts - 1) break; /* 本请求尝试次数已用尽，走统一后处理 */
+      account = nextAccount(state, triedAccountIds, true);
       if (!account) break;
       state.lastSwitch = { timestamp: new Date().toISOString(), from: previous.note, to: account.note, statusCode: 429 };
       switchedFrom = previous.note;
       recordErrorLog({ level: "info", source: "opencode-zen-switch", provider: "opencode", message: `OpenCode Zen 429，已从 ${previous.note} 切换到 ${account.note}` });
     }
+
+    /* 全败后：把参与账号的长冷却压缩为短冷却，让后续请求能尽快重新选号 */
+    if (lastResponse && state.config.autoSwitch && triedAccountIds.size > 0) {
+      const shortUntil = Date.now() + SHORT_COOLDOWN_MS;
+      for (const id of triedAccountIds) {
+        const until = state.cooldownUntil.get(id);
+        if (until !== undefined && until > shortUntil) state.cooldownUntil.set(id, shortUntil);
+      }
+    }
+
+    /* 回退最近成功账号：主循环未试过它时（被尝试上限截断或处于冷却被跳过），忽略冷却硬试一次 */
+    if (lastResponse && state.config.autoSwitch && canReplay && state.lastSuccessId && !triedAccountIds.has(state.lastSuccessId)) {
+      const fallbackAccount = state.config.accounts.find((item) => item.id === state.lastSuccessId && item.enabled && item.apiKey);
+      if (fallbackAccount) {
+        triedAccountIds.add(fallbackAccount.id);
+        recordErrorLog({ level: "info", source: "opencode-zen-switch", provider: "opencode", message: `OpenCode Zen 全败后回退最近成功账号 ${fallbackAccount.note}` });
+        const response = await send(fallbackAccount);
+        if (response.status !== 429) {
+          if (response.ok) {
+            state.activeIndex = Math.max(0, state.config.accounts.findIndex((item) => item.id === fallbackAccount.id));
+            state.lastSuccessId = fallbackAccount.id;
+            if (switchedFrom) notifyOpenCodeZenSwitch({ sessionId, from: switchedFrom, to: fallbackAccount.note, statusCode: 429 });
+          }
+          return response;
+        }
+        const responseBody = await response.arrayBuffer();
+        lastResponse = new Response(responseBody, { status: response.status, statusText: response.statusText, headers: response.headers });
+        state.cooldownUntil.set(fallbackAccount.id, Date.now() + SHORT_COOLDOWN_MS);
+      }
+    }
+
     return lastResponse ?? new Response("OpenCode Zen accounts are unavailable", { status: 503 });
   };
 }
