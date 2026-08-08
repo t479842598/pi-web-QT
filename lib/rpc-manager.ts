@@ -58,6 +58,8 @@ type SessionBusListener = (event: SessionBusEvent) => void;
  * carries the full accumulated message; the bus coalesces it separately.
  */
 const SESSION_BUS_EVENT_TYPES = new Set([
+  "agent_start",
+  "message_start",
   "message_update",
   "message_end",
   "agent_end",
