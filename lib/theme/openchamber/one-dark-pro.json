@@ -1,0 +1,41 @@
+{
+  "displayName": "One Dark Pro",
+  "dark": {
+    "bg": "#1e222a",
+    "panel": "#232832",
+    "hover": "#212631",
+    "selected": "#272c37",
+    "border": "#313848",
+    "text": "#abb2bf",
+    "muted": "#737a89",
+    "dim": "#737a89",
+    "accent": "#61afef",
+    "accentHover": "#579ad1",
+    "userBg": "#2e3442",
+    "assistantBg": "#1e222a",
+    "toolBg": "#212631",
+    "subtle": "#272c37",
+    "red": "#e06c75",
+    "green": "#98c379",
+    "orange": "#e5c07b"
+  },
+  "light": {
+    "bg": "#f5f6f8",
+    "panel": "#f0f5fa",
+    "hover": "#eef0f4",
+    "selected": "#edeff5",
+    "border": "#d5d8de",
+    "text": "#2b303b",
+    "muted": "#6e727b",
+    "dim": "#6e727b",
+    "accent": "#528bff",
+    "accentHover": "#73a0fe",
+    "userBg": "#eaedf4",
+    "assistantBg": "#f5f6f8",
+    "toolBg": "#eef0f4",
+    "subtle": "#edeff5",
+    "red": "#e06c75",
+    "green": "#4fa66d",
+    "orange": "#d19a66"
+  }
+}

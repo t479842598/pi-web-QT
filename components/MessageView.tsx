@@ -2,7 +2,7 @@
 
 import { memo, useState, useRef, useEffect, useMemo } from "react";
 import { MarkdownBody } from "./MarkdownBody";
-import { copyText } from "@/lib/clipboard";
+import { copyText, markdownToPlainText } from "@/lib/clipboard";
 import { resolveSlashDisplayText } from "@/lib/slash-display";
 
 import { isEmptyThinkingBlock } from "@/lib/message-display";
@@ -20,6 +20,7 @@ import { DatabaseIcon } from "@phosphor-icons/react/Database";
 import { WarningCircleIcon } from "@phosphor-icons/react/WarningCircle";
 import { GitForkIcon } from "@phosphor-icons/react/GitFork";
 import { useI18n } from "@/hooks/useI18n";
+import { cnyCost, matchesDeepSeekCNY, formatCNY } from "@/lib/deepseek-pricing";
 import type {
   AgentMessage,
   UserMessage,
@@ -36,6 +37,9 @@ import type {
 
 const MAX_THINKING_CACHE_ENTRIES = 100;
 const thinkingContentCache = new Map<string, Promise<string>>();
+/** Deferred thinking may still be written when a cross-device client fetches it. */
+const THINKING_LOAD_RETRY_ATTEMPTS = 5;
+const THINKING_LOAD_RETRY_MS = 2000;
 
 function loadThinkingContent(sessionId: string, entryId: string, blockIndex: number): Promise<string> {
   const key = `${sessionId}:${entryId}:${blockIndex}`;
@@ -119,7 +123,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} onCreateTask={onCreateTask} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} onFork={onFork} forking={forking} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -198,7 +202,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
-      className="chat-user-message"
+      className="chat-user-message chat-msg-in"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -236,7 +240,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
       {/* Bottom row: action buttons + timestamp */}
       {(time || canFork || canNavigate || true) && (
-        <div style={{
+        <div className="msg-actions" style={{
           display: "flex", alignItems: "center", justifyContent: "flex-end",
           gap: 6, marginTop: 3,
         }}>
@@ -289,7 +293,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             )}
           </div>
           {(canFork || canNavigate) && (
-            <div style={{
+            <div className="msg-actions" style={{
               display: "flex", gap: 3,
               opacity: (hovered || forking) ? 1 : 0,
               pointerEvents: (hovered || forking) ? "auto" : "none",
@@ -355,6 +359,8 @@ function AssistantMessageView({
   prevTimestamp,
   sessionId,
   entryId,
+  onFork,
+  forking,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -367,6 +373,8 @@ function AssistantMessageView({
   prevTimestamp?: number;
   sessionId?: string;
   entryId?: string;
+  onFork?: (entryId: string) => void;
+  forking?: boolean;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -376,6 +384,7 @@ function AssistantMessageView({
   const blocks = blockItems.map(({ block }) => block);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedPlain, setCopiedPlain] = useState(false);
   const streamStartRef = useRef<number | null>(null);
   const [tps, setTps] = useState<number | null>(null);
   const blockItemsRef = useRef(blockItems);
@@ -412,6 +421,9 @@ function AssistantMessageView({
     .filter((b): b is TextContent => b.type === "text")
     .map((b) => b.text)
     .join("\n");
+
+  const editedFiles = extractEditedFiles(blocks);
+  const [filesExpanded, setFilesExpanded] = useState(false);
 
   const copyContent = () => {
     copyText(textContent).then(() => {
@@ -490,7 +502,7 @@ function AssistantMessageView({
 
   return (
     <div
-      className={["chat-assistant-message", isStreaming ? "is-streaming" : ""].filter(Boolean).join(" ")}
+      className={["chat-assistant-message chat-msg-in", isStreaming ? "is-streaming" : ""].filter(Boolean).join(" ")}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -567,13 +579,25 @@ function AssistantMessageView({
                 {fmtToken(message.usage.cacheRead)}
               </span>
             )}
-            {message.usage && message.usage.cost?.total > 0 && (
-              <span>${message.usage.cost.total.toFixed(4)}</span>
-            )}
+            {message.usage && message.usage.cost?.total > 0 && (() => {
+              // deepseek-v4-flash/pro (any provider) is priced from the
+              // official CNY table; everything else keeps the SDK USD cost.
+              if (matchesDeepSeekCNY(message.model)) {
+                const cny = cnyCost(message.model, message.usage);
+                if (cny <= 0) return null;
+                return (
+                  <span title={t("desktop.turnUsageByOfficialPrice")}>
+                    {formatCNY(cny)}
+                  </span>
+                );
+              }
+              return <span>${message.usage.cost.total.toFixed(4)}</span>;
+            })()}
           </div>
         )}
         {textContent && !isStreaming && (
           <button
+            className="msg-actions"
             onClick={copyContent}
             title={t("desktop.copyMessage")}
             style={{
@@ -593,8 +617,122 @@ function AssistantMessageView({
             {copied ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
           </button>
         )}
+        {textContent && !isStreaming && (
+          <button
+            className="msg-actions"
+            onClick={() => {
+              copyText(markdownToPlainText(textContent)).then(() => {
+                setCopiedPlain(true);
+                setTimeout(() => setCopiedPlain(false), 1500);
+              });
+            }}
+            title={t("desktop.copyPlainText")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 22, height: 22,
+              background: "none", border: "none",
+              borderRadius: 5,
+              color: copiedPlain ? "var(--accent)" : "var(--text-dim)",
+              cursor: "pointer",
+              opacity: hovered ? 1 : 0,
+              pointerEvents: hovered ? "auto" : "none",
+              transition: "opacity 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { if (!copiedPlain) e.currentTarget.style.color = "var(--accent)"; }}
+            onMouseLeave={(e) => { if (!copiedPlain) e.currentTarget.style.color = "var(--text-dim)"; }}
+          >
+            {copiedPlain ? <CheckIcon size={11} /> : <ClipboardTextIcon size={11} />}
+          </button>
+        )}
+        {/* Fork: branch this answer into a new session (continues from the
+            user turn this answer belongs to). Touch devices get it via the
+            .msg-actions media rule; hover devices see it on hover. */}
+        {entryId && onFork && !isStreaming && (
+          <button
+            className="msg-actions"
+            onClick={() => onFork(entryId)}
+            disabled={forking}
+            title={forking ? t("desktop.creatingNewSession") : t("desktop.newSessionFromHere")}
+            aria-label={t("desktop.newSessionFromHere")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 22, height: 22,
+              background: "none", border: "none",
+              borderRadius: 5,
+              color: forking ? "var(--accent)" : "var(--text-dim)",
+              cursor: forking ? "not-allowed" : "pointer",
+              opacity: hovered ? 1 : 0,
+              pointerEvents: hovered ? "auto" : "none",
+              transition: "opacity 0.12s, color 0.12s",
+            }}
+          >
+            <GitForkIcon size={11} />
+          </button>
+        )}
         {time && !isStreaming && (
           <span style={{ fontSize: 11, color: hovered ? "var(--text-muted)" : "var(--text-dim)", opacity: hovered ? 1 : 0.5, marginLeft: "auto", transition: "color 0.15s, opacity 0.15s" }}>{time}</span>
+        )}
+        {editedFiles.length > 0 && !isStreaming && (
+          <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={() => setFilesExpanded((v) => !v)}
+              title={t("desktop.changedFiles", { count: editedFiles.length })}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "1px 7px",
+                border: "1px solid var(--border)",
+                borderRadius: 999,
+                background: filesExpanded ? "var(--bg-hover)" : "none",
+                color: "var(--text-muted)",
+                fontSize: 10,
+                cursor: "pointer",
+                opacity: hovered || filesExpanded ? 1 : 0.5,
+                transition: "opacity 0.12s, border-color 0.12s, background 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+              onMouseLeave={(e) => { if (!filesExpanded) { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; } }}
+            >
+              <GitForkIcon size={10} aria-hidden="true" />
+              {editedFiles.length}
+            </button>
+            {filesExpanded && (
+              <span
+                style={{
+                  position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 30,
+                  minWidth: 200, maxWidth: 320,
+                  padding: "6px 0",
+                  background: "var(--bg-panel)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                }}
+              >
+                {editedFiles.map((file) => (
+                  <button
+                    key={file}
+                    type="button"
+                    onClick={() => { setFilesExpanded(false); onOpenFile?.(file); }}
+                    style={{
+                      display: "block", width: "100%",
+                      padding: "5px 12px",
+                      background: "none", border: "none",
+                      color: "var(--text-muted)",
+                      fontSize: 11,
+                      textAlign: "left",
+                      fontFamily: "var(--font-mono)",
+                      cursor: "pointer",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--accent)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                  >
+                    {file}
+                  </button>
+                ))}
+              </span>
+            )}
+          </span>
         )}
       </div>
     </div>
@@ -648,15 +786,25 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    try {
-      setContent(await loadThinkingContent(sessionId, entryId, blockIndex));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
+    // Retry briefly: a cross-device message may arrive before the deferred
+    // thinking entry finished writing to disk.
+    let attempts = THINKING_LOAD_RETRY_ATTEMPTS;
+    const load = () => {
+      setLoading(true);
+      setError(null);
+      void loadThinkingContent(sessionId!, entryId!, blockIndex)
+        .then((value) => { setContent(value); setLoading(false); })
+        .catch((err) => {
+          if (attempts > 1) {
+            attempts--;
+            setTimeout(load, THINKING_LOAD_RETRY_MS);
+          } else {
+            setLoading(false);
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        });
+    };
+    load();
   };
 
   if (contentOnly) {
@@ -714,6 +862,7 @@ function ThinkingContentBody({ block, sessionId, entryId, blockIndex, isStreamin
 
   useEffect(() => {
     let cancelled = false;
+    let attempts = THINKING_LOAD_RETRY_ATTEMPTS;
     if (!block.deferred) {
       setLoading(false);
       return;
@@ -723,12 +872,27 @@ function ThinkingContentBody({ block, sessionId, entryId, blockIndex, isStreamin
       setError(t("desktop.thinkingContentUnavailable"));
       return;
     }
-    setLoading(true);
-    setError(null);
-    void loadThinkingContent(sessionId, entryId, blockIndex)
-      .then((value) => { if (!cancelled) setContent(value); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    // Cross-device sync: the thinking entry may still be written to disk when
+    // this client fetches it (e.g. the message came over the event bus from
+    // another device). Retry briefly instead of showing a permanent error.
+    const load = () => {
+      if (cancelled) return;
+      setLoading(true);
+      setError(null);
+      void loadThinkingContent(sessionId, entryId, blockIndex)
+        .then((value) => { if (!cancelled) { setContent(value); setLoading(false); } })
+        .catch((err) => {
+          if (cancelled) return;
+          if (attempts > 1) {
+            attempts--;
+            setTimeout(load, THINKING_LOAD_RETRY_MS);
+          } else {
+            setLoading(false);
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        });
+    };
+    load();
     return () => { cancelled = true; };
   }, [block.deferred, blockIndex, entryId, sessionId, t]);
 
@@ -1054,6 +1218,30 @@ function isEditToolName(toolName: string): boolean {
     name.endsWith("_edit") ||
     name.includes("str_replace") ||
     name.includes("replace_editor");
+}
+
+/**
+ * Collect the file paths this turn actually wrote, from edit/write tool calls.
+ * Only tools with an explicit file-ish input field contribute; apply_patch is
+ * skipped because its target lives inside the diff text, not the input.
+ */
+function extractEditedFiles(blocks: AssistantContentBlock[]): string[] {
+  const files = new Set<string>();
+  for (const block of blocks) {
+    if (block.type !== "toolCall") continue;
+    const tc = block as ToolCallContent;
+    const name = (tc.toolName ?? "").toLowerCase();
+    if (name === "apply_patch" || name.includes("patch")) continue;
+    const isWriter = isEditToolName(tc.toolName ?? "")
+      || name === "write" || name === "create" || name.includes("file_write")
+      || name.includes("create_file") || name.includes("multiedit");
+    if (!isWriter) continue;
+    const input = (tc.input ?? {}) as Record<string, unknown>;
+    const p = input.filePath ?? input.file_path ?? input.path ?? input.file
+      ?? input.destination ?? input.newFilePath ?? input.oldPath;
+    if (typeof p === "string" && p.trim()) files.add(p);
+  }
+  return [...files];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

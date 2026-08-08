@@ -13,8 +13,11 @@ import {
   FileText,
   GitBranch,
   Square,
+  Wallet,
 } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
+import type { DeepSeekBalanceData } from "@/hooks/useDeepSeekBalance";
+import { formatCNY } from "@/lib/deepseek-pricing";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionTreeNode } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
@@ -45,6 +48,19 @@ export interface SessionInfoBarProps {
   onBranchLeafChange?: (leafId: string | null) => void;
   /** Show text label alongside the sound icon (e.g. "提示音：开启") */
   showSoundLabel?: boolean;
+  /** Active session runs on the official DeepSeek provider (api.deepseek.com). */
+  isDeepSeekOfficial?: boolean;
+  /** Wallet balance fetched via GET /api/deepseek/balance. */
+  deepseekBalance?: DeepSeekBalanceData | null;
+  /** Most recent finished turn's usage breakdown (for the 本次回复 block). */
+  lastTurnUsage?: {
+    model: string;
+    input: number;
+    output: number;
+    cacheRead: number;
+    costCNY: number;
+    costUSD: number;
+  } | null;
 }
 
 type SessionCopyField = "file" | "id";
@@ -67,6 +83,9 @@ export function SessionInfoBar({
   branchActiveLeafId,
   onBranchLeafChange,
   showSoundLabel,
+  isDeepSeekOfficial,
+  deepseekBalance,
+  lastTurnUsage,
 }: SessionInfoBarProps) {
   const { t: translate } = useI18n();
   const [activePanel, setActivePanel] = useState<"system" | "session" | "branches" | null>(null);
@@ -102,11 +121,29 @@ export function SessionInfoBar({
     return Math.max(1, Math.round(tokens));
   }, [systemPrompt]);
 
+  // DeepSeek official balance chip title (computed before any early return so
+  // hook order stays stable).
+  const balanceTitle = useMemo(() => {
+    const b = deepseekBalance;
+    if (!b?.available || b.totalBalance == null) return translate("desktop.balanceUnavailable");
+    const granted = Number(b.grantedBalance) || 0;
+    const toppedUp = Number(b.toppedUpBalance) || 0;
+    return `${translate("desktop.balance")}：${formatCNY(Number(b.totalBalance) || 0)}（${translate("desktop.balanceGranted")}：${formatCNY(granted)} / ${translate("desktop.balanceToppedUp")}：${formatCNY(toppedUp)}）`;
+  }, [deepseekBalance, translate]);
+
   if (!showChat) return null;
 
   const t = sessionStats?.tokens;
   const c = sessionStats?.cost ?? 0;
-  const costStr = c > 0 ? (c >= 0.01 ? `$${c.toFixed(2)}` : "<$0.01") : null;
+  const costCNY = sessionStats?.costCNY ?? 0;
+  const costUSD = sessionStats?.costUSD ?? 0;
+  // Chips summary: CNY for deepseek-v4-flash/pro (official table), USD for
+  // everything else. Legacy fallback keeps the old single $ total.
+  const costStrParts: string[] = [];
+  if (costCNY > 0) costStrParts.push(formatCNY(costCNY));
+  if (costUSD > 0) costStrParts.push(costUSD >= 0.01 ? `$${costUSD.toFixed(2)}` : "<$0.01");
+  if (costStrParts.length === 0 && c > 0) costStrParts.push(c >= 0.01 ? `$${c.toFixed(2)}` : "<$0.01");
+  const costStr = costStrParts.length > 0 ? costStrParts.join(" + ") : null;
 
   let ctxColor = "var(--text-muted)";
   if (contextUsage?.contextWindow) {
@@ -118,13 +155,11 @@ export function SessionInfoBar({
   const hasSystemPrompt = systemPrompt !== null && systemPrompt !== "";
   const hasStats = sessionStats && t && (t.input > 0 || t.output > 0);
 
-  const hasBranching = hasSession && onBranchLeafChange && (() => {
-    const tree = branchTree ?? [];
-    function check(nodes: SessionTreeNode[]): boolean {
-      return nodes.some((node) => node.children.length > 1 || check(node.children));
-    }
-    return check(tree);
-  })();
+  // Always surface the branch navigator: for a linear session the tree has no
+  // branch point yet, so a branch-existence check hides the only entry point
+  // users would use to discover navigate/fork. The popover shows a hint when
+  // the session has no branches.
+  const hasBranching = hasSession && onBranchLeafChange;
 
   // Tooltip for stats button
   const tooltipParts: string[] = [];
@@ -135,7 +170,9 @@ export function SessionInfoBar({
       tooltipParts.push(`${translate("desktop.sessionInfoCacheRead")}: ${t.cacheRead.toLocaleString()}`);
     if (t.cacheWrite > 0)
       tooltipParts.push(`${translate("desktop.sessionInfoCacheWrite")}: ${t.cacheWrite.toLocaleString()}`);
-    if (c > 0) tooltipParts.push(`${translate("desktop.sessionInfoCost")}: $${c.toFixed(4)}`);
+    if (costCNY > 0) tooltipParts.push(`${translate("desktop.sessionInfoCostOfficial")}: ${formatCNY(costCNY)}`);
+    if (costUSD > 0) tooltipParts.push(`${translate("desktop.sessionInfoCost")}: $${costUSD.toFixed(4)}`);
+    if (costCNY <= 0 && costUSD <= 0 && c > 0) tooltipParts.push(`${translate("desktop.sessionInfoCost")}: $${c.toFixed(4)}`);
   }
   if (contextUsage?.contextWindow && contextUsage.percent !== null) {
     const pct = contextUsage.percent;
@@ -303,6 +340,18 @@ export function SessionInfoBar({
         </div>
       )}
 
+      {/* DeepSeek official balance (right side, before stats) */}
+      {isDeepSeekOfficial && deepseekBalance?.available && deepseekBalance.totalBalance != null && (
+        <span
+          className="session-info-bar-token-chip"
+          style={{ color: "var(--text-muted)", cursor: "default" }}
+          title={balanceTitle}
+        >
+          <Wallet size={11} aria-hidden="true" />
+          {translate("desktop.balance")} {formatCNY(Number(deepseekBalance.totalBalance) || 0)}
+        </span>
+      )}
+
       {/* Token stats button + popover (right side) */}
       {hasStats && (
         <div className="session-info-bar-popover-host">
@@ -430,7 +479,15 @@ export function SessionInfoBar({
                     if (tok.cacheRead > 0) tokenRows.push([translate("desktop.sessionInfoCacheRead"), tok.cacheRead.toLocaleString()]);
                     if (tok.cacheWrite > 0) tokenRows.push([translate("desktop.sessionInfoCacheWrite"), tok.cacheWrite.toLocaleString()]);
                     tokenRows.push([translate("desktop.sessionInfoTotal"), tok.total.toLocaleString()]);
-                    if (sessionStats.cost > 0) tokenRows.push([translate("desktop.sessionInfoCost"), `$${sessionStats.cost.toFixed(4)}`]);
+                    // Spend is split by currency: deepseek-v4-flash/pro use the
+                    // official CNY table, all other models keep the SDK USD cost.
+                    const cnySpend = sessionStats.costCNY ?? 0;
+                    const usdSpend = sessionStats.costUSD ?? 0;
+                    if (cnySpend > 0) tokenRows.push([translate("desktop.sessionInfoCostOfficial"), formatCNY(cnySpend)]);
+                    if (usdSpend > 0) tokenRows.push([translate("desktop.sessionInfoCost"), `$${usdSpend.toFixed(4)}`]);
+                    if (cnySpend <= 0 && usdSpend <= 0 && sessionStats.cost > 0) {
+                      tokenRows.push([translate("desktop.sessionInfoCost"), `$${sessionStats.cost.toFixed(4)}`]);
+                    }
                     if (ctx?.contextWindow && ctx.percent !== null) {
                       const pct = ctx.percent;
                       const used = ctx.tokens;
@@ -439,6 +496,15 @@ export function SessionInfoBar({
                         `${pct !== null ? `${pct.toFixed(1)}%` : "?"} ${used !== null ? formatTokenCount(used) : "?"}/${formatTokenCount(ctx.contextWindow)}`,
                       ]);
                     }
+
+                    // ── Latest turn (本次回复) ──
+                    const turnCost = lastTurnUsage
+                      ? lastTurnUsage.costCNY > 0
+                        ? formatCNY(lastTurnUsage.costCNY)
+                        : lastTurnUsage.costUSD > 0
+                          ? `$${lastTurnUsage.costUSD.toFixed(4)}`
+                          : null
+                      : null;
 
                     const row = (label: string, val: string) => (
                       <div key={label} className="session-stats-row">
@@ -468,6 +534,17 @@ export function SessionInfoBar({
                               {tokenRows.map(([label, val]) => row(label, val))}
                             </div>
                           </div>
+                          {lastTurnUsage && (
+                            <div className="session-stats-column">
+                              <div className="session-stats-section-title">{translate("desktop.turnUsageTitle")}</div>
+                              <div className="session-stats-compact-grid">
+                                {row(translate("desktop.sessionInfoInput"), lastTurnUsage.input.toLocaleString())}
+                                {row(translate("desktop.sessionInfoOutput"), lastTurnUsage.output.toLocaleString())}
+                                {lastTurnUsage.cacheRead > 0 && row(translate("desktop.sessionInfoCacheRead"), lastTurnUsage.cacheRead.toLocaleString())}
+                                {turnCost && row(translate("desktop.sessionInfoCost"), turnCost)}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </>
                     );

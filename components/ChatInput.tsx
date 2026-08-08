@@ -4,6 +4,7 @@ import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, f
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
+import type { SnippetItem } from "@/lib/snippet-store";
 import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
 import {
   isBase64ImageWithinLimits,
@@ -11,13 +12,15 @@ import {
 } from "@/lib/image-attachments";
 import { droppedFilePaths, droppedFileReference } from "@/lib/dropped-files";
 import {
-  buildEntriesFromFiles, buildAtInsertText, extractAtQuery, filterFileEntries,
-  type AtQueryMatch, type FileIndexEntry,
+  buildEntriesFromFiles, buildAtInsertText, extractAtQuery, filterFileEntries, extractSnippetQuery,
+  type AtQueryMatch, type FileIndexEntry, type SnippetQueryMatch,
 } from "@/lib/file-fuzzy";
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { FolderIcon as PhosphorFolderIcon } from "@phosphor-icons/react/Folder";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
+import { listTasks } from "@/lib/task-api";
+import { StackIcon } from "@phosphor-icons/react/Stack";
 import { ArrowBendUpLeftIcon } from "@phosphor-icons/react/ArrowBendUpLeft";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/ArrowClockwise";
 import { ArrowElbowUpLeftIcon } from "@phosphor-icons/react/ArrowElbowUpLeft";
@@ -65,7 +68,6 @@ interface Props {
   onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
-  isAutoModelSelection?: boolean;
   modelNames?: Record<string, string>;
   modelList?: { id: string; name: string; provider: string }[];
   modelScopeWarnings?: string[];
@@ -366,7 +368,7 @@ function QueuedMessageRow({ kind, text, label, index, total, onMove, onRecall, o
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelScopeWarnings, onModelChange,
+  onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, modelScopeWarnings, onModelChange,
   compactResult, toolPreset, onToolPresetChange, planMode = false, onPlanModeChange,
   collaborationMode = "normal", tokenMode = "full", toolApprovalMode = "auto",
   onCollaborationModeChange, onTokenModeChange, onToolApprovalModeChange,
@@ -420,6 +422,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const nextPasteIdRef = useRef(0);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  // 当前 OpenCode Zen 激活账号的备注名，显示在模型下拉的网关分组标题里，
+  // 让使用中的模型一眼看出走的是哪个导入账号。
+  const [zenActiveNote, setZenActiveNote] = useState<string | null>(null);
   const [viewport, setViewport] = useState({ height: 0, width: 0, offsetTop: 0 });
   const [modelSearch, setModelSearch] = useState("");
   const [favorites, setFavorites] = useState<Set<string>>(() => {
@@ -833,6 +838,64 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     setAtQuery(extractAtQuery(text.slice(0, pos)));
   }, [cwd]);
 
+  // ── `#` snippet autocomplete ─────────────────────────────────────────────
+  const [snippetQuery, setSnippetQuery] = useState<SnippetQueryMatch | null>(null);
+  const snippetQueryRef = useRef(snippetQuery);
+  snippetQueryRef.current = snippetQuery;
+  const [snippets, setSnippets] = useState<SnippetItem[]>([]);
+  const snippetsLoadedRef = useRef(false);
+  const loadSnippets = useCallback(async () => {
+    try {
+      const response = await fetch("/api/snippets");
+      if (!response.ok) return;
+      const data = await response.json() as { snippets?: SnippetItem[] };
+      setSnippets(data.snippets ?? []);
+      snippetsLoadedRef.current = true;
+    } catch {
+      // Snippets unavailable — `#` simply does not autocomplete.
+    }
+  }, []);
+  useEffect(() => {
+    void loadSnippets();
+    const onChanged = () => void loadSnippets();
+    window.addEventListener("pi:snippets-changed", onChanged);
+    return () => window.removeEventListener("pi:snippets-changed", onChanged);
+  }, [loadSnippets]);
+
+  const snippetQueryText = snippetQuery?.query ?? null;
+  const snippetMatches = React.useMemo(() => {
+    if (snippetQueryText === null || snippetsLoadedRef.current === false) return [];
+    const q = snippetQueryText.toLowerCase();
+    return snippets.filter((s) => s.name.toLowerCase().includes(q));
+  }, [snippetQueryText, snippets]);
+  const [snippetActiveIndex, setSnippetActiveIndex] = useState(0);
+  useEffect(() => { setSnippetActiveIndex(0); }, [snippetQueryText]);
+
+  const updateSnippetQuery = useCallback((text: string, cursor: number | null) => {
+    const pos = cursor ?? text.length;
+    const match = extractSnippetQuery(text.slice(0, pos));
+    setSnippetQuery(match);
+    if (match) setSnippetActiveIndex(0);
+  }, []);
+
+  const applySnippet = useCallback((snippet: SnippetItem) => {
+    const q = snippetQueryRef.current;
+    if (!q) return;
+    const before = value.slice(0, q.start);
+    const after = value.slice(q.end);
+    setValue(before + snippet.content + after);
+    setSnippetQuery(null);
+    const target = before.length + snippet.content.length;
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) { ta.focus(); ta.setSelectionRange(target, target); }
+    });
+  }, [value]);
+  const applySnippetAt = useCallback((index: number) => {
+    const snippet = snippetMatches[index];
+    if (snippet) applySnippet(snippet);
+  }, [snippetMatches, applySnippet]);
+
   const atQueryText = atQuery?.query ?? null;
   const atLocalMatches: FileIndexEntry[] = React.useMemo(() => (
     atQueryText !== null && fileIndex && fileIndex.cwd === cwd
@@ -1226,6 +1289,30 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
 
+      // `#` snippet menu — same navigation as @.
+      if (snippetQuery !== null && snippetMatches.length > 0 && !isComposing) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSnippetActiveIndex((i) => Math.min(Math.max(0, snippetMatches.length - 1), i + 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSnippetActiveIndex((i) => Math.max(0, i - 1));
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSnippetQuery(null);
+          return;
+        }
+        if ((e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) && snippetMatches[snippetActiveIndex]) {
+          e.preventDefault();
+          applySnippetAt(snippetActiveIndex);
+          return;
+        }
+      }
+
       if (e.key === "ArrowUp" && !isComposing && !isStreaming && (inputHistory?.length ?? 0) > 0 && value.trim().length === 0) {
         e.preventDefault();
         setSlashMenuOpen(false);
@@ -1257,7 +1344,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
     },
-    [isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, inputShortcut, cwd, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+    [isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, snippetQuery, snippetMatches, snippetActiveIndex, applySnippetAt, inputShortcut, cwd, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
   const handleInput = useCallback(() => {
@@ -1394,6 +1481,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   // Plan mode is driven by the attach menu, not the preset dropdown — show its
   // own label while keeping the dropdown's three options untouched.
   const toolPresetLabel = toolPreset === "plan" ? t("desktop.planModeLabel") : toolPresetLabels[toolPresetKey ?? "default"];
+  // Tools preset switcher is hidden unless plan mode is active (sessions
+  // default to ALL tools; users asked not to see the switcher). Use a plain
+  // boolean so TypeScript does not narrow toolPreset inside the dropdown.
+  const showToolPresetSwitcher = toolPreset === "plan";
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -1419,10 +1510,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, []);
 
   // Keep fixed selector panels anchored to the visual viewport while a mobile
-  // keyboard changes its height. Without a reactive viewport value, the panel
-  // can keep its old geometry until another unrelated state update occurs.
+  // keyboard changes its height. WebKit can dispatch resize before the restored
+  // height is observable, so read it on the next animation frame.
   useEffect(() => {
+    let frameId: number | null = null;
     const updateViewport = () => {
+      frameId = null;
       const visualViewport = window.visualViewport;
       setViewport({
         height: visualViewport?.height ?? window.innerHeight,
@@ -1430,14 +1523,25 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         offsetTop: visualViewport?.offsetTop ?? 0,
       });
     };
-    updateViewport();
-    window.addEventListener("resize", updateViewport);
-    window.visualViewport?.addEventListener("resize", updateViewport);
-    window.visualViewport?.addEventListener("scroll", updateViewport);
+    const scheduleViewportUpdate = () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateViewport);
+    };
+    scheduleViewportUpdate();
+    window.addEventListener("resize", scheduleViewportUpdate);
+    window.visualViewport?.addEventListener("resize", scheduleViewportUpdate);
+    window.visualViewport?.addEventListener("scroll", scheduleViewportUpdate);
+    window.addEventListener("focusin", scheduleViewportUpdate);
+    window.addEventListener("focusout", scheduleViewportUpdate);
+    window.addEventListener("pageshow", scheduleViewportUpdate);
     return () => {
-      window.removeEventListener("resize", updateViewport);
-      window.visualViewport?.removeEventListener("resize", updateViewport);
-      window.visualViewport?.removeEventListener("scroll", updateViewport);
+      window.removeEventListener("resize", scheduleViewportUpdate);
+      window.visualViewport?.removeEventListener("resize", scheduleViewportUpdate);
+      window.visualViewport?.removeEventListener("scroll", scheduleViewportUpdate);
+      window.removeEventListener("focusin", scheduleViewportUpdate);
+      window.removeEventListener("focusout", scheduleViewportUpdate);
+      window.removeEventListener("pageshow", scheduleViewportUpdate);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
     };
   }, []);
 
@@ -1446,6 +1550,52 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   useEffect(() => {
     if (modelDropdownOpen) modelSearchRef.current?.focus();
   }, [modelDropdownOpen]);
+
+  // Refresh the active Zen account label whenever the model dropdown opens,
+  // so a manual account switch (or a 429 rotation) is reflected immediately.
+  useEffect(() => {
+    if (!modelDropdownOpen) return;
+    let cancelled = false;
+    fetch("/api/opencode-zen")
+      .then((response) => response.ok ? response.json() as Promise<{ accounts?: Array<{ id: string; note: string }>; activeAccountId?: string }> : null)
+      .then((data) => {
+        if (cancelled || !data) return;
+        setZenActiveNote(data.accounts?.find((account) => account.id === data.activeAccountId)?.note ?? null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [modelDropdownOpen]);
+
+  // ── Task status row (input-bar summary) ───────────────────────────────────
+  // Mirrors OpenChamber's StatusRow: a compact strip of active work. Reads the
+  // project's task board for the current cwd and refreshes on task changes.
+  const [taskStats, setTaskStats] = useState<{ running: number; todo: number } | null>(null);
+  useEffect(() => {
+    if (!cwd) { setTaskStats(null); return; }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const projectsRes = await fetch("/api/tasks/projects");
+        const { projects } = await projectsRes.json() as { projects: string[] };
+        const root = (projects as string[]).find(
+          (p) => cwd === p || cwd.startsWith(p + "/") || p.startsWith(cwd + "/"),
+        );
+        if (!root) { if (!cancelled) setTaskStats(null); return; }
+        const tasks = await listTasks(root);
+        if (cancelled) return;
+        setTaskStats({
+          running: tasks.filter((t) => ["running", "awaiting_input", "preparing", "merging"].includes(t.status)).length,
+          todo: tasks.filter((t) => ["todo", "queued"].includes(t.status)).length,
+        });
+      } catch {
+        if (!cancelled) setTaskStats(null);
+      }
+    };
+    void load();
+    const source = new EventSource("/api/tasks/events");
+    source.onmessage = () => void load();
+    return () => { cancelled = true; source.close(); };
+  }, [cwd]);
 
 
 
@@ -1473,6 +1623,32 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }}
       />
       <div style={{ maxWidth: 820, margin: "0 auto" }}>
+        {taskStats && (taskStats.running > 0 || taskStats.todo > 0) && (
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("pi:open-tasks-view"))}
+            title={t("desktop.taskStatusHint")}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              marginBottom: 8,
+              padding: "3px 10px",
+              borderRadius: 999,
+              border: "1px solid var(--border)",
+              background: "var(--bg-panel)",
+              color: "var(--text-muted)",
+              fontSize: 11,
+              cursor: "pointer",
+              transition: "border-color 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+          >
+            <StackIcon size={12} aria-hidden="true" />
+            {taskStats.running > 0 && <span style={{ color: "var(--accent)" }}>{taskStats.running} {t("desktop.taskRunning")}</span>}
+            {taskStats.running > 0 && taskStats.todo > 0 && <span aria-hidden="true">·</span>}
+            {taskStats.todo > 0 && <span>{taskStats.todo} {t("desktop.taskTodo")}</span>}
+          </button>
+        )}
         {modelScopeWarnings && modelScopeWarnings.length > 0 && (
           <div
             role="status"
@@ -1911,6 +2087,61 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             );
           })()}
+          {snippetQuery !== null && snippetMatches.length > 0 && (
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: "calc(100% + 8px)",
+                zIndex: 120,
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                boxShadow: "0 -6px 20px rgba(0,0,0,0.12)",
+                overflow: "hidden",
+                maxHeight: "min(30vh, 240px)",
+              }}
+            >
+              <div
+                style={{
+                  padding: "4px 8px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600 }}>
+                  {snippetMatches.length} {t("desktop.snippetMatches")}
+                </span>
+              </div>
+              <div style={{ maxHeight: "min(26vh, 210px)", overflowY: "auto" }}>
+                {snippetMatches.map((snippet, index) => (
+                  <button
+                    key={snippet.id}
+                    type="button"
+                    onMouseEnter={() => setSnippetActiveIndex(index)}
+                    onClick={() => applySnippetAt(index)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8, width: "100%",
+                      padding: "6px 10px",
+                      background: index === snippetActiveIndex ? "var(--bg-selected)" : "none",
+                      border: "none",
+                      color: index === snippetActiveIndex ? "var(--accent)" : "var(--text)",
+                      cursor: "pointer", fontSize: 12, textAlign: "left",
+                    }}
+                  >
+                    <span style={{ color: "var(--accent)", fontFamily: "var(--font-mono)", fontSize: 11 }}>#</span>
+                    <span style={{ fontWeight: 600, flexShrink: 0 }}>{snippet.name}</span>
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-muted)", fontSize: 11 }}>
+                      {snippet.content.split("\n")[0]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div
             className={`chat-input-shell ${isStreaming && (onSteer || onFollowUp) ? "is-streaming" : ""} ${toolApprovalMode === "yolo" ? "is-yolo" : ""}`}
             onClick={(e) => {
@@ -2104,6 +2335,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             onChange={(e) => {
               setValue(e.target.value);
               updateAtQuery(e.target.value, e.target.selectionStart);
+              updateSnippetQuery(e.target.value, e.target.selectionStart);
             }}
             onSelect={(e) => {
               const el = e.currentTarget;
@@ -2400,7 +2632,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   })()}
               </div>
             )}
-            {onToolPresetChange && toolPreset !== "full" && (
+            {/* Tools preset: hidden unless plan mode is active (sessions
+                default to ALL tools; users asked not to see the switcher). */}
+            {onToolPresetChange && showToolPresetSwitcher && (
               <div ref={toolDropdownRef} className="chat-input-toolbar-tools" style={{ position: "relative" }}>                <button
                   onClick={(e) => { if (isStreaming) return; const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setToolDropdownRect({ top: rect.top, left: rect.left, width: rect.width }); setToolDropdownOpen((v) => !v); }}
                   disabled={isStreaming}
@@ -2457,7 +2691,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   }}>
                     {TOOL_PRESETS.map((lvl) => {
                       const preset = TOOL_PRESET_MAP[lvl];
-                      const isActive = (toolPreset ?? "default") === preset;
+                      const isActive = toolPreset !== "plan" && (toolPreset ?? "default") === preset;
                       const desc = lvl === "off" ? t("desktop.noToolsReadOnly") : lvl === "default" ? t("desktop.fourBuiltInTools") : t("desktop.allBuiltInTools");
                       return (
                         <button
@@ -2505,7 +2739,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       padding: isMobile ? "4px 6px" : "3px 7px",
                       height: 24,
                       width: isMobile ? "100%" : undefined,
-                      maxWidth: isMobile ? "100%" : 220,
+                      maxWidth: isMobile ? "100%" : "min(220px, 34vw)",
                       overflow: "hidden",
                       background: modelDropdownOpen ? "var(--bg-hover)" : "none",
                       border: "none",
@@ -2657,7 +2891,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                                 style={{ display: "flex", alignItems: "center", width: "100%" }}
                               >
                                 <button
-                                  onClick={() => { setModelDropdownOpen(false); if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId); }}
+                                  onClick={() => { setModelDropdownOpen(false); onModelChange(opt.provider, opt.modelId); }}
                                   style={{
                                     display: "flex", alignItems: "center", gap: 8,
                                     flex: 1, minWidth: 0,
@@ -2710,20 +2944,29 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         <div key={group.provider}>
                           <button
                             onClick={() => toggleProviderExpand(group.provider)}
+                            title={group.provider === "opencode" || group.provider === "opencode-go"
+                              ? (zenActiveNote ? `OpenCode Zen · ${zenActiveNote}` : group.provider)
+                              : group.provider}
                             style={{
                               display: "flex", alignItems: "center", gap: 4,
-                              width: "100%", padding: "6px 12px 4px",
+                              width: "100%", maxWidth: "100%", padding: "6px 12px 4px",
                               background: "none", border: "none",
                               cursor: "pointer",
                               fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
                               textTransform: "uppercase", letterSpacing: "0.07em",
+                              overflow: "hidden",
+                              whiteSpace: "nowrap",
                               borderTop: gi > 0 ? "1px solid var(--border)" : "none",
                             }}
                             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
                             onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
                           >
                             {caret}
-                            {group.provider}
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+                            {group.provider === "opencode" || group.provider === "opencode-go"
+                              ? `OpenCode Zen${zenActiveNote ? ` · 账号：${zenActiveNote}` : ""}`
+                              : group.provider}
+                            </span>
                           </button>
                           {isExpanded && group.options.map((opt) => {
                             const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;
@@ -2735,7 +2978,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                                 style={{ display: "flex", alignItems: "center", width: "100%" }}
                               >
                                 <button
-                                  onClick={() => { setModelDropdownOpen(false); if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId); }}
+                                  onClick={() => { setModelDropdownOpen(false); onModelChange(opt.provider, opt.modelId); }}
                                   style={{
                                     display: "flex", alignItems: "center", gap: 8,
                                     flex: 1, minWidth: 0,

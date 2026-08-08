@@ -1,0 +1,41 @@
+{
+  "displayName": "Monokai",
+  "dark": {
+    "bg": "#23241e",
+    "panel": "#21221a",
+    "hover": "#282a20",
+    "selected": "#303126",
+    "border": "#343528",
+    "text": "#f8f8f2",
+    "muted": "#939390",
+    "dim": "#939390",
+    "accent": "#ae81ff",
+    "accentHover": "#9973dd",
+    "userBg": "#36372a",
+    "assistantBg": "#23241e",
+    "toolBg": "#27281f",
+    "subtle": "#303126",
+    "red": "#f92672",
+    "green": "#a6e22e",
+    "orange": "#fd971f"
+  },
+  "light": {
+    "bg": "#fdf8ec",
+    "panel": "#fbf5e8",
+    "hover": "#f8f2e6",
+    "selected": "#f7efdd",
+    "border": "#e9e0cf",
+    "text": "#292318",
+    "muted": "#887c6a",
+    "dim": "#887c6a",
+    "accent": "#bf7bff",
+    "accentHover": "#cb94fb",
+    "userBg": "#f8f2e6",
+    "assistantBg": "#fdf8ec",
+    "toolBg": "#f8f2e6",
+    "subtle": "#f7efdd",
+    "red": "#e54b4b",
+    "green": "#4fb54b",
+    "orange": "#f1a948"
+  }
+}

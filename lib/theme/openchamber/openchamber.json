@@ -1,0 +1,41 @@
+{
+  "displayName": "OpenChamber",
+  "dark": {
+    "bg": "#120f0e",
+    "panel": "#181715",
+    "hover": "#171615",
+    "selected": "#171616",
+    "border": "#242323",
+    "text": "#c9c5ba",
+    "muted": "#8f8b81",
+    "dim": "#8f8b81",
+    "accent": "#da7c47",
+    "accentHover": "#eb8c57",
+    "userBg": "#25170e",
+    "assistantBg": "#120f0e",
+    "toolBg": "#120f0e",
+    "subtle": "#171616",
+    "red": "#da5b4a",
+    "green": "#76ad4f",
+    "orange": "#c67f13"
+  },
+  "light": {
+    "bg": "#fdfcfa",
+    "panel": "#f8f7f5",
+    "hover": "#f7f6f4",
+    "selected": "#f7f6f4",
+    "border": "#e5e1de",
+    "text": "#393a34",
+    "muted": "#5c5c54",
+    "dim": "#5c5c54",
+    "accent": "#b35017",
+    "accentHover": "#9a4310",
+    "userBg": "#f7f2ee",
+    "assistantBg": "#fdfcfa",
+    "toolBg": "#efeeec",
+    "subtle": "#f7f6f4",
+    "red": "#b7493f",
+    "green": "#5f8d3d",
+    "orange": "#8d6c15"
+  }
+}

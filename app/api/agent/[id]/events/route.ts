@@ -1,4 +1,4 @@
-import { resolveSessionPath } from "@/lib/session-reader";
+import { invalidateSessionListCache, resolveSessionPath } from "@/lib/session-reader";
 import { getRpcSession, startRpcSession, type AgentEvent } from "@/lib/rpc-manager";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +57,9 @@ export async function GET(
 
       // Send initial connected event
       encode({ type: "connected", sessionId: id });
+      void session.send({ type: "get_state" }).then((state) => {
+        try { encode({ type: "state_sync", sessionId: id, state }); } catch { /* controller already closed */ }
+      }).catch(() => {});
 
       // --- Coalescing buffer for message_update events ---
       // Each message_update carries the full accumulated message. During
@@ -81,6 +84,9 @@ export async function GET(
       }
 
       const unsubscribe = session.onEvent((event) => {
+        if (event.type === "message_end" || event.type === "tool_execution_end" || event.type === "agent_end") {
+          invalidateSessionListCache();
+        }
         const clientEvent = toClientEvent(event);
         if (!clientEvent) return;
 

@@ -1,0 +1,41 @@
+{
+  "displayName": "Mono Plus",
+  "dark": {
+    "bg": "#000000",
+    "panel": "#141414",
+    "hover": "#0a0a0a",
+    "selected": "#1a1a1a",
+    "border": "#2f2f2f",
+    "text": "#e5e5e5",
+    "muted": "#808080",
+    "dim": "#808080",
+    "accent": "#a2bee8",
+    "accentHover": "#e5e5e5",
+    "userBg": "#1a1a1a",
+    "assistantBg": "#000000",
+    "toolBg": "#0a0a0a",
+    "subtle": "#1a1a1a",
+    "red": "#9e6a6a",
+    "green": "#6a8e6a",
+    "orange": "#9e8a6a"
+  },
+  "light": {
+    "bg": "#ffffff",
+    "panel": "#fafafa",
+    "hover": "#f5f5f5",
+    "selected": "#f0f0f0",
+    "border": "#e3e3e3",
+    "text": "#1a1a1a",
+    "muted": "#6f6f6f",
+    "dim": "#6f6f6f",
+    "accent": "#4a6a9e",
+    "accentHover": "#1a1a1a",
+    "userBg": "#e5e5e5",
+    "assistantBg": "#ffffff",
+    "toolBg": "#f5f5f5",
+    "subtle": "#f0f0f0",
+    "red": "#8a5a5a",
+    "green": "#5a7a5a",
+    "orange": "#8a7a5a"
+  }
+}

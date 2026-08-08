@@ -1616,26 +1616,16 @@ export function ModelsConfig({
     return next;
   }, []);
 
-  const loadOAuthProviders = useCallback(() => {
-    fetch("/api/auth/providers")
-      .then((r) => r.json())
-      .then((d: { providers: OAuthProvider[] }) => setOauthProviders(d.providers))
-      .catch(() => {})
-      .finally(() => setProviderListsReady((previous) => ({ ...previous, oauth: true })));
-  }, []);
-
-  const loadApiKeyProviders = useCallback(() => {
-    fetch("/api/auth/all-providers")
-      .then((r) => r.json())
-      .then((d: { providers: ApiKeyProvider[] }) => setApiKeyProviders(d.providers))
-      .catch(() => {})
-      .finally(() => setProviderListsReady((previous) => ({ ...previous, apiKey: true })));
-  }, []);
-
   const refreshAuthenticationProviders = useCallback(() => {
-    loadOAuthProviders();
-    loadApiKeyProviders();
-  }, [loadOAuthProviders, loadApiKeyProviders]);
+    fetch("/api/auth/combined")
+      .then((r) => r.json())
+      .then((d: { oauth?: OAuthProvider[]; apiKey?: ApiKeyProvider[] }) => {
+        setOauthProviders(d.oauth ?? []);
+        setApiKeyProviders(d.apiKey ?? []);
+      })
+      .catch(() => {})
+      .finally(() => setProviderListsReady({ oauth: true, apiKey: true }));
+  }, []);
 
   const registerBuiltinFlush = useCallback<RegisterBuiltinFlush>((providerId, flush) => {
     builtinFlushesRef.current.set(providerId, flush);
@@ -1856,9 +1846,15 @@ export function ModelsConfig({
     ...oauthProviders.map((provider) => provider.id),
     ...apiKeyProviders.map((provider) => provider.id),
   ]);
-  const customProviders = providers.filter(([providerId]) => !builtinProviderIds.has(providerId));
+  // OpenCode Zen has its own account/proxy management panel. Keep it out of
+  // the generic provider editor so users cannot accidentally overwrite the
+  // gateway-managed credentials or endpoint.
+  const customProviders = providers.filter(([providerId]) =>
+    !builtinProviderIds.has(providerId) && providerId !== "opencode" && providerId !== "opencode-go",
+  );
   const activeOAuth = oauthProviders.filter((p) => p.loggedIn);
-  const activeApiKey = apiKeyProviders.filter((p) => p.configured);
+  const visibleApiKeyProviders = apiKeyProviders.filter((p) => p.id !== "opencode" && p.id !== "opencode-go");
+  const activeApiKey = visibleApiKeyProviders.filter((p) => p.configured);
 
   useEffect(() => {
     if (selection || loading || !providerListsReady.oauth || !providerListsReady.apiKey) return;
@@ -2121,7 +2117,7 @@ export function ModelsConfig({
     {pickerOpen && (
       <AddProviderPicker
         oauthProviders={oauthProviders}
-        apiKeyProviders={apiKeyProviders}
+        apiKeyProviders={visibleApiKeyProviders}
         onSelectOAuth={(id) => { void selectSelection({ type: "oauth", providerId: id }); }}
         onSelectApiKey={(id) => { void selectSelection({ type: "apikey", providerId: id }); }}
         onAddCustom={addCustomProvider}

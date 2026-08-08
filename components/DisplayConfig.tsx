@@ -113,14 +113,16 @@ function BorderIcon({ depth }: { depth: number }) {
 
 // ── Variant availability dots ───────────────────────────────────────────────
 
-function VariantDots({ hasDark, hasLight, t }: { hasDark: boolean; hasLight: boolean; t: (key: string) => string }) {
+function VariantDots({ hasDark, hasLight, darkColor, lightColor, t }: {
+  hasDark: boolean; hasLight: boolean; darkColor?: string; lightColor?: string; t: (key: string) => string;
+}) {
   return (
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center", flexShrink: 0 }}>
       {hasDark && (
-        <span title={t("desktop.darkVariant")} style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#7c6f64" }} />
+        <span title={t("desktop.darkVariant")} style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: darkColor ?? "#7c6f64" }} />
       )}
       {hasLight && (
-        <span title={t("desktop.lightVariant")} style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#d5c4a1", border: "1px solid rgba(0,0,0,0.1)" }} />
+        <span title={t("desktop.lightVariant")} style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: lightColor ?? "#d5c4a1", border: "1px solid rgba(0,0,0,0.1)" }} />
       )}
     </span>
   );
@@ -227,7 +229,7 @@ export function DisplayConfig() {
                 onMouseLeave={() => setHoveredTag(null)}
               >
                 {ts.displayName}
-                <VariantDots hasDark={ts.hasDark} hasLight={ts.hasLight} t={t} />
+                <VariantDots hasDark={ts.hasDark} hasLight={ts.hasLight} darkColor={ts.accent} lightColor={ts.accentLight} t={t} />
               </button>
             ))}
           </div>

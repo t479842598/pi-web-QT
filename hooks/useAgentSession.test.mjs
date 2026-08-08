@@ -26,7 +26,7 @@ test("keeps the session event stream open through the idle grace window", () => 
     source.indexOf('case "prompt_done"'),
   );
 
-  assert.match(source, /const EVENT_STREAM_IDLE_GRACE_MS = 30_000/);
+  assert.match(source, /const EVENT_STREAM_IDLE_GRACE_MS = 120_000/);
   assert.match(graceSource, /setTimeout\(\(\) => void checkServerIdle\(\), EVENT_STREAM_IDLE_GRACE_MS\)/);
   assert.match(graceSource, /fetch\(`\/api\/agent\/\$\{encodeURIComponent\(sid\)\}`\)/);
   assert.match(graceSource, /closeEvents\(\)/);
@@ -98,4 +98,65 @@ test("coalesces streaming message snapshots and drops stale queued updates", () 
   assert.match(agentStartSource, /resetStreamUpdates\(\)/);
   assert.match(agentEndSource, /resetStreamUpdates\(\)/);
   assert.match(updatesSource, /resetStreamUpdates\(\);\s*dispatch\(\{ type: "reset"/s);
+});
+
+test("new chats initialize mode defaults from the cached system settings", () => {
+  assert.match(source, /readCachedGlobalModeSettings\(\) \?\? defaultModeSettings\(\)/);
+  assert.match(source, /cacheGlobalModeSettings\(next\)/);
+  assert.match(source, /if \(!sessionId\) cacheGlobalModeSettings/);
+});
+
+test("guards model list writes by request generation and context", () => {
+  const loadSource = source.slice(
+    source.indexOf("const loadModels = useCallback"),
+    source.indexOf("const handleBuiltinSlashCommand"),
+  );
+  assert.match(loadSource, /modelLoadGenerationRef/);
+  assert.match(loadSource, /modelLoadAbortRef/);
+  assert.match(loadSource, /requestContextKey/);
+  assert.match(loadSource, /generation !== modelLoadGenerationRef\.current/);
+  assert.match(loadSource, /requestContextKey !== modelContextKeyRef\.current/);
+  assert.match(loadSource, /signal: controller\.signal/);
+});
+
+test("consumes global /api/events bus for the current session when direct SSE is closed", () => {
+  const busSource = source.slice(
+    source.indexOf("// Cross-client message sync."),
+    source.indexOf("const handleSend = useCallback"),
+  );
+  assert.match(busSource, /new EventSource\("\/api\/events"\)/);
+  assert.match(busSource, /data\.sessionId !== sessionIdRef\.current/);
+  assert.match(busSource, /eventSourceRef\.current\?\.readyState === EventSource\.OPEN/);
+  assert.match(busSource, /handleAgentEventRef\.current\?\.\(data\.payload as AgentEvent\)/);
+});
+
+test("mode instruction block injects once per mode composition", () => {
+  const handleSendSource = source.slice(
+    source.indexOf("// Plan mode prefixes every prompt"),
+    source.indexOf("const imageBlocks = images?.map"),
+  );
+  // The block is only prepended when the session-scoped signature has not been
+  // injected yet for this conversation and this mode composition.
+  assert.match(handleSendSource, /injectedModeSignatureRef\.current\.sessionKey !== sessionKey/);
+  assert.match(handleSendSource, /injectedModeSignatureRef\.current\.signature !== modeSignature/);
+  assert.match(handleSendSource, /combinedBlock && \(injectedModeSignatureRef\.current\.sessionKey !== sessionKey/);
+  assert.match(handleSendSource, /injectedModeSignatureRef\.current = \{ sessionKey, signature: modeSignature \}/);
+  assert.match(handleSendSource, /effectiveMessage = message/);
+  assert.match(handleSendSource, /const sessionKey = session\?\.id \?\? "new"/);
+  // Mode composition changes reset the signature so a fresh block can apply.
+  assert.match(source, /injectedModeSignatureRef\.current = \{ sessionKey: "", signature: "" \}/);
+});
+
+test("non-empty queue_update schedules a get_state reconcile (self-heal missed drain)", () => {
+  const queueCase = source.slice(
+    source.indexOf('case "queue_update":'),
+    source.indexOf('case "state_sync":'),
+  );
+  assert.match(queueCase, /scheduleQueueReconcile\(\)/);
+  assert.match(queueCase, /clearQueueReconcile\(\)/);
+  assert.match(source, /const scheduleQueueReconcile = useCallback/);
+  assert.match(source, /queueReconcileTimerRef\.current = setTimeout/);
+  // The reconcile reads back get_state and overwrites queuedMessages.
+  assert.match(source, /data\.state\?\.queuedMessages !== undefined/);
+  assert.match(source, /setQueuedMessages\(normalizeQueuedMessages\(data\.state\.queuedMessages\)\)/);
 });

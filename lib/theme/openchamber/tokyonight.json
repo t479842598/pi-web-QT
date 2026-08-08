@@ -1,0 +1,41 @@
+{
+  "displayName": "Tokyonight",
+  "dark": {
+    "bg": "#0f111a",
+    "panel": "#131629",
+    "hover": "#111428",
+    "selected": "#15192b",
+    "border": "#2d2f43",
+    "text": "#c0caf5",
+    "muted": "#8890b3",
+    "dim": "#8890b3",
+    "accent": "#7aa2f7",
+    "accentHover": "#6a8cd6",
+    "userBg": "#171b30",
+    "assistantBg": "#0f111a",
+    "toolBg": "#111428",
+    "subtle": "#15192b",
+    "red": "#f7768e",
+    "green": "#9ece6a",
+    "orange": "#e0af68"
+  },
+  "light": {
+    "bg": "#e1e2e7",
+    "panel": "#dee0ee",
+    "hover": "#dee0ea",
+    "selected": "#dadce6",
+    "border": "#c7c9d3",
+    "text": "#273153",
+    "muted": "#686e9b",
+    "dim": "#686e9b",
+    "accent": "#2e7de9",
+    "accentHover": "#5291e9",
+    "userBg": "#dcdee9",
+    "assistantBg": "#e1e2e7",
+    "toolBg": "#dee0ea",
+    "subtle": "#dadce6",
+    "red": "#c94060",
+    "green": "#587539",
+    "orange": "#8c6c3e"
+  }
+}

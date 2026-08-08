@@ -31,6 +31,7 @@ import {
 } from "@/lib/panel-layout";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
+import { samePath } from "@/lib/paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import type { SessionInfo } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
@@ -286,7 +287,7 @@ export function AppShell() {
     // within the same project (e.g. switching worktree, or clicking a session
     // that lives in another worktree) must not close the open session.
     const newProject = projectRoot ?? cwd;
-    if (selectedSession && (selectedSession.projectRoot ?? selectedSession.cwd) === newProject) {
+    if (selectedSession && samePath(selectedSession.projectRoot ?? selectedSession.cwd, newProject)) {
       return;
     }
     // Close any session that belongs to a different project — it no longer
@@ -308,6 +309,16 @@ export function AppShell() {
   }, [activeCwd]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
+    if (!isRestore && selectedSession) {
+      const sameProject = samePath(
+        selectedSession.projectRoot ?? selectedSession.cwd,
+        session.projectRoot ?? session.cwd,
+      );
+      if (selectedSession.id === session.id && sameProject) {
+        if (isMobile) setSidebarOpen(false);
+        return;
+      }
+    }
     setNewSessionCwd(null);
     setSelectedSession(session);
     setSessionKey((k) => k + 1);
@@ -327,7 +338,7 @@ export function AppShell() {
     if (!isRestore) {
       window.history.replaceState(null, "", `?session=${encodeURIComponent(session.id)}`);
     }
-  }, [router, isMobile]);
+  }, [isMobile, selectedSession]);
 
   const handleNewSession = useCallback((_sessionId: string, cwd: string) => {
     setSelectedSession(null);
@@ -380,10 +391,9 @@ export function AppShell() {
     // The session file is written asynchronously by the agent backend, so a
     // list refresh right now may scan before the file exists and the sidebar
     // keeps showing the old list (or "no sessions") until the cache expires.
-    // Re-trigger the list refresh after the file has had time to land so the
-    // new session appears promptly. 6s clears the 5s list cache AND gives the
-    // backend enough time to flush the session file with its first message.
-    window.setTimeout(() => setRefreshKey((k) => k + 1), 6000);
+    // Keep a delayed retry for filesystems where the first assistant entry is
+    // flushed after the optimistic session promotion.
+    window.setTimeout(() => setRefreshKey((k) => k + 1), 1200);
   }, [router, hydrateSelectedSession]);
 
   const handleAgentEnd = useCallback(() => {
@@ -583,7 +593,11 @@ export function AppShell() {
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
         onOpenFile={handleOpenFile}
-        onOpenSettings={(tab) => openSettings(tab === "models" ? "models" : (tab === "chat" ? "chat" : "models"))}
+        selectedSessionStats={sessionStats}
+        onOpenSettings={(tab) => {
+          const supported: SettingsTab[] = ["models", "skills", "plugins", "opencode-zen", "chat", "features", "logs"];
+          openSettings(supported.includes(tab as SettingsTab) ? tab as SettingsTab : "models");
+        }}
         explorerRefreshKey={explorerRefreshKey}
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}

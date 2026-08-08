@@ -44,11 +44,30 @@ export function invalidateModelsCache(): void {
 export function loadModelsWithCache(cwd: string, loader: () => Promise<ModelsData>): Promise<ModelsData> {
   const state = getModelsCacheState();
   const cached = state.entries.get(cwd);
+  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.data);
+
+  // Stale-while-revalidate: return the last known list immediately and let a
+  // single shared refresh update the cache for the next caller. The refresh is
+  // intentionally detached from the returned promise so an upstream outage
+  // cannot replace usable stale data with an error in the current render.
   if (cached) {
-    if (cached.expiresAt > Date.now()) return Promise.resolve(cached.data);
-    state.entries.delete(cwd);
+    if (!state.inFlight.has(cwd)) {
+      void startModelsLoad(state, cwd, loader).catch(() => {});
+    }
+    return Promise.resolve(cached.data);
   }
 
+  const existingLoad = state.inFlight.get(cwd);
+  if (existingLoad) return existingLoad;
+
+  return startModelsLoad(state, cwd, loader);
+}
+
+function startModelsLoad(
+  state: ModelsCacheState,
+  cwd: string,
+  loader: () => Promise<ModelsData>,
+): Promise<ModelsData> {
   const existingLoad = state.inFlight.get(cwd);
   if (existingLoad) return existingLoad;
 

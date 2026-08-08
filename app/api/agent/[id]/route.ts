@@ -27,6 +27,20 @@ export async function POST(
       return NextResponse.json({ success: true, data: result });
     }
 
+    // Abort-style commands only make sense for a live session. When the wrapper
+    // is gone (idle-reaped) there is nothing to stop, so answer immediately
+    // instead of paying a full cold start (~20s model listing) just to abort.
+    if (body.type === "abort" || body.type === "abort_bash") {
+      return NextResponse.json({ success: true, data: null });
+    }
+
+    // NOTE: clear_queue intentionally does NOT take the abort-style shortcut.
+    // The wrapper's clear_queue clears the live queue AND returns the cleared
+    // messages so the client can restore them into the input (handleRecallQueue
+    // reads result.steering/followUp). Returning null here would silently
+    // discard the queue text. Cold start is cheap now (~2s with the model
+    // cache), so always rebuild the wrapper for clear_queue.
+
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });

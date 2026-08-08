@@ -43,6 +43,10 @@ export interface ThemeSetInfo {
   hasLight: boolean;
   /** True for the built-in default theme (no JSON files). */
   builtin: boolean;
+  /** Dark variant accent (primary) color — theme swatch dot. */
+  accent?: string;
+  /** Light variant accent (primary) color — theme swatch dot. */
+  accentLight?: string;
 }
 
 /** A resolved, ready-to-use theme (one variant of a set). */
@@ -123,10 +127,53 @@ const BUILTIN_THEME_SETS: Record<string, BuiltinThemeSet> = {
   },
 };
 
+// ─── OpenChamber built-in themes ────────────────────────────────────────────
+
+const OPENCHAMBER_THEMES_DIR = join(process.cwd(), "lib", "theme", "openchamber");
+
+/**
+ * Load the OpenChamber themes converted by scripts/convert-openchamber-theme.cjs.
+ * Each file is a BuiltinThemeSet ({ displayName, light, dark }) so the existing
+ * resolve/list paths can treat them identically to the QT themes.
+ */
+function loadOpenChamberThemeSets(): Record<string, BuiltinThemeSet> {
+  const result: Record<string, BuiltinThemeSet> = {};
+  try {
+    if (!existsSync(OPENCHAMBER_THEMES_DIR)) return result;
+    for (const entry of readdirSync(OPENCHAMBER_THEMES_DIR)) {
+      if (!entry.endsWith(".json")) continue;
+      const fullPath = join(OPENCHAMBER_THEMES_DIR, entry);
+      try {
+        const parsed = JSON.parse(readFileSync(fullPath, "utf8")) as BuiltinThemeSet;
+        if (!parsed || typeof parsed !== "object") continue;
+        result[basename(entry, ".json")] = parsed;
+      } catch {
+        // Skip malformed converted themes.
+      }
+    }
+  } catch {
+    // Directory missing — no OpenChamber themes.
+  }
+  return result;
+}
+
+const OPENCHAMBER_THEME_SETS = loadOpenChamberThemeSets();
+
+/**
+ * All built-in themes. Existing QT themes win on name collisions so users who
+ * already selected e.g. "gruvbox" keep the familiar QT palette; OpenChamber
+ * themes fill in every name the QT set does not provide.
+ */
+const ALL_BUILTIN_THEME_SETS: Record<string, BuiltinThemeSet> = {
+  ...OPENCHAMBER_THEME_SETS,
+  ...BUILTIN_THEME_SETS,
+};
+
 function resolveBuiltinTheme(name: string, variant: ThemeVariant): ResolvedTheme | null {
-  const theme = BUILTIN_THEME_SETS[name];
+  const theme = ALL_BUILTIN_THEME_SETS[name];
   if (!theme) return null;
   const colors = theme[variant];
+  if (!colors) return null;
   const cssVars: Record<string, string> = {
     "--bg": colors.bg,
     "--bg-panel": colors.panel,
@@ -157,6 +204,26 @@ function resolveBuiltinTheme(name: string, variant: ThemeVariant): ResolvedTheme
     "--assistant-bg": colors.assistantBg,
     "--tool-bg": colors.toolBg,
     "--hatch-color": colors.subtle,
+    // Semantic status tokens
+    "--status-error": colors.red,
+    "--status-warning": colors.orange,
+    "--status-success": colors.green,
+    "--status-info": colors.accent,
+    "--status-error-bg": `color-mix(in srgb, ${colors.red} 14%, var(--bg))`,
+    "--status-warning-bg": `color-mix(in srgb, ${colors.orange} 14%, var(--bg))`,
+    "--status-success-bg": `color-mix(in srgb, ${colors.green} 14%, var(--bg))`,
+    "--status-info-bg": `color-mix(in srgb, ${colors.accent} 14%, var(--bg))`,
+    "--status-error-border": `color-mix(in srgb, ${colors.red} 45%, var(--bg))`,
+    "--status-warning-border": `color-mix(in srgb, ${colors.orange} 45%, var(--bg))`,
+    "--status-success-border": `color-mix(in srgb, ${colors.green} 45%, var(--bg))`,
+    "--status-info-border": `color-mix(in srgb, ${colors.accent} 45%, var(--bg))`,
+    // Syntax highlighting tokens (derived from the palette; OpenChamber themes
+    // override via their converted syntax colors).
+    "--syntax-keyword": colors.accent,
+    "--syntax-string": colors.orange,
+    "--syntax-number": colors.accent,
+    "--syntax-function": colors.accent,
+    "--syntax-comment": colors.dim,
   };
   return { name, isDark: variant === "dark", cssVars };
 }
@@ -429,6 +496,30 @@ function mapToCssVars(
     ? `rgba(${hexToRgb(accent)?.join(",") || "100,193,182"},0.16)`
     : `rgba(${hexToRgb(accent)?.join(",") || "13,148,136"},0.12)`;
 
+  // Semantic status tokens (pi CLI colors.error/success/warning, fallback to
+  // accent-derived defaults so the default theme never renders with empty vars)
+  css["--status-error"] = error;
+  css["--status-warning"] = warning;
+  css["--status-success"] = success;
+  css["--status-info"] = accent;
+  css["--status-error-bg"] = `color-mix(in srgb, ${error} 14%, var(--bg))`;
+  css["--status-warning-bg"] = `color-mix(in srgb, ${warning} 14%, var(--bg))`;
+  css["--status-success-bg"] = `color-mix(in srgb, ${success} 14%, var(--bg))`;
+  css["--status-info-bg"] = `color-mix(in srgb, ${accent} 14%, var(--bg))`;
+  css["--status-error-border"] = `color-mix(in srgb, ${error} 45%, var(--bg))`;
+  css["--status-warning-border"] = `color-mix(in srgb, ${warning} 45%, var(--bg))`;
+  css["--status-success-border"] = `color-mix(in srgb, ${success} 45%, var(--bg))`;
+  css["--status-info-border"] = `color-mix(in srgb, ${accent} 45%, var(--bg))`;
+
+  // Syntax tokens: pi CLI themes use camelCase syntaxKeyword/... tokens;
+  // the OpenChamber adapter fills short keyword/string/... names. Read both
+  // so every theme format colors code highlighting.
+  css["--syntax-keyword"] = colors.syntaxKeyword || colors.keyword || accent;
+  css["--syntax-string"] = colors.syntaxString || colors.string || orange;
+  css["--syntax-number"] = colors.syntaxNumber || colors.number || accent;
+  css["--syntax-function"] = colors.syntaxFunction || colors.function || accent;
+  css["--syntax-comment"] = colors.syntaxComment || colors.comment || dim;
+
   return css;
 }
 
@@ -460,6 +551,18 @@ function parseThemeFile(path: string): PiTheme | null {
     const raw = readFileSync(path, "utf-8");
     const json = JSON.parse(raw);
 
+    // OpenChamber layered format: { metadata: { variant }, colors: { primary, surface, ... } }
+    if (
+      json.metadata
+      && typeof json.metadata === "object"
+      && (json.metadata.variant === "light" || json.metadata.variant === "dark")
+      && json.colors
+      && typeof json.colors === "object"
+      && json.colors.primary
+    ) {
+      return parseOpenChamberThemeFile(json);
+    }
+
     if (!json.name || typeof json.name !== "string") return null;
     if (!json.colors || typeof json.colors !== "object") return null;
 
@@ -477,6 +580,90 @@ function parseThemeFile(path: string): PiTheme | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Adapt an OpenChamber layered theme ({ metadata, colors: { primary, surface,
+ * interactive, status, chat, tools, syntax } }) into the pi CLI PiTheme shape
+ * so mapToCssVars produces working pi-web CSS variables without conversion.
+ */
+function parseOpenChamberThemeFile(json: Record<string, unknown>): PiTheme | null {
+  const colors = json.colors as Record<string, Record<string, string> | undefined>;
+  const surface = colors.surface ?? {};
+  const interactive = colors.interactive ?? {};
+  const primary = colors.primary ?? {};
+  const status = colors.status ?? {};
+  const chat = colors.chat ?? {};
+  const tools = colors.tools ?? {};
+
+  const str = (v: unknown): string => (typeof v === "string" && /^#[0-9a-fA-F]{3,8}$/.test(v) ? v : "");
+
+  // Surface ramp for the pi CLI vars keys mapToCssVars reads.
+  const bg0 = str(surface.background) || "#1a1a1a";
+  const elevated = str(surface.elevated);
+  const mutedSurface = str(surface.muted);
+  const subtleSurface = str(surface.subtle);
+  const fg0 = str(surface.foreground) || "#e8e8e8";
+  const mutedFg = str(surface.mutedForeground);
+
+  const accent = str(primary.base);
+  const accentHover = str(primary.hover) || accent;
+  const border = str(interactive.border) || "#404040";
+  const borderAccent = accent || border;
+
+  const transparentToOpaque = (value: string, fallbackBg: string): string => {
+    // 8-digit hex with alpha → blend over the given background.
+    if (/^#[0-9a-fA-F]{8}$/.test(value)) {
+      const a = parseInt(value.slice(7, 9), 16) / 255;
+      const base = value.slice(1, 7);
+      const r = Math.round(parseInt(base.slice(0, 2), 16) * a + parseInt(fallbackBg.slice(1, 3), 16) * (1 - a));
+      const g = Math.round(parseInt(base.slice(2, 4), 16) * a + parseInt(fallbackBg.slice(3, 5), 16) * (1 - a));
+      const b = Math.round(parseInt(base.slice(4, 6), 16) * a + parseInt(fallbackBg.slice(5, 7), 16) * (1 - a));
+      return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+    }
+    return value;
+  };
+
+  const userMessageBg = transparentToOpaque(
+    str(chat.userMessageBackground) || (accent ? `${accent}26` : ""),
+    bg0,
+  );
+  const toolBg = transparentToOpaque(str(tools.background) || mutedSurface || subtleSurface || bg0, bg0);
+
+  const metadata = (json.metadata && typeof json.metadata === "object" ? json.metadata : {}) as Record<string, unknown>;
+  return {
+    name: typeof metadata.name === "string" ? metadata.name : "custom",
+    vars: {
+      bg0,
+      bg1: elevated || mutedSurface || bg0,
+      bg2: mutedSurface || subtleSurface || bg0,
+      bg3: subtleSurface || mutedSurface || bg0,
+      fg0,
+      fg3: mutedFg || "#888888",
+      fg4: mutedFg || "#777777",
+    },
+    colors: {
+      accent,
+      accentHover,
+      text: fg0,
+      muted: mutedFg || fg0,
+      dim: mutedFg || "#888888",
+      border,
+      borderAccent,
+      selectedBg: subtleSurface || mutedSurface || "",
+      success: str(status.success) || "#16a34a",
+      error: str(status.error) || "#dc2626",
+      warning: str(status.warning) || "#d97706",
+      userMessageBg: userMessageBg || bg0,
+      toolSuccessBg: toolBg || bg0,
+      // Syntax highlighting tokens from the layered theme's syntax.base
+      keyword: str((colors.syntax as Record<string, Record<string, string>> | undefined)?.base?.keyword) || accent,
+      string: str((colors.syntax as Record<string, Record<string, string>> | undefined)?.base?.string) || "",
+      number: str((colors.syntax as Record<string, Record<string, string>> | undefined)?.base?.number) || "",
+      function: str((colors.syntax as Record<string, Record<string, string>> | undefined)?.base?.function) || "",
+      comment: str((colors.syntax as Record<string, Record<string, string>> | undefined)?.base?.comment) || "",
+    },
+  };
 }
 
 // ─── File-name convention helpers ───────────────────────────────────────────
@@ -551,14 +738,16 @@ function scanThemeDir(dir: string): ScannedFile[] {
 
 /** List all available theme sets (global + project). */
 export function listThemeSets(projectCwd?: string): ThemeSetInfo[] {
-  const result: ThemeSetInfo[] = Object.entries(BUILTIN_THEME_SETS).map(([name, theme]) => ({
+  const result: ThemeSetInfo[] = Object.entries(ALL_BUILTIN_THEME_SETS).map(([name, theme]) => ({
     name,
     displayName: theme.displayName,
-    hasDark: true,
-    hasLight: true,
+    hasDark: Boolean(theme.dark),
+    hasLight: Boolean(theme.light),
     builtin: true,
+    accent: theme.dark?.accent,
+    accentLight: theme.light?.accent,
   }));
-  const seen = new Set(Object.keys(BUILTIN_THEME_SETS));
+  const seen = new Set(Object.keys(ALL_BUILTIN_THEME_SETS));
 
   // Collect all scanned files
   const allFiles: ScannedFile[] = [];
@@ -599,10 +788,51 @@ export function listThemeSets(projectCwd?: string): ThemeSetInfo[] {
       hasDark,
       hasLight,
       builtin: false,
+      ...extractThemeSetAccent(files),
     });
   }
 
   return result;
+}
+
+/**
+ * Extract swatch accents for a scanned theme group by reading the first file
+ * of each variant. Handles both pi CLI and OpenChamber layered formats.
+ */
+function extractThemeSetAccent(files: ScannedFile[]): { accent?: string; accentLight?: string } {
+  const readAccent = (file: ScannedFile | undefined, variant: ThemeVariant | null): string | undefined => {
+    if (!file) return undefined;
+    try {
+      const json = JSON.parse(readFileSync(file.path, "utf8")) as {
+        colors?: Record<string, unknown>;
+        metadata?: { variant?: string };
+      };
+      if (!json.colors || typeof json.colors !== "object") return undefined;
+      const colors = json.colors as Record<string, unknown>;
+      const accent = typeof colors.accent === "string" ? colors.accent
+        : (typeof colors.primary === "object" && colors.primary !== null)
+          ? (colors.primary as Record<string, unknown>).base
+          : undefined;
+      if (typeof accent === "string" && /^#[0-9a-fA-F]{3,8}$/.test(accent)) {
+        return accent.toLowerCase();
+      }
+      // Fall back to vars.primary for pi CLI themes that only define vars.
+      const raw = JSON.parse(readFileSync(file.path, "utf8")) as { vars?: Record<string, string | number> };
+      const v = raw.vars?.primary;
+      if (typeof v === "string" && /^#[0-9a-fA-F]{3,8}$/.test(v)) return v.toLowerCase();
+      void variant;
+    } catch {
+      // Malformed file — no accent.
+    }
+    return undefined;
+  };
+
+  const darkFile = files.find((f) => f.variant === "dark");
+  const lightFile = files.find((f) => f.variant === "light");
+  return {
+    accent: readAccent(darkFile, "dark"),
+    accentLight: readAccent(lightFile, "light"),
+  };
 }
 
 /** Convert a kebab-case theme name to a display-friendly title. */

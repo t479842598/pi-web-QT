@@ -1,0 +1,41 @@
+{
+  "displayName": "Ayu",
+  "dark": {
+    "bg": "#0f1419",
+    "panel": "#17202a",
+    "hover": "#18222c",
+    "selected": "#1e252d",
+    "border": "#292c30",
+    "text": "#d6dae0",
+    "muted": "#777e86",
+    "dim": "#777e86",
+    "accent": "#3fb7e3",
+    "accentHover": "#389fc5",
+    "userBg": "#1d2935",
+    "assistantBg": "#0f1419",
+    "toolBg": "#18222c",
+    "subtle": "#1e252d",
+    "red": "#f58572",
+    "green": "#78d05c",
+    "orange": "#e4a75c"
+  },
+  "light": {
+    "bg": "#fdfaf4",
+    "panel": "#faf6ed",
+    "hover": "#f7f3eb",
+    "selected": "#fff7e5",
+    "border": "#ece5d9",
+    "text": "#394049",
+    "muted": "#777e87",
+    "dim": "#777e87",
+    "accent": "#4aa8c8",
+    "accentHover": "#6eb8d1",
+    "userBg": "#fff7e5",
+    "assistantBg": "#fdfaf4",
+    "toolBg": "#fcf9f3",
+    "subtle": "#fff7e5",
+    "red": "#e6656a",
+    "green": "#5fb978",
+    "orange": "#ea9f41"
+  }
+}

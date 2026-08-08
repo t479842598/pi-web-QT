@@ -68,6 +68,10 @@ export interface SessionStatsInfo {
     total: number;
   };
   cost: number;
+  /** DeepSeek official CNY spend for deepseek-v4-flash/pro messages (any provider). */
+  costCNY?: number;
+  /** SDK USD spend for non-deepseek-v4 models. */
+  costUSD?: number;
   contextUsage?: ContextUsage;
 }
 
@@ -143,7 +147,11 @@ export interface AgentSessionLike {
   readonly isStreaming: boolean;
   readonly isCompacting: boolean;
   readonly model: ModelLike | undefined;
-  readonly modelRuntime: { getModel: (provider: string, modelId: string) => ModelLike | undefined };
+  readonly modelRuntime: {
+    getModel: (provider: string, modelId: string) => ModelLike | undefined;
+    setRuntimeApiKey: (provider: string, apiKey: string) => Promise<void>;
+    removeRuntimeApiKey: (provider: string) => Promise<void>;
+  };
   readonly sessionManager: SessionManager;
   readonly settingsManager: SettingsManager;
   readonly agent: AgentHookLike;

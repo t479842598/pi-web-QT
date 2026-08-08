@@ -17,8 +17,11 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { QueueRecoveryDialog } from "./QueueRecoveryDialog";
 import { SessionInfoBar } from "./SessionInfoBar";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
-import { useAgentSession, AGENT_RUNNING_SPACER_PX, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
+import { ArrowDownIcon } from "@phosphor-icons/react/ArrowDown";
+import { useAgentSession, CHAT_BOTTOM_SPACER_PX, BOTTOM_KEEP_OUT_PX, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
+import { useDeepSeekBalance } from "@/hooks/useDeepSeekBalance";
+import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
@@ -163,7 +166,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     isCompacting, compactError, compactResult, displayModel: displayModelValue, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages, pendingRecovery, recoveryIsImport,
     notices, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
-    isAutoModelSelection,
     agentPhase,
     isNew,
     branchTree, activeLeafId: branchActiveLeafId, handleLeafChange,
@@ -189,6 +191,53 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   useEffect(() => {
     if (pendingRecovery.length === 0) setRecoveryDismissed(false);
   }, [pendingRecovery.length]);
+
+  // ── DeepSeek official wallet balance ──────────────────────────────────────
+  // Only queried while the active model runs on the official api.deepseek.com
+  // provider. Gateway providers (zenmux etc.) never query the balance API;
+  // they only get the official-CNY pricing from deepseek-pricing.ts.
+  const { balance: deepseekBalance, refresh: refreshBalance, refreshSoon: refreshBalanceSoon } = useDeepSeekBalance();
+  const isDeepSeekOfficial = displayModelValue?.provider === "deepseek";
+  const lastBalanceTurnEntryRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (isDeepSeekOfficial) void refreshBalance();
+  }, [isDeepSeekOfficial, refreshBalance]);
+
+  // A finished turn carries usage on its final assistant message — refresh the
+  // balance debounced so a burst of turns triggers a single request.
+  useEffect(() => {
+    if (!isDeepSeekOfficial) return;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      const usage = (m as AssistantMessage).usage;
+      if (!usage) continue;
+      const key = `${i}:${entryIds[i] ?? ""}`;
+      if (key !== lastBalanceTurnEntryRef.current) {
+        lastBalanceTurnEntryRef.current = key;
+        refreshBalanceSoon();
+      }
+      break;
+    }
+  }, [messages, entryIds, isDeepSeekOfficial, refreshBalanceSoon]);
+
+  // Latest finished turn's token/cost breakdown for the "本次回复" stats block.
+  const lastTurnUsage = useMemo(() => {
+    const last = messages.findLast(
+      (m): m is AssistantMessage => m.role === "assistant" && !!(m as AssistantMessage).usage,
+    );
+    if (!last?.usage) return null;
+    const usage = last.usage;
+    return {
+      model: last.model ?? "",
+      input: usage.input ?? 0,
+      output: usage.output ?? 0,
+      cacheRead: usage.cacheRead ?? 0,
+      costCNY: matchesDeepSeekCNY(last.model) ? cnyCost(last.model, usage) : 0,
+      costUSD: matchesDeepSeekCNY(last.model) ? 0 : (usage.cost?.total ?? 0),
+    };
+  }, [messages]);
 
   // ── Plan review: after a plan-mode run settles, ask what to do next ──────
   const [planReviewOpen, setPlanReviewOpen] = useState(false);
@@ -260,22 +309,34 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   // Display a fade only when more conversation content exists beyond that edge.
   const [showChatTopFade, setShowChatTopFade] = useState(false);
   const [showChatBottomFade, setShowChatBottomFade] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const updateChatFades = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
     const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
     setShowChatTopFade(container.scrollTop > 1);
     setShowChatBottomFade(remaining > 1);
+    // The jump-to-latest button appears only when the user is meaningfully
+    // above the newest content (threshold large enough to ignore jitter).
+    setShowScrollToBottom(remaining > 240);
   }, [scrollContainerRef]);
 
   const scrollToBottomAfterProcessExpansion = useCallback(() => {
     window.requestAnimationFrame(() => {
       const container = scrollContainerRef.current;
-      if (!container) return;
-      container.scrollTop = container.scrollHeight;
+      const end = messagesEndRef.current;
+      if (!container || !end) return;
+      // Same keep-out math as useAgentSession.scrollToBottom: back off the
+      // persistent bottom spacer (sentinel sits BELOW it) and land the LAST
+      // MESSAGE BOTTOM_KEEP_OUT_PX above the container bottom instead of
+      // scrolling to the absolute bottom (which would hug the ChatInput).
+      const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+      const spacerH = CHAT_BOTTOM_SPACER_PX;
+      const target = Math.max(0, endInContainer - spacerH - container.clientHeight + BOTTOM_KEEP_OUT_PX);
+      container.scrollTo({ top: target, behavior: "auto" });
       updateChatFades();
     });
-  }, [scrollContainerRef, updateChatFades]);
+  }, [messagesEndRef, scrollContainerRef, updateChatFades]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -411,7 +472,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
       isStreaming={agentRunning}
       model={displayModelValue}
-      isAutoModelSelection={isAutoModelSelection}
       modelNames={modelNames}
       modelList={modelList}
       modelScopeWarnings={modelScopeWarnings}
@@ -675,9 +735,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 onAbortCompaction={handleAbortCompaction}
                 isCompacting={isCompacting}
                 compactError={compactError}
-                branchTree={branchTree}
-                branchActiveLeafId={branchActiveLeafId}
-                onBranchLeafChange={handleLeafChange}
+                isDeepSeekOfficial={isDeepSeekOfficial}
+                deepseekBalance={deepseekBalance}
+                lastTurnUsage={lastTurnUsage}
+                // Branch entry point lives in the bottom SessionInfoBar only;
+                // rendering it in both bars would duplicate the button.
               />
             </div>
           </div>
@@ -985,17 +1047,18 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               </div>
             )}
 
-            {agentRunning && (
-              /* Room below the last message while the agent runs so it is not
-                 hidden behind ChatInput. A full-viewport spacer makes
-                 scrollToBottom land on blank space (the end sentinel sits
-                 BELOW the spacer) — keep it small and let scrollToBottom back
-                 it off so the LAST MESSAGE, not the spacer, sits at the
-                 viewport bottom. (Same approach as upstream PR #372; height
-                 shared with useAgentSession's backoff via
-                 AGENT_RUNNING_SPACER_PX.) */
-              <div style={{ height: AGENT_RUNNING_SPACER_PX }} />
-            )}
+            {/* Keep-out room below the last message so scrollToBottom has
+                 physical space to land the LAST MESSAGE above ChatInput.
+                 Always rendered (not only while the agent runs): without
+                 trailing space the browser clamps the scroll at the content
+                 end and the last line hugs — or is covered by — the input.
+                 A full-viewport spacer makes scrollToBottom land on blank
+                 space (the end sentinel sits BELOW the spacer) — keep it
+                 small and let scrollToBottom back it off so the LAST MESSAGE,
+                 not the spacer, sits at the viewport bottom. (Same approach
+                 as upstream PR #372; height shared with useAgentSession's
+                 backoff via CHAT_BOTTOM_SPACER_PX.) */}
+              <div style={{ height: CHAT_BOTTOM_SPACER_PX }} />
 
               <div ref={messagesEndRef} />
               </div>
@@ -1012,6 +1075,43 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               aria-hidden="true"
               className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-[var(--bg)] to-transparent"
             />
+          )}
+          {showScrollToBottom && (
+            <button
+              type="button"
+              onClick={() => scrollToBottomAfterProcessExpansion()}
+              title={t("desktop.scrollToBottom")}
+              aria-label={t("desktop.scrollToBottom")}
+              style={{
+                position: "absolute",
+                bottom: 14,
+                right: 18,
+                zIndex: 20,
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "5px 10px",
+                border: "1px solid var(--border)",
+                borderRadius: 999,
+                background: "color-mix(in srgb, var(--bg-panel) 92%, transparent)",
+                color: "var(--text-muted)",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(0,0,0,0.14)",
+                backdropFilter: "blur(4px)",
+                transition: "color 0.12s, border-color 0.12s, background 0.12s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--accent)";
+                e.currentTarget.style.borderColor = "var(--accent)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--text-muted)";
+                e.currentTarget.style.borderColor = "var(--border)";
+              }}
+            >
+              <ArrowDownIcon size={12} weight="bold" aria-hidden="true" />
+              {t("desktop.scrollToBottom")}
+            </button>
           )}
         </div>
         {isMobile ? null : (
@@ -1055,6 +1155,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               branchTree={branchTree}
               branchActiveLeafId={branchActiveLeafId}
               onBranchLeafChange={handleLeafChange}
+              isDeepSeekOfficial={isDeepSeekOfficial}
+              deepseekBalance={deepseekBalance}
+              lastTurnUsage={lastTurnUsage}
             />
           </div>
         </div>
@@ -1146,11 +1249,11 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
               display: "flex",
               alignItems: "center",
               gap: 10,
-              minHeight: 60,
-              height: 60,
-              maxHeight: 60,
+              minHeight: 44,
+              maxHeight: 180,
               marginBottom: index === notices.length - 1 ? 0 : 6,
-              overflow: "hidden",
+              overflowY: "auto",
+              overflowX: "hidden",
               borderRadius: 14,
               border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
               background: "var(--bg)",
@@ -1160,7 +1263,7 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
               boxShadow: floating
                 ? "0 1px 2px rgba(15,23,42,0.05), 0 10px 28px -14px rgba(15,23,42,0.24)"
                 : "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
-              fontSize: 18,
+              fontSize: 13,
               lineHeight: 1.45,
               transformOrigin: "top center",
               animation: notice.exiting
@@ -1178,7 +1281,7 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
                 flexShrink: 0,
               }}
             />
-            <span style={{ padding: "14px 0", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span style={{ padding: "10px 0", minWidth: 0, maxWidth: "100%", overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
               {notice.message}
             </span>
           </div>

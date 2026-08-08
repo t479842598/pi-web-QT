@@ -18,3 +18,9 @@ test("agent SSE reuses one TextEncoder per stream", () => {
   assert.match(source, /controller\.enqueue\(encoder\.encode\(text\)\)/);
   assert.match(source, /controller\.enqueue\(encoder\.encode\(":\\n\\n"\)\)/);
 });
+
+test("agent SSE emits an initial state snapshot for reconnect convergence", async () => {
+  const source = await readFile(new URL("./[id]/events/route.ts", import.meta.url), "utf8");
+  assert.match(source, /type: "state_sync"/);
+  assert.match(source, /session\.send\(\{ type: "get_state" \}\)/);
+});

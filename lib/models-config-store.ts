@@ -4,6 +4,7 @@ import lockfile from "proper-lockfile";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { invalidateModelsCache } from "./models-cache";
+import { invalidateAvailableModelsCache } from "./model-scope";
 
 export type ModelsConfigData = Record<string, unknown>;
 
@@ -82,6 +83,10 @@ export async function mutateModelsConfig<T>(
     if (mutation.changed !== false) {
       writePrivateFileAtomicSync(path, JSON.stringify(mutation.data, null, 2));
       invalidateModelsCache();
+      // The in-process ModelRuntime list is cached too (see model-scope.ts);
+      // both caches must drop together or startRpcSession keeps serving the
+      // stale provider/model list until the 60s TTL expires.
+      invalidateAvailableModelsCache();
       throwIfCompromised();
     }
     return mutation.result;
