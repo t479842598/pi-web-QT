@@ -320,8 +320,11 @@ function normalizeInlineLatexMath(line: string): string {
   );
 }
 
-export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [remarkGfm, remarkMath];
-export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [remarkGfm, remarkMath];
+// A single `~` is commonly used for numeric ranges in CJK text (for example,
+// `5~7U`), so only the standard double-tilde form should create strikethrough.
+const remarkGfmOptions = { singleTilde: false } as const;
+export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [[remarkGfm, remarkGfmOptions], remarkMath];
+export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [[remarkGfm, remarkGfmOptions], remarkMath];
 
 export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   [rehypeSanitize, markdownSanitizeSchema],

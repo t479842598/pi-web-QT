@@ -188,7 +188,7 @@ export function AppTitleBar({
           {sessionTitle && (
             <button
               type="button"
-              onClick={() => setTitleModalOpen(true)}
+              onClick={() => { if (isMobile) setTitleModalOpen(true); }}
               title={isMobile ? sessionTitle : undefined}
               style={{
                 display: "block",

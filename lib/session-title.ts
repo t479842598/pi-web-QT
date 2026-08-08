@@ -333,7 +333,11 @@ export async function generateSessionTitle(
   }
   const sanitizedMessages = truncateTitleMessages(sanitizeTitleMessages(candidate));
   const historyLength = sanitizedMessages.length;
-  if (!sanitizedMessages.some((message) => message.role === "user")) {
+  const hasTitleSource = sanitizedMessages.some((message) => (
+    message.role === "user"
+    || (message.role === "custom" && message.customType === "compaction")
+  ));
+  if (!hasTitleSource) {
     throw new Error("The session has no user messages to name");
   }
 
