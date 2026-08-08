@@ -22,7 +22,10 @@ function parseLaunchOptions(args = process.argv.slice(2), env = process.env) {
 
   return {
     port: cliArgs.port ?? env.PORT ?? "30141",
-    hostname: cliArgs.hostname ?? env.PI_WEB_HOSTNAME ?? "127.0.0.1",
+    // Default to 0.0.0.0 so phones/other devices on the LAN can reach the
+    // web UI (the app is protected by HTTP Basic Auth when PI_WEB_PASSWORD
+    // is set). Use -H 127.0.0.1 to restrict to this machine only.
+    hostname: cliArgs.hostname ?? env.PI_WEB_HOSTNAME ?? "0.0.0.0",
     openBrowser: !cliArgs["no-open"] && !isEnabled(env.PI_WEB_NO_OPEN),
   };
 }
