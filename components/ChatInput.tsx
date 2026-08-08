@@ -18,6 +18,10 @@ import { FolderIcon, getFileIcon } from "./FileIcons";
 import { FolderIcon as PhosphorFolderIcon } from "@phosphor-icons/react/Folder";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
+import { listTasks } from "@/lib/task-api";
+import type { GitStatusResponse } from "@/lib/git-types";
+import { StackIcon } from "@phosphor-icons/react/Stack";
+import { GitBranchIcon } from "@phosphor-icons/react/GitBranch";
 import { ArrowBendUpLeftIcon } from "@phosphor-icons/react/ArrowBendUpLeft";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/ArrowClockwise";
 import { ArrowElbowUpLeftIcon } from "@phosphor-icons/react/ArrowElbowUpLeft";
@@ -122,6 +126,14 @@ const TOOL_PRESETS = ["off", "default", "full"] as const;
 const TOOL_PRESET_MAP: Record<"off" | "default" | "full", "none" | "default" | "full"> = { off: "none", default: "default", full: "full" };
 const COMPOSITION_END_ENTER_GRACE_MS = 100;
 const MODEL_OPTION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+const DRAFT_PRESETS: Array<{ labelKey: string }> = [
+  { labelKey: "desktop.presetReviewChanges" },
+  { labelKey: "desktop.presetExplainProject" },
+  { labelKey: "desktop.presetWriteTests" },
+  { labelKey: "desktop.presetRefactor" },
+  { labelKey: "desktop.presetFixBug" },
+];
 
 function compareModelOptions(a: ModelOption, b: ModelOption): number {
   return MODEL_OPTION_COLLATOR.compare(a.name || a.modelId, b.name || b.modelId)
@@ -1477,6 +1489,63 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     return () => { cancelled = true; };
   }, [modelDropdownOpen]);
 
+  // ── Pending git changes bar ───────────────────────────────────────────────
+  // Shows uncommitted change counts (+/-) for the current cwd, refreshed on a
+  // short interval while the agent is running (files mutate as it works).
+  const [gitStats, setGitStats] = useState<{ files: number; additions: number; deletions: number } | null>(null);
+  useEffect(() => {
+    if (!cwd) { setGitStats(null); return; }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch(`/api/git/status?${new URLSearchParams({ cwd }).toString()}`);
+        if (!response.ok) return;
+        const data = await response.json() as GitStatusResponse;
+        if (cancelled) return;
+        if (!data.isGitRepository) { setGitStats(null); return; }
+        setGitStats({
+          files: data.files.length,
+          additions: data.additions,
+          deletions: data.deletions,
+        });
+      } catch {
+        if (!cancelled) setGitStats(null);
+      }
+    };
+    void load();
+    const interval = setInterval(() => { if (isStreaming) void load(); }, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [cwd, isStreaming]);
+
+
+  const [taskStats, setTaskStats] = useState<{ running: number; todo: number } | null>(null);
+  useEffect(() => {
+    if (!cwd) { setTaskStats(null); return; }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const projectsRes = await fetch("/api/tasks/projects");
+        const { projects } = await projectsRes.json() as { projects: string[] };
+        const root = (projects as string[]).find(
+          (p) => cwd === p || cwd.startsWith(p + "/") || p.startsWith(cwd + "/"),
+        );
+        if (!root) { if (!cancelled) setTaskStats(null); return; }
+        const tasks = await listTasks(root);
+        if (cancelled) return;
+        setTaskStats({
+          running: tasks.filter((t) => ["running", "awaiting_input", "preparing", "merging"].includes(t.status)).length,
+          todo: tasks.filter((t) => ["todo", "queued"].includes(t.status)).length,
+        });
+      } catch {
+        if (!cancelled) setTaskStats(null);
+      }
+    };
+    void load();
+    const source = new EventSource("/api/tasks/events");
+    source.onmessage = () => void load();
+    return () => { cancelled = true; source.close(); };
+  }, [cwd]);
+
 
 
   return (
@@ -1503,6 +1572,59 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }}
       />
       <div style={{ maxWidth: 820, margin: "0 auto" }}>
+        {taskStats && (taskStats.running > 0 || taskStats.todo > 0) && (
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("pi:open-tasks-view"))}
+            title={t("desktop.taskStatusHint")}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              marginBottom: 8,
+              padding: "3px 10px",
+              borderRadius: 999,
+              border: "1px solid var(--border)",
+              background: "var(--bg-panel)",
+              color: "var(--text-muted)",
+              fontSize: 11,
+              cursor: "pointer",
+              transition: "border-color 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+          >
+            <StackIcon size={12} aria-hidden="true" />
+            {taskStats.running > 0 && <span style={{ color: "var(--accent)" }}>{taskStats.running} {t("desktop.taskRunning")}</span>}
+            {taskStats.running > 0 && taskStats.todo > 0 && <span aria-hidden="true">·</span>}
+            {taskStats.todo > 0 && <span>{taskStats.todo} {t("desktop.taskTodo")}</span>}
+          </button>
+        )}
+        {gitStats && gitStats.files > 0 && (
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("pi:open-tasks-view"))}
+            title={t("desktop.gitPendingHint")}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              marginBottom: 8,
+              marginLeft: 6,
+              padding: "3px 10px",
+              borderRadius: 999,
+              border: "1px solid var(--border)",
+              background: "var(--bg-panel)",
+              color: "var(--text-muted)",
+              fontSize: 11,
+              cursor: "pointer",
+              transition: "border-color 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+          >
+            <GitBranchIcon size={12} aria-hidden="true" />
+            <span>{gitStats.files} {t("desktop.gitPending")}</span>
+            {gitStats.additions > 0 && <span style={{ color: "var(--git-status-added)" }}>+{gitStats.additions}</span>}
+            {gitStats.deletions > 0 && <span style={{ color: "var(--git-status-deleted)" }}>−{gitStats.deletions}</span>}
+          </button>
+        )}
         {modelScopeWarnings && modelScopeWarnings.length > 0 && (
           <div
             role="status"
@@ -2126,6 +2248,36 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 ✕
               </button>
             </span>
+          )}
+          {!value.trim() && !isStreaming && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+              {DRAFT_PRESETS.map((preset) => (
+                <button
+                  key={preset.labelKey}
+                  type="button"
+                  onClick={() => {
+                    const text = t(preset.labelKey);
+                    setValue(text);
+                    setDraft(draftKey ?? "", { value: text, images: [] });
+                    requestAnimationFrame(() => textareaRef.current?.focus());
+                  }}
+                  style={{
+                    padding: "3px 10px",
+                    borderRadius: 999,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-panel)",
+                    color: "var(--text-muted)",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    transition: "border-color 0.12s, color 0.12s, background 0.12s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+                >
+                  {t(preset.labelKey)}
+                </button>
+              ))}
+            </div>
           )}
           <textarea
             ref={textareaRef}

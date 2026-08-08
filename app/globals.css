@@ -1911,3 +1911,27 @@ span.linenumber {
     display: none !important;
   }
 }
+
+/* Message appearance animation: plays once on mount (React keys stay stable,
+   so only newly-appearing messages animate; scroll/navigation do not replay). */
+@keyframes chat-msg-in {
+  from {
+    opacity: 0.25;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.chat-msg-in {
+  animation: chat-msg-in 0.18s ease-out;
+}
+
+/* Reduced-motion users get no entrance animation. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-msg-in {
+    animation: none;
+  }
+}

@@ -198,7 +198,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
-      className="chat-user-message"
+      className="chat-user-message chat-msg-in"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -494,7 +494,7 @@ function AssistantMessageView({
 
   return (
     <div
-      className={["chat-assistant-message", isStreaming ? "is-streaming" : ""].filter(Boolean).join(" ")}
+      className={["chat-assistant-message chat-msg-in", isStreaming ? "is-streaming" : ""].filter(Boolean).join(" ")}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
