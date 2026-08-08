@@ -23,6 +23,7 @@
     "!.next/cache",
     "!.next/dev",
     "!.next/**/*.js.map",
+    "lib/theme",
     "public",
     "next.config.ts",
     "package.json"
