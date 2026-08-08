@@ -122,7 +122,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} onCreateTask={onCreateTask} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} onFork={onFork} forking={forking} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -239,7 +239,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
       {/* Bottom row: action buttons + timestamp */}
       {(time || canFork || canNavigate || true) && (
-        <div style={{
+        <div className="msg-actions" style={{
           display: "flex", alignItems: "center", justifyContent: "flex-end",
           gap: 6, marginTop: 3,
         }}>
@@ -292,7 +292,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             )}
           </div>
           {(canFork || canNavigate) && (
-            <div style={{
+            <div className="msg-actions" style={{
               display: "flex", gap: 3,
               opacity: (hovered || forking) ? 1 : 0,
               pointerEvents: (hovered || forking) ? "auto" : "none",
@@ -358,6 +358,8 @@ function AssistantMessageView({
   prevTimestamp,
   sessionId,
   entryId,
+  onFork,
+  forking,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -370,6 +372,8 @@ function AssistantMessageView({
   prevTimestamp?: number;
   sessionId?: string;
   entryId?: string;
+  onFork?: (entryId: string) => void;
+  forking?: boolean;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -581,6 +585,7 @@ function AssistantMessageView({
         )}
         {textContent && !isStreaming && (
           <button
+            className="msg-actions"
             onClick={copyContent}
             title={t("desktop.copyMessage")}
             style={{
@@ -602,6 +607,7 @@ function AssistantMessageView({
         )}
         {textContent && !isStreaming && (
           <button
+            className="msg-actions"
             onClick={() => {
               copyText(markdownToPlainText(textContent)).then(() => {
                 setCopiedPlain(true);
@@ -624,6 +630,31 @@ function AssistantMessageView({
             onMouseLeave={(e) => { if (!copiedPlain) e.currentTarget.style.color = "var(--text-dim)"; }}
           >
             {copiedPlain ? <CheckIcon size={11} /> : <ClipboardTextIcon size={11} />}
+          </button>
+        )}
+        {/* Fork: branch this answer into a new session (continues from the
+            user turn this answer belongs to). Touch devices get it via the
+            .msg-actions media rule; hover devices see it on hover. */}
+        {entryId && onFork && !isStreaming && (
+          <button
+            className="msg-actions"
+            onClick={() => onFork(entryId)}
+            disabled={forking}
+            title={forking ? t("desktop.creatingNewSession") : t("desktop.newSessionFromHere")}
+            aria-label={t("desktop.newSessionFromHere")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 22, height: 22,
+              background: "none", border: "none",
+              borderRadius: 5,
+              color: forking ? "var(--accent)" : "var(--text-dim)",
+              cursor: forking ? "not-allowed" : "pointer",
+              opacity: hovered ? 1 : 0,
+              pointerEvents: hovered ? "auto" : "none",
+              transition: "opacity 0.12s, color 0.12s",
+            }}
+          >
+            <GitForkIcon size={11} />
           </button>
         )}
         {time && !isStreaming && (

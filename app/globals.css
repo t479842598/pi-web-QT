@@ -1382,6 +1382,15 @@ span.linenumber {
   100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
 }
 
+/* Touch devices have no hover state; keep message action buttons visible
+   and tappable (inline styles are overridden via !important). */
+@media (hover: none) {
+  .msg-actions {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────
    SessionInfoBar — bottom-row session info bar (under ChatInput).
    Replaces the inline-style implementation. Hover/active/compacting
