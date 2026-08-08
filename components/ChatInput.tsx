@@ -65,7 +65,6 @@ interface Props {
   onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
-  isAutoModelSelection?: boolean;
   modelNames?: Record<string, string>;
   modelList?: { id: string; name: string; provider: string }[];
   modelScopeWarnings?: string[];
@@ -366,7 +365,7 @@ function QueuedMessageRow({ kind, text, label, index, total, onMove, onRecall, o
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelScopeWarnings, onModelChange,
+  onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, modelScopeWarnings, onModelChange,
   compactResult, toolPreset, onToolPresetChange, planMode = false, onPlanModeChange,
   collaborationMode = "normal", tokenMode = "full", toolApprovalMode = "auto",
   onCollaborationModeChange, onTokenModeChange, onToolApprovalModeChange,
@@ -420,6 +419,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const nextPasteIdRef = useRef(0);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  // 当前 OpenCode Zen 激活账号的备注名，显示在模型下拉的网关分组标题里，
+  // 让使用中的模型一眼看出走的是哪个导入账号。
+  const [zenActiveNote, setZenActiveNote] = useState<string | null>(null);
   const [viewport, setViewport] = useState({ height: 0, width: 0, offsetTop: 0 });
   const [modelSearch, setModelSearch] = useState("");
   const [favorites, setFavorites] = useState<Set<string>>(() => {
@@ -1419,10 +1421,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, []);
 
   // Keep fixed selector panels anchored to the visual viewport while a mobile
-  // keyboard changes its height. Without a reactive viewport value, the panel
-  // can keep its old geometry until another unrelated state update occurs.
+  // keyboard changes its height. WebKit can dispatch resize before the restored
+  // height is observable, so read it on the next animation frame.
   useEffect(() => {
+    let frameId: number | null = null;
     const updateViewport = () => {
+      frameId = null;
       const visualViewport = window.visualViewport;
       setViewport({
         height: visualViewport?.height ?? window.innerHeight,
@@ -1430,14 +1434,25 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         offsetTop: visualViewport?.offsetTop ?? 0,
       });
     };
-    updateViewport();
-    window.addEventListener("resize", updateViewport);
-    window.visualViewport?.addEventListener("resize", updateViewport);
-    window.visualViewport?.addEventListener("scroll", updateViewport);
+    const scheduleViewportUpdate = () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateViewport);
+    };
+    scheduleViewportUpdate();
+    window.addEventListener("resize", scheduleViewportUpdate);
+    window.visualViewport?.addEventListener("resize", scheduleViewportUpdate);
+    window.visualViewport?.addEventListener("scroll", scheduleViewportUpdate);
+    window.addEventListener("focusin", scheduleViewportUpdate);
+    window.addEventListener("focusout", scheduleViewportUpdate);
+    window.addEventListener("pageshow", scheduleViewportUpdate);
     return () => {
-      window.removeEventListener("resize", updateViewport);
-      window.visualViewport?.removeEventListener("resize", updateViewport);
-      window.visualViewport?.removeEventListener("scroll", updateViewport);
+      window.removeEventListener("resize", scheduleViewportUpdate);
+      window.visualViewport?.removeEventListener("resize", scheduleViewportUpdate);
+      window.visualViewport?.removeEventListener("scroll", scheduleViewportUpdate);
+      window.removeEventListener("focusin", scheduleViewportUpdate);
+      window.removeEventListener("focusout", scheduleViewportUpdate);
+      window.removeEventListener("pageshow", scheduleViewportUpdate);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
     };
   }, []);
 
@@ -1445,6 +1460,21 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   // user can start typing a filter immediately.
   useEffect(() => {
     if (modelDropdownOpen) modelSearchRef.current?.focus();
+  }, [modelDropdownOpen]);
+
+  // Refresh the active Zen account label whenever the model dropdown opens,
+  // so a manual account switch (or a 429 rotation) is reflected immediately.
+  useEffect(() => {
+    if (!modelDropdownOpen) return;
+    let cancelled = false;
+    fetch("/api/opencode-zen")
+      .then((response) => response.ok ? response.json() as Promise<{ accounts?: Array<{ id: string; note: string }>; activeAccountId?: string }> : null)
+      .then((data) => {
+        if (cancelled || !data) return;
+        setZenActiveNote(data.accounts?.find((account) => account.id === data.activeAccountId)?.note ?? null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [modelDropdownOpen]);
 
 
@@ -2657,7 +2687,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                                 style={{ display: "flex", alignItems: "center", width: "100%" }}
                               >
                                 <button
-                                  onClick={() => { setModelDropdownOpen(false); if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId); }}
+                                  onClick={() => { setModelDropdownOpen(false); onModelChange(opt.provider, opt.modelId); }}
                                   style={{
                                     display: "flex", alignItems: "center", gap: 8,
                                     flex: 1, minWidth: 0,
@@ -2723,7 +2753,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                             onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
                           >
                             {caret}
-                            {group.provider}
+                            {group.provider === "opencode" || group.provider === "opencode-go"
+                              ? `OpenCode Zen${zenActiveNote ? ` · 账号：${zenActiveNote}` : ""}`
+                              : group.provider}
                           </button>
                           {isExpanded && group.options.map((opt) => {
                             const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;
@@ -2735,7 +2767,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                                 style={{ display: "flex", alignItems: "center", width: "100%" }}
                               >
                                 <button
-                                  onClick={() => { setModelDropdownOpen(false); if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId); }}
+                                  onClick={() => { setModelDropdownOpen(false); onModelChange(opt.provider, opt.modelId); }}
                                   style={{
                                     display: "flex", alignItems: "center", gap: 8,
                                     flex: 1, minWidth: 0,

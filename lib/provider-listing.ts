@@ -41,6 +41,9 @@ function uniqueProviders(providers: readonly ProviderListingInput[]): ProviderLi
 
 export function buildApiKeyProviderList(providers: readonly ProviderListingInput[]): ApiKeyProviderListing[] {
   return uniqueProviders(providers).flatMap((provider) => {
+    // OpenCode Zen has a dedicated account/proxy pool UI; keep it out of the
+    // generic provider editor and authentication picker.
+    if (provider.id === "opencode" || provider.id === "opencode-go") return [];
     if (!provider.hasApiKeyLogin || (provider.status.source && CUSTOM_PROVIDER_SOURCES.has(provider.status.source))) return [];
     const configured = provider.status.configured && provider.credentialType !== "oauth";
     return [{
@@ -55,7 +58,7 @@ export function buildApiKeyProviderList(providers: readonly ProviderListingInput
 }
 
 export function buildOAuthProviderList(providers: readonly ProviderListingInput[]): OAuthProviderListing[] {
-  return uniqueProviders(providers).flatMap((provider) => provider.hasOAuth ? [{
+  return uniqueProviders(providers).flatMap((provider) => (provider.id === "opencode" || provider.id === "opencode-go") ? [] : provider.hasOAuth ? [{
     id: provider.id,
     name: OAUTH_DISPLAY_NAMES[provider.id] ?? provider.oauthName ?? provider.name,
     usesCallbackServer: false,

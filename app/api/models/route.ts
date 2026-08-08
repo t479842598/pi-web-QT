@@ -5,6 +5,7 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { loadModelsWithCache, type ModelsData } from "@/lib/models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
+import { configureOpenCodeZenRuntime } from "@/lib/opencode-zen";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
     agentDir,
     ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
   });
+  await configureOpenCodeZenRuntime(services.modelRuntime);
   const settings: SettingsManager = services.settingsManager;
   const scope = await resolveVisibleModels(
     services.modelRuntime,
