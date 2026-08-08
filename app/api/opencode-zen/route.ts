@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSafeOpenCodeZenConfig, mergeOpenCodeZenConfig, readOpenCodeZenConfig, writeOpenCodeZenConfig } from "@/lib/opencode-zen";
+import { restartExternalAccessServer } from "@/lib/opencode-zen-external";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { syncOpenCodeZenRuntime } from "@/lib/rpc-manager";
 
@@ -18,6 +19,7 @@ export async function PUT(req: Request) {
     const activeAccountId = typeof body.activeAccountId === "string" ? body.activeAccountId : undefined;
     writeOpenCodeZenConfig(mergeOpenCodeZenConfig(body), activeAccountId);
     await syncOpenCodeZenRuntime();
+    await restartExternalAccessServer();
     return NextResponse.json({ success: true, ...getSafeOpenCodeZenConfig() });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });

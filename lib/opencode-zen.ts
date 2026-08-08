@@ -26,10 +26,23 @@ export interface OpenCodeZenAccount {
   proxy: OpenCodeZenProxy;
 }
 
+export interface OpenCodeZenExternalAccess {
+  enabled: boolean;
+  port: number;
+  apiKey: string;
+}
+
 export interface OpenCodeZenConfig {
   accounts: OpenCodeZenAccount[];
   autoSwitch: boolean;
   cooldownMs: number;
+  externalAccess: OpenCodeZenExternalAccess;
+}
+
+export interface SafeOpenCodeZenExternalAccess extends Omit<OpenCodeZenExternalAccess, "apiKey"> {
+  apiKeyMasked: string;
+  hasApiKey: boolean;
+  status: { running: boolean; port?: number; error?: string };
 }
 
 export interface SafeOpenCodeZenAccount extends Omit<OpenCodeZenAccount, "apiKey" | "proxy"> {
@@ -42,11 +55,13 @@ export interface SafeOpenCodeZenConfig {
   accounts: SafeOpenCodeZenAccount[];
   autoSwitch: boolean;
   cooldownMs: number;
+  externalAccess: SafeOpenCodeZenExternalAccess;
   activeAccountId?: string;
   lastSwitch?: { timestamp: string; from?: string; to: string; statusCode: number };
 }
 
 const CONFIG_FILE = "opencode-zen.json";
+export const DEFAULT_EXTERNAL_PORT = 7474;
 const DEFAULT_COOLDOWN_MS = 60_000;
 const MAX_COOLDOWN_MS = 10 * 60_000;
 /* 全池 429 全败后，把参与账号的长冷却压缩到此值，避免一个坏请求打瘫整池（后续请求 503） */
@@ -55,6 +70,20 @@ const SHORT_COOLDOWN_MS = 10_000;
  * 超过上限时剩余账号留给后续请求，全败后另有最近成功账号回退兜底 */
 const MAX_ATTEMPTS = 3;
 
+/**
+ * Cooldown entry: `daily` entries model the OpenCode Zen per-day free quota —
+ * they reset at the next UTC midnight and must never be force-tried by the
+ * ignore-cooldown fallback, the short-cooldown compression, or the
+ * last-success retry. Transient entries keep the old cooldownMs behavior.
+ */
+type CooldownEntry = { until: number; daily: boolean };
+
+/** Next UTC midnight (00:00 UTC) — the daily quota reset point for Zen accounts. */
+export function nextUtcMidnight(now = Date.now()): number {
+  const date = new Date(now);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1, 0, 0, 0);
+}
+
 export interface OpenCodeZenSwitchEvent {
   sessionId?: string;
   from?: string;
@@ -62,10 +91,10 @@ export interface OpenCodeZenSwitchEvent {
   statusCode: number;
 }
 
-type RuntimeState = {
+export type RuntimeState = {
   config: OpenCodeZenConfig;
   activeIndex: number;
-  cooldownUntil: Map<string, number>;
+  cooldownUntil: Map<string, CooldownEntry>;
   dispatchers: Map<string, Dispatcher>;
   /** 最近一次成功的账号 id：全败后回退硬试的目标 */
   lastSuccessId?: string;
@@ -97,6 +126,8 @@ export function isOpenCodeZenProvider(provider: string): boolean {
 declare global {
   var __piOpenCodeZenState: RuntimeState | undefined;
   var __piOpenCodeZenSwitchListeners: Set<(event: OpenCodeZenSwitchEvent) => void> | undefined;
+  /** Written by lib/opencode-zen-external.ts; read here for the safe config snapshot. */
+  var __piOpenCodeZenExternalStatus: { running: boolean; port?: number; error?: string } | undefined;
 }
 
 export function subscribeOpenCodeZenSwitch(listener: (event: OpenCodeZenSwitchEvent) => void): () => void {
@@ -118,7 +149,18 @@ function defaultProxy(): OpenCodeZenProxy {
 }
 
 function defaultConfig(): OpenCodeZenConfig {
-  return { accounts: [], autoSwitch: true, cooldownMs: DEFAULT_COOLDOWN_MS };
+  return { accounts: [], autoSwitch: true, cooldownMs: DEFAULT_COOLDOWN_MS, externalAccess: { enabled: false, port: DEFAULT_EXTERNAL_PORT, apiKey: "" } };
+}
+
+function normalizeExternalAccess(value: unknown, fallback: OpenCodeZenExternalAccess): OpenCodeZenExternalAccess {
+  const raw = isRecord(value) ? value : {};
+  const port = Number(raw.port);
+  return {
+    // Opt-in: absent in legacy configs must mean disabled, never enabled.
+    enabled: raw.enabled === true,
+    port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : fallback.port,
+    apiKey: typeof raw.apiKey === "string" ? raw.apiKey.trim() : fallback.apiKey,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -188,10 +230,12 @@ function normalizeConfig(value: unknown): OpenCodeZenConfig {
     ? raw.accounts.map(normalizeAccount).filter((account): account is OpenCodeZenAccount => account !== null)
     : [];
   const cooldown = Number(raw.cooldownMs);
+  const fallback = defaultConfig().externalAccess;
   return {
     accounts,
     autoSwitch: raw.autoSwitch !== false,
     cooldownMs: Number.isFinite(cooldown) ? Math.min(Math.max(cooldown, 0), MAX_COOLDOWN_MS) : DEFAULT_COOLDOWN_MS,
+    externalAccess: normalizeExternalAccess(raw.externalAccess, fallback),
   };
 }
 
@@ -283,6 +327,7 @@ export function maskOpenCodeKey(key: string): string {
 export function getSafeOpenCodeZenConfig(): SafeOpenCodeZenConfig {
   const state = getState();
   const active = state.config.accounts[state.activeIndex];
+  const external = state.config.externalAccess;
   return {
     accounts: state.config.accounts.map((account) => ({
       id: account.id,
@@ -302,6 +347,13 @@ export function getSafeOpenCodeZenConfig(): SafeOpenCodeZenConfig {
     })),
     autoSwitch: state.config.autoSwitch,
     cooldownMs: state.config.cooldownMs,
+    externalAccess: {
+      enabled: external.enabled,
+      port: external.port,
+      apiKeyMasked: maskOpenCodeKey(external.apiKey),
+      hasApiKey: Boolean(external.apiKey),
+      status: globalThis.__piOpenCodeZenExternalStatus ?? { running: false },
+    },
     ...(active ? { activeAccountId: active.id } : {}),
     ...(state.lastSwitch ? { lastSwitch: state.lastSwitch } : {}),
   };
@@ -402,19 +454,22 @@ function fetchUrl(input: FetchInput): string {
   return typeof input === "string" || input instanceof URL ? input.toString() : input.url;
 }
 
-function nextAccount(state: RuntimeState, excludedIds: ReadonlySet<string> = new Set(), ignoreCooldown = false): OpenCodeZenAccount | null {
+/** 导出仅供测试 */
+export function nextAccount(state: RuntimeState, excludedIds: ReadonlySet<string> = new Set(), ignoreCooldown = false): OpenCodeZenAccount | null {
   const now = Date.now();
   const total = state.config.accounts.length;
   if (total === 0) return null;
-  /* 冷却中且冷却最早过期（最接近可用）的账号，供 ignoreCooldown 兜底硬试 */
+  /* 冷却中且冷却最早过期（最接近可用）的账号，供 ignoreCooldown 兜底硬试。
+   * 日级（daily）冷却的账号不参与兜底——它们到 UTC 0 点才重置，硬试只会再吃 429。 */
   let earliest: { account: OpenCodeZenAccount; index: number; until: number } | null = null;
   for (let offset = 0; offset < total; offset++) {
     const index = (state.activeIndex + offset) % total;
     const account = state.config.accounts[index];
     if (!account.enabled || !account.apiKey || excludedIds.has(account.id)) continue;
-    const until = state.cooldownUntil.get(account.id) ?? 0;
+    const entry = state.cooldownUntil.get(account.id);
+    const until = entry?.until ?? 0;
     if (until > now) {
-      if (!earliest || until < earliest.until) earliest = { account, index, until };
+      if (!entry?.daily && (!earliest || until < earliest.until)) earliest = { account, index, until };
       continue;
     }
     state.activeIndex = (index + 1) % total;
@@ -492,9 +547,17 @@ export function createOpenCodeZenFetch(
     const requestHasBody = input instanceof Request ? input.body !== null : init?.body !== undefined && init.body !== null;
     const canReplay = !requestHasBody || body !== undefined;
     const triedAccountIds = new Set<string>();
-    /* 全池都在冷却时仍取最早过期的账号硬试（冷却池兜底），不直接 503 */
+    /* 全池都在冷却时仍取最早过期的账号硬试（冷却池兜底，日级冷却除外），不直接 503 */
     let account = nextAccount(state, triedAccountIds) ?? nextAccount(state, triedAccountIds, true);
-    if (!account) return new Response("OpenCode Zen accounts are cooling down", { status: 503, headers: { "Retry-After": String(Math.ceil(state.config.cooldownMs / 1000)) } });
+    if (!account) {
+      /* Retry-After 按最早解冻时间（日级冷却为距 UTC 0 点的秒数） */
+      let earliestUntil = Infinity;
+      for (const entry of state.cooldownUntil.values()) if (entry.until < earliestUntil) earliestUntil = entry.until;
+      const retryAfter = Number.isFinite(earliestUntil)
+        ? Math.max(1, Math.ceil((earliestUntil - Date.now()) / 1000))
+        : Math.ceil(state.config.cooldownMs / 1000);
+      return new Response("OpenCode Zen accounts are cooling down", { status: 503, headers: { "Retry-After": String(retryAfter) } });
+    }
     let lastResponse: Response | null = null;
     let switchedFrom: string | undefined;
     /* 单请求最多尝试 MAX_ATTEMPTS 个账号，剩余账号留给后续请求，避免一个坏请求把全池打冷 */
@@ -511,7 +574,8 @@ export function createOpenCodeZenFetch(
       const responseBody = await response.arrayBuffer();
       lastResponse = new Response(responseBody, { status: response.status, statusText: response.statusText, headers: response.headers });
       const previous = account;
-      state.cooldownUntil.set(previous.id, Date.now() + state.config.cooldownMs);
+      /* 429 = 当日免费额度耗尽：冷却到下一个 UTC 0 点自动重置，而非固定时长 */
+      state.cooldownUntil.set(previous.id, { until: nextUtcMidnight(), daily: true });
       if (attempt === attempts - 1) break; /* 本请求尝试次数已用尽，走统一后处理 */
       account = nextAccount(state, triedAccountIds, true);
       if (!account) break;
@@ -520,18 +584,19 @@ export function createOpenCodeZenFetch(
       recordErrorLog({ level: "info", source: "opencode-zen-switch", provider: "opencode", message: `OpenCode Zen 429，已从 ${previous.note} 切换到 ${account.note}` });
     }
 
-    /* 全败后：把参与账号的长冷却压缩为短冷却，让后续请求能尽快重新选号 */
+    /* 全败后：把参与账号的长冷却压缩为短冷却，让后续请求能尽快重新选号（日级冷却不压缩） */
     if (lastResponse && state.config.autoSwitch && triedAccountIds.size > 0) {
       const shortUntil = Date.now() + SHORT_COOLDOWN_MS;
       for (const id of triedAccountIds) {
-        const until = state.cooldownUntil.get(id);
-        if (until !== undefined && until > shortUntil) state.cooldownUntil.set(id, shortUntil);
+        const entry = state.cooldownUntil.get(id);
+        if (entry && !entry.daily && entry.until > shortUntil) state.cooldownUntil.set(id, { until: shortUntil, daily: false });
       }
     }
 
-    /* 回退最近成功账号：主循环未试过它时（被尝试上限截断或处于冷却被跳过），忽略冷却硬试一次 */
+    /* 回退最近成功账号：主循环未试过它时（被尝试上限截断或处于冷却被跳过），忽略冷却硬试一次；
+     * 日级冷却中的最近成功账号不参与回退（到 UTC 0 点才重置，硬试只会再吃 429） */
     if (lastResponse && state.config.autoSwitch && canReplay && state.lastSuccessId && !triedAccountIds.has(state.lastSuccessId)) {
-      const fallbackAccount = state.config.accounts.find((item) => item.id === state.lastSuccessId && item.enabled && item.apiKey);
+      const fallbackAccount = state.config.accounts.find((item) => item.id === state.lastSuccessId && item.enabled && item.apiKey && !state.cooldownUntil.get(item.id)?.daily);
       if (fallbackAccount) {
         triedAccountIds.add(fallbackAccount.id);
         recordErrorLog({ level: "info", source: "opencode-zen-switch", provider: "opencode", message: `OpenCode Zen 全败后回退最近成功账号 ${fallbackAccount.note}` });
@@ -546,7 +611,7 @@ export function createOpenCodeZenFetch(
         }
         const responseBody = await response.arrayBuffer();
         lastResponse = new Response(responseBody, { status: response.status, statusText: response.statusText, headers: response.headers });
-        state.cooldownUntil.set(fallbackAccount.id, Date.now() + SHORT_COOLDOWN_MS);
+        state.cooldownUntil.set(fallbackAccount.id, { until: nextUtcMidnight(), daily: true });
       }
     }
 
@@ -565,7 +630,9 @@ export function getOpenCodeZenAccountProxy(id: string): OpenCodeZenProxy | null 
 export function mergeOpenCodeZenConfig(input: unknown): OpenCodeZenConfig {
   const current = readOpenCodeZenConfig();
   if (!isRecord(input)) return current;
-  const rawAccounts = Array.isArray(input.accounts) ? input.accounts : [];
+  // `accounts` missing (e.g. a switch-active-account PUT) must keep the
+  // current list — treating it as [] would wipe every configured account.
+  const rawAccounts = Array.isArray(input.accounts) ? input.accounts : current.accounts;
   const accounts = rawAccounts.map((raw, index) => {
     const item = isRecord(raw) ? raw : {};
     const id = typeof item.id === "string" && item.id.trim() ? item.id.trim() : `account-${index + 1}`;
@@ -587,10 +654,20 @@ export function mergeOpenCodeZenConfig(input: unknown): OpenCodeZenConfig {
       },
     } satisfies OpenCodeZenAccount;
   }).filter((account) => account.apiKey);
+  const rawExternal = isRecord(input.externalAccess) ? input.externalAccess : {};
+  const externalAccess = normalizeExternalAccess(
+    {
+      enabled: typeof rawExternal.enabled === "boolean" ? rawExternal.enabled : current.externalAccess.enabled,
+      port: Number.isInteger(Number(rawExternal.port)) ? Number(rawExternal.port) : current.externalAccess.port,
+      apiKey: typeof rawExternal.apiKey === "string" && rawExternal.apiKey.trim() ? rawExternal.apiKey.trim() : current.externalAccess.apiKey,
+    },
+    current.externalAccess,
+  );
   return normalizeConfig({
     accounts,
     autoSwitch: typeof input.autoSwitch === "boolean" ? input.autoSwitch : current.autoSwitch,
     cooldownMs: typeof input.cooldownMs === "number" ? input.cooldownMs : current.cooldownMs,
+    externalAccess,
   });
 }
 

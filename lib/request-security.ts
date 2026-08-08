@@ -87,13 +87,23 @@ export function shouldCheckApiRequestOrigin(request: Request): boolean {
   return request.headers.has("origin") || request.headers.has("sec-fetch-site");
 }
 
+/** Mutating methods must come from a same-origin browser page. Plain HTTP
+ *  clients (curl, scripts) that send no Origin header can read but never
+ *  write — this keeps LAN-visible instances (0.0.0.0 listen) from being
+ *  reconfigured by any device on the network. */
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 export function isApiRequestAllowed(
   request: Request,
   configuredHostnames = configuredHostnamesFromEnvironment(),
 ): boolean {
   if (!isApiRequestHostAllowed(request, configuredHostnames)) return false;
   if (isUserInitiatedSessionExportNavigation(request)) return true;
-  return !shouldCheckApiRequestOrigin(request) || isApiRequestOriginAllowed(request);
+  if (!shouldCheckApiRequestOrigin(request)) {
+    // Non-browser client: reads are fine, writes require a same-origin page.
+    return !WRITE_METHODS.has((request.method ?? "GET").toUpperCase());
+  }
+  return isApiRequestOriginAllowed(request);
 }
 
 export function hasJsonContentType(request: Request): boolean {

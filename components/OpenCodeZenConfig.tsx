@@ -8,9 +8,16 @@ import type { SafeOpenCodeZenAccount, SafeOpenCodeZenConfig } from "@/lib/openco
 
 type DraftAccount = SafeOpenCodeZenAccount & { apiKey?: string; apiKeyDraft?: string; passwordDraft?: string };
 const blankProxy = () => ({ protocol: "http" as const, enabled: true, url: "", port: 0, username: "", password: "", hasPassword: false });
+const DEFAULT_EXTERNAL_PORT = 7474;
 
 function maskedKey(account: DraftAccount): string {
   return account.apiKey ? `${account.apiKey.slice(0, 4)}••••${account.apiKey.slice(-4)}` : account.apiKeyMasked;
+}
+
+function generateExternalKey(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return `piweb-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export function OpenCodeZenConfig() {
@@ -21,6 +28,17 @@ export function OpenCodeZenConfig() {
   const [cooldownMs, setCooldownMs] = useState(60_000);
   const [importText, setImportText] = useState("");
   const [proxyImportText, setProxyImportText] = useState("");
+  const [externalEnabled, setExternalEnabled] = useState(false);
+  const [externalPort, setExternalPort] = useState(DEFAULT_EXTERNAL_PORT);
+  const [externalApiKeyDraft, setExternalApiKeyDraft] = useState("");
+  const [externalHasApiKey, setExternalHasApiKey] = useState(false);
+  const [externalKeyMasked, setExternalKeyMasked] = useState("••••••••");
+  /** Plaintext shown exactly once right after Generate; cleared on save/close. */
+  const [externalRevealedKey, setExternalRevealedKey] = useState<string | null>(null);
+  const [externalStatus, setExternalStatus] = useState<SafeOpenCodeZenConfig["externalAccess"]["status"]>({ running: false });
+  const [testingExternal, setTestingExternal] = useState(false);
+  /** 外部调用网关地址（127.0.0.1 仅本机；经 cloudflared 等隧道对外暴露）。 */
+  const baseUrl = `http://127.0.0.1:${externalPort || DEFAULT_EXTERNAL_PORT}/v1`;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -36,6 +54,12 @@ export function OpenCodeZenConfig() {
       setActiveAccountId(data.activeAccountId ?? null);
       setAutoSwitch(data.autoSwitch);
       setCooldownMs(data.cooldownMs);
+      setExternalEnabled(data.externalAccess.enabled);
+      setExternalPort(data.externalAccess.port);
+      setExternalApiKeyDraft("");
+      setExternalHasApiKey(data.externalAccess.hasApiKey);
+      setExternalKeyMasked(data.externalAccess.apiKeyMasked);
+      setExternalStatus(data.externalAccess.status);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -80,11 +104,17 @@ export function OpenCodeZenConfig() {
       const response = await fetch("/api/opencode-zen", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accounts: accounts.map((account) => ({ ...account, ...(account.apiKeyDraft ? { apiKey: account.apiKeyDraft } : {}) })), autoSwitch, cooldownMs }),
+        body: JSON.stringify({ accounts: accounts.map((account) => ({ ...account, ...(account.apiKeyDraft ? { apiKey: account.apiKeyDraft } : {}) })), autoSwitch, cooldownMs, externalAccess: { enabled: externalEnabled, port: externalPort, ...(externalApiKeyDraft ? { apiKey: externalApiKeyDraft } : {}) } }),
       });
       const data = await response.json() as SafeOpenCodeZenConfig & { error?: string };
       if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
       setAccounts(data.accounts.map((account) => ({ ...account, proxy: { ...account.proxy }, apiKeyDraft: "", passwordDraft: "" })));
+      setExternalApiKeyDraft("");
+      setExternalHasApiKey(data.externalAccess.hasApiKey);
+      setExternalKeyMasked(data.externalAccess.apiKeyMasked);
+      setExternalStatus(data.externalAccess.status);
+      // The plaintext hint is one-shot only — after saving it is gone for good.
+      setExternalRevealedKey(null);
       setMessage("OpenCode Zen 配置已保存");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -171,6 +201,42 @@ export function OpenCodeZenConfig() {
   const addAccount = () => setAccounts((current) => [...current, { id: `account-${Date.now()}`, note: "新账号", apiKeyMasked: "••••••••", hasApiKey: false, enabled: true, proxy: blankProxy(), apiKeyDraft: "" }]);
   const removeAccount = (id: string) => setAccounts((current) => current.filter((account) => account.id !== id));
 
+  const testExternal = async () => {
+    setTestingExternal(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/opencode-zen/external/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: externalEnabled, port: externalPort, apiKey: externalApiKeyDraft || undefined }),
+      });
+      const data = await response.json() as { ok?: boolean; skipped?: boolean; message?: string; status?: number; latencyMs?: number; modelCount?: number; error?: string };
+      if (data.skipped) {
+        setMessage(data.message ?? "外部调用未启用，无需测试");
+        return;
+      }
+      if (!response.ok || data.ok !== true) throw new Error(data.error ?? (response.ok ? "测试未通过" : `HTTP ${response.status}`));
+      setMessage(`外部调用测试通过：模型接口返回 ${data.modelCount ?? "?"} 个模型（${data.latencyMs ?? "?"}ms）`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setTestingExternal(false);
+    }
+  };
+
+  const copyExternalKey = async () => {
+    try {
+      const response = await fetch("/api/opencode-zen/external/key", { method: "POST" });
+      const data = await response.json() as { apiKey?: string; error?: string };
+      if (!response.ok || !data.apiKey) throw new Error(data.error ?? `HTTP ${response.status}`);
+      await copyText(data.apiKey);
+      setMessage("外部调用 API Key 已复制");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
   if (loading) return <div style={{ flex: 1, padding: 20, color: "var(--text-muted)", fontSize: 12 }}>{t("desktop.loading")}</div>;
 
   return (
@@ -179,13 +245,66 @@ export function OpenCodeZenConfig() {
         <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>OpenCode Zen</div>
         <div style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 11 }}>账号、独立代理和 429 自动切换只在此处配置，不在普通供应商列表中显示。</div>
       </div>
+      <section style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "var(--bg-panel)", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>外部调用（OpenAI 兼容 API）</span>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--text-muted)", fontSize: 12 }}><input type="checkbox" checked={externalEnabled} onChange={(event) => setExternalEnabled(event.target.checked)} />启用</label>
+          {externalStatus.running
+            ? <span style={{ color: "#22c55e", fontSize: 11 }}>运行中（127.0.0.1:{externalStatus.port ?? externalPort}）</span>
+            : externalStatus.error
+              ? <span style={{ color: "#ef4444", fontSize: 11 }}>错误：{externalStatus.error}</span>
+              : <span style={{ color: "var(--text-dim)", fontSize: 11 }}>已停止</span>}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--text-muted)", fontSize: 12 }}>端口
+            <input type="number" min={1} max={65535} value={externalPort || ""} onChange={(event) => setExternalPort(Number(event.target.value) || 0)} style={{ width: 90, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text)", fontSize: 12 }} />
+          </label>
+          <code style={{ padding: "6px 8px", background: "var(--bg)", color: "var(--text-muted)", borderRadius: 5, fontSize: 11 }}>{baseUrl}</code>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ color: "var(--text-dim)", fontSize: 11 }}>API Key（外部客户端 Bearer 认证）：</span>
+          <input type="password" value={externalApiKeyDraft} onChange={(event) => { setExternalApiKeyDraft(event.target.value); setExternalRevealedKey(null); }} placeholder={externalHasApiKey ? `${externalKeyMasked}（留空保持不变）` : "设置外部调用 API Key"} style={{ width: 220, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text)", fontSize: 11 }} />
+          <button type="button" onClick={() => {
+            const key = generateExternalKey();
+            setExternalApiKeyDraft(key);
+            setExternalRevealedKey(key);
+            setMessage(null);
+          }} style={{ padding: "5px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}>生成随机 Key</button>
+          <button type="button" onClick={() => void copyExternalKey()} disabled={!externalHasApiKey} title="复制已保存的 API Key" style={{ padding: "5px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text-muted)", cursor: externalHasApiKey ? "pointer" : "not-allowed", fontSize: 11 }}><Copy size={12} /> 复制 Key</button>
+          <button type="button" onClick={() => void testExternal()} disabled={testingExternal} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text-muted)", cursor: testingExternal ? "wait" : "pointer", fontSize: 11 }}><Play size={12} /> {testingExternal ? "测试中…" : "测试连接"}</button>
+        </div>
+        {externalRevealedKey && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 10px", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 6, background: "rgba(34,197,94,0.08)" }}>
+            <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>⚠ 明文仅显示这一次，请立即复制（保存后无法再次查看明文）：</span>
+            <code style={{ padding: "4px 8px", background: "var(--bg)", borderRadius: 4, fontSize: 11, color: "var(--text)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>{externalRevealedKey}</code>
+            <button type="button" onClick={async () => { await copyText(externalRevealedKey); setMessage("API Key 已复制"); }} style={{ padding: "4px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}><Copy size={12} /> 复制</button>
+          </div>
+        )}
+
+        {/* 调用地址与调用方式 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", fontWeight: 600 }}>调用地址与调用方式</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <code style={{ padding: "6px 8px", background: "var(--bg)", color: "var(--text-muted)", borderRadius: 5, fontSize: 11 }}>{baseUrl}</code>
+            <button type="button" onClick={async () => { await copyText(baseUrl); setMessage("baseURL 已复制"); }} title="复制 baseURL" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}><Copy size={12} /> 复制 baseURL</button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ fontSize: 11, color: "var(--text-dim)" }}>curl 示例：</div>
+            <div style={{ padding: "8px 10px", background: "var(--bg)", borderRadius: 5, fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--text-muted)", overflowX: "auto", whiteSpace: "pre" }}>
+{`curl ${baseUrl}/chat/completions \\
+  -H "Authorization: Bearer <你的 Key>" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"<免费模型，见 GET /v1/models>","messages":[{"role":"user","content":"Hello"}]}'`}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-dim)" }}>OpenAI 兼容客户端（Cline / Roo Code / Open WebUI 等）配置：baseURL = <code>{baseUrl}</code>，API Key = 上方外部调用 Key，模型列表来自 <code>{baseUrl}/models</code>（仅返回免费模型）。</div>
+          </div>
+        </div>
+        <div style={{ color: "var(--text-dim)", fontSize: 11 }}>流量复用本账号/代理池；仅监听 127.0.0.1，可通过 cloudflared 等隧道对外暴露（Bearer Key 鉴权，未配置 Key 不启动）。修改后点击上方「保存」生效。</div>
+      </section>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <button type="button" onClick={addAccount} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 12 }}><Plus size={14} /> 添加账号</button>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text-muted)", fontSize: 12 }}><input type="checkbox" checked={autoSwitch} onChange={(event) => setAutoSwitch(event.target.checked)} />429 自动切换账号+代理</label>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text-muted)", fontSize: 12 }} title="一个账号触发 429 后，在此时间内不会再次被选中（毫秒）">
-          429 冷却（毫秒）
-          <input type="number" min={0} max={600000} step={5000} value={cooldownMs} onChange={(event) => setCooldownMs(Number(event.target.value) || 0)} style={{ width: 110, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text)", fontSize: 12 }} />
-        </label>
+        <span style={{ color: "var(--text-dim)", fontSize: 11 }} title="账号返回 429 表示当日免费额度耗尽，冷却至次日 UTC 0 点自动重置">429 限额冷却：至 UTC 0 点自动重置</span>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text-muted)", fontSize: 12 }} title="请求将优先使用此账号；429 自动切换会暂时移开它，冷却结束后回到它">
           当前使用账号
           <select
