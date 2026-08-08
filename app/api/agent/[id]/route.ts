@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
-import { removeQueue } from "@/lib/queue-store";
 import { startRpcSession, getRpcSession } from "@/lib/rpc-manager";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 
@@ -35,14 +34,12 @@ export async function POST(
       return NextResponse.json({ success: true, data: null });
     }
 
-    // clear_queue is persisted in the queue sidecar and restored when the
-    // wrapper is recreated, so a silent success would leave the queue alive.
-    // Drop the sidecar directly and answer without paying a cold start.
-    if (body.type === "clear_queue") {
-      const filePath = await resolveSessionPath(id);
-      if (filePath) removeQueue(filePath);
-      return NextResponse.json({ success: true, data: null });
-    }
+    // NOTE: clear_queue intentionally does NOT take the abort-style shortcut.
+    // The wrapper's clear_queue clears the live queue AND returns the cleared
+    // messages so the client can restore them into the input (handleRecallQueue
+    // reads result.steering/followUp). Returning null here would silently
+    // discard the queue text. Cold start is cheap now (~2s with the model
+    // cache), so always rebuild the wrapper for clear_queue.
 
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
