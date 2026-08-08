@@ -135,11 +135,14 @@ test("mode instruction block injects once per mode composition", () => {
     source.indexOf("// Plan mode prefixes every prompt"),
     source.indexOf("const imageBlocks = images?.map"),
   );
-  // The block is only prepended when the mode signature has not been injected yet.
-  assert.match(handleSendSource, /injectedModeSignatureRef\.current !== modeSignature/);
-  assert.match(handleSendSource, /injectedModeSignatureRef\.current = modeSignature/);
-  assert.match(handleSendSource, /combinedBlock && injectedModeSignatureRef\.current !== modeSignature/);
+  // The block is only prepended when the session-scoped signature has not been
+  // injected yet for this conversation and this mode composition.
+  assert.match(handleSendSource, /injectedModeSignatureRef\.current\.sessionKey !== sessionKey/);
+  assert.match(handleSendSource, /injectedModeSignatureRef\.current\.signature !== modeSignature/);
+  assert.match(handleSendSource, /combinedBlock && \(injectedModeSignatureRef\.current\.sessionKey !== sessionKey/);
+  assert.match(handleSendSource, /injectedModeSignatureRef\.current = \{ sessionKey, signature: modeSignature \}/);
   assert.match(handleSendSource, /effectiveMessage = message/);
+  assert.match(handleSendSource, /const sessionKey = session\?\.id \?\? "new"/);
   // Mode composition changes reset the signature so a fresh block can apply.
-  assert.match(source, /injectedModeSignatureRef\.current = ""/);
+  assert.match(source, /injectedModeSignatureRef\.current = \{ sessionKey: "", signature: "" \}/);
 });

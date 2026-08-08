@@ -579,9 +579,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
    * Signature of the last mode-instruction block injected into a sent message.
    * The mode (plan / goal / token profile) is held by the agent's context once
    * injected; repeating the same block on every message is redundant noise that
-   * shows up in transcripts. Reset whenever the mode composition changes.
+   * shows up in transcripts.
+   *
+   * Scoped per session (sessionKey): switching to another conversation whose
+   * agent context never received the block must inject it fresh, even when both
+   * sessions share the same mode composition. Reset whenever the mode
+   * composition changes.
    */
-  const injectedModeSignatureRef = useRef<string>("");
+  const injectedModeSignatureRef = useRef<{ sessionKey: string; signature: string }>({ sessionKey: "", signature: "" });
   const modeSettingsRef = useRef(modeSettings);
   useEffect(() => {
     modeSettingsRef.current = modeSettings;
@@ -595,11 +600,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     collaborationModeRef.current = collaborationMode;
     // Mode composition changed — allow a fresh mode-block injection.
-    injectedModeSignatureRef.current = "";
+    injectedModeSignatureRef.current = { sessionKey: "", signature: "" };
   }, [collaborationMode]);
   useEffect(() => {
     tokenModeRef.current = tokenMode;
-    injectedModeSignatureRef.current = "";
+    injectedModeSignatureRef.current = { sessionKey: "", signature: "" };
   }, [tokenMode]);
   /** Pending tool-approval requests surfaced by the RPC wrapper (SSE). */
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequestItem[]>([]);
@@ -1704,9 +1709,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       planModeRef.current ? "legacy-plan" : "",
       combinedBlock ? String(combinedBlock.length) : "",
     ].join("|");
+    // A new session has no id yet (sessionIdRef fills in after ensureNewSession),
+    // so key the injection on the stable session identity from props: existing
+    // conversations keep their id, new ones stay "new" until they become real.
+    const sessionKey = session?.id ?? "new";
     let effectiveMessage: string;
-    if (combinedBlock && injectedModeSignatureRef.current !== modeSignature) {
-      injectedModeSignatureRef.current = modeSignature;
+    if (combinedBlock && (injectedModeSignatureRef.current.sessionKey !== sessionKey || injectedModeSignatureRef.current.signature !== modeSignature)) {
+      injectedModeSignatureRef.current = { sessionKey, signature: modeSignature };
       effectiveMessage = `${combinedBlock}\n\n${message}`;
     } else {
       effectiveMessage = message;
