@@ -127,14 +127,6 @@ const TOOL_PRESET_MAP: Record<"off" | "default" | "full", "none" | "default" | "
 const COMPOSITION_END_ENTER_GRACE_MS = 100;
 const MODEL_OPTION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
-const DRAFT_PRESETS: Array<{ labelKey: string }> = [
-  { labelKey: "desktop.presetReviewChanges" },
-  { labelKey: "desktop.presetExplainProject" },
-  { labelKey: "desktop.presetWriteTests" },
-  { labelKey: "desktop.presetRefactor" },
-  { labelKey: "desktop.presetFixBug" },
-];
-
 function compareModelOptions(a: ModelOption, b: ModelOption): number {
   return MODEL_OPTION_COLLATOR.compare(a.name || a.modelId, b.name || b.modelId)
     || MODEL_OPTION_COLLATOR.compare(a.provider, b.provider)
@@ -2248,36 +2240,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 ✕
               </button>
             </span>
-          )}
-          {!value.trim() && !isStreaming && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
-              {DRAFT_PRESETS.map((preset) => (
-                <button
-                  key={preset.labelKey}
-                  type="button"
-                  onClick={() => {
-                    const text = t(preset.labelKey);
-                    setValue(text);
-                    setDraft(draftKey ?? "", { value: text, images: [] });
-                    requestAnimationFrame(() => textareaRef.current?.focus());
-                  }}
-                  style={{
-                    padding: "3px 10px",
-                    borderRadius: 999,
-                    border: "1px solid var(--border)",
-                    background: "var(--bg-panel)",
-                    color: "var(--text-muted)",
-                    fontSize: 11,
-                    cursor: "pointer",
-                    transition: "border-color 0.12s, color 0.12s, background 0.12s",
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; }}
-                >
-                  {t(preset.labelKey)}
-                </button>
-              ))}
-            </div>
           )}
           <textarea
             ref={textareaRef}
