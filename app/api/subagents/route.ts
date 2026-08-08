@@ -70,7 +70,7 @@ function sanitizeField(key: keyof SubagentsConfig, kind: "number" | "boolean" | 
 }
 
 /** Filter an incoming body down to the whitelisted fields. */
-export function sanitizeSubagentsConfig(body: unknown): SubagentsConfig {
+function sanitizeSubagentsConfig(body: unknown): SubagentsConfig {
   const out: SubagentsConfig = {};
   if (!isRecord(body)) return out;
   for (const { key, kind } of FIELD_WHITELIST) {
