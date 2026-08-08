@@ -961,6 +961,9 @@ export class AgentSessionWrapper {
         try {
           await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
         } finally {
+          // steer/follow_up must clear the phase like prompt does, or the
+          // "waiting for model" spinner lingers after the turn finishes.
+          this.promptPhase = null;
           notifyRunningChange();
         }
         return null;
@@ -974,6 +977,7 @@ export class AgentSessionWrapper {
         try {
           await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
         } finally {
+          this.promptPhase = null;
           notifyRunningChange();
         }
         return null;
