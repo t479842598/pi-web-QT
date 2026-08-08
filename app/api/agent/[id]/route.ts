@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
+import { removeQueue } from "@/lib/queue-store";
 import { startRpcSession, getRpcSession } from "@/lib/rpc-manager";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 
@@ -30,7 +31,16 @@ export async function POST(
     // Abort-style commands only make sense for a live session. When the wrapper
     // is gone (idle-reaped) there is nothing to stop, so answer immediately
     // instead of paying a full cold start (~20s model listing) just to abort.
-    if (body.type === "abort" || body.type === "abort_bash" || body.type === "clear_queue") {
+    if (body.type === "abort" || body.type === "abort_bash") {
+      return NextResponse.json({ success: true, data: null });
+    }
+
+    // clear_queue is persisted in the queue sidecar and restored when the
+    // wrapper is recreated, so a silent success would leave the queue alive.
+    // Drop the sidecar directly and answer without paying a cold start.
+    if (body.type === "clear_queue") {
+      const filePath = await resolveSessionPath(id);
+      if (filePath) removeQueue(filePath);
       return NextResponse.json({ success: true, data: null });
     }
 

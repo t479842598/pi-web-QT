@@ -29,8 +29,8 @@
     "package.json"
   ],
   "scripts": {
-    "dev": "node bin/fix-pi-agent-undici.js && next dev -H 127.0.0.1 -p 50955 --turbopack",
-    "dev:lan": "node bin/fix-pi-agent-undici.js && next dev -H 0.0.0.0 -p 50955 --turbopack",
+    "dev": "node bin/fix-pi-agent-undici.js && next dev -H 127.0.0.1 -p 0 --turbopack",
+    "dev:lan": "node bin/fix-pi-agent-undici.js && next dev -H 0.0.0.0 -p 0 --turbopack",
     "build": "env -u TURBOPACK next build --webpack",
     "start": "node bin/fix-pi-agent-undici.js && next start -H 127.0.0.1 -p 0",
     "start:lan": "node bin/fix-pi-agent-undici.js && next start -H 0.0.0.0 -p 0",
