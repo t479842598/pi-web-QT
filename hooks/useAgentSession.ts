@@ -10,6 +10,7 @@ import type {
   SessionTreeNode,
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
+import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { getToolNamesForPreset, PRESET_PLAN, type ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -739,6 +740,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (sessionStatsOverride) return sessionStatsOverride;
     const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
     let cost = 0;
+    // Split spend by pricing currency: deepseek-v4-flash/pro (any provider)
+    // is priced with the DeepSeek official CNY table; every other model keeps
+    // the SDK's USD cost. The legacy `cost` field stays the SDK total for
+    // backward compatibility.
+    let costCNY = 0;
+    let costUSD = 0;
     let userMessages = 0;
     let assistantMessages = 0;
     let toolResults = 0;
@@ -748,14 +755,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (msg.role === "toolResult") toolResults += 1;
       if (msg.role !== "assistant") continue;
       assistantMessages += 1;
-      const u = (msg as import("@/lib/types").AssistantMessage).usage;
-      toolCalls += (msg as import("@/lib/types").AssistantMessage).content.filter((c) => c.type === "toolCall").length;
+      const assistant = msg as import("@/lib/types").AssistantMessage;
+      const u = assistant.usage;
+      toolCalls += assistant.content.filter((c) => c.type === "toolCall").length;
       if (!u) continue;
       tokens.input += u.input ?? 0;
       tokens.output += u.output ?? 0;
       tokens.cacheRead += u.cacheRead ?? 0;
       tokens.cacheWrite += u.cacheWrite ?? 0;
-      cost += u.cost?.total ?? 0;
+      const costTotal = u.cost?.total ?? 0;
+      cost += costTotal;
+      if (matchesDeepSeekCNY(assistant.model)) {
+        costCNY += cnyCost(assistant.model, u);
+      } else {
+        costUSD += costTotal;
+      }
     }
     tokens.total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
     if (tokens.total === 0 && messages.length === 0) return null;
@@ -770,6 +784,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       totalMessages: messages.length,
       tokens,
       cost,
+      costCNY,
+      costUSD,
       ...(contextUsage ? { contextUsage } : {}),
     } satisfies SessionStatsInfo;
   }, [messages, sessionStatsOverride, contextUsage, data?.filePath, session?.id, session?.name]);

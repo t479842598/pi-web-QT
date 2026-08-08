@@ -20,6 +20,7 @@ import { DatabaseIcon } from "@phosphor-icons/react/Database";
 import { WarningCircleIcon } from "@phosphor-icons/react/WarningCircle";
 import { GitForkIcon } from "@phosphor-icons/react/GitFork";
 import { useI18n } from "@/hooks/useI18n";
+import { cnyCost, matchesDeepSeekCNY, formatCNY } from "@/lib/deepseek-pricing";
 import type {
   AgentMessage,
   UserMessage,
@@ -578,9 +579,20 @@ function AssistantMessageView({
                 {fmtToken(message.usage.cacheRead)}
               </span>
             )}
-            {message.usage && message.usage.cost?.total > 0 && (
-              <span>${message.usage.cost.total.toFixed(4)}</span>
-            )}
+            {message.usage && message.usage.cost?.total > 0 && (() => {
+              // deepseek-v4-flash/pro (any provider) is priced from the
+              // official CNY table; everything else keeps the SDK USD cost.
+              if (matchesDeepSeekCNY(message.model)) {
+                const cny = cnyCost(message.model, message.usage);
+                if (cny <= 0) return null;
+                return (
+                  <span title={t("desktop.turnUsageByOfficialPrice")}>
+                    {formatCNY(cny)}
+                  </span>
+                );
+              }
+              return <span>${message.usage.cost.total.toFixed(4)}</span>;
+            })()}
           </div>
         )}
         {textContent && !isStreaming && (

@@ -68,6 +68,10 @@ export interface SessionStatsInfo {
     total: number;
   };
   cost: number;
+  /** DeepSeek official CNY spend for deepseek-v4-flash/pro messages (any provider). */
+  costCNY?: number;
+  /** SDK USD spend for non-deepseek-v4 models. */
+  costUSD?: number;
   contextUsage?: ContextUsage;
 }
 

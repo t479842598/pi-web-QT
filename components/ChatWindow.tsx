@@ -20,6 +20,8 @@ import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ArrowDownIcon } from "@phosphor-icons/react/ArrowDown";
 import { useAgentSession, CHAT_BOTTOM_SPACER_PX, BOTTOM_KEEP_OUT_PX, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
+import { useDeepSeekBalance } from "@/hooks/useDeepSeekBalance";
+import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
@@ -189,6 +191,53 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   useEffect(() => {
     if (pendingRecovery.length === 0) setRecoveryDismissed(false);
   }, [pendingRecovery.length]);
+
+  // ── DeepSeek official wallet balance ──────────────────────────────────────
+  // Only queried while the active model runs on the official api.deepseek.com
+  // provider. Gateway providers (zenmux etc.) never query the balance API;
+  // they only get the official-CNY pricing from deepseek-pricing.ts.
+  const { balance: deepseekBalance, refresh: refreshBalance, refreshSoon: refreshBalanceSoon } = useDeepSeekBalance();
+  const isDeepSeekOfficial = displayModelValue?.provider === "deepseek";
+  const lastBalanceTurnEntryRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (isDeepSeekOfficial) void refreshBalance();
+  }, [isDeepSeekOfficial, refreshBalance]);
+
+  // A finished turn carries usage on its final assistant message — refresh the
+  // balance debounced so a burst of turns triggers a single request.
+  useEffect(() => {
+    if (!isDeepSeekOfficial) return;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      const usage = (m as AssistantMessage).usage;
+      if (!usage) continue;
+      const key = `${i}:${entryIds[i] ?? ""}`;
+      if (key !== lastBalanceTurnEntryRef.current) {
+        lastBalanceTurnEntryRef.current = key;
+        refreshBalanceSoon();
+      }
+      break;
+    }
+  }, [messages, entryIds, isDeepSeekOfficial, refreshBalanceSoon]);
+
+  // Latest finished turn's token/cost breakdown for the "本次回复" stats block.
+  const lastTurnUsage = useMemo(() => {
+    const last = messages.findLast(
+      (m): m is AssistantMessage => m.role === "assistant" && !!(m as AssistantMessage).usage,
+    );
+    if (!last?.usage) return null;
+    const usage = last.usage;
+    return {
+      model: last.model ?? "",
+      input: usage.input ?? 0,
+      output: usage.output ?? 0,
+      cacheRead: usage.cacheRead ?? 0,
+      costCNY: matchesDeepSeekCNY(last.model) ? cnyCost(last.model, usage) : 0,
+      costUSD: matchesDeepSeekCNY(last.model) ? 0 : (usage.cost?.total ?? 0),
+    };
+  }, [messages]);
 
   // ── Plan review: after a plan-mode run settles, ask what to do next ──────
   const [planReviewOpen, setPlanReviewOpen] = useState(false);
@@ -686,6 +735,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 onAbortCompaction={handleAbortCompaction}
                 isCompacting={isCompacting}
                 compactError={compactError}
+                isDeepSeekOfficial={isDeepSeekOfficial}
+                deepseekBalance={deepseekBalance}
+                lastTurnUsage={lastTurnUsage}
                 // Branch entry point lives in the bottom SessionInfoBar only;
                 // rendering it in both bars would duplicate the button.
               />
@@ -1103,6 +1155,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               branchTree={branchTree}
               branchActiveLeafId={branchActiveLeafId}
               onBranchLeafChange={handleLeafChange}
+              isDeepSeekOfficial={isDeepSeekOfficial}
+              deepseekBalance={deepseekBalance}
+              lastTurnUsage={lastTurnUsage}
             />
           </div>
         </div>
