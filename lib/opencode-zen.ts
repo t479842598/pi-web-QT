@@ -65,10 +65,26 @@ type RuntimeState = {
   lastSwitch?: SafeOpenCodeZenConfig["lastSwitch"];
 };
 
-export const OPENCODE_ZEN_PROVIDER_IDS = ["opencode", "opencode-go"] as const;
+/**
+ * Providers that receive the OpenCode Zen account key.
+ *
+ * pi-ai ships two Zen gateway providers (`opencode` → opencode.ai/zen and
+ * `opencode-go` → opencode.ai/zen/go) whose model catalogs overlap for 12
+ * models (gpt-5.6-luna, glm-5.2, kimi-k2.6, deepseek-v4-pro, ...). Injecting
+ * the same key into both makes every shared model appear twice in the picker
+ * as two identical "OpenCode Zen" groups. Only the default zen gateway is
+ * keyed; the zen/go catalog's unique models (qwen3.7/3.8-max, hy3,
+ * mimo-v2.5, mimo-v2.5-pro) are therefore not listed.
+ */
+export const OPENCODE_ZEN_PROVIDER_IDS = ["opencode"] as const;
 
+/**
+ * Gateways whose requests are routed through the account/proxy pool.
+ * Kept separate from OPENCODE_ZEN_PROVIDER_IDS so a user who manually
+ * configures an opencode-go provider (own baseUrl + key) still gets the pool.
+ */
 export function isOpenCodeZenProvider(provider: string): boolean {
-  return (OPENCODE_ZEN_PROVIDER_IDS as readonly string[]).includes(provider);
+  return provider === "opencode" || provider === "opencode-go";
 }
 
 declare global {
