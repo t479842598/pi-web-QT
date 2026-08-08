@@ -1,0 +1,41 @@
+{
+  "displayName": "Carbonfox",
+  "dark": {
+    "bg": "#161616",
+    "panel": "#222222",
+    "hover": "#222222",
+    "selected": "#292828",
+    "border": "#2d2c2c",
+    "text": "#f2f4f8",
+    "muted": "#8b8a8a",
+    "dim": "#8b8a8a",
+    "accent": "#33b1ff",
+    "accentHover": "#2f9adc",
+    "userBg": "#262626",
+    "assistantBg": "#161616",
+    "toolBg": "#262626",
+    "subtle": "#292828",
+    "red": "#ff8389",
+    "green": "#42be65",
+    "orange": "#f1c21b"
+  },
+  "light": {
+    "bg": "#ffffff",
+    "panel": "#f4f4f7",
+    "hover": "#f4f4f4",
+    "selected": "#f6f6f8",
+    "border": "#e3e2e2",
+    "text": "#161616",
+    "muted": "#868585",
+    "dim": "#868585",
+    "accent": "#0072c3",
+    "accentHover": "#338ecf",
+    "userBg": "#f4f4f7",
+    "assistantBg": "#ffffff",
+    "toolBg": "#f4f4f4",
+    "subtle": "#f6f6f8",
+    "red": "#da1e28",
+    "green": "#198038",
+    "orange": "#f1c21b"
+  }
+}

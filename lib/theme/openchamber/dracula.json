@@ -1,0 +1,41 @@
+{
+  "displayName": "Dracula",
+  "dark": {
+    "bg": "#14151f",
+    "panel": "#161722",
+    "hover": "#181926",
+    "selected": "#1f2030",
+    "border": "#292a36",
+    "text": "#f8f8f2",
+    "muted": "#7c7e9c",
+    "dim": "#7c7e9c",
+    "accent": "#bd93f9",
+    "accentHover": "#a480d8",
+    "userBg": "#222436",
+    "assistantBg": "#14151f",
+    "toolBg": "#181926",
+    "subtle": "#1f2030",
+    "red": "#ff5555",
+    "green": "#50fa7b",
+    "orange": "#ffb86c"
+  },
+  "light": {
+    "bg": "#f8f8f2",
+    "panel": "#eeeee5",
+    "hover": "#eff1eb",
+    "selected": "#edeee7",
+    "border": "#e2e3da",
+    "text": "#1f1f2f",
+    "muted": "#6c6c7a",
+    "dim": "#6c6c7a",
+    "accent": "#7c6bf5",
+    "accentHover": "#9587f4",
+    "userBg": "#f1f2ed",
+    "assistantBg": "#f8f8f2",
+    "toolBg": "#f1f2ed",
+    "subtle": "#edeee7",
+    "red": "#d9536f",
+    "green": "#2fbf71",
+    "orange": "#f7a14d"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "displayName": "JetBrains",
+  "dark": {
+    "bg": "#1e1f22",
+    "panel": "#2b2d30",
+    "hover": "#26282b",
+    "selected": "#28292c",
+    "border": "#383a3f",
+    "text": "#dfe1e5",
+    "muted": "#9fa0a2",
+    "dim": "#9fa0a2",
+    "accent": "#6796f5",
+    "accentHover": "#70aeff",
+    "userBg": "#2a3b5d",
+    "assistantBg": "#1e1f22",
+    "toolBg": "#26282b",
+    "subtle": "#28292c",
+    "red": "#fa6675",
+    "green": "#57965d",
+    "orange": "#f2c55c"
+  },
+  "light": {
+    "bg": "#ffffff",
+    "panel": "#ffffff",
+    "hover": "#f7f8fa",
+    "selected": "#f5f8fd",
+    "border": "#dde0ea",
+    "text": "#000000",
+    "muted": "#404040",
+    "dim": "#404040",
+    "accent": "#195ce3",
+    "accentHover": "#2d61f0",
+    "userBg": "#eff4fd",
+    "assistantBg": "#f7f8fa",
+    "toolBg": "#f5f7f9",
+    "subtle": "#f5f8fd",
+    "red": "#ce0606",
+    "green": "#077d18",
+    "orange": "#f49810"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "displayName": "Kanagawa",
+  "dark": {
+    "bg": "#1f1f28",
+    "panel": "#2a2a37",
+    "hover": "#23232d",
+    "selected": "#2a2a36",
+    "border": "#333343",
+    "text": "#dcd7ba",
+    "muted": "#8b8b85",
+    "dim": "#8b8b85",
+    "accent": "#7fb4ca",
+    "accentHover": "#9dc5e0",
+    "userBg": "#2a2a37",
+    "assistantBg": "#2f2f3d",
+    "toolBg": "#16161d",
+    "subtle": "#2a2a36",
+    "red": "#e82424",
+    "green": "#98bb6c",
+    "orange": "#ff9e3b"
+  },
+  "light": {
+    "bg": "#f6f3d6",
+    "panel": "#eae4bf",
+    "hover": "#ece6c8",
+    "selected": "#e6f0e3",
+    "border": "#d7d1ba",
+    "text": "#545464",
+    "muted": "#6c6c67",
+    "dim": "#6c6c67",
+    "accent": "#4d699b",
+    "accentHover": "#6693bf",
+    "userBg": "#e6f2e1",
+    "assistantBg": "#f6f3d6",
+    "toolBg": "#dcd5ac",
+    "subtle": "#e6f0e3",
+    "red": "#e82424",
+    "green": "#6f894e",
+    "orange": "#de9800"
+  }
+}

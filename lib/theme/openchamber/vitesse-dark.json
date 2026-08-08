@@ -1,0 +1,23 @@
+{
+  "displayName": "Vitesse Dark",
+  "dark": {
+    "bg": "#121212",
+    "panel": "#1a1a1a",
+    "hover": "#171717",
+    "selected": "#1e1e1e",
+    "border": "#313131",
+    "text": "#dbd7ca",
+    "muted": "#c0beb9",
+    "dim": "#c0beb9",
+    "accent": "#4d9375",
+    "accentHover": "#4d9375",
+    "userBg": "#252525",
+    "assistantBg": "#121212",
+    "toolBg": "#121212",
+    "subtle": "#1e1e1e",
+    "red": "#cb7676",
+    "green": "#4d9375",
+    "orange": "#d4976c"
+  },
+  "light": null
+}

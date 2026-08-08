@@ -1,0 +1,41 @@
+{
+  "displayName": "Night Owl",
+  "dark": {
+    "bg": "#011627",
+    "panel": "#001122",
+    "hover": "#0b253a",
+    "selected": "#162431",
+    "border": "#2b3339",
+    "text": "#d6deeb",
+    "muted": "#7d8892",
+    "dim": "#7d8892",
+    "accent": "#82aaff",
+    "accentHover": "#6f94df",
+    "userBg": "#0f283f",
+    "assistantBg": "#011627",
+    "toolBg": "#0b253a",
+    "subtle": "#162431",
+    "red": "#ef5350",
+    "green": "#c5e478",
+    "orange": "#ecc48d"
+  },
+  "light": {
+    "bg": "#fbfbfb",
+    "panel": "#ffffff",
+    "hover": "#f0f0f0",
+    "selected": "#f0f0f0",
+    "border": "#dfdfdf",
+    "text": "#403f53",
+    "muted": "#747a7a",
+    "dim": "#747a7a",
+    "accent": "#4876d6",
+    "accentHover": "#6c91dd",
+    "userBg": "#f0f0f0",
+    "assistantBg": "#fbfbfb",
+    "toolBg": "#f0f0f0",
+    "subtle": "#f0f0f0",
+    "red": "#de3d3b",
+    "green": "#2aa298",
+    "orange": "#c96765"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "displayName": "Aura",
+  "dark": {
+    "bg": "#15141b",
+    "panel": "#201e2b",
+    "hover": "#1a1921",
+    "selected": "#25232f",
+    "border": "#2a2935",
+    "text": "#edecee",
+    "muted": "#8a8282",
+    "dim": "#8a8282",
+    "accent": "#a277ff",
+    "accentHover": "#8d68dd",
+    "userBg": "#393647",
+    "assistantBg": "#15141b",
+    "toolBg": "#1a1921",
+    "subtle": "#25232f",
+    "red": "#ff6767",
+    "green": "#61ffca",
+    "orange": "#ffca85"
+  },
+  "light": {
+    "bg": "#f5f0ff",
+    "panel": "#f1ebfb",
+    "hover": "#efe8fc",
+    "selected": "#efe8fc",
+    "border": "#e0d6f2",
+    "text": "#2d2640",
+    "muted": "#807b8b",
+    "dim": "#807b8b",
+    "accent": "#a277ff",
+    "accentHover": "#b38fff",
+    "userBg": "#efe8fc",
+    "assistantBg": "#f5f0ff",
+    "toolBg": "#efe8fc",
+    "subtle": "#efe8fc",
+    "red": "#d94f4f",
+    "green": "#40bf7a",
+    "orange": "#d9a24a"
+  }
+}

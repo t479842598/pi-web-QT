@@ -1,0 +1,41 @@
+{
+  "displayName": "Fields of the Shire",
+  "dark": {
+    "bg": "#1b1815",
+    "panel": "#2b2622",
+    "hover": "#23201c",
+    "selected": "#282320",
+    "border": "#35322f",
+    "text": "#ebe0d1",
+    "muted": "#83796f",
+    "dim": "#83796f",
+    "accent": "#7a8a5a",
+    "accentHover": "#93a56b",
+    "userBg": "#272a25",
+    "assistantBg": "#1b1815",
+    "toolBg": "#23201c",
+    "subtle": "#282320",
+    "red": "#b34d3b",
+    "green": "#7f905e",
+    "orange": "#c47a3a"
+  },
+  "light": {
+    "bg": "#f9f5eb",
+    "panel": "#fcf9f0",
+    "hover": "#f4efe3",
+    "selected": "#f1ece1",
+    "border": "#1a1612",
+    "text": "#1a1612",
+    "muted": "#5a5048",
+    "dim": "#5a5048",
+    "accent": "#4a6030",
+    "accentHover": "#5e773f",
+    "userBg": "#efe8da",
+    "assistantBg": "#f9f5eb",
+    "toolBg": "#f4efe3",
+    "subtle": "#f1ece1",
+    "red": "#a24d3f",
+    "green": "#4a6030",
+    "orange": "#8c5520"
+  }
+}

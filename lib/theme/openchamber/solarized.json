@@ -1,0 +1,41 @@
+{
+  "displayName": "Solarized",
+  "dark": {
+    "bg": "#001e25",
+    "panel": "#052832",
+    "hover": "#02232e",
+    "selected": "#062930",
+    "border": "#223a41",
+    "text": "#93a1a1",
+    "muted": "#6f7475",
+    "dim": "#6f7475",
+    "accent": "#278bd2",
+    "accentHover": "#5c65ac",
+    "userBg": "#042b34",
+    "assistantBg": "#001f27",
+    "toolBg": "#022733",
+    "subtle": "#062930",
+    "red": "#dc322f",
+    "green": "#859900",
+    "orange": "#b58900"
+  },
+  "light": {
+    "bg": "#fdf6e3",
+    "panel": "#faf3dc",
+    "hover": "#f6efda",
+    "selected": "#f6efda",
+    "border": "#e0decc",
+    "text": "#586e75",
+    "muted": "#7a8587",
+    "dim": "#7a8587",
+    "accent": "#268bd2",
+    "accentHover": "#51a0d5",
+    "userBg": "#f6efda",
+    "assistantBg": "#fdf6e3",
+    "toolBg": "#f6efda",
+    "subtle": "#f6efda",
+    "red": "#dc322f",
+    "green": "#859900",
+    "orange": "#b58900"
+  }
+}

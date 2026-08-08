@@ -1,0 +1,41 @@
+{
+  "displayName": "Gruvbox",
+  "dark": {
+    "bg": "#282828",
+    "panel": "#25292b",
+    "hover": "#32302f",
+    "selected": "#343230",
+    "border": "#453f3b",
+    "text": "#ebdbb2",
+    "muted": "#918574",
+    "dim": "#918574",
+    "accent": "#83a598",
+    "accentHover": "#759287",
+    "userBg": "#3e3c3a",
+    "assistantBg": "#282828",
+    "toolBg": "#32302f",
+    "subtle": "#343230",
+    "red": "#fb4934",
+    "green": "#b8bb26",
+    "orange": "#fabd2f"
+  },
+  "light": {
+    "bg": "#f8f1d5",
+    "panel": "#efebcd",
+    "hover": "#f2e5bc",
+    "selected": "#f3efde",
+    "border": "#e8d7b7",
+    "text": "#3c3836",
+    "muted": "#7c6f64",
+    "dim": "#7c6f64",
+    "accent": "#076678",
+    "accentHover": "#388288",
+    "userBg": "#fdf9e8",
+    "assistantBg": "#fbf1c7",
+    "toolBg": "#f2e5bc",
+    "subtle": "#f3efde",
+    "red": "#9d0006",
+    "green": "#79740e",
+    "orange": "#b57614"
+  }
+}

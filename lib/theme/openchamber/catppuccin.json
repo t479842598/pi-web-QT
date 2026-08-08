@@ -1,0 +1,41 @@
+{
+  "displayName": "Catppuccin",
+  "dark": {
+    "bg": "#1e1e2e",
+    "panel": "#282841",
+    "hover": "#2a273b",
+    "selected": "#26263f",
+    "border": "#35324a",
+    "text": "#cdd6f4",
+    "muted": "#969cb1",
+    "dim": "#969cb1",
+    "accent": "#7d8fff",
+    "accentHover": "#9ea6df",
+    "userBg": "#3a3a5b",
+    "assistantBg": "#1e1e2e",
+    "toolBg": "#211f31",
+    "subtle": "#26263f",
+    "red": "#f38ba8",
+    "green": "#a6d189",
+    "orange": "#f4b8e4"
+  },
+  "light": {
+    "bg": "#fff6f4",
+    "panel": "#fbefea",
+    "hover": "#f8edeb",
+    "selected": "#fdeeee",
+    "border": "#e4d9dc",
+    "text": "#2e314a",
+    "muted": "#888992",
+    "dim": "#888992",
+    "accent": "#7287fd",
+    "accentHover": "#8c99f6",
+    "userBg": "#ffffff",
+    "assistantBg": "#f5e0dc",
+    "toolBg": "#f2d8d4",
+    "subtle": "#fdeeee",
+    "red": "#d20f39",
+    "green": "#40a02b",
+    "orange": "#df8e1d"
+  }
+}

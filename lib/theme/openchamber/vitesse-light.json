@@ -1,0 +1,23 @@
+{
+  "displayName": "Vitesse Light",
+  "dark": null,
+  "light": {
+    "bg": "#ffffff",
+    "panel": "#f7f7f7",
+    "hover": "#f2f0f0",
+    "selected": "#f6f3f3",
+    "border": "#dbd8d8",
+    "text": "#2c2c28",
+    "muted": "#5b5c54",
+    "dim": "#5b5c54",
+    "accent": "#1c6b48",
+    "accentHover": "#1c6b48",
+    "userBg": "#f4f1f1",
+    "assistantBg": "#ffffff",
+    "toolBg": "#ffffff",
+    "subtle": "#f6f3f3",
+    "red": "#ab5959",
+    "green": "#1e754f",
+    "orange": "#a65e2b"
+  }
+}

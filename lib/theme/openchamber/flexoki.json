@@ -1,0 +1,41 @@
+{
+  "displayName": "Flexoki",
+  "dark": {
+    "bg": "#171515",
+    "panel": "#1c1a19",
+    "hover": "#1c1b1a",
+    "selected": "#1e1d1c",
+    "border": "#2b2a28",
+    "text": "#cecdc3",
+    "muted": "#807e79",
+    "dim": "#807e79",
+    "accent": "#da702c",
+    "accentHover": "#da702c",
+    "userBg": "#27180e",
+    "assistantBg": "#171515",
+    "toolBg": "#1c1b1a",
+    "subtle": "#1e1d1c",
+    "red": "#d14d41",
+    "green": "#a0af54",
+    "orange": "#da702c"
+  },
+  "light": {
+    "bg": "#fffdf4",
+    "panel": "#fbfaf2",
+    "hover": "#f6f5ee",
+    "selected": "#f7f4ec",
+    "border": "#e6e4db",
+    "text": "#100f0f",
+    "muted": "#686663",
+    "dim": "#686663",
+    "accent": "#bc5215",
+    "accentHover": "#f9ae77",
+    "userBg": "#f7f4ec",
+    "assistantBg": "#fffdf4",
+    "toolBg": "#f6f5ee",
+    "subtle": "#f7f4ec",
+    "red": "#af3029",
+    "green": "#66800b",
+    "orange": "#bc5215"
+  }
+}
