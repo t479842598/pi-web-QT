@@ -1398,6 +1398,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   // Plan mode is driven by the attach menu, not the preset dropdown — show its
   // own label while keeping the dropdown's three options untouched.
   const toolPresetLabel = toolPreset === "plan" ? t("desktop.planModeLabel") : toolPresetLabels[toolPresetKey ?? "default"];
+  // Tools preset switcher is hidden unless plan mode is active (sessions
+  // default to ALL tools; users asked not to see the switcher). Use a plain
+  // boolean so TypeScript does not narrow toolPreset inside the dropdown.
+  const showToolPresetSwitcher = toolPreset === "plan";
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -2489,7 +2493,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   })()}
               </div>
             )}
-            {onToolPresetChange && toolPreset !== "full" && (
+            {/* Tools preset: hidden unless plan mode is active (sessions
+                default to ALL tools; users asked not to see the switcher). */}
+            {onToolPresetChange && showToolPresetSwitcher && (
               <div ref={toolDropdownRef} className="chat-input-toolbar-tools" style={{ position: "relative" }}>                <button
                   onClick={(e) => { if (isStreaming) return; const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setToolDropdownRect({ top: rect.top, left: rect.left, width: rect.width }); setToolDropdownOpen((v) => !v); }}
                   disabled={isStreaming}
@@ -2546,7 +2552,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   }}>
                     {TOOL_PRESETS.map((lvl) => {
                       const preset = TOOL_PRESET_MAP[lvl];
-                      const isActive = (toolPreset ?? "default") === preset;
+                      const isActive = toolPreset !== "plan" && (toolPreset ?? "default") === preset;
                       const desc = lvl === "off" ? t("desktop.noToolsReadOnly") : lvl === "default" ? t("desktop.fourBuiltInTools") : t("desktop.allBuiltInTools");
                       return (
                         <button
