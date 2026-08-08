@@ -511,14 +511,14 @@ function mapToCssVars(
   css["--status-success-border"] = `color-mix(in srgb, ${success} 45%, var(--bg))`;
   css["--status-info-border"] = `color-mix(in srgb, ${accent} 45%, var(--bg))`;
 
-  // Syntax tokens from pi CLI vars (keyword/string/number/function are not
-  // standard pi CLI tokens; derive from accent/orange/dim with sensible roles;
-  // OpenChamber format themes populate colors.keyword/string/... explicitly)
-  css["--syntax-keyword"] = colors.keyword || accent;
-  css["--syntax-string"] = colors.string || orange;
-  css["--syntax-number"] = colors.number || accent;
-  css["--syntax-function"] = colors.function || accent;
-  css["--syntax-comment"] = colors.comment || dim;
+  // Syntax tokens: pi CLI themes use camelCase syntaxKeyword/... tokens;
+  // the OpenChamber adapter fills short keyword/string/... names. Read both
+  // so every theme format colors code highlighting.
+  css["--syntax-keyword"] = colors.syntaxKeyword || colors.keyword || accent;
+  css["--syntax-string"] = colors.syntaxString || colors.string || orange;
+  css["--syntax-number"] = colors.syntaxNumber || colors.number || accent;
+  css["--syntax-function"] = colors.syntaxFunction || colors.function || accent;
+  css["--syntax-comment"] = colors.syntaxComment || colors.comment || dim;
 
   return css;
 }
