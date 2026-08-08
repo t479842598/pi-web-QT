@@ -1,15 +1,29 @@
 # Changelog
 
-## Unreleased
+## v0.9.18 — 2026-08-09（正式版）
 
 ### 新增
 - **DeepSeek 用量监控（余额 / 本次回复 / 窗口费用）** — 底部统计条新增「余额」chip：使用 DeepSeek 官方 API（provider=deepseek）时显示账户实时余额（`GET /user/balance`，回合结束自动刷新，失败静默隐藏）；统计弹窗新增「本次回复」区块（最近一回合输入/输出/缓存/费用）；凡模型名包含 `deepseek-v4-flash` / `deepseek-v4-pro` 的消息（含 zenmux 等网关代理，不限官方 provider）费用均按 DeepSeek 官网 CNY 刊例价实时折算显示 `¥`（flash ¥1/2/¥0.02 缓存，pro ¥3/6/¥0.025 缓存），窗口统计按「官网价 ¥ / 其它模型 $」双货币分行汇总，全部文案中文显示。
-- **OpenCode Zen 外部调用（OpenAI 兼容网关）** — 设置页 OpenCode Zen 页新增「外部调用」区块：启用后监听 `http://127.0.0.1:7474/v1`，可设置/生成外部 API Key（Bearer 认证），Cline / Roo Code / Open WebUI 等外部工具可直接以 OpenAI 兼容方式调用，复用账号/代理池与 429 自动切号、冷却逻辑；`/v1/models` 仅返回免费模型（`-free` 后缀）；支持流式（SSE）输出；端口与 Key 修改保存后热生效，无需重启；仅监听本机回环地址。
+- **OpenCode Zen 外部调用（OpenAI 兼容网关）** — 设置页 OpenCode Zen 页新增「外部调用」区块：启用后监听 `http://127.0.0.1:7474/v1`，可设置/生成外部 API Key（Bearer 认证），Cline / Roo Code / Open WebUI 等外部工具可直接以 OpenAI 兼容方式调用，复用账号/代理池与 429 自动切号、冷却逻辑；`/v1/models` 仅返回免费模型（`-free` 后缀）；支持流式（SSE）输出；端口与 Key 修改保存后热生效，无需重启；仅监听本机回环地址，可通过 cloudflared 等隧道对外暴露。外部调用区块展示**调用地址与调用方式**（baseURL + curl 示例 + 客户端配置说明）；**API Key 生成后明文仅显示一次**（可随时复制，保存后不再显示明文）；未配置 Key 不启动。
+- **MCP 服务器配置页** — 设置新增「MCP」标签页：可视化增删改 `~/.pi/agent/mcp.json` 服务器（stdio/sse/http 传输、eager/lazy 生命周期、启动参数、请求超时、环境变量 JSON），服务器名白名单校验，重启 pi 后生效。
+- **子代理（Subagents）配置页** — 设置新增「子代理」标签页：配置 `subagents.json` 并发数/最大轮数/宽限轮数/加入模式/调度/模型范围/舰队视图/输出转录等（字段白名单，未知键丢弃），并列出 `agents/*.md` 已发现代理（frontmatter 容错解析）。
+- **#snippet 片段补全** — 用户可定义常用代码/文本片段，输入 `#` 时弹出补全列表，选中即展开到输入框；设置页「片段」标签页管理增删改。
+- **主题语义 token 扩展** — 主题系统新增状态色（error/warning/success/info）与代码语法高亮色（keyword/string/number/function/comment）语义 token，全部内置/用户主题输出统一映射；明暗主题独立记忆。
 - **OpenCode Zen 429 日限额冷却** — 账号返回 429 视为当日免费额度耗尽，冷却至次日 UTC 0 点自动重置（不再按固定毫秒数冷却）；日级冷却账号不会被冷却池兜底/最近成功账号回退硬试；全池日限额时返回 503 且 `Retry-After` 指向 UTC 0 点；外部调用收到 429 时返回 OpenAI 格式提示「当前账号已限额，请重新请求」，客户端重试即自动换号。
 - **OpenCode Zen 429 轮换增强** — 单请求最多尝试 3 个账号（剩余留给后续请求）；全败后回退最近成功账号。
 
 ### 修复
+- **LAN 写接口安全加固** — pi-web 默认监听 0.0.0.0（手机/局域网可直接访问）后，所有写接口（POST/PUT/PATCH/DELETE）要求浏览器同源 Origin 校验：局域网内 curl/脚本等无 Origin 客户端只能读取、不能改写配置（MCP/子代理/OpenCode Zen 等），明文 Key 读取接口同样受保护；外部网关请求体加 64MB 上限（超限 413）。
 - **切换当前使用账号不再清空账号列表** — 设置页切换「当前使用账号」时仅提交 `activeAccountId`，此前合并逻辑会把账号数组误判为空导致全部账号被清空。
+- **同步链路三连修复** — 总线事件白名单补 `agent_start`/`message_start`（修复手机发消息电脑端内容不同步）；deferred 思考内容跨设备加载失败自动重试；排队消息自愈（非空 `queue_update` 后延迟 `get_state` 对账）。
+- **clear_queue 可靠性** — clear_queue 移出免重建捷径（wrapper 回收后召回不再丢文本）；顺带清理 queue-store 侧car、联动模型缓存。
+- **Pi CLI 格式主题** — 语法高亮色映射生效（此前 CLI 主题的语法色未正确映射到 Web token）。
+- **命令行启动默认不自动打开浏览器** — 需 `--open` 才打开。
+- **移动端设置 tab 栏** — 可横向滚动，不再截断。
+- **分支导航入口常驻** — 线性会话也显示分支按钮（此前无分支时会隐藏，用户无法发现导航入口）。
+- **消息操作按钮** — 触摸设备常显（不再依赖 hover）；答案消息可分叉。
+- **工具预设选择器默认隐藏** — 仅计划模式显示，避免误触。
+- **OpenCode Zen 模型列表去重** — 只注入默认 opencode 网关 key，`opencode-go` 不再双分组。
 
 ## v0.9.18-beta.1 — 2026-08-08
 
