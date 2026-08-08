@@ -161,9 +161,17 @@ export function SettingsModal({
               width: isMobile ? "100%" : 150,
               padding: 8,
               flexShrink: 0,
+              minWidth: 0,
               background: "var(--bg-panel)",
               borderRight: isMobile ? "none" : "1px solid var(--border)",
               borderBottom: isMobile ? "1px solid var(--border)" : "none",
+              // On mobile all tabs cannot fit one row; allow horizontal
+              // scrolling so every tab stays reachable (previously the
+              // overflow was clipped with no scrollbar and the last tabs
+              // were unreachable).
+              overflowX: isMobile ? "auto" : undefined,
+              overflowY: isMobile ? "hidden" : undefined,
+              WebkitOverflowScrolling: isMobile ? "touch" : undefined,
             }}
           >
             {tabs.filter(({ id }) => !(isMobile && id === "import")).map(({ id, labelKey, Icon }) => {
@@ -180,7 +188,8 @@ export function SettingsModal({
                     display: "flex",
                     alignItems: "center",
                     gap: 8,
-                    flex: isMobile ? 1 : undefined,
+                    flex: isMobile ? "0 0 auto" : undefined,
+                    whiteSpace: "nowrap",
                     width: isMobile ? undefined : "100%",
                     padding: "8px 10px",
                     border: "none",
