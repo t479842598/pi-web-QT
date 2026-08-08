@@ -17,6 +17,7 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { QueueRecoveryDialog } from "./QueueRecoveryDialog";
 import { SessionInfoBar } from "./SessionInfoBar";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
+import { ArrowDownIcon } from "@phosphor-icons/react/ArrowDown";
 import { useAgentSession, CHAT_BOTTOM_SPACER_PX, BOTTOM_KEEP_OUT_PX, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
@@ -259,12 +260,16 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   // Display a fade only when more conversation content exists beyond that edge.
   const [showChatTopFade, setShowChatTopFade] = useState(false);
   const [showChatBottomFade, setShowChatBottomFade] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const updateChatFades = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
     const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
     setShowChatTopFade(container.scrollTop > 1);
     setShowChatBottomFade(remaining > 1);
+    // The jump-to-latest button appears only when the user is meaningfully
+    // above the newest content (threshold large enough to ignore jitter).
+    setShowScrollToBottom(remaining > 240);
   }, [scrollContainerRef]);
 
   const scrollToBottomAfterProcessExpansion = useCallback(() => {
@@ -1019,6 +1024,43 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               aria-hidden="true"
               className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-[var(--bg)] to-transparent"
             />
+          )}
+          {showScrollToBottom && (
+            <button
+              type="button"
+              onClick={() => scrollToBottomAfterProcessExpansion()}
+              title={t("desktop.scrollToBottom")}
+              aria-label={t("desktop.scrollToBottom")}
+              style={{
+                position: "absolute",
+                bottom: 14,
+                right: 18,
+                zIndex: 20,
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "5px 10px",
+                border: "1px solid var(--border)",
+                borderRadius: 999,
+                background: "color-mix(in srgb, var(--bg-panel) 92%, transparent)",
+                color: "var(--text-muted)",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(0,0,0,0.14)",
+                backdropFilter: "blur(4px)",
+                transition: "color 0.12s, border-color 0.12s, background 0.12s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--accent)";
+                e.currentTarget.style.borderColor = "var(--accent)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--text-muted)";
+                e.currentTarget.style.borderColor = "var(--border)";
+              }}
+            >
+              <ArrowDownIcon size={12} weight="bold" aria-hidden="true" />
+              {t("desktop.scrollToBottom")}
+            </button>
           )}
         </div>
         {isMobile ? null : (

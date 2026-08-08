@@ -2535,7 +2535,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       padding: isMobile ? "4px 6px" : "3px 7px",
                       height: 24,
                       width: isMobile ? "100%" : undefined,
-                      maxWidth: isMobile ? "100%" : 220,
+                      maxWidth: isMobile ? "100%" : "min(220px, 34vw)",
                       overflow: "hidden",
                       background: modelDropdownOpen ? "var(--bg-hover)" : "none",
                       border: "none",
@@ -2740,22 +2740,29 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         <div key={group.provider}>
                           <button
                             onClick={() => toggleProviderExpand(group.provider)}
+                            title={group.provider === "opencode" || group.provider === "opencode-go"
+                              ? (zenActiveNote ? `OpenCode Zen · ${zenActiveNote}` : group.provider)
+                              : group.provider}
                             style={{
                               display: "flex", alignItems: "center", gap: 4,
-                              width: "100%", padding: "6px 12px 4px",
+                              width: "100%", maxWidth: "100%", padding: "6px 12px 4px",
                               background: "none", border: "none",
                               cursor: "pointer",
                               fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
                               textTransform: "uppercase", letterSpacing: "0.07em",
+                              overflow: "hidden",
+                              whiteSpace: "nowrap",
                               borderTop: gi > 0 ? "1px solid var(--border)" : "none",
                             }}
                             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
                             onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
                           >
                             {caret}
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
                             {group.provider === "opencode" || group.provider === "opencode-go"
                               ? `OpenCode Zen${zenActiveNote ? ` · 账号：${zenActiveNote}` : ""}`
                               : group.provider}
+                            </span>
                           </button>
                           {isExpanded && group.options.map((opt) => {
                             const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;

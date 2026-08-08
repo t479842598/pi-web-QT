@@ -129,3 +129,17 @@ test("consumes global /api/events bus for the current session when direct SSE is
   assert.match(busSource, /eventSourceRef\.current\?\.readyState === EventSource\.OPEN/);
   assert.match(busSource, /handleAgentEventRef\.current\?\.\(data\.payload as AgentEvent\)/);
 });
+
+test("mode instruction block injects once per mode composition", () => {
+  const handleSendSource = source.slice(
+    source.indexOf("// Plan mode prefixes every prompt"),
+    source.indexOf("const imageBlocks = images?.map"),
+  );
+  // The block is only prepended when the mode signature has not been injected yet.
+  assert.match(handleSendSource, /injectedModeSignatureRef\.current !== modeSignature/);
+  assert.match(handleSendSource, /injectedModeSignatureRef\.current = modeSignature/);
+  assert.match(handleSendSource, /combinedBlock && injectedModeSignatureRef\.current !== modeSignature/);
+  assert.match(handleSendSource, /effectiveMessage = message/);
+  // Mode composition changes reset the signature so a fresh block can apply.
+  assert.match(source, /injectedModeSignatureRef\.current = ""/);
+});

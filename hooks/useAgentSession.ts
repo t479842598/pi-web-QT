@@ -575,6 +575,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const toolApprovalModeRef = useRef<ToolApprovalMode>(toolApprovalMode);
   const permissionRulesRef = useRef(modeSettings.permissionRules);
   const goalTextRef = useRef<string | null>(null);
+  /**
+   * Signature of the last mode-instruction block injected into a sent message.
+   * The mode (plan / goal / token profile) is held by the agent's context once
+   * injected; repeating the same block on every message is redundant noise that
+   * shows up in transcripts. Reset whenever the mode composition changes.
+   */
+  const injectedModeSignatureRef = useRef<string>("");
   const modeSettingsRef = useRef(modeSettings);
   useEffect(() => {
     modeSettingsRef.current = modeSettings;
@@ -587,9 +594,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [modeSettings.permissionRules]);
   useEffect(() => {
     collaborationModeRef.current = collaborationMode;
+    // Mode composition changed — allow a fresh mode-block injection.
+    injectedModeSignatureRef.current = "";
   }, [collaborationMode]);
   useEffect(() => {
     tokenModeRef.current = tokenMode;
+    injectedModeSignatureRef.current = "";
   }, [tokenMode]);
   /** Pending tool-approval requests surfaced by the RPC wrapper (SSE). */
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequestItem[]>([]);
@@ -1683,9 +1693,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const planFallback = !modeBlock && planModeRef.current && !isSlashCommandPrompt
       ? PLAN_MODE_INSTRUCTION
       : "";
-    const effectiveMessage = (modeBlock || planFallback)
-      ? `${modeBlock || planFallback}\n\n${message}`
-      : message;
+    // Inject the mode block only once per mode composition. Once the agent has
+    // the plan/goal contract in context, repeating the block on every message
+    // is redundant — and the user should not see the same prompt text repeated
+    // across turns (or after switching windows and back).
+    const combinedBlock = modeBlock || planFallback;
+    const modeSignature = [
+      collaborationModeRef.current,
+      tokenModeRef.current,
+      planModeRef.current ? "legacy-plan" : "",
+      combinedBlock ? String(combinedBlock.length) : "",
+    ].join("|");
+    let effectiveMessage: string;
+    if (combinedBlock && injectedModeSignatureRef.current !== modeSignature) {
+      injectedModeSignatureRef.current = modeSignature;
+      effectiveMessage = `${combinedBlock}\n\n${message}`;
+    } else {
+      effectiveMessage = message;
+    }
     const sentMessage = effectiveMessage;
 
     const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));

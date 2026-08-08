@@ -2,7 +2,7 @@
 
 import { memo, useState, useRef, useEffect, useMemo } from "react";
 import { MarkdownBody } from "./MarkdownBody";
-import { copyText } from "@/lib/clipboard";
+import { copyText, markdownToPlainText } from "@/lib/clipboard";
 import { resolveSlashDisplayText } from "@/lib/slash-display";
 
 import { isEmptyThinkingBlock } from "@/lib/message-display";
@@ -376,6 +376,7 @@ function AssistantMessageView({
   const blocks = blockItems.map(({ block }) => block);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedPlain, setCopiedPlain] = useState(false);
   const streamStartRef = useRef<number | null>(null);
   const [tps, setTps] = useState<number | null>(null);
   const blockItemsRef = useRef(blockItems);
@@ -412,6 +413,9 @@ function AssistantMessageView({
     .filter((b): b is TextContent => b.type === "text")
     .map((b) => b.text)
     .join("\n");
+
+  const editedFiles = extractEditedFiles(blocks);
+  const [filesExpanded, setFilesExpanded] = useState(false);
 
   const copyContent = () => {
     copyText(textContent).then(() => {
@@ -593,8 +597,96 @@ function AssistantMessageView({
             {copied ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
           </button>
         )}
+        {textContent && !isStreaming && (
+          <button
+            onClick={() => {
+              copyText(markdownToPlainText(textContent)).then(() => {
+                setCopiedPlain(true);
+                setTimeout(() => setCopiedPlain(false), 1500);
+              });
+            }}
+            title={t("desktop.copyPlainText")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 22, height: 22,
+              background: "none", border: "none",
+              borderRadius: 5,
+              color: copiedPlain ? "var(--accent)" : "var(--text-dim)",
+              cursor: "pointer",
+              opacity: hovered ? 1 : 0,
+              pointerEvents: hovered ? "auto" : "none",
+              transition: "opacity 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { if (!copiedPlain) e.currentTarget.style.color = "var(--accent)"; }}
+            onMouseLeave={(e) => { if (!copiedPlain) e.currentTarget.style.color = "var(--text-dim)"; }}
+          >
+            {copiedPlain ? <CheckIcon size={11} /> : <ClipboardTextIcon size={11} />}
+          </button>
+        )}
         {time && !isStreaming && (
           <span style={{ fontSize: 11, color: hovered ? "var(--text-muted)" : "var(--text-dim)", opacity: hovered ? 1 : 0.5, marginLeft: "auto", transition: "color 0.15s, opacity 0.15s" }}>{time}</span>
+        )}
+        {editedFiles.length > 0 && !isStreaming && (
+          <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={() => setFilesExpanded((v) => !v)}
+              title={t("desktop.changedFiles", { count: editedFiles.length })}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "1px 7px",
+                border: "1px solid var(--border)",
+                borderRadius: 999,
+                background: filesExpanded ? "var(--bg-hover)" : "none",
+                color: "var(--text-muted)",
+                fontSize: 10,
+                cursor: "pointer",
+                opacity: hovered || filesExpanded ? 1 : 0.5,
+                transition: "opacity 0.12s, border-color 0.12s, background 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+              onMouseLeave={(e) => { if (!filesExpanded) { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; } }}
+            >
+              <GitForkIcon size={10} aria-hidden="true" />
+              {editedFiles.length}
+            </button>
+            {filesExpanded && (
+              <span
+                style={{
+                  position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 30,
+                  minWidth: 200, maxWidth: 320,
+                  padding: "6px 0",
+                  background: "var(--bg-panel)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                }}
+              >
+                {editedFiles.map((file) => (
+                  <button
+                    key={file}
+                    type="button"
+                    onClick={() => { setFilesExpanded(false); onOpenFile?.(file); }}
+                    style={{
+                      display: "block", width: "100%",
+                      padding: "5px 12px",
+                      background: "none", border: "none",
+                      color: "var(--text-muted)",
+                      fontSize: 11,
+                      textAlign: "left",
+                      fontFamily: "var(--font-mono)",
+                      cursor: "pointer",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--accent)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                  >
+                    {file}
+                  </button>
+                ))}
+              </span>
+            )}
+          </span>
         )}
       </div>
     </div>
@@ -1054,6 +1146,30 @@ function isEditToolName(toolName: string): boolean {
     name.endsWith("_edit") ||
     name.includes("str_replace") ||
     name.includes("replace_editor");
+}
+
+/**
+ * Collect the file paths this turn actually wrote, from edit/write tool calls.
+ * Only tools with an explicit file-ish input field contribute; apply_patch is
+ * skipped because its target lives inside the diff text, not the input.
+ */
+function extractEditedFiles(blocks: AssistantContentBlock[]): string[] {
+  const files = new Set<string>();
+  for (const block of blocks) {
+    if (block.type !== "toolCall") continue;
+    const tc = block as ToolCallContent;
+    const name = (tc.toolName ?? "").toLowerCase();
+    if (name === "apply_patch" || name.includes("patch")) continue;
+    const isWriter = isEditToolName(tc.toolName ?? "")
+      || name === "write" || name === "create" || name.includes("file_write")
+      || name.includes("create_file") || name.includes("multiedit");
+    if (!isWriter) continue;
+    const input = (tc.input ?? {}) as Record<string, unknown>;
+    const p = input.filePath ?? input.file_path ?? input.path ?? input.file
+      ?? input.destination ?? input.newFilePath ?? input.oldPath;
+    if (typeof p === "string" && p.trim()) files.add(p);
+  }
+  return [...files];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
