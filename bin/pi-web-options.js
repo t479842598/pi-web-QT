@@ -15,6 +15,7 @@ function parseLaunchOptions(args = process.argv.slice(2), env = process.env) {
     options: {
       port:      { type: "string", short: "p" },
       hostname:  { type: "string", short: "H" },
+      open:      { type: "boolean" },
       "no-open": { type: "boolean" },
     },
     strict: false,
@@ -26,7 +27,9 @@ function parseLaunchOptions(args = process.argv.slice(2), env = process.env) {
     // web UI (the app is protected by HTTP Basic Auth when PI_WEB_PASSWORD
     // is set). Use -H 127.0.0.1 to restrict to this machine only.
     hostname: cliArgs.hostname ?? env.PI_WEB_HOSTNAME ?? "0.0.0.0",
-    openBrowser: !cliArgs["no-open"] && !isEnabled(env.PI_WEB_NO_OPEN),
+    // Do NOT auto-open the browser by default (server-style usage). Opt in
+    // with --open; PI_WEB_NO_OPEN always wins.
+    openBrowser: cliArgs.open === true && !isEnabled(env.PI_WEB_NO_OPEN),
   };
 }
 
