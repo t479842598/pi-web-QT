@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowClockwise, Trash } from "@phosphor-icons/react";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
@@ -8,8 +8,9 @@ import type { ErrorLogEntry } from "@/lib/error-log-types";
 
 export function LogsConfig() {
   const { t } = useI18n();
-  const [entries, setEntries] = useState<ErrorLogEntry[]>([]);
+  const [allEntries, setAllEntries] = useState<ErrorLogEntry[]>([]);
   const [statusCode, setStatusCode] = useState("");
+  const [source, setSource] = useState("");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,27 +19,42 @@ export function LogsConfig() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (statusCode) params.set("statusCode", statusCode);
-      if (query.trim()) params.set("query", query.trim());
-      const response = await fetch(`/api/logs?${params}`);
+      // Fetch the full ring once (the store caps at 500 entries) and filter on
+      // the client, so the source dropdown keeps its options while filtering.
+      const response = await fetch("/api/logs?limit=500");
       const data = await response.json() as { entries?: ErrorLogEntry[]; error?: string };
       if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
-      setEntries(data.entries ?? []);
+      setAllEntries(data.entries ?? []);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
     }
-  }, [query, statusCode]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  const availableSources = useMemo(
+    () => [...new Set(allEntries.map((entry) => entry.source).filter(Boolean))].sort(),
+    [allEntries],
+  );
+
+  const entries = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    return allEntries
+      .filter((entry) => !statusCode || entry.statusCode === Number(statusCode))
+      .filter((entry) => !source || entry.source === source)
+      .filter((entry) => !needle
+        || [entry.message, entry.details, entry.provider, entry.model, entry.source]
+          .filter(Boolean).some((value) => value!.toLocaleLowerCase().includes(needle)))
+      .slice(0, 200);
+  }, [allEntries, statusCode, source, query]);
 
   const clear = async () => {
     try {
       const response = await fetch("/api/logs", { method: "DELETE" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      setEntries([]);
+      setAllEntries([]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -64,7 +80,11 @@ export function LogsConfig() {
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <select value={statusCode} onChange={(event) => setStatusCode(event.target.value)} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }}>
           <option value="">{t("desktop.logsAllCodes")}</option>
-          {[400, 401, 403, 404, 408, 409, 413, 429, 500, 502, 503, 504].map((code) => <option key={code} value={code}>{code}</option>)}
+          {[200, 400, 401, 403, 404, 408, 409, 413, 429, 500, 502, 503, 504].map((code) => <option key={code} value={code}>{code}</option>)}
+        </select>
+        <select value={source} onChange={(event) => setSource(event.target.value)} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }}>
+          <option value="">{t("desktop.logsAllSources")}</option>
+          {availableSources.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("desktop.logsSearch")} style={{ flex: 1, minWidth: 180, padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }} />
         <button type="button" onClick={() => void load()} title={t("desktop.refresh")} aria-label={t("desktop.refresh")} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text-muted)", cursor: "pointer" }}><ArrowClockwise size={14} /></button>
@@ -76,7 +96,7 @@ export function LogsConfig() {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {entries.map((entry) => (
           <details key={entry.id} style={{ border: "1px solid var(--border)", borderRadius: 7, background: "var(--bg-panel)", padding: "8px 10px" }}>
-            <summary style={{ cursor: "pointer", color: entry.level === "error" ? "#ef4444" : "var(--text)", fontSize: 12 }}>
+            <summary style={{ cursor: "pointer", color: entry.level === "error" ? "#ef4444" : entry.level === "warning" ? "#f59e0b" : "var(--text)", fontSize: 12 }}>
               <span style={{ fontFamily: "var(--font-mono)", marginRight: 8 }}>{entry.statusCode ?? "—"}</span>
               <span style={{ marginRight: 8 }}>{new Date(entry.timestamp).toLocaleString()}</span>
               <span style={{ overflowWrap: "anywhere" }}>{entry.message.length > 180 ? `${entry.message.slice(0, 180)}…` : entry.message}</span>

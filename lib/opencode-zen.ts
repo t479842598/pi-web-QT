@@ -675,6 +675,10 @@ export function importOpenCodeZenKeys(text: string): SafeOpenCodeZenConfig {
   const current = readOpenCodeZenConfig();
   const imported = parseOpenCodeKeyImport(text);
   const accounts = [...current.accounts];
+  // 保留当前激活账号：writeOpenCodeZenConfig 未传 activeAccountId 时会把
+  // activeIndex 重置为 0（“当前使用账号”跳到列表第一个，影响已保存内容）。
+  const state = getState();
+  const previousActiveId = state.config.accounts[state.activeIndex]?.id;
   for (const item of imported) {
     // 同一个 Key 再次导入时不新增账号，只更新它的备注（账号名）。
     const existingByKey = accounts.find((account) => account.apiKey === item.apiKey);
@@ -684,7 +688,7 @@ export function importOpenCodeZenKeys(text: string): SafeOpenCodeZenConfig {
     }
     accounts.push({ id: `account-${Date.now().toString(36)}-${accounts.length}`, note: item.note, apiKey: item.apiKey, enabled: true, proxy: defaultProxy() });
   }
-  writeOpenCodeZenConfig({ ...current, accounts });
+  writeOpenCodeZenConfig({ ...current, accounts }, previousActiveId);
   return getSafeOpenCodeZenConfig();
 }
 

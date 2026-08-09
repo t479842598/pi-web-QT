@@ -101,6 +101,102 @@ export async function readBody(req: IncomingMessage, maxBytes = MAX_EXTERNAL_BOD
   return Buffer.concat(chunks);
 }
 
+/** Extract the `model` field from a JSON request body (post-normalization). */
+function bodyModel(body: Buffer): string | undefined {
+  try {
+    const parsed = JSON.parse(body.toString("utf8")) as { model?: unknown };
+    return typeof parsed.model === "string" && parsed.model ? parsed.model : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Structural summary of a chat/completions request body for the call log:
+ * per-message role, present fields, and content/reasoning_content/tool_calls
+ * shape (never the text itself). Used to diagnose upstream 400s like
+ * "reasoning_content must be passed back" without logging user content.
+ */
+export function summarizeRequestBody(body: Buffer): string | undefined {
+  try {
+    const parsed = JSON.parse(body.toString("utf8")) as Record<string, unknown>;
+    const messages = parsed.messages;
+    if (!Array.isArray(messages)) return undefined;
+    const parts = messages.map((raw, index) => {
+      const msg = (raw ?? {}) as Record<string, unknown>;
+      const role = typeof msg.role === "string" ? msg.role : "?";
+      const fields = Object.keys(msg).filter((key) => key !== "role");
+      const shape = (value: unknown): string => {
+        if (value === undefined) return "missing";
+        if (value === null) return "null";
+        if (typeof value === "string") return `str(${value.length})`;
+        if (Array.isArray(value)) return `arr(${value.length})`;
+        if (typeof value === "object") return "obj";
+        return typeof value;
+      };
+      const summary = [`content=${shape(msg.content)}`, `reasoning_content=${shape(msg.reasoning_content)}`, `tool_calls=${shape(msg.tool_calls)}`];
+      const name = typeof msg.name === "string" ? ` name=${msg.name}` : "";
+      const toolCallId = typeof msg.tool_call_id === "string" ? ` tool_call_id=${msg.tool_call_id}` : "";
+      return `${index}:${role}{${fields.join(",")}} ${summary.join(" ")}${name}${toolCallId}`;
+    });
+    const top = ["stream", "thinking", "reasoning", "reasoning_effort", "chat_template_kwargs", "tools", "max_tokens", "max_completion_tokens"]
+      .filter((key) => parsed[key] !== undefined)
+      .map((key) => {
+        const value = parsed[key];
+        const desc = Array.isArray(value) ? `arr(${value.length})` : typeof value === "string" ? `str(${value.length})` : typeof value === "boolean" ? String(value) : typeof value === "number" ? String(value) : "obj";
+        return `${key}=${desc}`;
+      });
+    return `messages=[${parts.join(" | ")}] ${top.join(" ")}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Bound + ellipsize an upstream response body for the error log. */
+function previewText(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= 2000) return trimmed || "（空响应体）";
+  return `${trimmed.slice(0, 2000)}…（总长 ${trimmed.length}）`;
+}
+
+/**
+ * Normalize a /v1/responses request body for the Zen upstream.
+ *
+ * Two upstream defects are worked around here:
+ * 1. A string `input` is rejected with "Empty input messages" — convert it to
+ *    the `[{ role: "user", content }]` array form the upstream expects.
+ * 2. A request carrying BOTH the top-level `reasoning_effort` and the nested
+ *    `reasoning.effort` is rejected with 400 '"reasoning_effort" and
+ *    "reasoning.effort" are both provided with conflicting values' (seen with
+ *    Codebuff) — drop the top-level duplicate so only the canonical Responses
+ *    API field survives. A lone `reasoning_effort` is left untouched: the
+ *    upstream accepts it and rewriting it could change semantics.
+ *
+ * Non-JSON bodies and bodies with nothing to fix are returned unchanged.
+ */
+export function normalizeResponsesBody(body: Buffer): Buffer {
+  try {
+    const parsed = JSON.parse(body.toString("utf8")) as {
+      input?: unknown;
+      reasoning_effort?: unknown;
+      reasoning?: { effort?: unknown };
+    };
+    let changed = false;
+    if (typeof parsed.input === "string") {
+      parsed.input = [{ role: "user", content: parsed.input }];
+      changed = true;
+    }
+    if (parsed.reasoning_effort !== undefined && parsed.reasoning && parsed.reasoning.effort !== undefined) {
+      delete parsed.reasoning_effort;
+      changed = true;
+    }
+    return changed ? Buffer.from(JSON.stringify(parsed), "utf8") : body;
+  } catch {
+    // Not JSON — pass the body through untouched.
+    return body;
+  }
+}
+
 /** Filter a /v1/models payload down to free models (id ends with "-free"). */
 export function filterFreeModels(payload: unknown): unknown {
   if (payload === null || typeof payload !== "object" || !("data" in payload)) return payload;
@@ -162,6 +258,27 @@ async function handleRequest(handle: ExternalServerHandle, req: IncomingMessage,
     body = Buffer.alloc(0);
   }
 
+  // POST /v1/messages (Anthropic format): the Zen gateway's Anthropic endpoint
+  // has upstream defects on reasoning models (400 "Error from provider
+  // (Console): ... Empty input messages / reasoning_content must be passed
+  // back"). Intercept with a clear pointer instead of forwarding a confusing
+  // upstream error — the gateway is OpenAI-compatible only.
+  if (req.method === "POST" && (rawUrl === "/v1/messages" || rawUrl.startsWith("/v1/messages?"))) {
+    const error = openAiError(
+      400,
+      "该网关为 OpenAI 兼容接口，不支持 Anthropic /v1/messages 端点。请将客户端配置为 OpenAI 兼容格式：baseURL http://127.0.0.1:7474/v1，使用 /v1/chat/completions。",
+      "unsupported_endpoint",
+    );
+    res.writeHead(error.status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(error.body);
+    return;
+  }
+
+  // POST /v1/responses: normalize request bodies the Zen upstream rejects.
+  if (req.method === "POST" && (rawUrl === "/v1/responses" || rawUrl.startsWith("/v1/responses?")) && body.length > 0) {
+    body = normalizeResponsesBody(body);
+  }
+
   const headers = new Headers();
   for (const [key, rawValue] of Object.entries(req.headers)) {
     if (!rawValue) continue;
@@ -172,6 +289,9 @@ async function handleRequest(handle: ExternalServerHandle, req: IncomingMessage,
   }
 
   const target = `${ZEN_BASE_URL}${rawUrl.slice(3)}`;
+  const model = body.length > 0 ? bodyModel(body) : undefined;
+  const messagesSummary = body.length > 0 ? summarizeRequestBody(body) : undefined;
+  const callDesc = `${req.method} ${rawUrl}${model ? ` 模型=${model}` : ""}${messagesSummary ? ` ${messagesSummary}` : ""}`;
   let response: Response;
   try {
     response = await zenFetch(target, {
@@ -184,7 +304,7 @@ async function handleRequest(handle: ExternalServerHandle, req: IncomingMessage,
       level: "error",
       source: "opencode-zen-external",
       provider: "opencode",
-      message: `外部调用网关转发失败：${error instanceof Error ? error.message : String(error)}`,
+      message: `外部调用 ${callDesc} 网关转发失败：${error instanceof Error ? error.message : String(error)}`,
     });
     const failure = openAiError(502, "Upstream request failed");
     res.writeHead(failure.status, { "Content-Type": "application/json" });
@@ -203,6 +323,13 @@ async function handleRequest(handle: ExternalServerHandle, req: IncomingMessage,
     }
     const filtered = filterFreeModels(payload);
     const out = Buffer.from(filtered === null ? text : JSON.stringify(filtered), "utf8");
+    recordErrorLog({
+      level: "info",
+      source: "opencode-zen-external",
+      provider: "opencode",
+      statusCode: response.status,
+      message: `外部调用 ${callDesc} 上游 ${response.status}${Array.isArray(payload && (payload as { data?: unknown }).data) ? ` 模型数=${(payload as { data: unknown[] }).data.length}` : ""}`,
+    });
     res.writeHead(response.status, {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
@@ -213,8 +340,17 @@ async function handleRequest(handle: ExternalServerHandle, req: IncomingMessage,
 
   // Upstream 429: the pool has already cooled the account down and moved to
   // the next one — surface a friendly OpenAI-style 429 so the external client
-  // knows to retry (the retry will use a different account).
+  // knows to retry (the retry will use a different account). Read and log the
+  // upstream body first: it names the actual limit (e.g. the daily free tier).
   if (response.status === 429) {
+    const upstreamText = await response.text().catch(() => "");
+    recordErrorLog({
+      level: "warning",
+      source: "opencode-zen-external",
+      provider: "opencode",
+      statusCode: 429,
+      message: `外部调用 ${callDesc} 上游 429：${previewText(upstreamText)}`,
+    });
     const rateLimit = openAiRateLimitError(response.headers.get("retry-after"));
     res.writeHead(rateLimit.status, {
       ...rateLimit.headers,
@@ -222,6 +358,29 @@ async function handleRequest(handle: ExternalServerHandle, req: IncomingMessage,
     });
     res.end(rateLimit.body);
     return;
+  }
+
+  // Other non-2xx upstream responses (400/401/403/5xx): read the body so it
+  // can be logged (and so the client still receives it unchanged), then fall
+  // through to the passthrough below with a rebuilt Response.
+  if (response.status >= 400) {
+    const text = await response.text().catch(() => "");
+    recordErrorLog({
+      level: "error",
+      source: "opencode-zen-external",
+      provider: "opencode",
+      statusCode: response.status,
+      message: `外部调用 ${callDesc} 上游 ${response.status}：${previewText(text)}`,
+    });
+    response = new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers });
+  } else {
+    recordErrorLog({
+      level: "info",
+      source: "opencode-zen-external",
+      provider: "opencode",
+      statusCode: response.status,
+      message: `外部调用 ${callDesc} 上游 ${response.status}`,
+    });
   }
 
   // Passthrough (streaming SSE included): pipe the upstream body.

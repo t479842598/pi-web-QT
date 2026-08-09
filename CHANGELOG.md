@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.19 — 2026-08-09（正式版）
+
+### 新增
+- **外部调用启动开关** — 设置页外部调用「启用」复选框改为开关：点击立即保存并热生效（后端自动重启网关），无需再点保存；开关后直接显示状态/错误（运行中/端口占用/未设置 API Key），不再有困惑的「保存后自动启动」。
+- **外部调用网关调用日志** — 每次转发记录方法/路径/模型/上游状态码（info 级）；上游非 2xx（400/401/5xx）读响应体摘要记 error 级（含具体错误消息，如 `CreditsError: No payment method`、模型不支持等），429 记 warning 级，错误日志页可查。
+- **错误日志页来源过滤** — 设置日志页新增「全部来源」下拉（按 source 筛选，如只看 `opencode-zen-external` 外部调用日志），错误码下拉补 200，warning 级日志橙色显示；日志改为客户端过滤（一次拉全量 500 条）。
+
+### 修复
+- **i18n 缺失 `desktop.saving` 补录** — MCP/子代理配置页保存按钮引用但目录缺失，catalog 测试转绿。
+- **外部调用不支持 Anthropic 端点的明确提示** — 网关拦截 `POST /v1/messages`（Anthropic 格式）并返回中文指引：该端点对应 opencode zen 上游对推理模型多轮/工具调用存在缺陷（`Error from provider (Console): ... reasoning_content must be passed back` / `Empty input messages`），透传只会得到迷惑的 400；请将客户端配置为 OpenAI 兼容格式使用 `/v1/chat/completions`。
+- **`/v1/responses` 字符串 input 归一化** — zen 上游要求数组格式 `input`（字符串会报「Empty input messages」400），网关自动转换为数组格式，修复 Codebuff 等客户端调用。
+- **`/v1/responses` reasoning 字段冲突归一化** — Codebuff 等客户端请求体同时携带顶层 `reasoning_effort` 与嵌套 `reasoning.effort`（值冲突）时，zen 上游返回 400 `"reasoning_effort" and "reasoning.effort" are both provided with conflicting values`；网关转发前删除顶层重复字段、保留 Responses API 标准嵌套字段（单独出现顶层 `reasoning_effort` 时原样透传，上游接受）。
+- **账号导入保留当前使用账号** — 导入 Key 时此前会把「当前使用账号」重置为列表第一个；现在导入保持原激活账号不变，新账号仍不自动分配代理、已有账号/代理/外部调用配置不受影响。
+- **代理批量导入去重** — 同一节点（协议+主机+端口，忽略用户名/密码与大小写）只保留首次出现，跳过重复节点并提示数量，不再重复测试/重复绑定。
+- **设置页外部调用状态提示** — 未设置 API Key 时状态行明确显示「未设置 API Key，服务未启动」（橙色），保存提示同步说明，不再笼统显示「已停止」。
+
 ## v0.9.18 — 2026-08-09（正式版）
 
 ### 新增

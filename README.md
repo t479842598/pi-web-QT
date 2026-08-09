@@ -31,12 +31,106 @@
 | 会话导入 | 从 Reasonix 等工具导入历史对话记录，自动发现项目与会话，支持合并或新建项目；导入后可选批量并行生成标题。 |
 | 项目与文件 | 通过目录选择器加载项目，浏览文件、Diff、图片、音频、PDF、DOCX。 |
 | 模型与认证 | 在网页中管理模型、OAuth/API Key、连通性测试和默认模型；支持从供应商自动获取模型列表与 models.dev 定价预设一键填入。 |
+| OpenCode Zen | 多账号/代理池管理、429 自动切号与日限额冷却；外部调用（OpenAI 兼容网关）允许 Cline / Roo Code / Open WebUI / ZCode 等客户端直接接入账号池。 |
 | 备份恢复 | 一键导出/导入核心配置、技能、插件、MCP 服务器与会话（可选含密钥），跨平台自动适配路径与命令。 |
 | 技能与插件 | 查询、安装、启停 Skills 与 package 插件。 |
 | Git Worktree | 在同一项目下创建、切换和移除 Worktree。 |
 | 任务看板 | 桌面端四列看板：把任务交给 agent 在 worktree 分支中执行，支持验收、合并、归档、每项目设置（Beta）。 |
 | 主题与语言 | 支持 Pi TUI 主题、亮暗模式及中文/English。 |
 | 移动端 | 适配 Safari/Chrome 窄屏布局；模型选择和发送操作保持可见。 |
+
+## 快速开始
+
+### 前置条件
+
+- Node.js **22.19.0 或更高版本**
+- 已配置可用的 Pi 模型/认证信息
+
+### 从 npm 安装（推荐）
+
+```bash
+npx @qt4798/pi-web@latest
+```
+
+或全局安装：
+
+```bash
+npm install -g @qt4798/pi-web
+pi-web
+```
+
+然后打开 [http://127.0.0.1:30141](http://127.0.0.1:30141)。CLI 会在服务就绪后自动打开浏览器。默认只监听 `127.0.0.1`。
+
+### 更新
+
+```bash
+npm update -g @qt4798/pi-web
+# 或指定版本
+npm install -g @qt4798/pi-web@latest
+```
+
+更新后重启服务即可生效（先停掉旧进程再执行 `pi-web`）。
+
+### 常用选项
+
+```bash
+pi-web --port 8080              # 自定义端口
+pi-web --hostname 0.0.0.0       # 暴露在局域网
+pi-web -p 8080 -H 0.0.0.0       # 组合使用
+pi-web --no-open                # 不自动打开浏览器
+
+PORT=8080 pi-web                # 也可通过环境变量设置端口
+PI_WEB_HOSTNAME=0.0.0.0 pi-web  # 显式设置监听地址
+PI_WEB_ALLOWED_HOSTS=piweb.example.com pi-web  # 允许反向代理域名
+PI_WEB_PASSWORD='随机长密码' pi-web           # 启用 HTTP Basic Auth（用户名 pi）
+PI_WEB_NO_OPEN=1 pi-web         # 后台服务不自动打开浏览器
+```
+
+设置 `PI_WEB_PASSWORD` 后，所有网页接口和 API 端点都需要 HTTP Basic Auth 认证，用户名为 `pi`。不设或留空则禁用认证。
+
+> Basic Auth 不加密传输中的密码。请勿将纯 HTTP 直接暴露到公网，通过可信反向代理启用 HTTPS 或使用可信 VPN 进行远程访问。
+
+### 从源码运行
+
+```bash
+git clone https://github.com/t479842598/pi-web-QT.git
+cd pi-web-QT
+npm ci
+npm run dev
+```
+
+`npm run dev` 使用**随机端口**（`-p 0`），启动日志会打印实际地址，如 `http://127.0.0.1:<随机端口>`。本地仓库构建仅作为测试环境；日常命令行运行请使用 npm 全局安装的 `@qt4798/pi-web`（`pi-web` 命令，固定 `http://127.0.0.1:30141`）。
+
+开发服务器默认只监听本机。局域网调试可使用：
+
+```bash
+npm run dev:lan
+```
+
+## 安装提示（npm 11）
+
+自 **v0.9.17-beta.3 起**，`ERESOLVE overriding peer dependency` 与 `deprecated intersection-observer` 两类提示已消除：供应商图标改为内置（不再依赖 `@lobehub/icons`，从而不再被 npm 自动安装 `@lobehub/ui` / `antd` / `@emoji-mart/react` 整条链）。新装本包时仅剩以下两类**提示性警告，均不影响安装与运行**：
+
+- `deprecated node-domexception`：来自 `@google/genai` → `google-auth-library` 的传递依赖 `fetch-blob`。它只是旧版 Node 的 polyfill，Node ≥ 18 原生自带 `DOMException`，运行时完全用不到。上游未修复前无法从包侧移除。
+
+- `allow-scripts`：npm ≥ 11.16 新增的安装脚本审批提示（`@google/genai` / `protobufjs` / `sharp` 等传递依赖的 preinstall/postinstall/install 脚本）。当前版本**只提示、不拦截**（脚本照常执行），未来版本可能改为默认拦截。想消除提示可在你的项目执行：
+
+  ```bash
+  npm approve-scripts --allow-scripts-pending   # 先查看待审批清单
+  npm approve-scripts @google/genai protobufjs sharp   # 逐个批准并写入你的 package.json
+  ```
+
+  或在项目 `package.json` 声明：
+
+  ```json
+  "allowScripts": {
+    "@google/genai@1.52.0": true,
+    "protobufjs@7.6.5": true,
+    "sharp@0.34.5": true
+  }
+  ```
+
+  注意该字段按 `包名@精确版本` 匹配，版本升级后需同步更新。
 
 ## 任务看板（Beta）
 
@@ -83,180 +177,9 @@
 ### 技术说明与限制
 
 - 任务存储于 `~/.pi/agent/tasks/`（JSONL，原子写），与会话文件同级；任务会话与其他会话一样可在会话列表查看。
-- 每个任务在独立 git worktree 分支中执行，互不干扰；**任务 agent 被明确约束不得提交/推送其他分支或工作区的改动**。
+- 每个任务在独立 git worktree 分支中执行，互不干扰；任务 agent 被约束不得提交/推送其他分支或工作区的改动。
 - 引擎由服务器进程持有（单实例锁），重启后自动恢复中断的任务（标记为失败/中断，可重试）。
 - Beta 阶段：仅在桌面端显示入口；移动端不可用。
-
-## 最新更新（2026-08-07 · v0.9.17 正式版）
-
-- **Windows 导入会话不识别修复**：Reasonix 数据根目录新增 `%APPDATA%/reasonix` 双根发现（Windows 桌面版 v1.x / Go/Wails 布局），projects + sessions 平铺双布局跨根扫描合并，Windows 下实测可发现 43 个会话；mac/CLI 布局不受影响。
-- **底层 pi 升级到 0.84.0**：`@earendil-works/pi-*` 四包 0.83.0 → 0.84.0（同步上游 agegr/pi-web v0.8.7），适配 0.84 的 `Theme` 构造与 `apiKeyAuth.login(signal)` API 变化。
-- **每个会话独立记忆模式配置**：任务模式 / 运行档位 / 工具权限 / 权限规则按会话分别保存——新会话继承全局默认，已有会话各自记住自己的设置，切换会话互不覆盖（新增 settings.json `modesPerSession`，旧会话自动回落全局默认）。
-- **公式渲染修复**：display math 规范化升级（上游 #332）——多行公式、嵌套列表里的公式、粘连 `$$` 分隔符不再误吞后续文本或渲染成 KaTeX 错误块。
-- **编辑消息恢复图片**：从历史消息点「从这里编辑」时，消息里的图片与文本一起回填到撰写栏，可直接再次发送。
-- **随屏滚动完善**：streaming 期间仅当用户接近底部时才跟随输出；上翻阅读历史时不再被流式输出拉走；发送后滚动锚点带底部边界钳制。
-- 版本号进入正式版（去 beta）。
-
-## 历史更新（2026-08-07 · v0.9.17-beta.3）
-
-- **生成标题不再超时（524）**：会话运行中点「生成标题」最多等待空闲 10 秒后直接用当前对话快照生成，模型调用超时收紧到 80 秒，总时长稳在 Cloudflare 100 秒网关超时内。
-- **默认任务模式改为常规**：新对话默认不再继承「计划」。
-- **任务看板开关实时生效**：设置-功能里关闭/打开任务看板立即同步顶部入口与看板视图，无需刷新页面。
-- **settings.json 并发写保护**：模式、功能开关、标题模型共用同一文件锁（proper-lockfile + 原子写），并发保存不再互相覆盖丢配置。
-- **设置-功能页新增模式默认项**：可配置默认任务模式（常规 / 计划 / 目标）、默认运行档位（轻量 / 均衡 / 交付，默认均衡）、默认工具权限（批准 / 自动 / Yolo），已打开的对话立即生效、新对话自动继承。
-- **SPA 导航修复**：地址栏 `?session=` ↔ `?cwd=` 切换项目无需整页刷新；全新项目（尚无会话）仍保留在项目列表；新会话创建后立即出现在侧栏。
-- **安装提示清零**：供应商图标改为内置组件，移除 `@lobehub/icons` 依赖，不再被 npm 自动安装 `@lobehub/ui` / `antd` / `@emoji-mart/react` 整条链——安装时不再出现 `ERESOLVE overriding peer dependency` 与 `deprecated intersection-observer` 警告（详情见「安装提示（npm 11）」）。
-- **undici 修复改为运行时执行**：移除 `postinstall` 钩子，`pi-web` 启动与 dev/start 脚本执行前自动应用 undici CVE 修复，安装不再要求审批安装脚本。
-
-## 历史更新（2026-08-06 · v0.9.17-beta.2）
-
-- **对话框模式系统**（移植自 Reasonix）：输入框工具栏新增三组模式控件——任务模式（常规 / 计划 / 目标）、运行档位（轻量 / 均衡 / 交付）、工具权限（批准 / 自动 / Yolo）。计划模式只读产出计划后弹出确认卡（开始执行 / 提出建议 / 退出）；目标模式输入目标后自动持续推进，带轮次预算与无进展检测；轻量档位收窄工具集省 token，交付档位强制验收指令。
-- **工具调用审批（真拦截）**：权限为「批准」时，agent 的写类工具调用在真正执行前挂起，输入框上方弹出审批卡，可允许 / 拒绝 / 附理由拒绝；规则（deny > ask > allow）支持 `ToolName` / `ToolName(glob)` / `Bash(command:*)`，持久化到 settings.json。
-- **Yolo 红色警示**：选择 Yolo 时输入框外圈变红，直观提醒高权限模式。
-- **长粘贴自动折叠**：粘贴大段代码自动折叠为 `[已粘贴文本 #N · X 行]` 占位卡（可预览 / 删除），发送时自动展开，输入框不再卡顿。
-- **标题失败气泡 + 换模型弹窗**：生成标题失败在会话行右侧弹出原因气泡，可重试或换模型（按 provider 分组的模型选择弹窗）。
-- **修复**：Markdown 渲染 hydration 错误（移除 rehypeRaw）、消息气泡不再显示注入的模式提示词、批量生成主题 500 与页面卡死、模型选择弹窗 key 冲突与分组、Windows 导入路径适配、审批请求幂等、移动端标题栏（git 分支只显图标 + 点击标题看全文）。
-
-## 历史更新（2026-08-06 · v0.9.17-beta.1）
-
-- **修复导入会话生成标题 500**：Reasonix 导入的会话自动生成标题时不再报 `Cannot read properties of undefined (reading 'length')`。根因是导入转换产生缺失 `text` 字段的消息块，已在导入与标题生成两条链路同时修复，历史坏文件也兼容。
-- **标题生成提速**：超长会话（上千条工具消息）只取最近一段上下文生成标题，不再容易超时；尾部无用户消息时自动回退全量。
-- **批量生成项目标题**：会话列表顶部新增「生成标题」批量按钮，一键为当前项目所有会话并行生成标题，带进度显示，完成后自动刷新。
-- **导入标题生成并行化**：导入完成页的标题生成改为并发并行（原串行 + 500ms 间隔），单条失败自动跳过。
-
-## 历史更新（2026-08-06 · v0.9.16-beta.1）
-
-- **代理配置**：设置弹窗新增「代理」标签页，支持 HTTP / HTTPS / SOCKS5 代理，主机端口与用户名密码分开填写、密码脱敏；可测试连通性；保存后运行时热生效无需重启。适用于外部代理与本地代理（Clash / V2Ray 等）。
-- **计划模式**：输入框左下角加号升级为三选项菜单（常规 / 计划 / 上传文件）。计划模式切到只读工具集并自动注入「只读分析、输出实现计划」指令，输入框显示「计划模式」徽章；计划完成后弹出确认框，可确认执行、提出建议继续完善、或退出计划模式。
-- **用量统计**：设置弹窗新增「用量」标签页，支持当前会话（实时上下文占用环形图）与全局（总量、每日趋势、Top 会话）切换；优先使用会话中真实记录的模型用量，无记录时按文本估算。
-- **任务看板增强**：取消任务可填原因；重试/重新排队可填备注（注入下次运行提示词）；无文件变更的任务支持「直接完成」跳过合并；所有列按更新时间最新优先。
-- **任务从消息创建**：用户消息悬浮栏新增「创建任务」按钮，自动打开看板并预填。
-- **一键推送与 Stash**：会话信息栏新增推送按钮与 Stash 管理（列表 / 保存 / 恢复 / 删除）。
-- **功能开关**：设置弹窗新增「功能」标签页，可整体开关任务看板（Beta）。
-
-## 历史更新（2026-08-05）
-
-- **任务看板（Beta，桌面端）**：标题栏新增看板按钮，四列看板（待办/进行中/待处理/已完成）把任务交给 agent 在独立 git worktree 分支中执行；支持拖拽启动、详情抽屉（时间线/Diff/变更文件）、验收合并、退回反馈、归档、任务模板、每项目任务设置（并发/合并策略/预检/初始化命令/阶段提示词）、系统通知与中英文/主题适配。任务存于 `~/.pi/agent/tasks/`（JSONL）。
-- **内置模型配置持久化修复**：内置供应商模型编辑（上下文窗口 / 最大输出 / 思考映射 / 名称 / 隐藏）改为写入 SDK 原生 `modelOverrides` 字段级覆盖，不再整模型替换，也不会重置未修改字段；`models.json` 读写加互斥锁与原子写，局部保存和全局保存互不覆盖。
-- **草稿保护**：切换供应商、点击全局保存或关闭设置前会自动保存未提交的内置模型修改；保存失败保留草稿并提示，不再静默丢失。兼容历史 `models[]` 配置，自定义与传输字段原样保留。
-- **备份导入修复**：修复超过 10MB 的备份包导入被截断（413）的问题，上传上限与导入接口对齐（600MB）；导入按钮改为标准按钮样式，不再像纯文字。
-- **Reasonix 会话导入增强**：除原有 `~/.reasonix/projects/` 布局外，新增支持 Windows/CLI 平铺的 `~/.reasonix/sessions/` 布局（按文件名前缀自动发现 code / desktop 等项目）；对非 mac 命名格式的文件名做解析容错。
-- **项目选择**：左上角项目选择模块始终显示（含新装用户），侧边栏不再出现重复的独立按钮；无项目占位文案改为随界面语言（中文"选择项目…"）。
-- **会话导入**：设置弹窗新增「导入会话」标签页，自动发现 `~/.reasonix/projects/` 下的项目与历史会话，支持按项目勾选批量导入，可选择合并到现有项目或新建项目；导入后可选调用模型生成标题。
-- **Windows 兼容修复**：修复全新安装（无历史会话）时项目选择器消失的问题；修复 `~` 路径缩写和快捷工作区识别的大小写敏感问题。
-
-## 历史更新（2026-08-04）
-
-- **跨平台备份恢复**：设置弹窗新增「备份」标签页，一键导出/导入核心配置、技能、插件、MCP 与会话；导入按平台自动适配路径与命令，支持类别勾选与 MCP 跳过。
-- **自动生成会话标题**：会话列表新增“生成标题”按钮，基于会话内容调用模型命名；可全局指定标题生成模型。
-- **内置模型覆盖**：模型配置可查看供应商内置模型明细并叠加 models.json 自定义覆盖项。
-- **安全加固**：auto-name / settings / models-config 等 API 补齐请求鉴权；备份导入增加解压炸弹防护（单条目/总量双重上限 + 实际字节校验）、脚本白名单、路径穿越校验与 npm 插件 opt-in 重装。
-- **供应商获取模型**：模型配置中可直接从供应商的 Base URL 拉取模型列表（支持 OpenAI / Anthropic / Google 等协议），筛选、多选后一键添加，无需手写模型 ID。
-- **models.dev 定价预设**：填写模型 ID 后一键从 models.dev 拉取名称、上下文窗口、价格等字段填入，支持撤销；价格来源与可信度一目了然。
-- **对话滚动跟随**：修复 agent 运行时消息列表跳到底部空白的问题；流式输出期间停留在列表底部则自动跟随，滚到上方查看历史不被打断，且最后一条消息与输入框之间保留间距。
-- **快捷操作**：文件标签页支持中间键关闭；会话删除支持 Shift+点击跳过确认；Markdown 中的本地图片可直接预览。
-- **URL 直达目录**：通过 `?cwd=<路径>` 参数打开网页时直接校验并进入指定目录的新会话。
-
-## 安装提示（npm 11）
-
-自 **v0.9.17-beta.3 起**，`ERESOLVE overriding peer dependency` 与 `deprecated intersection-observer` 两类提示已消除：供应商图标改为内置（不再依赖 `@lobehub/icons`，从而不再被 npm 自动安装 `@lobehub/ui` / `antd` / `@emoji-mart/react` 整条链）。新装本包时仅剩以下两类**提示性警告，均不影响安装与运行**：
-
-- `deprecated node-domexception`：来自 `@google/genai` → `google-auth-library` 的传递依赖 `fetch-blob`。它只是旧版 Node 的 polyfill，Node ≥ 18 原生自带 `DOMException`，运行时完全用不到。上游未修复前无法从包侧移除。
-
-- `allow-scripts`：npm ≥ 11.16 新增的安装脚本审批提示（`@google/genai` / `protobufjs` / `sharp` 等传递依赖的 preinstall/postinstall/install 脚本）。当前版本**只提示、不拦截**（脚本照常执行），未来版本可能改为默认拦截。想消除提示可在你的项目执行：
-
-  ```bash
-  npm approve-scripts --allow-scripts-pending   # 先查看待审批清单
-  npm approve-scripts @google/genai protobufjs sharp   # 逐个批准并写入你的 package.json
-  ```
-
-  或在项目 `package.json` 声明：
-
-  ```json
-  "allowScripts": {
-    "@google/genai@1.52.0": true,
-    "protobufjs@7.6.5": true,
-    "sharp@0.34.5": true
-  }
-  ```
-
-  注意该字段按 `包名@精确版本` 匹配，版本升级后需同步更新。
-
-## 历史更新（2026-08-03）
-
-- **Web-only 基线**：界面和运行代码已统一为 `pi-web-desktop` 的网页基线；Electron 主进程、桌面端打包、PWA Service Worker 与 tag 驱动的桌面 Release 工作流已移除。
-- **目录选择器**：侧栏“选择文件夹”改为可逐级浏览的目录弹窗，选择“此文件夹”后直接加载项目，不再要求手动输入路径。
-- **移动端可用性**：当前模型和发送按钮始终显示；项目名、Git 仓库/Worktree 名在窄屏缩小并省略，避免横向滚动。
-- **模型下拉稳定性**：展开或收起供应商二级模型列表时，面板外框保持固定高度，只有结果列表滚动，不再上下跳动。
-- **QT 固定主题**：显示设置重新提供 Gruvbox、Nord、Tokyo Night、Solarized、One Dark、Dracula 与 Catppuccin；它们和 Pi JSON 自定义主题共存，均支持浅色、深色与跟随系统。
-- **移动端输入区**：聊天输入框提高到 52px；保持 16px 防止 iOS Safari 聚焦缩放，同时以更紧凑的行高和字距降低文字视觉体积。
-- **运行与渲染修复**：生产服务不再依赖 Turbopack 开发 chunk；Markdown 表格行引用保持合法 DOM 结构，避免 hydration 报错。
-
-## 快速开始
-
-### 前置条件
-
-- Node.js **22.19.0 或更高版本**
-- 已配置可用的 Pi 模型/认证信息
-
-### 从 npm 安装（推荐）
-
-```bash
-npx @qt4798/pi-web@latest
-```
-
-或全局安装：
-
-```bash
-npm install -g @qt4798/pi-web
-pi-web
-```
-
-然后打开 [http://127.0.0.1:30141](http://127.0.0.1:30141)。CLI 会在服务就绪后自动打开浏览器。默认只监听 `127.0.0.1`。
-
-**更新：**
-
-```bash
-npm update -g @qt4798/pi-web
-# 或指定版本
-npm install -g @qt4798/pi-web@latest
-```
-
-**常用选项：**
-
-```bash
-pi-web --port 8080              # 自定义端口
-pi-web --hostname 0.0.0.0       # 暴露在局域网
-pi-web -p 8080 -H 0.0.0.0       # 组合使用
-pi-web --no-open                # 不自动打开浏览器
-
-PORT=8080 pi-web                # 也可通过环境变量设置端口
-PI_WEB_HOSTNAME=0.0.0.0 pi-web  # 显式设置监听地址
-PI_WEB_ALLOWED_HOSTS=piweb.example.com pi-web  # 允许反向代理域名
-PI_WEB_PASSWORD='随机长密码' pi-web           # 启用 HTTP Basic Auth（用户名 pi）
-PI_WEB_NO_OPEN=1 pi-web         # 后台服务不自动打开浏览器
-```
-
-设置 `PI_WEB_PASSWORD` 后，所有网页接口和 API 端点都需要 HTTP Basic Auth 认证，用户名为 `pi`。不设或留空则禁用认证。
-
-> Basic Auth 不加密传输中的密码。请勿将纯 HTTP 直接暴露到公网，通过可信反向代理启用 HTTPS 或使用可信 VPN 进行远程访问。
-
-### 从源码运行
-
-```bash
-git clone https://github.com/t479842598/pi-web-QT.git
-cd pi-web-QT
-npm ci
-npm run dev
-```
-
-`npm run dev` 使用**随机端口**（`-p 0`），启动日志会打印实际地址，如 `http://127.0.0.1:<随机端口>`。本地仓库构建仅作为测试环境；日常命令行运行请使用 npm 全局安装的 `@qt4798/pi-web`（`pi-web` 命令，固定 `http://127.0.0.1:30141`）。
-
-开发服务器默认只监听本机。局域网调试可使用：
-
-```bash
-npm run dev:lan
-```
 
 ## 生产部署
 
@@ -281,7 +204,7 @@ node bin/pi-web.js -H 127.0.0.1 -p 30141 --no-open
 
 | 变量 | 用途 |
 | --- | --- |
-| `PI_WEB_PASSWORD` | 启用 HTTP Basic Auth；用户名固定为 `pi`。 |
+| `PI_WEB_PASSWORD` | 启用 Basic Auth；用户名固定为 `pi`。 |
 | `PI_WEB_ALLOWED_HOSTS` | 以逗号分隔的外部允许域名，例如 `piweb.example.com`。 |
 | `PI_CODING_AGENT_DIR` | 指向另一套 Pi 数据目录；默认使用 `~/.pi/agent`。 |
 | `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` | 为服务端模型/API 请求设置代理。 |
