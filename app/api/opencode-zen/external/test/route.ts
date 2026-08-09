@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     // the gateway would actually forward through; the key only gates access).
     const zenFetch = createOpenCodeZenFetch(globalThis.fetch.bind(globalThis), undefined, {
       ...current,
-      externalAccess: { enabled, port, apiKey },
+      externalAccess: { enabled, port, apiKey, freeModelsOnly: true },
     });
     const started = Date.now();
     const response = await zenFetch("https://opencode.ai/zen/v1/models", {

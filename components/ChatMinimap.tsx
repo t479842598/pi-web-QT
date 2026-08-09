@@ -9,6 +9,21 @@ interface Props {
   scrollContainer: RefObject<HTMLDivElement | null>;
   messageRefs: RefObject<(HTMLDivElement | null)[]>;
   onWidthChange?: (width: number) => void;
+  /** Optional virtualizer from the message list. When present, node positions
+   *  come from the virtualizer's layout (measured rows + estimate fallback)
+   *  instead of DOM lookups — the DOM is virtualized so most messages have no
+   *  element to measure. */
+  virtualizer?: {
+    /** Absolute offset of a rendered item index (measured or estimated). */
+    getOffsetForIndex: (index: number) => number;
+    /** Height of a rendered item (measured or estimated). */
+    sizeFor: (index: number) => number;
+    /** Total height of the virtualized list. */
+    totalHeight: () => number;
+    /** Rendered-item index for each visible (user/assistant) message ref index. */
+    refToItemIndex: (refIndex: number) => number | undefined;
+    itemCount: number;
+  } | null;
 }
 
 const MINIMAP_WIDTH = 18;
@@ -123,7 +138,7 @@ interface NodeInfo {
   index: number;
 }
 
-export function ChatMinimap({ messages, streamingMessage, scrollContainer, messageRefs, onWidthChange }: Props) {
+export function ChatMinimap({ messages, streamingMessage, scrollContainer, messageRefs, onWidthChange, virtualizer }: Props) {
   const [scrollRatio, setScrollRatio] = useState(0);
   const [viewportRatio, setViewportRatio] = useState(1);
   const [visible, setVisible] = useState(false);
@@ -158,9 +173,13 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
     }
   }, [scrollContainer]);
 
-  // --- 节流 DOM 测量（仅消息变化/尺寸变化时触发，最多 150ms 一次）---
+  // --- 节流布局计算（消息变化/尺寸变化时触发，最多 150ms 一次）---
   const measureThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nodesRef = useRef<NodeInfo[]>([]);
+  // Keep the virtualizer behind a ref so the throttled measure callback stays
+  // stable regardless of prop identity (it changes when the minimap remounts).
+  const virtualizerRef = useRef(virtualizer);
+  virtualizerRef.current = virtualizer;
   const measureNodes = useCallback(() => {
     // 节流：150ms 内忽略重复调用
     if (measureThrottleRef.current) return;
@@ -171,28 +190,58 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
       const totalH = scrollEl.scrollHeight;
       if (totalH <= 0) return;
 
-      const refs = messageRefs.current;
       const newNodes: NodeInfo[] = [];
-      let refIndex = 0;
       const allMessages = allMessagesRef.current;
+      const v = virtualizerRef.current;
 
-      for (let i = 0; i < allMessages.length; i++) {
-        const msg = allMessages[i];
-        if (msg.role !== "user" && msg.role !== "assistant") continue;
-        const el = refs?.[refIndex];
-        refIndex++;
-        if (!hasTextContent(msg)) continue;
-        if (el) {
-          const elRect = el.getBoundingClientRect();
-          const containerRect = scrollEl.getBoundingClientRect();
-          const top = elRect.top - containerRect.top + scrollEl.scrollTop;
-          const h = elRect.height;
+      if (v) {
+        // Virtualized mode: positions come from the virtualizer layout
+        // (measured rows + estimate fallback), so messages that are not
+        // currently mounted still get a node. refIndex runs in message order
+        // (user/assistant only) and maps to rendered items via refToItemIndex.
+        // NOTE: the ratio denominator is `totalH` (scrollHeight, includes the
+        // bottom spacer) — the same base the DOM branch and the viewport box
+        // use — so nodes line up with the scroll position even though the
+        // virtualizer offsets themselves exclude the spacer.
+        if (v.totalHeight() <= 0) return;
+        let refIndex = 0;
+        for (let i = 0; i < allMessages.length; i++) {
+          const msg = allMessages[i];
+          if (msg.role !== "user" && msg.role !== "assistant") continue;
+          if (!hasTextContent(msg)) { refIndex += 1; continue; }
+          const itemIndex = v.refToItemIndex(refIndex);
+          refIndex += 1;
+          if (itemIndex === undefined) continue;
+          const top = v.getOffsetForIndex(itemIndex);
+          const size = v.sizeFor(itemIndex);
           newNodes.push({
             topRatio: top / totalH,
-            heightRatio: h / totalH,
+            heightRatio: Math.max(size / totalH, 1 / totalH),
             msg,
             index: newNodes.length,
           });
+        }
+      } else {
+        const refs = messageRefs.current;
+        let refIndex = 0;
+        for (let i = 0; i < allMessages.length; i++) {
+          const msg = allMessages[i];
+          if (msg.role !== "user" && msg.role !== "assistant") continue;
+          const el = refs?.[refIndex];
+          refIndex++;
+          if (!hasTextContent(msg)) continue;
+          if (el) {
+            const elRect = el.getBoundingClientRect();
+            const containerRect = scrollEl.getBoundingClientRect();
+            const top = elRect.top - containerRect.top + scrollEl.scrollTop;
+            const h = elRect.height;
+            newNodes.push({
+              topRatio: top / totalH,
+              heightRatio: h / totalH,
+              msg,
+              index: newNodes.length,
+            });
+          }
         }
       }
       // Commit only when measurements actually changed. Without this guard a

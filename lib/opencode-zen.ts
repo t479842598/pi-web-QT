@@ -30,6 +30,8 @@ export interface OpenCodeZenExternalAccess {
   enabled: boolean;
   port: number;
   apiKey: string;
+  /** GET /v1/models filtering: true = only `-free` models (default), false = all. */
+  freeModelsOnly: boolean;
 }
 
 export interface OpenCodeZenConfig {
@@ -149,7 +151,7 @@ function defaultProxy(): OpenCodeZenProxy {
 }
 
 function defaultConfig(): OpenCodeZenConfig {
-  return { accounts: [], autoSwitch: true, cooldownMs: DEFAULT_COOLDOWN_MS, externalAccess: { enabled: false, port: DEFAULT_EXTERNAL_PORT, apiKey: "" } };
+  return { accounts: [], autoSwitch: true, cooldownMs: DEFAULT_COOLDOWN_MS, externalAccess: { enabled: false, port: DEFAULT_EXTERNAL_PORT, apiKey: "", freeModelsOnly: true } };
 }
 
 function normalizeExternalAccess(value: unknown, fallback: OpenCodeZenExternalAccess): OpenCodeZenExternalAccess {
@@ -160,6 +162,9 @@ function normalizeExternalAccess(value: unknown, fallback: OpenCodeZenExternalAc
     enabled: raw.enabled === true,
     port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : fallback.port,
     apiKey: typeof raw.apiKey === "string" ? raw.apiKey.trim() : fallback.apiKey,
+    // Default to free-only whenever the flag is absent (legacy configs keep
+    // the current behavior of exposing only `-free` models).
+    freeModelsOnly: raw.freeModelsOnly === false ? false : true,
   };
 }
 
@@ -350,6 +355,7 @@ export function getSafeOpenCodeZenConfig(): SafeOpenCodeZenConfig {
     externalAccess: {
       enabled: external.enabled,
       port: external.port,
+      freeModelsOnly: external.freeModelsOnly,
       apiKeyMasked: maskOpenCodeKey(external.apiKey),
       hasApiKey: Boolean(external.apiKey),
       status: globalThis.__piOpenCodeZenExternalStatus ?? { running: false },
@@ -660,6 +666,7 @@ export function mergeOpenCodeZenConfig(input: unknown): OpenCodeZenConfig {
       enabled: typeof rawExternal.enabled === "boolean" ? rawExternal.enabled : current.externalAccess.enabled,
       port: Number.isInteger(Number(rawExternal.port)) ? Number(rawExternal.port) : current.externalAccess.port,
       apiKey: typeof rawExternal.apiKey === "string" && rawExternal.apiKey.trim() ? rawExternal.apiKey.trim() : current.externalAccess.apiKey,
+      freeModelsOnly: typeof rawExternal.freeModelsOnly === "boolean" ? rawExternal.freeModelsOnly : current.externalAccess.freeModelsOnly,
     },
     current.externalAccess,
   );

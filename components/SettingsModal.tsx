@@ -67,12 +67,14 @@ export function SettingsModal({
   );
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
-  const modelsFlushRef = useRef<(() => Promise<void>) | null>(null);
-
-  const registerModelsFlush = useCallback((flush: () => Promise<void>) => {
-    modelsFlushRef.current = flush;
+  // Multiple embedded configs can register a close-time flush (models.json
+  // and OpenCode Zen auto-save both need to persist pending edits before the
+  // dialog unmounts).
+  const flushRefs = useRef(new Set<() => Promise<void>>());
+  const registerFlush = useCallback((flush: () => Promise<void>) => {
+    flushRefs.current.add(flush);
     return () => {
-      if (modelsFlushRef.current === flush) modelsFlushRef.current = null;
+      flushRefs.current.delete(flush);
     };
   }, []);
 
@@ -81,7 +83,11 @@ export function SettingsModal({
     setClosing(true);
     setCloseError(null);
     try {
-      await modelsFlushRef.current?.();
+      // Flush every registered config independently: one failing flush must
+      // not prevent the others (e.g. OpenCode Zen auto-save) from persisting.
+      const results = await Promise.allSettled([...flushRefs.current].map((flush) => flush()));
+      const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+      if (firstError) throw firstError.reason;
       onCloseAction();
     } catch (error) {
       setCloseError(error instanceof Error ? error.message : String(error));
@@ -109,6 +115,7 @@ export function SettingsModal({
         role="dialog"
         aria-modal="true"
         aria-label={t("desktop.settings")}
+        className="settings-modal"
         style={{
           width: isMobile ? "calc(100vw - 16px)" : 1000,
           maxWidth: "calc(100vw - 16px)",
@@ -238,7 +245,7 @@ export function SettingsModal({
             <ChatConfig />
           </div>
           <div style={{ display: activeTab === "models" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <ModelsConfig embedded onSavedAction={onModelsSavedAction} onRegisterFlush={registerModelsFlush} />
+            <ModelsConfig embedded onSavedAction={onModelsSavedAction} onRegisterFlush={registerFlush} />
           </div>
           {cwd && (
             <div style={{ display: activeTab === "skills" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
@@ -251,7 +258,7 @@ export function SettingsModal({
             </div>
           )}
           <div style={{ display: activeTab === "opencode-zen" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <OpenCodeZenConfig />
+            <OpenCodeZenConfig onRegisterFlush={registerFlush} />
           </div>
           <div style={{ display: activeTab === "proxy" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <ProxyConfig />
@@ -272,7 +279,7 @@ export function SettingsModal({
             <McpConfig />
           </div>
           <div style={{ display: activeTab === "subagents" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <SubagentsConfig />
+            <SubagentsConfig cwd={cwd} />
           </div>
           <div style={{ display: activeTab === "backup" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <BackupConfig cwd={cwd} />

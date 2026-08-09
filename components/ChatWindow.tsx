@@ -16,8 +16,10 @@ import { ProcessGroup } from "./ProcessGroup";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { QueueRecoveryDialog } from "./QueueRecoveryDialog";
 import { SessionInfoBar } from "./SessionInfoBar";
+import { VirtualizedMessageList } from "./VirtualizedMessageList";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ArrowDownIcon } from "@phosphor-icons/react/ArrowDown";
+import type { Virtualizer } from "@tanstack/react-virtual";
 import { useAgentSession, CHAT_BOTTOM_SPACER_PX, BOTTOM_KEEP_OUT_PX, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
 import { useDeepSeekBalance } from "@/hooks/useDeepSeekBalance";
@@ -26,13 +28,6 @@ import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionStatsInfo } from "@/lib/pi-types";
-import {
-  captureScrollDistance,
-  getNextVisibleCount,
-  getVisibleRenderWindow,
-  restoreScrollTop,
-  VISIBLE_PAGE_SIZE,
-} from "@/lib/chat-lazy-load";
 
 interface Props {
   session: SessionInfo | null;
@@ -354,43 +349,30 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     };
   }, [messages.length, scrollContainerRef, updateChatFades]);
 
-  // --- Lazy-load historical messages ---
-  // Only render the last N messages initially. When the user scrolls to the
-  // top, load another page while keeping the scroll position stable.
-  const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const prevScrollDistanceRef = useRef<number | null>(null);
-
-  // IntersectionObserver on the sentinel div at the top of the message list.
-  // When it becomes visible, load the next page of older messages.
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    const container = scrollContainerRef.current;
-    if (!sentinel || !container) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          // Save distance from top before prepending to restore scroll later
-          prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
-          setVisibleCount((prev) => getNextVisibleCount(prev));
-        }
-      },
-      { root: container, threshold: 0 }
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [visibleCount, messages.length, scrollContainerRef]);
-
-  // After visibleCount increases (more messages prepended), restore the
-  // scroll position so the viewport doesn't jump.
-  useEffect(() => {
-    if (prevScrollDistanceRef.current == null) return;
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    container.scrollTop = restoreScrollTop(container.scrollHeight, prevScrollDistanceRef.current);
-    updateChatFades();
-    prevScrollDistanceRef.current = null;
-  }, [visibleCount, scrollContainerRef, updateChatFades]);
+  // --- Virtualized message list ---
+  // T-004 (方案 B): the full rendered array is the data source; the
+  // VirtualizedMessageList mounts only the viewport window. The old
+  // pagination state (visibleCount / sentinel / scroll restore) is gone —
+  // scrolling to the top reaches the oldest message instantly.
+  const messageVirtualizerRef = useRef<Virtualizer<HTMLElement, Element> | null>(null);
+  // Rendered-item index per visible (user/assistant) message ref index. Built
+  // alongside the rendered array in the JSX IIFE below (see refToItemIndexRef).
+  const refToItemIndexRef = useRef<Array<number | undefined>>([]);
+  // Stable adapter object for ChatMinimap (positions from the virtualizer
+  // layout instead of DOM, which is virtualized). Object identity is stable
+  // so the minimap's ResizeObserver wiring does not re-create on each render.
+  const minimapVirtualizerAdapter = useMemo(() => ({
+    getOffsetForIndex: (itemIndex: number) => messageVirtualizerRef.current?.getOffsetForIndex(itemIndex)?.[0] ?? 0,
+    sizeFor: (itemIndex: number) => {
+      const v = messageVirtualizerRef.current;
+      if (!v) return 0;
+      const cached = v.measurementsCache[itemIndex];
+      return cached?.size ?? v.options.estimateSize?.(itemIndex) ?? 0;
+    },
+    totalHeight: () => messageVirtualizerRef.current?.getTotalSize() ?? 0,
+    refToItemIndex: (refIndex: number) => refToItemIndexRef.current[refIndex],
+    itemCount: refToItemIndexRef.current.length,
+  }), []);
   // Push session stats up to AppShell for the top bar.
   // Compare scalar fields to avoid loops from new object identity each render.
   const statsKey = sessionStats
@@ -848,6 +830,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               };
 
               const rendered: ReactNode[] = [];
+              // Parallel record: the visible (user/assistant) message ref index
+              // that each rendered item starts with, for the minimap virtualizer
+              // adapter (item boundaries map back to message refs).
+              const itemStartRefs: Array<number | undefined> = [];
+              const pushRendered = (node: ReactNode, refIndex: number | undefined) => {
+                rendered.push(node);
+                itemStartRefs.push(refIndex);
+              };
               for (let idx = 0; idx < messages.length;) {
                 const msg = messages[idx];
                 const startsCompactionTurn = isCompactionBoundary(msg);
@@ -857,7 +847,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 // the ProcessGroup rendering path rather than the legacy message
                 // renderer.
                 if (msg.role !== "user" && !startsCompactionTurn) {
-                  rendered.push(renderMessage(idx));
+                  pushRendered(renderMessage(idx), visibleRefIndexByMessage.get(idx));
                   idx += 1;
                   continue;
                 }
@@ -872,7 +862,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   && (userIdx === lastUserIdx || startsCompactionTurn);
 
                 if (isLiveTail) {
-                  rendered.push(renderMessage(userIdx));
+                  pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx));
                   const hasStreamingAssistant = streamState.streamingMessage?.role === "assistant";
                   const liveProcessIndices: number[] = [];
                   const existingProcessEnd = !hasStreamingAssistant && finalAssistantIdx >= 0 ? finalAssistantIdx : endIdx;
@@ -914,7 +904,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     const processRefIdx = liveProcessIndices
                       .map((processIdx) => visibleRefIndexByMessage.get(processIdx))
                       .find((value): value is number => typeof value === "number");
-                    rendered.push(
+                    pushRendered(
                       <div
                         key={`live-process-group-${userIdx}`}
                         ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
@@ -927,10 +917,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                           sessionId={session?.id ?? sessionIdRef.current ?? undefined}
                         />
                       </div>,
+                      processRefIdx,
                     );
                   }
                   if (liveAnswerMessage) {
-                    rendered.push(
+                    pushRendered(
                       <MessageView
                         key={`live-answer-${userIdx}`}
                         message={liveAnswerMessage}
@@ -940,6 +931,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                         onOpenFile={onOpenFile}
                         onQuoteReply={handleQuoteReply}
                       />,
+                      finalAssistantIdx >= 0 ? visibleRefIndexByMessage.get(finalAssistantIdx) : undefined,
                     );
                   }
                   idx = endIdx;
@@ -948,13 +940,13 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
                 if (finalAssistantIdx === -1) {
                   for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
-                    rendered.push(renderMessage(renderIdx));
+                    pushRendered(renderMessage(renderIdx), visibleRefIndexByMessage.get(renderIdx));
                   }
                   idx = endIdx;
                   continue;
                 }
 
-                rendered.push(renderMessage(userIdx));
+                pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx));
 
                 const processIndices: number[] = [];
                 for (let processIdx = userIdx + 1; processIdx < finalAssistantIdx; processIdx++) {
@@ -983,7 +975,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     .map((processIdx) => visibleRefIndexByMessage.get(processIdx))
                     .find((value): value is number => typeof value === "number")
                     ?? (finalAnswerMessage ? undefined : visibleRefIndexByMessage.get(finalAssistantIdx));
-                  rendered.push(
+                  pushRendered(
                     <div
                       key={`process-group-${userIdx}-${finalAssistantIdx}`}
                       ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
@@ -998,27 +990,33 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                         sessionId={session?.id ?? sessionIdRef.current ?? undefined}
                       />
                     </div>,
+                    processRefIdx,
                   );
                 }
 
                 if (finalAnswerMessage) {
-                  rendered.push(renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage }));
+                  pushRendered(renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage }), visibleRefIndexByMessage.get(finalAssistantIdx));
                 }
                 for (let renderIdx = finalAssistantIdx + 1; renderIdx < endIdx; renderIdx++) {
-                  rendered.push(renderMessage(renderIdx));
+                  pushRendered(renderMessage(renderIdx), visibleRefIndexByMessage.get(renderIdx));
                 }
                 idx = endIdx;
               }
-              const { startIndex, hasMore } = getVisibleRenderWindow(rendered.length, visibleCount);
+              // After building all items, expose the per-message → item map to
+              // the minimap adapter: each rendered item represents exactly one
+              // visible (user/assistant) message ref (mirroring the old DOM-ref
+              // semantics where a ProcessGroup node carried a single ref).
+              const refToItem: Array<number | undefined> = [];
+              itemStartRefs.forEach((startRef, itemIdx) => {
+                if (startRef !== undefined) refToItem[startRef] = itemIdx;
+              });
+              refToItemIndexRef.current = refToItem;
               return (
-                <>
-                  {hasMore && (
-                    <div ref={sentinelRef} className="py-3 text-center text-xs text-text-muted">
-                      {t("desktop.scrollToLoadEarlierMessages", { count: startIndex })}
-                    </div>
-                  )}
-                  {rendered.slice(startIndex)}
-                </>
+                <VirtualizedMessageList
+                  scrollElementRef={scrollContainerRef}
+                  items={rendered}
+                  virtualizerRef={messageVirtualizerRef}
+                />
               );
             })()}
 
@@ -1120,6 +1118,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             streamingMessage={streamState.streamingMessage}
             scrollContainer={scrollContainerRef}
             messageRefs={messageRefs}
+            virtualizer={minimapVirtualizerAdapter}
           />
         )}
       </div>
