@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Copy, FloppyDisk, Play, Plus, Trash } from "@phosphor-icons/react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Copy, Play, Plus, Trash } from "@phosphor-icons/react";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import type { SafeOpenCodeZenAccount, SafeOpenCodeZenConfig } from "@/lib/opencode-zen";
@@ -36,7 +36,7 @@ function generateExternalKey(): string {
   return `piweb-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export function OpenCodeZenConfig() {
+export function OpenCodeZenConfig({ onRegisterFlush }: { onRegisterFlush?: (flush: () => Promise<void>) => () => void }) {
   const { t } = useI18n();
   const [accounts, setAccounts] = useState<DraftAccount[]>([]);
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
@@ -46,6 +46,7 @@ export function OpenCodeZenConfig() {
   const [proxyImportText, setProxyImportText] = useState("");
   const [externalEnabled, setExternalEnabled] = useState(false);
   const [externalPort, setExternalPort] = useState(DEFAULT_EXTERNAL_PORT);
+  const [freeModelsOnly, setFreeModelsOnly] = useState(true);
   const [externalApiKeyDraft, setExternalApiKeyDraft] = useState("");
   const [externalHasApiKey, setExternalHasApiKey] = useState(false);
   const [externalKeyMasked, setExternalKeyMasked] = useState("••••••••");
@@ -68,6 +69,93 @@ export function OpenCodeZenConfig() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Auto-save: every editable field change schedules a debounced PUT and the
+   * latest draft values are read from this ref at save time (never stale
+   * closures). The explicit „保存“ button is gone — edits persist on their
+   * own. The 500ms debounce keeps keystrokes from hammering the API.
+   */
+  const latestRef = useRef({ accounts, autoSwitch, cooldownMs, externalEnabled, externalPort, freeModelsOnly, externalApiKeyDraft });
+  latestRef.current = { accounts, autoSwitch, cooldownMs, externalEnabled, externalPort, freeModelsOnly, externalApiKeyDraft };
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savingRef = useRef(false);
+  const [pendingSave, setPendingSave] = useState(false);
+
+  /** Perform one PUT with the latest draft state. Serialized; re-entrant callers queue behind the in-flight promise. */
+  const performAutoSave = useCallback(async (): Promise<void> => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setPendingSave(true);
+    try {
+      const latest = latestRef.current;
+      const sentAccounts = latest.accounts;
+      const response = await fetch("/api/opencode-zen", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accounts: sentAccounts.map((account) => ({ ...account, ...(account.apiKeyDraft ? { apiKey: account.apiKeyDraft } : {}) })),
+          autoSwitch: latest.autoSwitch,
+          cooldownMs: latest.cooldownMs,
+          externalAccess: { enabled: latest.externalEnabled, port: latest.externalPort, freeModelsOnly: latest.freeModelsOnly, ...(latest.externalApiKeyDraft ? { apiKey: latest.externalApiKeyDraft } : {}) },
+        }),
+      });
+      const data = await response.json() as SafeOpenCodeZenConfig & { error?: string };
+      if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
+      setExternalHasApiKey(data.externalAccess.hasApiKey);
+      setExternalKeyMasked(data.externalAccess.apiKeyMasked);
+      setExternalStatus(data.externalAccess.status);
+      // The plaintext hint is one-shot only — after saving it is gone for good.
+      setExternalRevealedKey(null);
+      // Only echo the persisted accounts back when the user has NOT edited
+      // since this request was sent (identity comparison on the array). If
+      // they kept typing, keep their local draft — echoing would clobber it.
+      if (latestRef.current.accounts === sentAccounts) {
+        setAccounts(data.accounts.map((account) => ({ ...account, proxy: { ...account.proxy }, apiKeyDraft: "", passwordDraft: "" })));
+        setMessage("已自动保存");
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      savingRef.current = false;
+      setPendingSave(false);
+    }
+  }, []);
+
+  /** Schedule a debounced auto-save (500ms). */
+  const scheduleAutoSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      void performAutoSave();
+    }, 500);
+  }, [performAutoSave]);
+
+  /** Flush any pending debounced save immediately (used before unmount/close). */
+  const flushAutoSave = useCallback(async (): Promise<void> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      await performAutoSave();
+    } else if (savingRef.current) {
+      // A save is in flight; wait for it so closing never loses the last edit.
+      const deadline = Date.now() + 5000;
+      while (savingRef.current && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+  }, [performAutoSave]);
+
+  // Clean up a pending debounce on unmount (switching tabs / closing modal
+  // unmounts this component; the SettingsModal requestClose awaits flush).
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -80,6 +168,7 @@ export function OpenCodeZenConfig() {
       setCooldownMs(data.cooldownMs);
       setExternalEnabled(data.externalAccess.enabled);
       setExternalPort(data.externalAccess.port);
+      setFreeModelsOnly(data.externalAccess.freeModelsOnly);
       setExternalApiKeyDraft("");
       setExternalHasApiKey(data.externalAccess.hasApiKey);
       setExternalKeyMasked(data.externalAccess.apiKeyMasked);
@@ -95,6 +184,7 @@ export function OpenCodeZenConfig() {
 
   const updateAccount = (id: string, update: (account: DraftAccount) => DraftAccount) => {
     setAccounts((current) => current.map((account) => account.id === id ? update(account) : account));
+    scheduleAutoSave();
   };
 
   /** 切换当前使用账号：立即保存 activeAccountId，不改动其他配置。 */
@@ -120,34 +210,14 @@ export function OpenCodeZenConfig() {
     }
   };
 
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const response = await fetch("/api/opencode-zen", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accounts: accounts.map((account) => ({ ...account, ...(account.apiKeyDraft ? { apiKey: account.apiKeyDraft } : {}) })), autoSwitch, cooldownMs, externalAccess: { enabled: externalEnabled, port: externalPort, ...(externalApiKeyDraft ? { apiKey: externalApiKeyDraft } : {}) } }),
-      });
-      const data = await response.json() as SafeOpenCodeZenConfig & { error?: string };
-      if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
-      setAccounts(data.accounts.map((account) => ({ ...account, proxy: { ...account.proxy }, apiKeyDraft: "", passwordDraft: "" })));
-      setExternalApiKeyDraft("");
-      setExternalHasApiKey(data.externalAccess.hasApiKey);
-      setExternalKeyMasked(data.externalAccess.apiKeyMasked);
-      setExternalStatus(data.externalAccess.status);
-      // The plaintext hint is one-shot only — after saving it is gone for good.
-      setExternalRevealedKey(null);
-      setMessage(externalEnabled && !data.externalAccess.hasApiKey
-        ? "OpenCode Zen 配置已保存（外部调用已启用，但尚未设置 API Key，服务未启动）"
-        : "OpenCode Zen 配置已保存");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setSaving(false);
-    }
-  };
+  const flushRef = useRef<(() => Promise<void>) | null>(null);
+  flushRef.current = flushAutoSave;
+
+  useEffect(() => {
+    if (!onRegisterFlush) return undefined;
+    const unregister = onRegisterFlush(() => flushRef.current?.() ?? Promise.resolve());
+    return unregister;
+  }, [onRegisterFlush]);
 
   const importProxies = async () => {
     const proxies = proxyImportText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
@@ -230,7 +300,7 @@ export function OpenCodeZenConfig() {
       const response = await fetch("/api/opencode-zen", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ externalAccess: { enabled: nextEnabled, port: externalPort, ...(externalApiKeyDraft ? { apiKey: externalApiKeyDraft } : {}) } }),
+        body: JSON.stringify({ externalAccess: { enabled: nextEnabled, port: externalPort, freeModelsOnly, ...(externalApiKeyDraft ? { apiKey: externalApiKeyDraft } : {}) } }),
       });
       const data = await response.json() as SafeOpenCodeZenConfig & { error?: string };
       if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
@@ -264,8 +334,14 @@ export function OpenCodeZenConfig() {
     }
   };
 
-  const addAccount = () => setAccounts((current) => [...current, { id: `account-${Date.now()}`, note: "新账号", apiKeyMasked: "••••••••", hasApiKey: false, enabled: true, proxy: blankProxy(), apiKeyDraft: "" }]);
-  const removeAccount = (id: string) => setAccounts((current) => current.filter((account) => account.id !== id));
+  const addAccount = () => {
+    setAccounts((current) => [...current, { id: `account-${Date.now()}`, note: "新账号", apiKeyMasked: "••••••••", hasApiKey: false, enabled: true, proxy: blankProxy(), apiKeyDraft: "" }]);
+    scheduleAutoSave();
+  };
+  const removeAccount = (id: string) => {
+    setAccounts((current) => current.filter((account) => account.id !== id));
+    scheduleAutoSave();
+  };
 
   const testExternal = async () => {
     setTestingExternal(true);
@@ -359,18 +435,22 @@ export function OpenCodeZenConfig() {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--text-muted)", fontSize: 12 }}>端口
-            <input type="number" min={1} max={65535} value={externalPort || ""} onChange={(event) => setExternalPort(Number(event.target.value) || 0)} style={{ width: 90, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text)", fontSize: 12 }} />
+            <input type="number" min={1} max={65535} value={externalPort || ""} onChange={(event) => { setExternalPort(Number(event.target.value) || 0); scheduleAutoSave(); }} style={{ width: 90, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text)", fontSize: 12 }} />
           </label>
           <code style={{ padding: "6px 8px", background: "var(--bg)", color: "var(--text-muted)", borderRadius: 5, fontSize: 11 }}>{baseUrl}</code>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--text-muted)", fontSize: 12 }} title="开启时 GET /v1/models 仅返回免费模型（-free 后缀）；关闭后返回全部模型（含付费）">
+            <input type="checkbox" checked={freeModelsOnly} onChange={(event) => { setFreeModelsOnly(event.target.checked); scheduleAutoSave(); }} />只显示免费模型
+          </label>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ color: "var(--text-dim)", fontSize: 11 }}>API Key（外部客户端 Bearer 认证）：</span>
-          <input type="password" value={externalApiKeyDraft} onChange={(event) => { setExternalApiKeyDraft(event.target.value); setExternalRevealedKey(null); }} placeholder={externalHasApiKey ? `${externalKeyMasked}（留空保持不变）` : "设置外部调用 API Key"} style={{ width: 220, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text)", fontSize: 11 }} />
+          <input type="password" value={externalApiKeyDraft} onChange={(event) => { setExternalApiKeyDraft(event.target.value); setExternalRevealedKey(null); scheduleAutoSave(); }} placeholder={externalHasApiKey ? `${externalKeyMasked}（留空保持不变）` : "设置外部调用 API Key"} style={{ width: 220, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text)", fontSize: 11 }} />
           <button type="button" onClick={() => {
             const key = generateExternalKey();
             setExternalApiKeyDraft(key);
             setExternalRevealedKey(key);
             setMessage(null);
+            scheduleAutoSave();
           }} style={{ padding: "5px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}>生成随机 Key</button>
           <button type="button" onClick={() => void copyExternalKey()} disabled={!externalHasApiKey} title="复制已保存的 API Key" style={{ padding: "5px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text-muted)", cursor: externalHasApiKey ? "pointer" : "not-allowed", fontSize: 11 }}><Copy size={12} /> 复制 Key</button>
           <button type="button" onClick={() => void testExternal()} disabled={testingExternal} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 8px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text-muted)", cursor: testingExternal ? "wait" : "pointer", fontSize: 11 }}><Play size={12} /> {testingExternal ? "测试中…" : "测试连接"}</button>
@@ -396,16 +476,16 @@ export function OpenCodeZenConfig() {
 {`curl ${baseUrl}/chat/completions \\
   -H "Authorization: Bearer <你的 Key>" \\
   -H "Content-Type: application/json" \\
-  -d '{"model":"<免费模型，见 GET /v1/models>","messages":[{"role":"user","content":"Hello"}]}'`}
+  -d '{"model":"<${freeModelsOnly ? "免费模型，见 GET /v1/models" : "模型，见 GET /v1/models"}>","messages":[{"role":"user","content":"Hello"}]}'`}
             </div>
-            <div style={{ fontSize: 11, color: "var(--text-dim)" }}>OpenAI 兼容客户端（Cline / Roo Code / Open WebUI 等）配置：baseURL = <code>{baseUrl}</code>，API Key = 上方外部调用 Key，模型列表来自 <code>{baseUrl}/models</code>（仅返回免费模型）。</div>
+            <div style={{ fontSize: 11, color: "var(--text-dim)" }}>OpenAI 兼容客户端（Cline / Roo Code / Open WebUI 等）配置：baseURL = <code>{baseUrl}</code>，API Key = 上方外部调用 Key，模型列表来自 <code>{baseUrl}/models</code>{freeModelsOnly ? "（仅返回免费模型）" : "（返回全部模型，含付费）"}。</div>
           </div>
         </div>
-        <div style={{ color: "var(--text-dim)", fontSize: 11 }}>流量复用本账号/代理池；仅监听 127.0.0.1，可通过 cloudflared 等隧道对外暴露（Bearer Key 鉴权，未配置 Key 不启动）。开关显示的是实际运行状态（服务重启后自动恢复启动），点击即生效；端口/Key 修改后点击上方「保存」生效。</div>
+        <div style={{ color: "var(--text-dim)", fontSize: 11 }}>流量复用本账号/代理池；仅监听 127.0.0.1，可通过 cloudflared 等隧道对外暴露（Bearer Key 鉴权，未配置 Key 不启动）。开关显示的是实际运行状态（服务重启后自动恢复启动），点击即生效；所有修改自动保存，无需手动保存。</div>
       </section>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <button type="button" onClick={addAccount} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 12 }}><Plus size={14} /> 添加账号</button>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text-muted)", fontSize: 12 }}><input type="checkbox" checked={autoSwitch} onChange={(event) => setAutoSwitch(event.target.checked)} />429 自动切换账号+代理</label>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text-muted)", fontSize: 12 }}><input type="checkbox" checked={autoSwitch} onChange={(event) => { setAutoSwitch(event.target.checked); scheduleAutoSave(); }} />429 自动切换账号+代理</label>
         <span style={{ color: "var(--text-dim)", fontSize: 11 }} title="账号返回 429 表示当日免费额度耗尽，冷却至次日 UTC 0 点自动重置">429 限额冷却：至 UTC 0 点自动重置</span>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text-muted)", fontSize: 12 }} title="请求将优先使用此账号；429 自动切换会暂时移开它，冷却结束后回到它">
           当前使用账号
@@ -421,7 +501,7 @@ export function OpenCodeZenConfig() {
             ))}
           </select>
         </label>
-        <button type="button" onClick={() => void save()} disabled={saving} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 10px", border: "none", borderRadius: 6, background: "var(--accent)", color: "#fff", cursor: saving ? "wait" : "pointer", fontSize: 12 }}><FloppyDisk size={14} /> 保存</button>
+        {pendingSave && <span style={{ color: "var(--text-dim)", fontSize: 11 }}>自动保存中…</span>}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <textarea value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={"每行：账号-apikey\n例如：alice-sk-abc-def"} rows={4} style={{ width: "100%", resize: "vertical", padding: 9, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 12 }} />

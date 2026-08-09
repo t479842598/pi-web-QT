@@ -1452,6 +1452,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       streamingScrollRafRef.current = null;
       requestAnimationFrame(() => {
         if (!isNearBottomRef.current || !agentRunningRef.current) return;
+        // Never fight an active user scroll gesture. isNearBottom can be
+        // momentarily true right after a scroll-up (virtualized total size
+        // still settling); without this guard the follow would yank the
+        // viewport back to the bottom mid-gesture.
+        if (Date.now() < userScrollIntentUntilRef.current) return;
         scrollToBottom("auto");
       });
     });
@@ -2734,9 +2739,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const { scrollTop, clientHeight, scrollHeight } = container;
       isNearBottomRef.current = scrollTop + clientHeight >= scrollHeight - SCROLL_BOTTOM_THRESHOLD;
     }
-    if (!agentRunningRef.current) return;
+    // A user-initiated scroll away from the bottom revokes the auto-scroll
+    // permission regardless of whether an agent is running. (Previously this
+    // returned early while idle, so completionScrollAllowed stayed true and
+    // the NEXT incoming message yanked an idle reader back to the bottom —
+    // the virtualized-list “scroll up → bounce to bottom” report.)
+    //
+    // Intent window takes priority over the programmatic-ignore window: a
+    // real wheel/touch gesture that lands inside a scrollToBottom 700ms
+    // window is still a user gesture and must revoke the auto-scroll. Only
+    // scrolls OUTSIDE the intent window are checked against the
+    // programmatic marker (those are scrollToBottom's own echo events).
+    if (Date.now() < userScrollIntentUntilRef.current) {
+      completionScrollAllowedRef.current = false;
+      return;
+    }
     if (Date.now() < ignoreProgrammaticScrollUntilRef.current) return;
-    if (Date.now() > userScrollIntentUntilRef.current) return;
     completionScrollAllowedRef.current = false;
   }, []);
 

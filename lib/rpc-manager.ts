@@ -742,7 +742,18 @@ export class AgentSessionWrapper {
 
       case "set_model": {
         const { provider, modelId } = command as { provider: string; modelId: string };
-        const model = this.inner.modelRuntime.getModel(provider, modelId);
+        let model = this.inner.modelRuntime.getModel(provider, modelId);
+        if (!model) {
+          // 会话 wrapper 存活期间 models.json 可能已更新（新增供应商/模型、改 apiKey）：
+          // modelRuntime 是创建时的快照，先重读一次配置再查，仍找不到才报错。
+          // 这修复“设置里新加的供应商/模型在旧对话中报 Model not found”的问题。
+          try {
+            await this.inner.modelRuntime.refresh({ allowNetwork: false });
+            model = this.inner.modelRuntime.getModel(provider, modelId);
+          } catch {
+            model = undefined;
+          }
+        }
         if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
         await this.inner.setModel(model);
         invalidateModelsCache();

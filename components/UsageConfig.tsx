@@ -24,11 +24,11 @@ function formatToken(n: number | null | undefined): string {
   return n == null ? "—" : formatTokenCount(n);
 }
 
-/** Settings tab showing token usage. Two scopes, switchable: the current
- *  session's live context usage, and a global estimate across all sessions. */
+/** Settings tab showing token usage. Both scopes render together: the current
+ *  session's live context usage on top, and a global estimate across all
+ *  sessions below — no tab switching. */
 export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
   const { t } = useI18n();
-  const [scope, setScope] = useState<"session" | "global">("session");
   const [sessionUsage, setSessionUsage] = useState<SessionUsageState | null>(null);
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -66,9 +66,8 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
     }
   }, []);
   useEffect(() => {
-    if (scope !== "global") return;
     void loadGlobal();
-  }, [scope, loadGlobal]);
+  }, [loadGlobal]);
 
   const daily = useMemo(() => report?.daily.slice(-DAYS_SHOWN) ?? [], [report]);
   const maxDay = useMemo(
@@ -76,34 +75,13 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
     [daily],
   );
 
-  const switchStyle: React.CSSProperties = {
-    display: "inline-flex", alignItems: "center",
-    background: "var(--bg-hover)", borderRadius: 999, padding: 2,
-    gap: 2,
-  };
-  const switchBtn = (active: boolean): React.CSSProperties => ({
-    padding: "4px 14px", borderRadius: 999, border: "none",
-    background: active ? "var(--bg-panel)" : "transparent",
-    color: active ? "var(--text)" : "var(--text-muted)",
-    fontSize: 12, fontWeight: active ? 600 : 400, cursor: "pointer",
-    boxShadow: active ? "0 1px 3px rgba(0,0,0,0.12)" : "none",
-  });
-
   return (
     <div style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{t("desktop.usage")}</h3>
-        <div style={switchStyle}>
-          <button type="button" onClick={() => setScope("session")} style={switchBtn(scope === "session")}>
-            {t("desktop.usageSession")}
-          </button>
-          <button type="button" onClick={() => setScope("global")} style={switchBtn(scope === "global")}>
-            {t("desktop.usageGlobal")}
-          </button>
-        </div>
-      </div>
+      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{t("desktop.usage")}</h3>
 
-      {scope === "session" ? (
+      {/* Current session — always visible, no tab switching. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>{t("desktop.usageSession")}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {sessionId ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12, borderRadius: 12, border: "1px solid var(--border)", padding: 16 }}>
@@ -157,7 +135,11 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
             </span>
           )}
         </div>
-      ) : (
+      </div>
+
+      {/* Global — always visible below the session card. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>{t("desktop.usageGlobal")}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
             {[
@@ -216,7 +198,7 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
             )}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

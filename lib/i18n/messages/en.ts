@@ -126,6 +126,8 @@ export const enLocale = {
     "desktop.subagentsOutputTranscript": "Output transcript",
     "desktop.subagentsOutputTranscriptDesc": "Keep a transcript of subagent output for later review.",
     "desktop.subagentsSaved": "Saved",
+    "desktop.subagentsModel": "Model",
+    "desktop.subagentsModelDefault": "Default (unspecified)",
     "desktop.subagentsDiscovered": "Discovered agents",
     "desktop.backup": "Backup",
     "desktop.backupExportTitle": "Export backup",

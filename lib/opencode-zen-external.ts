@@ -14,8 +14,8 @@ import { recordErrorLog } from "./error-log";
  * account/proxy pool, 429 auto-switch and cooldown logic apply unchanged.
  *
  * Only /v1/* paths are proxied; GET /v1/models is filtered to free models
- * (id ends with "-free"). The server binds 127.0.0.1 by default and never
- * logs or echoes the external key.
+ * (id ends with "-free") unless the config switch `freeModelsOnly` is off.
+ * The server binds 127.0.0.1 by default and never logs or echoes the external key.
  */
 
 const ZEN_BASE_URL = "https://opencode.ai/zen/v1";
@@ -41,14 +41,16 @@ type ExternalServerHandle = {
   /** Signature of the config this server was started with; restart() no-ops when unchanged. */
   configSignature: string;
   externalApiKey: string;
+  /** GET /v1/models filtering: true = only `-free` models, false = all models. */
+  freeModelsOnly: boolean;
 };
 
 declare global {
   var __piOpenCodeZenExternalServer: ExternalServerHandle | undefined;
 }
 
-function configSignature(enabled: boolean, port: number, apiKey: string): string {
-  return `${enabled}|${port}|${apiKey}`;
+function configSignature(enabled: boolean, port: number, apiKey: string, freeModelsOnly: boolean): string {
+  return `${enabled}|${port}|${apiKey}|${freeModelsOnly}`;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -312,7 +314,7 @@ async function handleRequest(handle: ExternalServerHandle, req: IncomingMessage,
     return;
   }
 
-  // GET /v1/models: filter to free models only.
+  // GET /v1/models: filter to free models only when the switch is on.
   if (req.method === "GET" && (rawUrl === "/v1/models" || rawUrl.startsWith("/v1/models?"))) {
     const text = await response.text().catch(() => "");
     let payload: unknown;
@@ -321,7 +323,7 @@ async function handleRequest(handle: ExternalServerHandle, req: IncomingMessage,
     } catch {
       payload = null;
     }
-    const filtered = filterFreeModels(payload);
+    const filtered = handle.freeModelsOnly ? filterFreeModels(payload) : payload;
     const out = Buffer.from(filtered === null ? text : JSON.stringify(filtered), "utf8");
     recordErrorLog({
       level: "info",
@@ -411,7 +413,7 @@ export async function startExternalAccessServer(): Promise<void> {
     await stopExternalAccessServer();
     return;
   }
-  const signature = configSignature(true, external.port, external.apiKey);
+  const signature = configSignature(true, external.port, external.apiKey, external.freeModelsOnly);
   const existing = globalThis.__piOpenCodeZenExternalServer;
   if (existing && existing.configSignature === signature) return; // already running with this config
 
@@ -419,7 +421,7 @@ export async function startExternalAccessServer(): Promise<void> {
 
   const zenFetch = createOpenCodeZenFetch(globalThis.fetch.bind(globalThis));
   const server = createServer((req, res) => {
-    const handle: ExternalServerHandle = { server, zenFetch, configSignature: signature, externalApiKey: external.apiKey };
+    const handle: ExternalServerHandle = { server, zenFetch, configSignature: signature, externalApiKey: external.apiKey, freeModelsOnly: external.freeModelsOnly };
     void handleRequest(handle, req, res);
   });
 
@@ -437,7 +439,7 @@ export async function startExternalAccessServer(): Promise<void> {
     });
     server.listen(external.port, "127.0.0.1", () => {
       setStatus(true, external.port);
-      globalThis.__piOpenCodeZenExternalServer = { server, zenFetch, configSignature: signature, externalApiKey: external.apiKey };
+      globalThis.__piOpenCodeZenExternalServer = { server, zenFetch, configSignature: signature, externalApiKey: external.apiKey, freeModelsOnly: external.freeModelsOnly };
       resolve();
     });
   });
@@ -459,7 +461,7 @@ export async function stopExternalAccessServer(): Promise<void> {
 /** Restart the gateway when its config signature changed; no-op otherwise. */
 export async function restartExternalAccessServer(): Promise<void> {
   const external = readOpenCodeZenConfig().externalAccess;
-  const signature = configSignature(external.enabled, external.port, external.apiKey);
+  const signature = configSignature(external.enabled, external.port, external.apiKey, external.freeModelsOnly);
   const existing = globalThis.__piOpenCodeZenExternalServer;
   if (existing && existing.configSignature === signature) return;
   await startExternalAccessServer();

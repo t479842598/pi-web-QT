@@ -1981,3 +1981,15 @@ span.linenumber {
     animation: none;
   }
 }
+
+/* iOS Safari zooms into any input/select/textarea whose font-size is below
+   16px when it receives focus. Inside the settings dialog every input is
+   styled inline with 11–13px fonts, so on mobile force 16px to keep the page
+   from zooming; desktop layout is untouched (media query is mobile-only). */
+@media (max-width: 767px) {
+  .settings-modal input,
+  .settings-modal select,
+  .settings-modal textarea {
+    font-size: 16px !important;
+  }
+}

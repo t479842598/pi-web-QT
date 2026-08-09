@@ -151,6 +151,8 @@ export interface AgentSessionLike {
     getModel: (provider: string, modelId: string) => ModelLike | undefined;
     setRuntimeApiKey: (provider: string, apiKey: string) => Promise<void>;
     removeRuntimeApiKey: (provider: string) => Promise<void>;
+    /** 重读 models.json 并重建注册表；allowNetwork=false 时不做网络刷新。 */
+    refresh: (options?: { allowNetwork?: boolean; providers?: readonly string[]; force?: boolean; signal?: AbortSignal }) => Promise<unknown>;
   };
   readonly sessionManager: SessionManager;
   readonly settingsManager: SettingsManager;

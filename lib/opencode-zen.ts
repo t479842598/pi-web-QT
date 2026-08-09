@@ -30,6 +30,8 @@ export interface OpenCodeZenExternalAccess {
   enabled: boolean;
   port: number;
   apiKey: string;
+  /** GET /v1/models filtering: true = only `-free` models (default), false = all. */
+  freeModelsOnly: boolean;
 }
 
 export interface OpenCodeZenConfig {
@@ -61,6 +63,9 @@ export interface SafeOpenCodeZenConfig {
 }
 
 const CONFIG_FILE = "opencode-zen.json";
+/* 运行时状态（冷却/轮转/最近成功账号）独立持久化：进程重启后恢复，
+ * 避免已限额账号复活、每次重启都重新吃一轮 429。 */
+const RUNTIME_STATE_FILE = "opencode-zen-state.json";
 export const DEFAULT_EXTERNAL_PORT = 7474;
 const DEFAULT_COOLDOWN_MS = 60_000;
 const MAX_COOLDOWN_MS = 10 * 60_000;
@@ -100,6 +105,62 @@ export type RuntimeState = {
   lastSuccessId?: string;
   lastSwitch?: SafeOpenCodeZenConfig["lastSwitch"];
 };
+
+/** 持久化到磁盘的运行时状态（不含 dispatcher 等不可序列化字段）。 */
+type PersistedRuntimeState = {
+  activeIndex?: number;
+  lastSuccessId?: string;
+  lastSwitch?: SafeOpenCodeZenConfig["lastSwitch"];
+  cooldownUntil?: Record<string, CooldownEntry>;
+  updatedAt?: string;
+};
+
+function runtimeStatePath(): string {
+  return join(getAgentDir(), RUNTIME_STATE_FILE);
+}
+
+/** 把冷却/轮转/最近成功账号写入磁盘（原子写），进程重启后由 loadRuntimeState 恢复。 */
+export function persistRuntimeState(state: RuntimeState): void {
+  try {
+    const payload: PersistedRuntimeState = {
+      activeIndex: state.activeIndex,
+      ...(state.lastSuccessId ? { lastSuccessId: state.lastSuccessId } : {}),
+      ...(state.lastSwitch ? { lastSwitch: state.lastSwitch } : {}),
+      cooldownUntil: Object.fromEntries(state.cooldownUntil),
+      updatedAt: new Date().toISOString(),
+    };
+    writePrivateFileAtomicSync(runtimeStatePath(), JSON.stringify(payload, null, 2));
+  } catch {
+    // 状态持久化失败不能影响请求主流程（与配置持久化同一策略）。
+  }
+}
+
+/** 读取持久化的运行时状态；过期冷却（已到 UTC 0 点/已超时）直接丢弃。 */
+export function loadRuntimeState(): PersistedRuntimeState {
+  try {
+    if (!existsSync(runtimeStatePath())) return {};
+    const raw = JSON.parse(readFileSync(runtimeStatePath(), "utf8")) as unknown;
+    if (!isRecord(raw)) return {};
+    const now = Date.now();
+    const cooldownUntil: Record<string, CooldownEntry> = {};
+    if (isRecord(raw.cooldownUntil)) {
+      for (const [accountId, entry] of Object.entries(raw.cooldownUntil)) {
+        const record = isRecord(entry) ? entry : undefined;
+        const until = record ? Number(record.until) : NaN;
+        if (!record || !Number.isFinite(until) || until <= now) continue;
+        cooldownUntil[accountId] = { until, daily: record.daily === true };
+      }
+    }
+    return {
+      ...(typeof raw.activeIndex === "number" && Number.isInteger(raw.activeIndex) && raw.activeIndex >= 0 ? { activeIndex: raw.activeIndex } : {}),
+      ...(typeof raw.lastSuccessId === "string" ? { lastSuccessId: raw.lastSuccessId } : {}),
+      ...(isRecord(raw.lastSwitch) && typeof raw.lastSwitch.to === "string" ? { lastSwitch: raw.lastSwitch as SafeOpenCodeZenConfig["lastSwitch"] } : {}),
+      ...(Object.keys(cooldownUntil).length > 0 ? { cooldownUntil } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Providers that receive the OpenCode Zen account key.
@@ -149,7 +210,7 @@ function defaultProxy(): OpenCodeZenProxy {
 }
 
 function defaultConfig(): OpenCodeZenConfig {
-  return { accounts: [], autoSwitch: true, cooldownMs: DEFAULT_COOLDOWN_MS, externalAccess: { enabled: false, port: DEFAULT_EXTERNAL_PORT, apiKey: "" } };
+  return { accounts: [], autoSwitch: true, cooldownMs: DEFAULT_COOLDOWN_MS, externalAccess: { enabled: false, port: DEFAULT_EXTERNAL_PORT, apiKey: "", freeModelsOnly: true } };
 }
 
 function normalizeExternalAccess(value: unknown, fallback: OpenCodeZenExternalAccess): OpenCodeZenExternalAccess {
@@ -160,6 +221,9 @@ function normalizeExternalAccess(value: unknown, fallback: OpenCodeZenExternalAc
     enabled: raw.enabled === true,
     port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : fallback.port,
     apiKey: typeof raw.apiKey === "string" ? raw.apiKey.trim() : fallback.apiKey,
+    // Default to free-only whenever the flag is absent (legacy configs keep
+    // the current behavior of exposing only `-free` models).
+    freeModelsOnly: raw.freeModelsOnly === false ? false : true,
   };
 }
 
@@ -259,14 +323,27 @@ function loadConfig(): OpenCodeZenConfig {
   }
 }
 
+function createRuntimeState(configOverride?: OpenCodeZenConfig): RuntimeState {
+  const config = configOverride ? normalizeConfig(configOverride) : loadConfig();
+  if (configOverride) {
+    // 覆盖配置分支（测试/独立运行时）不读也不写持久化状态，保持隔离。
+    return { config, activeIndex: 0, cooldownUntil: new Map(), dispatchers: new Map() };
+  }
+  // 全局态：恢复上次进程留下的冷却/轮转/最近成功账号，已过期冷却被 loadRuntimeState 丢弃。
+  const persisted = loadRuntimeState();
+  return {
+    config,
+    activeIndex: persisted.activeIndex ?? 0,
+    cooldownUntil: new Map(Object.entries(persisted.cooldownUntil ?? {})),
+    dispatchers: new Map(),
+    ...(persisted.lastSuccessId ? { lastSuccessId: persisted.lastSuccessId } : {}),
+    ...(persisted.lastSwitch ? { lastSwitch: persisted.lastSwitch } : {}),
+  };
+}
+
 function getState(): RuntimeState {
   if (!globalThis.__piOpenCodeZenState) {
-    globalThis.__piOpenCodeZenState = {
-      config: loadConfig(),
-      activeIndex: 0,
-      cooldownUntil: new Map(),
-      dispatchers: new Map(),
-    };
+    globalThis.__piOpenCodeZenState = createRuntimeState();
   }
   return globalThis.__piOpenCodeZenState;
 }
@@ -313,10 +390,20 @@ export function writeOpenCodeZenConfig(config: OpenCodeZenConfig, activeAccountI
   state.activeIndex = activeAccountId
     ? Math.max(0, state.config.accounts.findIndex((account) => account.id === activeAccountId))
     : 0;
-  state.cooldownUntil.clear();
+  // 只清理已删除账号的冷却：429 日限额冷却属于账号本身，账号还在就应保留。
+  // 此前每次保存（含只改开关/代理/外部访问）都清空全部冷却，会让已限额账号复活、
+  // 设置页保存后立刻又吃一轮 429。
+  for (const id of [...state.cooldownUntil.keys()]) {
+    if (!state.config.accounts.some((account) => account.id === id)) state.cooldownUntil.delete(id);
+  }
+  // 激活账号被删除时丢弃其最近成功指向，避免回退到一个不存在的账号。
+  if (state.lastSuccessId && !state.config.accounts.some((account) => account.id === state.lastSuccessId)) {
+    state.lastSuccessId = undefined;
+  }
   for (const dispatcher of state.dispatchers.values()) void dispatcher.close().catch(() => {});
   state.dispatchers.clear();
   persist(state.config);
+  persistRuntimeState(state);
 }
 
 export function maskOpenCodeKey(key: string): string {
@@ -350,6 +437,7 @@ export function getSafeOpenCodeZenConfig(): SafeOpenCodeZenConfig {
     externalAccess: {
       enabled: external.enabled,
       port: external.port,
+      freeModelsOnly: external.freeModelsOnly,
       apiKeyMasked: maskOpenCodeKey(external.apiKey),
       hasApiKey: Boolean(external.apiKey),
       status: globalThis.__piOpenCodeZenExternalStatus ?? { running: false },
@@ -523,9 +611,10 @@ export function createOpenCodeZenFetch(
   /* 池状态挂在闭包上（每个 fetch 实例一套运行时态）：覆盖配置时跨请求共享冷却/最近成功账号，
    * 生产（无覆盖）则共享全局态。注意不能放到每次请求内重建，否则冷却与回退记忆全部丢失。 */
   const state: RuntimeState = configOverride
-    ? { config: normalizeConfig(configOverride), activeIndex: 0, cooldownUntil: new Map(), dispatchers: new Map() }
+    ? createRuntimeState(configOverride)
     : getState();
   return async (input, init) => {
+    try {
     if (!isOpenCodeTarget(input)) return baseFetch(input, init);
     const accounts = state.config.accounts.filter((account) => account.enabled && account.apiKey);
     if (accounts.length === 0) {
@@ -616,6 +705,11 @@ export function createOpenCodeZenFetch(
     }
 
     return lastResponse ?? new Response("OpenCode Zen accounts are unavailable", { status: 503 });
+    } finally {
+      // 请求结束把冷却/轮转/最近成功账号落盘（仅全局态；覆盖配置分支保持隔离）。
+      // 进程重启后由 createRuntimeState → loadRuntimeState 恢复，避免已限额账号复活。
+      if (!configOverride) persistRuntimeState(state);
+    }
   };
 }
 
@@ -660,6 +754,7 @@ export function mergeOpenCodeZenConfig(input: unknown): OpenCodeZenConfig {
       enabled: typeof rawExternal.enabled === "boolean" ? rawExternal.enabled : current.externalAccess.enabled,
       port: Number.isInteger(Number(rawExternal.port)) ? Number(rawExternal.port) : current.externalAccess.port,
       apiKey: typeof rawExternal.apiKey === "string" && rawExternal.apiKey.trim() ? rawExternal.apiKey.trim() : current.externalAccess.apiKey,
+      freeModelsOnly: typeof rawExternal.freeModelsOnly === "boolean" ? rawExternal.freeModelsOnly : current.externalAccess.freeModelsOnly,
     },
     current.externalAccess,
   );

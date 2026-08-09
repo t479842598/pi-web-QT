@@ -126,6 +126,8 @@ export const zhCNLocale = {
     "desktop.subagentsOutputTranscript": "输出转录",
     "desktop.subagentsOutputTranscriptDesc": "保留子代理输出转录，便于之后回顾。",
     "desktop.subagentsSaved": "已保存",
+    "desktop.subagentsModel": "模型",
+    "desktop.subagentsModelDefault": "默认（不指定）",
     "desktop.subagentsDiscovered": "已发现的代理",
     "desktop.backup": "备份",
     "desktop.backupExportTitle": "导出备份",

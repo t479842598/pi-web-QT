@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Robot } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { SettingCard, SettingNote, SettingRow, SettingRowLast } from "./SettingCard";
@@ -26,7 +26,7 @@ function labelStyle(): React.CSSProperties {
   return { fontSize: 12, color: "var(--text-muted)" };
 }
 
-export function SubagentsConfig() {
+export function SubagentsConfig({ cwd }: { cwd?: string | null }) {
   const { t } = useI18n();
   const [config, setConfig] = useState<SubagentsConfig>({});
   const [agents, setAgents] = useState<SubagentsConfigResponse["agents"]>([]);
@@ -36,6 +36,10 @@ export function SubagentsConfig() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  /** Available models (id/name/provider) for the per-agent model pickers. */
+  const [modelList, setModelList] = useState<Array<{ id: string; name: string; provider: string }>>([]);
+  /** Per-agent inline save state: name → "saving" | "saved" | "error:msg". */
+  const [agentModelState, setAgentModelState] = useState<Record<string, string>>({});
 
   const loadConfig = useCallback(async () => {
     setLoadError(null);
@@ -52,6 +56,19 @@ export function SubagentsConfig() {
       setLoaded(true);
     }
   }, []);
+
+  // Load the current model list (same source as the chat model picker) so
+  // users can choose any provider they have configured — built-in providers
+  // with credentials plus custom providers from models.json.
+  useEffect(() => {
+    const qs = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
+    fetch(`/api/models${qs}`)
+      .then((res) => (res.ok ? res.json() as Promise<{ modelList?: Array<{ id: string; name: string; provider: string }> }> : null))
+      .then((data) => {
+        if (data?.modelList) setModelList(data.modelList);
+      })
+      .catch(() => {});
+  }, [cwd]);
 
   useEffect(() => {
     void loadConfig();
@@ -83,6 +100,42 @@ export function SubagentsConfig() {
       setSaving(false);
     }
   }, [config]);
+
+  /** PATCH the agent's frontmatter model; inline feedback per agent.
+   *  A per-agent sequence counter guards against races when the user
+   *  switches the dropdown rapidly — only the latest request takes effect. */
+  const agentModelSeqRef = useRef<Record<string, number>>({});
+  const changeAgentModel = useCallback(async (name: string, model: string | null) => {
+    const seq = (agentModelSeqRef.current[name] ?? 0) + 1;
+    agentModelSeqRef.current[name] = seq;
+    setAgentModelState((current) => ({ ...current, [name]: "saving" }));
+    try {
+      const res = await fetch(`/api/subagents/agents/${encodeURIComponent(name)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      if (agentModelSeqRef.current[name] !== seq) return; // superseded by a newer request
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setAgentModelState((current) => ({ ...current, [name]: "saved" }));
+      // Keep the local list in sync with the persisted frontmatter.
+      setAgents((current) => current.map((agent) => agent.name === name ? { ...agent, model: model ?? undefined } : agent));
+      setTimeout(() => {
+        setAgentModelState((current) => {
+          if (current[name] === "saved") {
+            const next = { ...current };
+            delete next[name];
+            return next;
+          }
+          return current;
+        });
+      }, 2000);
+    } catch (error) {
+      if (agentModelSeqRef.current[name] !== seq) return;
+      setAgentModelState((current) => ({ ...current, [name]: `error:${error instanceof Error ? error.message : String(error)}` }));
+    }
+  }, []);
 
   const numberField = (key: "maxConcurrent" | "defaultMaxTurns" | "graceTurns", labelKey: string) => (
     <SettingRow key={key}>
@@ -211,6 +264,27 @@ export function SubagentsConfig() {
                               {agent.model}
                             </span>
                           )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{t("desktop.subagentsModel")}</span>
+                          <select
+                            value={agent.model ?? ""}
+                            onChange={(event) => void changeAgentModel(agent.name, event.target.value || null)}
+                            style={{ ...inputStyle, width: "min(260px, 100%)", maxWidth: 260 }}
+                          >
+                            <option value="">{t("desktop.subagentsModelDefault")}</option>
+                            {agent.model && !modelList.some((model) => `${model.provider}/${model.id}` === agent.model) && (
+                              <option value={agent.model}>{agent.model}</option>
+                            )}
+                            {modelList.map((model) => (
+                              <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
+                                {model.name}（{model.provider}/{model.id}）
+                              </option>
+                            ))}
+                          </select>
+                          {agentModelState[agent.name] === "saving" && <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{t("desktop.saving")}…</span>}
+                          {agentModelState[agent.name] === "saved" && <span style={{ fontSize: 10, color: "#22c55e" }}>{t("desktop.subagentsSaved")}</span>}
+                          {agentModelState[agent.name]?.startsWith("error:") && <span style={{ fontSize: 10, color: "#ef4444" }}>{(agentModelState[agent.name] as string).slice(6)}</span>}
                         </div>
                         {agent.description && (
                           <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{agent.description}</div>
