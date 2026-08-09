@@ -19,4 +19,16 @@ export async function register(): Promise<void> {
     // Engine startup is best-effort at boot; task commands report
     // "engine not running" and the next request can retry.
   }
+
+  // Restore the OpenCode Zen external gateway when the config says it is
+  // enabled, so the settings switch reflects a genuinely listening server
+  // after restarts (previously the gateway only started when the config page
+  // was saved, leaving "enabled but not running" states). Best-effort:
+  // failures surface in the settings panel, never block boot.
+  try {
+    const { ensureExternalAccessServer } = await import("@/lib/opencode-zen-external");
+    await ensureExternalAccessServer();
+  } catch {
+    // Boot-time best effort; the settings panel surfaces failures.
+  }
 }

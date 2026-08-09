@@ -58,6 +58,11 @@ export function OpenCodeZenConfig() {
   const [externalToggleError, setExternalToggleError] = useState<string | null>(null);
   /** 外部调用网关地址（127.0.0.1 仅本机；经 cloudflared 等隧道对外暴露）。 */
   const baseUrl = `http://127.0.0.1:${externalPort || DEFAULT_EXTERNAL_PORT}/v1`;
+  /**
+   * 开关的视觉状态以实际监听状态为准：配置里 enabled=true 只代表“意向”，
+   * 服务重启/启动失败时网关可能并未运行，开关必须如实显示（避免“看着开了其实没开”）。
+   */
+  const externalActuallyOn = externalStatus.running === true;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -192,12 +197,20 @@ export function OpenCodeZenConfig() {
       const result = results[index];
       return result?.ok ? { ...account, proxy: result.proxy, passwordDraft: result.proxy.password } : account;
     });
-    setAccounts(nextAccounts);
+    // 自动保存：绑定结果立即写入配置，无需再点「保存」。
     setProxyImportText("");
+    const saveResponse = await fetch("/api/opencode-zen", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accounts: nextAccounts.map((account) => ({ ...account, ...(account.apiKeyDraft ? { apiKey: account.apiKeyDraft } : {}) })) }),
+    });
+    const saveData = await saveResponse.json() as SafeOpenCodeZenConfig & { error?: string };
+    if (!saveResponse.ok) throw new Error(saveData.error ?? `HTTP ${saveResponse.status}`);
+    setAccounts(saveData.accounts.map((account) => ({ ...account, proxy: { ...account.proxy }, apiKeyDraft: "", passwordDraft: "" })));
     if (failed.length === 0) {
-      setMessage(`代理导入完成：${passed.length} 个代理全部通过检测，已按账号顺序绑定，请点击保存`);
+      setMessage(`代理导入完成：${passed.length} 个代理全部通过检测，已按账号顺序绑定并自动保存`);
     } else {
-      setMessage(`代理导入完成：${passed.length} 个通过并绑定；${failed.length} 个未通过检测、未绑定，请检查下方原因`);
+      setMessage(`代理导入完成：${passed.length} 个通过并绑定、已自动保存；${failed.length} 个未通过检测、未绑定，请检查下方原因`);
       setError(failed.map((result) => `${result.proxy.protocol}://${result.proxy.url}:${result.proxy.port}：${result.error ?? "不可用"}`).join("\n"));
     }
     if (uniqueProxies.length > accounts.length) {
@@ -205,14 +218,15 @@ export function OpenCodeZenConfig() {
     }
   };
 
-  /** 外部调用启动开关：点击立即保存（含端口/Key 草稿），无需再点保存。 */
+  /** 外部调用启动开关：显示实际监听状态，点击立即保存（含端口/Key 草稿），无需再点保存。 */
   const toggleExternal = async () => {
     setExternalSaving(true);
     setExternalToggleError(null);
     setError(null);
     setMessage(null);
     try {
-      const nextEnabled = !externalEnabled;
+      // 开关反映的是实际运行状态：未运行→尝试启动，运行中→停止。
+      const nextEnabled = !externalStatus.running;
       const response = await fetch("/api/opencode-zen", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -244,7 +258,7 @@ export function OpenCodeZenConfig() {
       setAccounts(data.accounts.map((account) => ({ ...account, proxy: { ...account.proxy }, apiKeyDraft: "", passwordDraft: "" })));
       setActiveAccountId(data.activeAccountId ?? null);
       setImportText("");
-      setMessage("账号导入成功：重复的 Key 只更新备注，请配置每个账号的独立代理后保存");
+      setMessage("账号导入成功并已自动保存：重复的 Key 只更新备注；代理可用下方「批量导入并测试代理」按账号顺序绑定");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -303,25 +317,29 @@ export function OpenCodeZenConfig() {
           <button
             type="button"
             role="switch"
-            aria-checked={externalEnabled}
+            aria-checked={externalActuallyOn}
             aria-label="外部调用开关"
             onClick={() => void toggleExternal()}
             disabled={externalSaving}
-            title={externalEnabled ? "点击关闭（立即生效）" : "点击开启（立即生效，需要已设置 API Key）"}
+            title={externalActuallyOn
+              ? "点击关闭（立即生效）"
+              : externalEnabled
+                ? "已开启但网关未运行，点击重新启动"
+                : "点击开启（立即生效，需要已设置 API Key）"}
             style={{
               position: "relative",
               width: 38, height: 20, borderRadius: 10,
               border: "1px solid var(--border)",
-              background: externalEnabled ? "#22c55e" : "var(--bg)",
+              background: externalActuallyOn ? "#22c55e" : "var(--bg)",
               cursor: externalSaving ? "wait" : "pointer",
               transition: "background 0.15s",
               padding: 0,
             }}
           >
             <span style={{
-              position: "absolute", top: 2, left: externalEnabled ? 18 : 2,
+              position: "absolute", top: 2, left: externalActuallyOn ? 18 : 2,
               width: 14, height: 14, borderRadius: 7,
-              background: "#fff", opacity: externalEnabled ? 1 : 0.7,
+              background: "#fff", opacity: externalActuallyOn ? 1 : 0.7,
               transition: "left 0.15s",
             }} />
           </button>
@@ -332,10 +350,12 @@ export function OpenCodeZenConfig() {
               : externalStatus.running
                 ? <span style={{ color: "#22c55e", fontSize: 11 }}>运行中（127.0.0.1:{externalStatus.port ?? externalPort}）</span>
                 : externalStatus.error
-                  ? <span style={{ color: "#ef4444", fontSize: 11 }}>错误：{externalStatus.error}</span>
+                  ? <span style={{ color: "#ef4444", fontSize: 11 }}>未运行：{externalStatus.error}</span>
                   : externalEnabled && !externalHasApiKey
-                    ? <span style={{ color: "#f59e0b", fontSize: 11 }}>未设置 API Key，服务未启动</span>
-                    : <span style={{ color: "var(--text-dim)", fontSize: 11 }}>已停止</span>}
+                    ? <span style={{ color: "#f59e0b", fontSize: 11 }}>已开启但未设置 API Key，服务未启动</span>
+                    : externalEnabled
+                      ? <span style={{ color: "#f59e0b", fontSize: 11 }}>已开启但网关未运行，点击开关重新启动</span>
+                      : <span style={{ color: "var(--text-dim)", fontSize: 11 }}>已停止</span>}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--text-muted)", fontSize: 12 }}>端口
@@ -381,7 +401,7 @@ export function OpenCodeZenConfig() {
             <div style={{ fontSize: 11, color: "var(--text-dim)" }}>OpenAI 兼容客户端（Cline / Roo Code / Open WebUI 等）配置：baseURL = <code>{baseUrl}</code>，API Key = 上方外部调用 Key，模型列表来自 <code>{baseUrl}/models</code>（仅返回免费模型）。</div>
           </div>
         </div>
-        <div style={{ color: "var(--text-dim)", fontSize: 11 }}>流量复用本账号/代理池；仅监听 127.0.0.1，可通过 cloudflared 等隧道对外暴露（Bearer Key 鉴权，未配置 Key 不启动）。开关点击即生效；端口/Key 修改后点击上方「保存」生效。</div>
+        <div style={{ color: "var(--text-dim)", fontSize: 11 }}>流量复用本账号/代理池；仅监听 127.0.0.1，可通过 cloudflared 等隧道对外暴露（Bearer Key 鉴权，未配置 Key 不启动）。开关显示的是实际运行状态（服务重启后自动恢复启动），点击即生效；端口/Key 修改后点击上方「保存」生效。</div>
       </section>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <button type="button" onClick={addAccount} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 12 }}><Plus size={14} /> 添加账号</button>

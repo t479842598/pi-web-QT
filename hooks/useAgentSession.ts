@@ -530,40 +530,77 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // existing conversation remembers its own mode/policy choices; the global
   // default remains the fallback for new sessions.
   const [modeSettings, setModeSettings] = useState<ModeSettings>(() => readCachedGlobalModeSettings() ?? defaultModeSettings());
+  /**
+   * 新对话（session 未创建）里做出的模式选择先暂存于此：session 创建后写入
+   * modesPerSession[新id]，绝不写入全局 modes（全局默认只能由设置页修改，
+   * 避免“新对话继承上一个对话的计划模式”）。
+   */
+  const pendingModeOverrideRef = useRef<ModeSettings | null>(null);
+  /**
+   * 每次挂载的首次模式加载=“进入对话”，仅此时做计划模式重置；
+   * MODES_CHANGED 触发的重载保持会话内选择不变。
+   */
+  const modesEntryHydratedRef = useRef(false);
   const modeSessionIdRef = useRef<string | null>(session?.id ?? null);
   modeSessionIdRef.current = session?.id ?? null;
   useEffect(() => {
     let cancelled = false;
-    const load = () => {
+    const load = async () => {
       const sessionId = modeSessionIdRef.current;
       const qs = sessionId ? `?session=${encodeURIComponent(sessionId)}` : "";
-      return fetch(`/api/modes${qs}`)
-        .then((response) => (response.ok ? response.json() as Promise<ModeSettings> : null))
-        .then((loaded) => {
-          if (cancelled || !loaded) return;
-          const next = {
-            collaborationMode: normalizeCollaborationMode(loaded.collaborationMode),
-            tokenMode: normalizeTokenMode(loaded.tokenMode),
-            toolApprovalMode: normalizeToolApprovalMode(loaded.toolApprovalMode),
-            permissionRules: {
-              allow: Array.isArray(loaded.permissionRules?.allow) ? loaded.permissionRules.allow : [],
-              ask: Array.isArray(loaded.permissionRules?.ask) ? loaded.permissionRules.ask : [],
-              deny: Array.isArray(loaded.permissionRules?.deny) ? loaded.permissionRules.deny : [],
-            },
-          };
-          setModeSettings(next);
-          // Cache the global defaults so a brand-new chat shows the system
-          // defaults immediately instead of the hard-coded fallback until the
-          // first async /api/modes round-trip completes.
-          if (!sessionId) cacheGlobalModeSettings(next);
-        })
-        .catch(() => { /* keep defaults on load failure */ });
+      try {
+        const response = await fetch(`/api/modes${qs}`);
+        if (!response.ok || cancelled) return;
+        const loaded = await response.json() as ModeSettings;
+        if (cancelled) return;
+        let next = {
+          collaborationMode: normalizeCollaborationMode(loaded.collaborationMode),
+          tokenMode: normalizeTokenMode(loaded.tokenMode),
+          toolApprovalMode: normalizeToolApprovalMode(loaded.toolApprovalMode),
+          permissionRules: {
+            allow: Array.isArray(loaded.permissionRules?.allow) ? loaded.permissionRules.allow : [],
+            ask: Array.isArray(loaded.permissionRules?.ask) ? loaded.permissionRules.ask : [],
+            deny: Array.isArray(loaded.permissionRules?.deny) ? loaded.permissionRules.deny : [],
+          },
+        };
+        // 进入对话时，上次遗留的计划模式重置为设置里的全局默认——计划是临场
+        // 模式，不能从“上次离开时”继承（仅入口生效，会话内 MODES_CHANGED
+        // 重载不替换）。修正后回写清理该会话的遗留记录。
+        if (!modesEntryHydratedRef.current && sessionId && next.collaborationMode === "plan") {
+          const globalResponse = await fetch("/api/modes").catch(() => null);
+          if (!cancelled && globalResponse?.ok) {
+            const globalData = await globalResponse.json().catch(() => null) as ModeSettings | null;
+            if (!cancelled && globalData) {
+              const entryCollaborationMode = next.collaborationMode;
+              next = { ...next, collaborationMode: normalizeCollaborationMode(globalData.collaborationMode) };
+              if (next.collaborationMode !== entryCollaborationMode) {
+                void fetch(`/api/modes?session=${encodeURIComponent(sessionId)}`, {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(next),
+                }).catch(() => { /* cleanup is best-effort */ });
+              }
+            }
+          }
+        }
+        modesEntryHydratedRef.current = true;
+        setModeSettings(next);
+        // Cache the global defaults so a brand-new chat shows the system
+        // defaults immediately instead of the hard-coded fallback until the
+        // first async /api/modes round-trip completes.
+        if (!sessionId) cacheGlobalModeSettings(next);
+      } catch {
+        /* keep defaults on load failure */
+      }
     };
     void load();
     const onModesChanged = () => void load();
     window.addEventListener("pi:modes-changed", onModesChanged);
     return () => {
       cancelled = true;
+      // StrictMode dev 双挂载时，第一次（被丢弃的）运行的入口标记必须复位，
+      // 否则真实挂载会跳过入口重置。
+      modesEntryHydratedRef.current = false;
       window.removeEventListener("pi:modes-changed", onModesChanged);
     };
   }, [session?.id]);
@@ -882,7 +919,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const tools = await sendAgentCommand<ToolEntry[]>(sid, { type: "get_tools" });
       if (tools) {
         const { getPresetFromTools } = await import("@/lib/tool-presets");
-        setToolPresetState(getPresetFromTools(tools));
+        const preset = getPresetFromTools(tools);
+        if (preset === "plan" && !planModeRef.current) {
+          // 进入对话时计划模式的只读工具集不恢复——计划是临场模式，入口
+          // 处重置为默认预设，与重置后的协作模式保持一致（会话内正在使用
+          // 计划模式时 /reload 等路径由 planModeRef 保护不重置）。
+          await sendAgentCommand(sid, { type: "set_tools", toolNames: getToolNamesForPreset("default") }).catch(() => {});
+          setToolPresetState("default");
+        } else {
+          setToolPresetState(preset);
+        }
       }
     } catch (e) {
       console.error("Failed to load tools:", e);
@@ -938,6 +984,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         thinkingLevel?: ThinkingLevelOption;
       };
       sessionIdRef.current = result.sessionId;
+      // 新对话创建后，把创建前暂存的模式选择写入该会话的 per-session override。
+      const pendingMode = pendingModeOverrideRef.current;
+      if (pendingMode) {
+        pendingModeOverrideRef.current = null;
+        void fetch(`/api/modes?session=${encodeURIComponent(result.sessionId)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(pendingMode),
+        }).catch((error) => {
+          console.error("Failed to persist pending mode settings:", error);
+        });
+      }
       if (result.model && newSessionModelOverrideRef.current === selectedModel) {
         setPendingModel(result.model);
         if (!selectedModel) setNewSessionDefaultModel(result.model);
@@ -2456,13 +2514,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   // ── Chat modes (Reasonix port) ───────────────────────────────────────────
   // Persist to the current session's per-session override (modesPerSession) so
-  // each conversation keeps its own mode; before a session exists the global
-  // defaults are written instead.
+  // each conversation keeps its own mode; a brand-new chat (no session id yet)
+  // holds its choice as a pending override applied once the session exists —
+  // it must NEVER overwrite the global defaults (owned by the settings
+  // "Features" tab), otherwise every new chat would inherit this one's mode.
   const persistModeSettings = useCallback((next: ModeSettings) => {
     setModeSettings(next);
-    const sessionId = sessionIdRef.current ?? null;
-    const qs = sessionId ? `?session=${encodeURIComponent(sessionId)}` : "";
-    void fetch(`/api/modes${qs}`, {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) {
+      pendingModeOverrideRef.current = next;
+      return;
+    }
+    pendingModeOverrideRef.current = null;
+    void fetch(`/api/modes?session=${encodeURIComponent(sessionId)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(next),
@@ -2717,6 +2781,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (agentState.state.extensionWidgets !== undefined) setExtensionWidgets(agentState.state.extensionWidgets ?? []);
           if (agentState.state.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(agentState.state.queuedMessages));
           if (agentState.state.pendingRecovery !== undefined) setPendingRecovery(agentState.state.pendingRecovery ?? []);
+        }
+        // 入口对账：包装器存活但空闲时，上次访问遗留的计划模式只读工具集
+        // 不得泄漏进本次访问。轻量检查（GET 不创建包装器），不付冷启动代价。
+        if (!agentState?.running) {
+          fetch(`/api/agent/${encodeURIComponent(session.id)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => { if (d && (d as { running?: boolean }).running) loadTools(session.id); })
+            .catch(() => { /* best-effort; the first send reconciles tools */ });
         }
       });
     }

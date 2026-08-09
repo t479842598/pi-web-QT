@@ -106,6 +106,44 @@ test("new chats initialize mode defaults from the cached system settings", () =>
   assert.match(source, /if \(!sessionId\) cacheGlobalModeSettings/);
 });
 
+test("new-chat mode choices stay pending and never overwrite the global defaults", () => {
+  const persistSource = source.slice(
+    source.indexOf("const persistModeSettings = useCallback"),
+    source.indexOf("const handleCollaborationModeChange"),
+  );
+  // No session id yet (brand-new chat) → hold as pending override, no PUT.
+  assert.match(persistSource, /if \(!sessionId\) \{\s*pendingModeOverrideRef\.current = next;/);
+  assert.match(persistSource, /\/api\/modes\?session=\$/);
+  // Once the session is created, the pending choice lands in modesPerSession.
+  const ensureSource = source.slice(
+    source.indexOf("const ensureNewSession = useCallback"),
+    source.indexOf("const loadSlashCommands"),
+  );
+  assert.match(ensureSource, /sessionIdRef\.current = result\.sessionId;/);
+  assert.match(ensureSource, /pendingModeOverrideRef\.current/);
+  assert.match(ensureSource, /\/api\/modes\?session=\$/);
+});
+
+test("entering a conversation resets a leftover plan mode to the settings default", () => {
+  const loadSource = source.slice(
+    source.indexOf("const load = async () => {"),
+    source.indexOf("void load();"),
+  );
+  assert.match(loadSource, /modesEntryHydratedRef\.current && sessionId && next\.collaborationMode === \"plan\"/);
+  assert.match(loadSource, /fetch\(\"\/api\/modes\"\)/);
+  assert.match(loadSource, /normalizeCollaborationMode\(globalData\.collaborationMode\)/);
+});
+
+test("entry never restores plan mode's read-only toolset", () => {
+  const loadToolsSource = source.slice(
+    source.indexOf("const loadTools = useCallback"),
+    source.indexOf("const promoteNewSession"),
+  );
+  assert.match(loadToolsSource, /preset === \"plan\" && !planModeRef\.current/);
+  assert.match(loadToolsSource, /getToolNamesForPreset\(\"default\"\)/);
+  assert.match(loadToolsSource, /setToolPresetState\(\"default\"\)/);
+});
+
 test("guards model list writes by request generation and context", () => {
   const loadSource = source.slice(
     source.indexOf("const loadModels = useCallback"),
