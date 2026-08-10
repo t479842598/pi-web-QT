@@ -43,6 +43,8 @@ interface ProcessGroupProps {
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
   sessionId?: string;
+  /** Live token throughput (tokens/sec) while streaming. */
+  tokenRate?: number | null;
 }
 
 type Step =
@@ -695,6 +697,7 @@ export function ProcessGroup({
   cwd,
   onOpenFile,
   sessionId,
+  tokenRate = null,
 }: ProcessGroupProps) {
   const { t } = useI18n();
   const ts: BuildLabelFn = useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
@@ -885,6 +888,11 @@ export function ProcessGroup({
           aria-expanded={areaExpanded}
         >
           <span className="truncate">{summary}</span>
+          {isStreaming && tokenRate != null && tokenRate > 0 && (
+            <span className="shrink-0 text-xs tabular-nums text-text-dim">
+              {t("desktop.tokensPerSecond", { count: tokenRate >= 10 ? String(Math.round(tokenRate)) : tokenRate.toFixed(1) })}
+            </span>
+          )}
           <span className={`opacity-0 transition-opacity group-hover/summary:opacity-60 ${areaExpanded ? "rotate-90" : ""}`}>
             <Caret expanded={false} />
           </span>

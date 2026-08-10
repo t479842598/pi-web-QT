@@ -10,6 +10,7 @@ import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionCon
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 import { resolveProject, type ProjectInfo } from "./worktree";
+import { readSettingsJsonUnlocked } from "./settings-lock";
 
 export { getAgentDir };
 
@@ -26,6 +27,11 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
     projectByCwd.set(cwd, await resolveProject(cwd));
   }));
 
+  // Read pinned session ids from settings.json (sessionPins: string[])
+  const settings = readSettingsJsonUnlocked();
+  const rawPins = Array.isArray(settings.sessionPins) ? (settings.sessionPins as unknown[]) : [];
+  const pinSet = new Set(rawPins.filter((p): p is string => typeof p === "string"));
+
   return piSessions.map((s) => {
     cacheSessionPath(s.id, s.path);
     const project = s.cwd ? projectByCwd.get(s.cwd) : undefined;
@@ -40,8 +46,9 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
       firstMessage: s.firstMessage || "(no messages)",
       parentSessionId: s.parentSessionPath ? pathToId.get(normalizePath(s.parentSessionPath)) : undefined,
       projectRoot: project?.projectRoot ?? s.cwd,
+      pinned: pinSet.has(s.id),
       importedFrom: (s as unknown as { importedFrom?: string }).importedFrom,
-      ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
+      ...(project?.branch ? { worktreeBranch: project.branch } : {}),
     };
   });
 }

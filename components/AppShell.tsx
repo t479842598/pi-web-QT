@@ -8,6 +8,8 @@ import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
+import { SubagentsPanel } from "./SubagentsPanel";
+import { SubagentDetail } from "./SubagentDetail";
 import { TabBar, type Tab } from "./TabBar";
 import { SettingsModal, type SettingsTab } from "./SettingsModal";
 import { TasksViewProvider } from "@/contexts/tasks-view-context";
@@ -33,7 +35,7 @@ import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
 import { samePath } from "@/lib/paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
-import type { SessionInfo } from "@/lib/types";
+import type { SessionInfo, SubagentStatus } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { ProjectTrustStatus } from "@/lib/api-types";
@@ -88,6 +90,13 @@ export function AppShell() {
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
+
+  // Subagent fleet monitor — populated by ChatWindow, displayed in sidebar
+  const [subagents, setSubagents] = useState<SubagentStatus[]>([]);
+  const handleSubagentsChange = useCallback((list: SubagentStatus[]) => {
+    setSubagents(list);
+  }, []);
+  const runningSubagentCount = subagents.filter((s) => s.status === "running").length;
   const [copiedSessionField, setCopiedSessionField] = useState<SessionCopyField | null>(null);
   const sessionCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopySessionField = useCallback((field: SessionCopyField, value: string) => {
@@ -141,6 +150,20 @@ export function AppShell() {
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  // Right panel "subagent view": opened via the running bubble; shows the fleet
+  // list, clicking a row drills into the read-only conversation detail.
+  const [subagentViewOpen, setSubagentViewOpen] = useState(false);
+  const [subagentViewAgentId, setSubagentViewAgentId] = useState<string | null>(null);
+  const openSubagentView = useCallback((agentId?: string | null) => {
+    setSubagentViewAgentId(agentId ?? null);
+    setSubagentViewOpen(true);
+    setRightPanelOpen(true);
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
+  const closeSubagentView = useCallback(() => {
+    setSubagentViewOpen(false);
+    setSubagentViewAgentId(null);
+  }, []);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(getDefaultRightPanelWidth(1366));
   const getResponsiveRightPanelWidth = useCallback(
@@ -754,6 +777,7 @@ export function AppShell() {
               chatInputRef={chatInputRef}
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
+              onSubagentsChange={handleSubagentsChange}
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
@@ -803,6 +827,39 @@ export function AppShell() {
         </div>
       </div>
 
+      {/* Subagent running bubble — top-right, appears while agents are running */}
+      {runningSubagentCount > 0 && (
+        <button
+          type="button"
+          onClick={() => openSubagentView()}
+          title={t("desktop.subagentsViewTitle")}
+          aria-label={t("desktop.subagentsViewTitle")}
+          style={{
+            position: "fixed",
+            top: 46,
+            right: isMobile ? 12 : rightPanelOpen && !subagentViewOpen ? `calc(${rightPanel.width}px + 16px)` : 16,
+            zIndex: 500,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 7,
+            padding: "6px 12px",
+            border: "1px solid color-mix(in srgb, var(--accent) 45%, var(--border))",
+            borderRadius: 999,
+            background: "color-mix(in srgb, var(--accent) 12%, var(--bg-panel))",
+            color: "var(--accent)",
+            boxShadow: "0 6px 20px rgba(0,0,0,0.14)",
+            cursor: "pointer",
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 20%, var(--bg-panel))"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 12%, var(--bg-panel))"; }}
+        >
+          <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--accent)", boxShadow: "0 0 0 0 var(--accent)", animation: "subagent-pulse 1.4s ease-out infinite" }} />
+          {runningSubagentCount} {t("desktop.subagentsRunningBubble")}
+        </button>
+      )}
+
       {/* Right panel: file viewer — always mounted, width animated via CSS */}
       {rightPanelOpen && (
         <div
@@ -830,12 +887,43 @@ export function AppShell() {
               onCloseTab={handleCloseFileTab}
             />
           </div>
+          {/* Switch between file view and subagent view */}
+          <button
+            type="button"
+            onClick={() => subagentViewOpen ? closeSubagentView() : openSubagentView()}
+            title={subagentViewOpen ? t("desktop.subagentsBackToFiles") : t("desktop.subagentsViewTitle")}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0, height: 28, marginRight: 6, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 6, background: subagentViewOpen ? "var(--bg-selected)" : "transparent", color: subagentViewOpen ? "var(--text)" : "var(--text-muted)", cursor: "pointer", fontSize: 11 }}
+          >
+            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: runningSubagentCount > 0 ? "var(--accent)" : "var(--text-dim)", boxShadow: runningSubagentCount > 0 ? "0 0 0 0 var(--accent)" : "none", animation: runningSubagentCount > 0 ? "subagent-pulse 1.4s ease-out infinite" : "none" }} />
+            {subagentViewOpen ? t("desktop.subagentsBackToFiles") : t("desktop.subagentsViewTitle")}
+          </button>
 
         </div>
 
-        {/* File content */}
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          {activeFileTab?.filePath ? (
+        {/* Content: subagent view OR file viewer */}
+        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          {subagentViewOpen ? (
+            subagentViewAgentId ? (() => {
+              const agent = subagents.find((s) => s.id === subagentViewAgentId) ?? null;
+              return agent ? (
+                <SubagentDetail
+                  agent={agent}
+                  cwd={activeCwd ?? selectedSession?.cwd ?? undefined}
+                  onBack={() => setSubagentViewAgentId(null)}
+                />
+              ) : (
+                <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
+                  {t("desktop.subagentsNotFound")}
+                </div>
+              );
+            })() : (
+              <SubagentsPanel
+                subagents={subagents}
+                selectedId={subagentViewAgentId}
+                onSelect={(agent) => setSubagentViewAgentId(agent.id)}
+              />
+            )
+          ) : activeFileTab?.filePath ? (
             <FileViewer
               filePath={activeFileTab.filePath}
               cwd={activeCwd ?? undefined}

@@ -1,12 +1,13 @@
 "use client";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { AgentMessage, AssistantContentBlock, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
+import type { AgentMessage, AssistantContentBlock, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, SubagentStatus, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { collectProcessContentBlocks, splitAssistantContentBlocks } from "@/lib/process-content";
 import { MessageView } from "./MessageView";
 import { PlanReviewDialog } from "./PlanReviewDialog";
+import { GoalBanner } from "./GoalBanner";
 import { ApprovalModal } from "./ApprovalModal";
 import { requestCreateTaskFromText } from "@/lib/task-compose-events";
 
@@ -40,6 +41,8 @@ interface Props {
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
   onSystemPromptChange?: (prompt: string | null) => void;
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
+  /** Live subagent activity (Agent tool spawns/completions) forwarded to AppShell. */
+  onSubagentsChange?: (subagents: SubagentStatus[]) => void;
   onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string) => void;
@@ -117,7 +120,7 @@ function withAssistantBlocks(
 
 
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onWorkspaceControlsHostChange, onViewFullHistory, systemPrompt }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSubagentsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onWorkspaceControlsHostChange, onViewFullHistory, systemPrompt }: Props) {
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -140,7 +143,17 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
   // 稳定化 onEditContent 引用，配合 React.memo 防止历史消息重渲染
   const handleEditContent = useCallback((message: UserMessage) => {
-    chatInputRef?.current?.replaceMessage(message);
+    // Strip mode-instruction block prefixes so only the user-typed text goes
+    // back into the input, even if the optimistic-message dedup missed.
+    let cleaned = message;
+    if (typeof message.content === "string") {
+      const stripped = message.content
+        .replace(/<(?:delivery|economy|goal)-profile>[\s\S]*?<\/(?:delivery|economy|goal)-profile>\s*/g, "")
+        .replace(/^You are in PLAN MODE\.\s*\n[\s\S]*?\n(?=\n|$)/, "")
+        .trimStart();
+      if (stripped) cleaned = { ...message, content: stripped };
+    }
+    chatInputRef?.current?.replaceMessage(cleaned);
   }, [chatInputRef]);
 
   const handleQuoteReply = useCallback((quote: string) => {
@@ -158,7 +171,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     loading, error, messages, entryIds, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
-    isCompacting, compactError, compactResult, displayModel: displayModelValue, sessionStats,
+    isCompacting, compactError, compactResult, displayModel: displayModelValue, sessionStats, tokenRate,
     slashCommands, slashCommandsLoading, queuedMessages, pendingRecovery, recoveryIsImport,
     notices, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     agentPhase,
@@ -180,6 +193,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
+    onSubagentsChange,
   });
 
   const [recoveryDismissed, setRecoveryDismissed] = useState(false);
@@ -321,15 +335,19 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       const container = scrollContainerRef.current;
       const end = messagesEndRef.current;
       if (!container || !end) return;
-      // Same keep-out math as useAgentSession.scrollToBottom: back off the
-      // persistent bottom spacer (sentinel sits BELOW it) and land the LAST
-      // MESSAGE BOTTOM_KEEP_OUT_PX above the container bottom instead of
-      // scrolling to the absolute bottom (which would hug the ChatInput).
-      const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
-      const spacerH = CHAT_BOTTOM_SPACER_PX;
-      const target = Math.max(0, endInContainer - spacerH - container.clientHeight + BOTTOM_KEEP_OUT_PX);
-      container.scrollTo({ top: target, behavior: "auto" });
+      const doScroll = () => {
+        if (!container || !end) return;
+        const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+        const spacerH = CHAT_BOTTOM_SPACER_PX;
+        const target = Math.max(0, endInContainer - spacerH - container.clientHeight + BOTTOM_KEEP_OUT_PX);
+        container.scrollTo({ top: target, behavior: "auto" });
+      };
+      doScroll();
       updateChatFades();
+      // Settle correction: virtual list rows measure after mount, growing
+      // totalSize and shifting the sentinel. Re-scroll so the button always
+      // lands at the true bottom.
+      window.setTimeout(doScroll, 200);
     });
   }, [messagesEndRef, scrollContainerRef, updateChatFades]);
 
@@ -595,18 +613,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
         />
       )}
 
-      {planMode && (
-        <PlanReviewDialog
-          open={planReviewOpen}
-          planText={planReviewText}
-          busy={agentRunning}
-          onExecute={handlePlanExecute}
-          onFeedback={handlePlanFeedback}
-          onExit={handlePlanExit}
-          onClose={() => setPlanReviewOpen(false)}
-        />
-      )}
-
       {approvalRequests.length > 0 && (
         <ApprovalModal
           request={approvalRequests[0] ?? null}
@@ -692,6 +698,15 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               <NoticeShelf notices={notices} align="right" />
             </div>
 
+            {collaborationMode === "goal" && (
+              <GoalBanner
+                goalState={goalState}
+                onPause={handleGoalPause}
+                onResume={handleGoalResume}
+                onStop={handleGoalStop}
+              />
+            )}
+
             {chatInputElement}
 
             {/* Session Info Bar */}
@@ -745,7 +760,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           </div>
         </div>
         <div className="relative flex-1 min-h-0 min-w-0">
-          <div ref={scrollContainerRef} className="h-full min-w-0 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]">
+          <div ref={scrollContainerRef} className="h-full min-w-0 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
             <div style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
               <ExtensionStatusBar statuses={extensionStatuses} />
@@ -915,6 +930,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                           cwd={messageCwd}
                           onOpenFile={onOpenFile}
                           sessionId={session?.id ?? sessionIdRef.current ?? undefined}
+                          tokenRate={tokenRate}
                         />
                       </div>,
                       processRefIdx,
@@ -984,7 +1000,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                         blocks={processBlocks}
                         isStreaming={false}
                         defaultExpanded={!finalAnswerMessage}
-                        onAutoExpanded={finalAnswerMessage ? undefined : scrollToBottomAfterProcessExpansion}
+                        onAutoExpanded={undefined}
                         cwd={messageCwd}
                         onOpenFile={onOpenFile}
                         sessionId={session?.id ?? sessionIdRef.current ?? undefined}
@@ -1023,7 +1039,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
             {activePhaseLabel && (isCompacting || (agentRunning && !streamState.streamingMessage)) && (
               <div className="py-2 text-[13px] text-text-muted">
-                <span className="animate-[pulse_1.5s_infinite]">{activePhaseLabel}</span>
+                <span className="animate-[pulse_1.5s_infinite]">
+                  {activePhaseLabel}
+                  {agentPhase?.kind === "waiting_model" && (
+                    <span style={{ display: "inline-block", width: 12, height: 12, marginLeft: 6, verticalAlign: "-2px", border: "1.5px solid var(--text-muted)", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.6s linear infinite" }} />
+                  )}
+                </span>
               </div>
             )}
 
@@ -1059,6 +1080,18 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               <div style={{ height: CHAT_BOTTOM_SPACER_PX }} />
 
               <div ref={messagesEndRef} />
+
+              {/* Plan review shelf — inline at the end of the chat stream so
+                   the user can read the plan above before choosing an action. */}
+              <PlanReviewDialog
+                open={planReviewOpen}
+                planText={planReviewText}
+                busy={agentRunning}
+                onExecute={handlePlanExecute}
+                onFeedback={handlePlanFeedback}
+                onExit={handlePlanExit}
+                onClose={() => setPlanReviewOpen(false)}
+              />
               </div>
             </div>
           </div>

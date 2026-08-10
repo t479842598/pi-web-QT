@@ -727,6 +727,20 @@ pre, code {
   scrollbar-color: var(--border) transparent;
 }
 
+/* Floating overlay scrollbars — do not consume layout width.
+   Chrome/WebKit render an overlay scrollbar (no gutter, floats over content);
+   Firefox does not support `overflow-y: overlay`, so it falls back to a thin
+   classic scrollbar via scrollbar-width. */
+.scroll-overlay {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+@supports (overflow-y: overlay) {
+  .scroll-overlay {
+    overflow-y: overlay;
+  }
+}
+
 /* Chat markdown: compact enough for conversations, with a readable document hierarchy. */
 .markdown-body {
   min-width: 0;
@@ -1304,6 +1318,11 @@ span.linenumber {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes accordion-row-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 @keyframes drop-icon-float {
   0%, 100% { transform: translateY(0px); }
   50%       { transform: translateY(-6px); }
@@ -1332,6 +1351,12 @@ span.linenumber {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+@keyframes subagent-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+  70% { box-shadow: 0 0 0 5px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 @keyframes notice-shelf-in {

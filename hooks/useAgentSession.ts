@@ -8,6 +8,7 @@ import type {
   ExtensionWidgetItem,
   SessionInfo,
   SessionTreeNode,
+  SubagentStatus,
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
@@ -126,6 +127,8 @@ export interface GoalRuntimeState {
   noProgressTurns: number;
   noProgressLimit: number;
   tokensUsed: number;
+  /** Unix-ms timestamp when the goal run started. */
+  startedAt?: number;
 }
 
 /** Default turn quota for a goal run (mirrors Reasonix budgetClassSimple). */
@@ -209,6 +212,8 @@ export interface UseAgentSessionOptions {
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
   onSystemPromptChange?: (prompt: string | null) => void;
   onSessionStatsPanelOpen?: () => void;
+  /** Live subagent activity for this session (Agent tool spawns + completions). */
+  onSubagentsChange?: (subagents: SubagentStatus[]) => void;
   setToolPreset?: (preset: "none" | "default" | "full" | "plan") => void;
 }
 
@@ -487,7 +492,7 @@ function cacheGlobalModeSettings(settings: ModeSettings): void {
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
-    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
+    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen, onSubagentsChange,
   } = opts;
 
   const isNew = session === null && newSessionCwd !== null;
@@ -500,6 +505,58 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [entryIds, setEntryIds] = useState<string[]>([]);
   const [streamState, dispatch] = useReducer(streamReducer, { isStreaming: false, streamingMessage: null });
+
+  // ── Live token rate (tokens/sec) during streaming ────────────────────────
+  // Approximated from streamed text length: every message_update event carries
+  // the full accumulated assistant content, so we count characters added since
+  // the last event and slide a 1s window to derive a rate (≈4 chars/token).
+  const [tokenRate, setTokenRate] = useState<number | null>(null);
+  const tokenRateRef = useRef({
+    lastChars: 0,
+    window: [] as Array<{ at: number; chars: number }>,
+    charsPerToken: 4,
+  });
+  const resetTokenRate = useCallback(() => {
+    tokenRateRef.current = { lastChars: 0, window: [], charsPerToken: 4 };
+    setTokenRate(null);
+  }, []);
+
+  /** Count printable characters in an assistant content block list. */
+  const countAssistantChars = useCallback((msg: Partial<AgentMessage> | undefined): number => {
+    if (!msg || msg.role !== "assistant") return 0;
+    const content = msg.content as unknown;
+    if (!Array.isArray(content)) return 0;
+    let total = 0;
+    for (const block of content as unknown[]) {
+      if (typeof block === "string") {
+        total += block.length;
+      } else if (block && typeof block === "object") {
+        const b = block as { type?: string; text?: string; thinking?: string };
+        if (typeof b.text === "string") total += b.text.length;
+        else if (typeof b.thinking === "string") total += b.thinking.length;
+      }
+    }
+    return total;
+  }, []);
+
+  /** Feed streamed content and update the 1s token-rate estimate. */
+  const trackTokenRate = useCallback((msg: Partial<AgentMessage> | undefined) => {
+    const chars = countAssistantChars(msg);
+    const ref = tokenRateRef.current;
+    if (chars === ref.lastChars) return;
+    const now = Date.now();
+    const delta = Math.max(0, chars - ref.lastChars);
+    ref.lastChars = chars;
+    ref.window.push({ at: now, chars: delta });
+    // Drop samples older than 1s.
+    const cutoff = now - 1000;
+    while (ref.window.length > 0 && ref.window[0].at < cutoff) ref.window.shift();
+    const sum = ref.window.reduce((acc, s) => acc + s.chars, 0);
+    const windowMs = ref.window.length > 0 ? now - ref.window[0].at : 0;
+    if (windowMs < 200) return; // too early for a stable rate
+    const perSec = (sum / Math.max(1, windowMs)) * 1000 / ref.charsPerToken;
+    setTokenRate(Math.max(0, Math.round(perSec * 10) / 10));
+  }, [countAssistantChars]);
   const [agentRunning, setAgentRunning] = useState(false);
   const [bashRunning, setBashRunning] = useState(false);
   const [pendingBash, setPendingBash] = useState<{ command: string; excludeFromContext: boolean } | null>(null);
@@ -690,6 +747,95 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [pendingRecovery, setPendingRecovery] = useState<PendingRecoveryItem[]>([]);
   const [recoveryIsImport, setRecoveryIsImport] = useState(false);
 
+  // ── Subagent fleet monitor ────────────────────────────────────────────────
+  // Tracks Agent tool spawns (tool_execution_start) and completions
+  // (entry_appended → customType "subagents:record") for the current session.
+  const [subagents, setSubagents] = useState<SubagentStatus[]>([]);
+  const subagentsRef = useRef<SubagentStatus[]>([]);
+  const SUBAGENT_TOOL_NAMES = useMemo(() => new Set(["Agent", "Task"]), []);
+  const MAX_SUBAGENT_ROWS = 20;
+
+  const applySubagents = useCallback((updater: (prev: SubagentStatus[]) => SubagentStatus[]) => {
+    setSubagents((prev) => {
+      const next = updater(prev);
+      subagentsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  /** Register an Agent tool spawn as a running subagent row. */
+  const addRunningSubagent = useCallback((id: string, args: Record<string, unknown>) => {
+    applySubagents((prev) => {
+      if (prev.some((s) => s.id === id)) return prev;
+      const description =
+        typeof args.description === "string" && args.description.trim()
+          ? args.description.trim()
+          : typeof args.prompt === "string"
+            ? args.prompt.slice(0, 80)
+            : "Agent";
+      const agentType = typeof args.subagent_type === "string" && args.subagent_type ? args.subagent_type : "Agent";
+      const next = [...prev, {
+        id, agentType, description,
+        status: "running" as const,
+        startedAt: Date.now(),
+      }];
+      return next.slice(-MAX_SUBAGENT_ROWS);
+    });
+  }, [applySubagents]);
+
+  /** Upsert a completed subagent from a subagents:record transcript entry. */
+  const upsertSubagentRecord = useCallback((record: Record<string, unknown>) => {
+    const recordId = typeof record.id === "string" ? record.id : "";
+    const type = typeof record.type === "string" ? record.type : "Agent";
+    const description = typeof record.description === "string" ? record.description : "";
+    const statusRaw = typeof record.status === "string" ? record.status : "";
+    const status: SubagentStatus["status"] =
+      statusRaw === "error" || statusRaw === "aborted" ? "failed"
+        : statusRaw === "stopped" ? "stopped"
+          : "completed";
+    const startedAt = typeof record.startedAt === "number" ? record.startedAt : Date.now();
+    const completedAt = typeof record.completedAt === "number" ? record.completedAt : Date.now();
+    const tokens = typeof record.tokens === "object" && record.tokens !== null
+      ? { input: (record.tokens as Record<string, unknown>).input as number | undefined,
+          output: (record.tokens as Record<string, unknown>).output as number | undefined,
+          total: (record.tokens as Record<string, unknown>).total as number | undefined }
+      : undefined;
+    const toolUses = typeof record.toolUses === "number" ? record.toolUses : undefined;
+    const error = typeof record.error === "string" && record.error ? record.error : undefined;
+
+    applySubagents((prev) => {
+      // Match by record.id first, else by (type + description) so a completion
+      // lands on the running row spawned from the same Agent tool call.
+      const idx = prev.findIndex((s) => s.id === recordId || (s.agentType === type && s.description === description));
+      const entry: SubagentStatus = {
+        id: recordId || prev[idx]?.id || `${type}-${startedAt}`,
+        agentType: type,
+        description,
+        status,
+        startedAt,
+        completedAt,
+        tokens,
+        toolUses,
+        error,
+      };
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = entry;
+        return next;
+      }
+      return [...prev, entry].slice(-MAX_SUBAGENT_ROWS);
+    });
+  }, [applySubagents]);
+
+  /** Mark a running Agent tool call finished when it ends without a record. */
+  const finishRunningSubagent = useCallback((id: string) => {
+    applySubagents((prev) => prev.map((s) => {
+      if (s.id !== id || s.status !== "running") return s;
+      return { ...s, status: "completed" as const, completedAt: Date.now() };
+    }));
+  }, [applySubagents]);
+
+
   // Queue reconciliation: the empty queue_update can be lost during an SSE
   // drop/reconnect window (the bus does not replay history), which leaves
   // stale "queued" chips on a device that never saw the drain. After a non-empty
@@ -846,6 +992,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setActiveLeafId(null);
           setMessages([]);
           setError(null);
+          applySubagents(() => []);
         }
         return null;
       }
@@ -904,7 +1051,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (showLoading && !messagesLoaded) setLoading(false);
     }
-  }, []);
+  }, [applySubagents]);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null) => {
     try {
@@ -1437,15 +1584,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const container = scrollContainerRef.current;
     const end = messagesEndRef.current;
     if (!container || !end) return;
-    // The end sentinel sits BELOW the keep-out spacer. scrollIntoView on the
-    // sentinel would put that blank spacer in the viewport — hence the blank
-    // screen while streaming during a run. Back off by the spacer so the LAST
-    // MESSAGE lands just above the viewport bottom with a keep-out gap
-    // (BOTTOM_KEEP_OUT_PX) so it is not hidden behind ChatInput.
-    const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
-    const spacerH = CHAT_BOTTOM_SPACER_PX;
-    const target = Math.max(0, endInContainer - spacerH - container.clientHeight + BOTTOM_KEEP_OUT_PX);
-    container.scrollTo({ top: target, behavior });
+    const doScroll = () => {
+      if (!container || !end) return;
+      const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+      const spacerH = CHAT_BOTTOM_SPACER_PX;
+      const target = Math.max(0, endInContainer - spacerH - container.clientHeight + BOTTOM_KEEP_OUT_PX);
+      container.scrollTo({ top: target, behavior });
+    };
+    doScroll();
+    // Settle correction: virtual list rows measure asynchronously, growing
+    // totalSize and shifting the sentinel. Re-scroll after measurements
+    // settle so we always land at the true bottom. "instant" covers initial
+    // load; "auto" covers streaming follow. Only re-scroll when the user
+    // hasn't scrolled away in the meantime.
+    if (behavior === "instant" || behavior === "auto") {
+      window.setTimeout(() => {
+        if (container && end && isNearBottomRef.current) doScroll();
+      }, 200);
+    }
   }, []);
 
   // Streaming live-follow. A single rAF can run before React commits the new
@@ -1458,12 +1614,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     streamingScrollRafRef.current = requestAnimationFrame(() => {
       streamingScrollRafRef.current = null;
       requestAnimationFrame(() => {
-        if (!isNearBottomRef.current || !agentRunningRef.current) return;
-        // Never fight an active user scroll gesture. isNearBottom can be
-        // momentarily true right after a scroll-up (virtualized total size
-        // still settling); without this guard the follow would yank the
-        // viewport back to the bottom mid-gesture.
+        if (!agentRunningRef.current) return;
+        // Never fight an active user scroll gesture.
         if (Date.now() < userScrollIntentUntilRef.current) return;
+        // Re-read isNearBottom live: virtual list totalSize can grow between
+        // scroll events (rows measure after mount), silently pushing the
+        // viewport above the bottom. Without this fresh check the stale
+        // isNearBottomRef keeps follow suppressed and the viewport drifts.
+        const container = scrollContainerRef.current;
+        if (container) {
+          const { scrollTop, clientHeight, scrollHeight } = container;
+          isNearBottomRef.current = scrollTop + clientHeight >= scrollHeight - SCROLL_BOTTOM_THRESHOLD;
+        }
+        if (!isNearBottomRef.current) return;
         scrollToBottom("auto");
       });
     });
@@ -1473,6 +1636,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     switch (event.type) {
       case "agent_start":
         resetStreamUpdates();
+        resetTokenRate();
         cancelEventStreamGrace();
         sdkAgentActiveRef.current = true;
         agentRunningRef.current = true;
@@ -1485,6 +1649,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       case "agent_end": {
         resetStreamUpdates();
+        resetTokenRate();
         // Multiple agent_end events may precede retry, compaction, queued
         // extension work, or agent_settled. Keep the SSE stream alive; the
         // grace window owns eventual connection teardown.
@@ -1605,6 +1770,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           break;
         }
         if (msg) {
+          trackTokenRate(msg);
           queueStreamUpdate(normalizeToolCalls(msg as AgentMessage));
         }
         // Functional bail-out: only commit a change when the phase differs.
@@ -1679,6 +1845,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "tool_execution_start": {
         const id = event.toolCallId as string;
         const name = event.toolName as string;
+        if (SUBAGENT_TOOL_NAMES.has(name)) {
+          const args = (event as { args?: unknown }).args;
+          addRunningSubagent(id, typeof args === "object" && args !== null ? args as Record<string, unknown> : {});
+        }
         setAgentPhase((prev) => {
           const tools = prev?.kind === "running_tools" ? [...prev.tools] : [];
           if (!tools.some((t) => t.id === id)) tools.push({ id, name });
@@ -1688,12 +1858,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       case "tool_execution_end": {
         const id = event.toolCallId as string;
+        if (SUBAGENT_TOOL_NAMES.has(event.toolName as string)) {
+          finishRunningSubagent(id);
+        }
         setAgentPhase((prev) => {
           if (prev?.kind !== "running_tools") return prev;
           const tools = prev.tools.filter((t) => t.id !== id);
           if (tools.length === 0) return { kind: "waiting_model" };
           return { kind: "running_tools", tools };
         });
+        break;
+      }
+      case "entry_appended": {
+        const entry = (event as { entry?: { customType?: string; data?: unknown } }).entry;
+        if (entry?.customType === "subagents:record" && typeof entry.data === "object" && entry.data !== null) {
+          upsertSubagentRecord(entry.data as Record<string, unknown>);
+        }
         break;
       }
       case "queue_update":
@@ -1775,6 +1955,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     resetStreamUpdates,
     scheduleQueueReconcile,
     clearQueueReconcile,
+    addRunningSubagent,
+    upsertSubagentRecord,
+    finishRunningSubagent,
+    SUBAGENT_TOOL_NAMES,
+    trackTokenRate,
+    resetTokenRate,
   ]);
   handleAgentEventRef.current = handleAgentEvent;
 
@@ -2498,27 +2684,45 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [setToolPresetState]);
 
   // ── Plan mode ────────────────────────────────────────────────────────────
+  // Entering/exiting delegates to the @narumitw/pi-plan-mode extension via the
+  // /plan slash command (the prompt RPC path executes extension commands). The
+  // extension owns the read-only toolset and plan workflow; the frontend keeps
+  // its own planMode flag + PlanReviewDialog for the post-plan review shelf.
+  // Uses a generation counter so rapid toggles don't race (e.g. exit + re-enter
+  // before the exit command completes).
+  const planModeGenRef = useRef(0);
   const handlePlanModeChange = useCallback(async (enabled: boolean) => {
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
+    const gen = ++planModeGenRef.current;
     if (enabled) {
       // Remember the active preset so exiting plan mode can restore it.
       prePlanPresetRef.current = toolPreset === "plan" ? "default" : toolPreset;
       setPlanMode(true);
       if (sid) {
         try {
-          await sendAgentCommand(sid, { type: "set_tools", toolNames: [...PRESET_PLAN] });
+          // Activate the extension's Plan mode (read-only tools + plan workflow).
+          await sendAgentCommand(sid, { type: "prompt", message: "/plan" });
+          if (planModeGenRef.current !== gen) return; // superseded by a later call
         } catch (e) {
+          if (planModeGenRef.current !== gen) return;
           console.error("Failed to enter plan mode:", e);
         }
       }
     } else {
       setPlanMode(false);
       if (sid) {
-        const restore = prePlanPresetRef.current;
         try {
-          await sendAgentCommand(sid, { type: "set_tools", toolNames: getToolNamesForPreset(restore) });
+          // Exit the extension's Plan mode; it restores the previous toolset.
+          await sendAgentCommand(sid, { type: "prompt", message: "/plan exit" });
+          if (planModeGenRef.current !== gen) return; // superseded
         } catch (e) {
+          if (planModeGenRef.current !== gen) return;
           console.error("Failed to exit plan mode:", e);
+          // Fall back to restoring the preset toolset manually.
+          try {
+            const restore = prePlanPresetRef.current;
+            await sendAgentCommand(sid, { type: "set_tools", toolNames: getToolNamesForPreset(restore) });
+          } catch { /* ignore */ }
         }
       }
     }
@@ -2631,6 +2835,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       goalText: trimmed,
       turnsUsed: 0,
       noProgressTurns: 0,
+      startedAt: Date.now(),
     }));
   }, []);
 
@@ -2719,6 +2924,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     goalActionsRef.current = { drive: driveGoalLoop };
   }, [driveGoalLoop]);
+
+  // ── Subagent fleet monitor: push live status up + reset on session switch ──
+  const subagentsKey = subagents.map((s) => `${s.id}:${s.status}:${s.completedAt ?? ""}`).join("|");
+  const subagentsRef2 = useRef(subagents);
+  subagentsRef2.current = subagents;
+  useEffect(() => {
+    onSubagentsChange?.(subagentsRef2.current);
+  }, [subagentsKey, onSubagentsChange]);
+  useEffect(() => () => { onSubagentsChange?.([]); }, [onSubagentsChange]);
+  useEffect(() => {
+    applySubagents(() => []);
+    // Reset whenever the active session (or its cwd) changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id, newSessionCwd ?? session?.cwd]);
 
   const scrollUserMsgToTop = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -2867,10 +3086,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         initialScrollDoneRef.current = true;
         scrollUserMsgToTop();
       } else if (loading || !initialScrollDoneRef.current) {
-        // Re-anchor to the bottom on every batch while the initial session
-        // load is still in flight: the first scroll runs on partial content
-        // and can be clamped before the list finishes growing, which would
-        // leave the last message pressed against ChatInput.
         if (!loading) initialScrollDoneRef.current = true;
         scrollToBottom("instant");
       } else if (!agentRunningRef.current && (completionScrollAllowedRef.current || isNearBottomRef.current)) {
@@ -2952,7 +3167,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
+    tokenRate,
     planMode,
+    subagents,
     // Chat modes (Reasonix port)
     collaborationMode, tokenMode, toolApprovalMode, permissionRules, modeSettings,
     approvalRequests,

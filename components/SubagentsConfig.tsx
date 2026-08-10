@@ -5,6 +5,7 @@ import { Robot } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { SettingCard, SettingNote, SettingRow, SettingRowLast } from "./SettingCard";
 import { SettingToggle } from "./SettingToggle";
+import { ApplyNowButton } from "./ApplyNowButton";
 import type { SubagentsConfig, SubagentsConfigResponse } from "@/lib/api-types";
 
 const JOIN_MODES = ["async", "group", "smart"] as const;
@@ -26,7 +27,7 @@ function labelStyle(): React.CSSProperties {
   return { fontSize: 12, color: "var(--text-muted)" };
 }
 
-export function SubagentsConfig({ cwd }: { cwd?: string | null }) {
+export function SubagentsConfig({ cwd, sessionId }: { cwd?: string | null; sessionId?: string | null }) {
   const { t } = useI18n();
   const [config, setConfig] = useState<SubagentsConfig>({});
   const [agents, setAgents] = useState<SubagentsConfigResponse["agents"]>([]);
@@ -240,6 +241,7 @@ export function SubagentsConfig({ cwd }: { cwd?: string | null }) {
               </button>
               {saved && <span style={{ color: "#22c55e", fontSize: 12 }}>{t("desktop.subagentsSaved")}</span>}
               {saveError && <span style={{ color: "#ef4444", fontSize: 12 }}>{saveError}</span>}
+              <ApplyNowButton sessionId={sessionId} />
             </div>
 
             {agents.length > 0 && (

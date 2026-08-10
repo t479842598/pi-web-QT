@@ -5,6 +5,8 @@ import { PencilSimple, PlusIcon, Trash } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { SettingCard, SettingNote, SettingRow, SettingRowLast } from "./SettingCard";
 import type { McpConfigResponse, McpServerConfig } from "@/lib/api-types";
+import { VisionMcpConfig, VISION_SERVER_NAME } from "./VisionMcpConfig";
+import { ApplyNowButton } from "./ApplyNowButton";
 
 const TRANSPORTS = ["stdio", "sse", "http"] as const;
 const LIFECYCLES = ["eager", "lazy"] as const;
@@ -102,7 +104,7 @@ function formToServer(form: FormState): { error?: string; server?: McpServerConf
   return { server };
 }
 
-export function McpConfig() {
+export function McpConfig({ sessionId }: { sessionId?: string | null }) {
   const { t } = useI18n();
   const [servers, setServers] = useState<Record<string, McpServerConfig>>({});
   const [filePath, setFilePath] = useState("");
@@ -162,6 +164,10 @@ export function McpConfig() {
         setSaveError("Allowed characters: a-z, A-Z, 0-9, _ and -");
         return;
       }
+      if (editing.isNew && name === VISION_SERVER_NAME) {
+        setSaveError(t("desktop.mcpVisionNameReserved"));
+        return;
+      }
       const built = formToServer(form);
       if (built.error || !built.server) {
         setSaveError(built.error ?? "Invalid server");
@@ -189,7 +195,7 @@ export function McpConfig() {
     } finally {
       setSaving(false);
     }
-  }, [editing, form, servers]);
+  }, [editing, form, servers, t]);
 
   const deleteServer = useCallback(async (name: string) => {
     setSaving(true);
@@ -217,7 +223,9 @@ export function McpConfig() {
     setForm((current) => ({ ...current, [key]: value }));
   }, []);
 
-  const entries = Object.entries(servers);
+  // The built-in deepseek-vision server is managed from its own dedicated
+  // card (VisionMcpConfig) — keep it out of the generic server list.
+  const entries = Object.entries(servers).filter(([name]) => name !== VISION_SERVER_NAME);
 
   return (
     <div style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
@@ -235,35 +243,40 @@ export function McpConfig() {
                   {filePath}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={startAdd}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "7px 12px",
-                  border: "none",
-                  borderRadius: 6,
-                  background: "var(--accent)",
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  flexShrink: 0,
-                }}
-              >
-                <PlusIcon size={13} aria-hidden="true" />
-                {t("desktop.mcpAddServer")}
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                <ApplyNowButton sessionId={sessionId} onApplied={loadConfig} />
+                <button
+                  type="button"
+                  onClick={startAdd}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "7px 12px",
+                    border: "none",
+                    borderRadius: 6,
+                    background: "var(--accent)",
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    flexShrink: 0,
+                  }}
+                >
+                  <PlusIcon size={13} aria-hidden="true" />
+                  {t("desktop.mcpAddServer")}
+                </button>
+              </div>
             </div>
 
             <SettingNote>{t("desktop.mcpRestartNote")}</SettingNote>
+
+            <VisionMcpConfig sessionId={sessionId} />
 
             {entries.length === 0 && !editing ? (
               <SettingCard>
                 <SettingRowLast>
                   <div style={{ padding: "14px 0", fontSize: 12, color: "var(--text-dim)" }}>
-                    {t("desktop.mcpEmpty")}
+                    {servers[VISION_SERVER_NAME] ? t("desktop.mcpEmptyOther") : t("desktop.mcpEmpty")}
                   </div>
                 </SettingRowLast>
               </SettingCard>

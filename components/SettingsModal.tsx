@@ -245,11 +245,11 @@ export function SettingsModal({
             <ChatConfig />
           </div>
           <div style={{ display: activeTab === "models" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <ModelsConfig embedded onSavedAction={onModelsSavedAction} onRegisterFlush={registerFlush} />
+            <ModelsConfig embedded sessionId={sessionId} onSavedAction={onModelsSavedAction} onRegisterFlush={registerFlush} />
           </div>
           {cwd && (
             <div style={{ display: activeTab === "skills" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-              <SkillsConfig cwd={cwd} embedded />
+              <SkillsConfig cwd={cwd} embedded sessionId={sessionId} />
             </div>
           )}
           {cwd && (
@@ -276,10 +276,10 @@ export function SettingsModal({
             <UsageConfig sessionId={sessionId} cwd={cwd} />
           </div>
           <div style={{ display: activeTab === "mcp" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <McpConfig />
+            <McpConfig sessionId={sessionId} />
           </div>
           <div style={{ display: activeTab === "subagents" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <SubagentsConfig cwd={cwd} />
+            <SubagentsConfig cwd={cwd} sessionId={sessionId} />
           </div>
           <div style={{ display: activeTab === "backup" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <BackupConfig cwd={cwd} />

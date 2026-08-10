@@ -111,6 +111,31 @@ export interface BashExecutionMessage {
 
 export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | CustomMessage | BashExecutionMessage;
 
+/**
+ * Live status of a subagent spawned via the Agent tool in the current session.
+ * Built from two event sources:
+ *  - `tool_execution_start` (toolName === "Agent") → running entry
+ *  - `entry_appended` (customType === "subagents:record") → completion details
+ */
+export interface SubagentStatus {
+  id: string;              // toolCallId or subagents:record data.id
+  agentType: string;       // subagent_type or record.type
+  description: string;
+  status: "running" | "completed" | "failed" | "stopped";
+  startedAt: number;
+  completedAt?: number;
+  tokens?: { input?: number; output?: number; total?: number };
+  toolUses?: number;
+  error?: string;
+  /** Absolute path of the streaming .output transcript (JSONL), if written. */
+  transcriptPath?: string;
+  /** Parent session cwd — used to resolve the transcript path when absent. */
+  cwd?: string;
+}
+
+export type { SubagentStatus as SubagentRecord };
+export type { SubagentTranscriptLine } from "@/lib/subagent-transcript";
+
 export type ExtensionUiRequest =
   | {
       type: "extension_ui_request";
@@ -294,6 +319,8 @@ export interface SessionInfo {
   messageCount: number;
   firstMessage: string;
   parentSessionId?: string; // set if this session was forked from another
+  /** Whether this session is pinned to the top of the session list (stored in settings.json sessionPins). */
+  pinned?: boolean;
   /** Main repo root shared by all worktrees of this cwd (cwd itself for non-git dirs).
    *  Always set by the server; optional because the client builds transient
    *  SessionInfo objects before the first refresh. Fall back to cwd. */

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { PlusIcon } from "@phosphor-icons/react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
+import { ApplyNowButton } from "./ApplyNowButton";
 import type {
   SkillInfo as Skill,
   SkillInstallScope,
@@ -699,10 +700,12 @@ function AddSkillPanel({
 export function SkillsConfig({
   cwd,
   embedded = false,
+  sessionId,
   onCloseAction,
 }: {
   cwd: string;
   embedded?: boolean;
+  sessionId?: string | null;
   onCloseAction?: () => void;
 }) {
   const isMobile = useIsMobile();
@@ -937,6 +940,9 @@ export function SkillsConfig({
               background: "var(--bg-panel)",
             }}
           >
+            <div style={{ padding: "8px 8px 0", display: "flex", justifyContent: "flex-end" }}>
+              <ApplyNowButton sessionId={sessionId} onApplied={loadSkills} />
+            </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 6px" }}>
               {loading ? (
                 <div

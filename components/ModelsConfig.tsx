@@ -14,6 +14,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { TitleModelSetting } from "@/components/TitleModelSetting";
 import { BuiltinModelsDetail } from "@/components/BuiltinModelsDetail";
+import { ApplyNowButton } from "./ApplyNowButton";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
 import type { DiscoveredModel } from "@/lib/model-discovery";
 
@@ -1581,11 +1582,13 @@ function AddProviderPicker({
 
 export function ModelsConfig({
   embedded = false,
+  sessionId,
   onCloseAction,
   onSavedAction,
   onRegisterFlush,
 }: {
   embedded?: boolean;
+  sessionId?: string | null;
   onCloseAction?: () => void;
   onSavedAction?: () => void;
   onRegisterFlush?: RegisterModelsFlush;
@@ -2091,6 +2094,7 @@ export function ModelsConfig({
               {t("desktop.cancel")}
             </button>
           )}
+          <ApplyNowButton sessionId={sessionId} />
           <button onClick={handleSave} disabled={saving || savedOk} style={{
             position: "relative",
             padding: "6px 16px",

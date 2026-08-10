@@ -1698,7 +1698,7 @@ function publishSessionBus(event: SessionBusEvent): void {
  * Deliver an event to the bus. `message_update` events are coalesced per
  * sessionId; every other whitelisted event flushes immediately.
  */
-function broadcastSessionBusEvent(type: string, sessionId: string, payload: unknown): void {
+export function broadcastSessionBusEvent(type: string, sessionId: string, payload: unknown): void {
   const listeners = globalThis.__piSessionBusListeners;
   if (!listeners || listeners.size === 0) return;
 

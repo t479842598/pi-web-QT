@@ -23,7 +23,7 @@ import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 export function VirtualizedMessageList({
   scrollElementRef,
   items,
-  estimateSize = 130,
+  estimateSize = 120,
   overscan = 8,
   virtualizerRef,
 }: {
@@ -53,23 +53,22 @@ export function VirtualizedMessageList({
   // correct while the user is NOT scrolling — during a scroll-up gesture it
   // fights the user (every newly measured short row drags the viewport back
   // toward the bottom, and the total-size shrink then clamps scrollTop to
-  // the new max: the “scroll up → bounce back to bottom” loop). So:
-  //   • while a scroll gesture is in flight (wheel/touch/programmatic) →
-  //     never adjust (no fighting, no cascade);
-  //   • while stationary → adjust only rows ENTIRELY above the fold
-  //     (keeps the anchored content in place and prevents the shrink
-  //     clamp); rows spanning the fold (a streaming message growing at its
-  //     bottom) are left alone — adjusting them would drag the viewport
-  //     downward on every growth (#1218).
+  // the new max: the “scroll up → bounce back to bottom” loop).
+  //
+  // We disable it ENTIRELY (always false), not just during gestures:
+  // measurements keep landing AFTER the gesture ends (rows mount and
+  // ResizeObserver reports while isScrolling is already false), and the
+  // delayed compensation then shifts scrollTop by the accumulated
+  // estimate→measured delta — positive deltas (tall rows measuring from the
+  // 60px estimate) drag the viewport straight back toward the bottom the
+  // moment the user stops scrolling. scrollTop must be owned exclusively by
+  // the user (wheel/touch) and by useAgentSession's scrollToBottom; the
+  // virtualizer never adjusts it on its own.
   // In tanstack-virtual 3.17.7 this is a Virtualizer INSTANCE field: passing
   // it as an option merges it into `options`, but resizeItem reads the
   // instance field, so an option never takes effect. Assign it directly;
   // setOptions does not overwrite the instance field.
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
-    if (instance.isScrolling) return false;
-    const offset = instance.scrollOffset ?? 0;
-    return item.start + item.size <= offset;
-  };
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
 
   if (virtualizerRef) virtualizerRef.current = virtualizer;
 
@@ -124,6 +123,7 @@ export function VirtualizedMessageList({
             left: 0,
             width: "100%",
             minWidth: 0,
+            overflow: "hidden",
             transform: `translateY(${item.start}px)`,
           }}
         >

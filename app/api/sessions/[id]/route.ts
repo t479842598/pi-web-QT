@@ -10,7 +10,8 @@ import {
   buildSessionContext,
   readSessionHeader,
 } from "@/lib/session-reader";
-import { getRpcSession } from "@/lib/rpc-manager";
+import { getRpcSession, broadcastSessionBusEvent } from "@/lib/rpc-manager";
+import { mutateSettingsJson } from "@/lib/settings-lock";
 
 // BranchNavigator still traverses recursively, so keep the response tree shallow.
 const MAX_PROJECTED_TREE_DEPTH = 200;
@@ -169,23 +170,38 @@ export async function GET(
   }
 }
 
-// PATCH /api/sessions/[id]  body: { name: string }
+// PATCH /api/sessions/[id]  body: { name?: string, pinned?: boolean }
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   try {
-    const { name } = await req.json() as { name?: string };
-    if (typeof name !== "string") {
-      return NextResponse.json({ error: "name is required" }, { status: 400 });
+    const { name, pinned } = await req.json() as { name?: string; pinned?: boolean };
+    if (typeof name !== "string" && typeof pinned !== "boolean") {
+      return NextResponse.json({ error: "name or pinned required" }, { status: 400 });
     }
-    const filePath = await resolveSessionPath(id);
-    if (!filePath) {
-      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (typeof name === "string") {
+      const filePath = await resolveSessionPath(id);
+      if (!filePath) {
+        return NextResponse.json({ error: "Session not found" }, { status: 404 });
+      }
+      const sm = SessionManager.open(filePath);
+      sm.appendSessionInfo(name.trim());
     }
-    const sm = SessionManager.open(filePath);
-    sm.appendSessionInfo(name.trim());
+    if (typeof pinned === "boolean") {
+      await mutateSettingsJson((settings) => {
+        const pins = Array.isArray(settings.sessionPins) ? [...(settings.sessionPins as unknown[])] : [];
+        const next = pinned
+          ? [...new Set([...pins, id])]
+          : pins.filter((p) => p !== id);
+        settings.sessionPins = next;
+        return { settings };
+      });
+      // Broadcast to all connected clients so other windows / devices refresh
+      // their session lists immediately.
+      broadcastSessionBusEvent("session_pin_changed", id, { pinned });
+    }
     invalidateSessionListCache();
     return NextResponse.json({ ok: true });
   } catch (error) {

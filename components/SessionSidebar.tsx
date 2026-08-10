@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, Lightning, MagnifyingGlass, PencilSimple, Plug, Plus, Sparkle, Stack, Trash, UploadSimple, X } from "@phosphor-icons/react";
+import { ArrowClockwise, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, GitFork, Lightning, List, MagnifyingGlass, PencilSimple, Plug, Plus, PushPin, Sparkle, Stack, StackSimple, Trash, UploadSimple, X } from "@phosphor-icons/react";
 import type { SessionInfo } from "@/lib/types";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { useI18n } from "@/hooks/useI18n";
@@ -273,6 +273,126 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
   return roots;
 }
 
+// ── Session grouped-accordion view ──────────────────────────────────────────
+
+type SessionViewStyle = "list" | "groups";
+const SESSION_VIEW_STYLE_KEY = "pi-web:session-view-style";
+
+type GroupKey = "pinned" | "today" | "yesterday" | "older";
+
+/** One row in a grouped session view — session plus its fork depth. */
+interface SessionGroupRow {
+  session: SessionInfo;
+  /** Fork depth: 0 = not a fork (or flat group); 1 = direct fork of a listed session, etc. */
+  forkDepth: number;
+}
+
+interface SessionGroup {
+  key: GroupKey;
+  rows: SessionGroupRow[];
+}
+
+const GROUP_LABEL_KEYS: Record<GroupKey, string> = {
+  pinned: "desktop.pinned",
+  today: "desktop.today",
+  yesterday: "desktop.yesterday",
+  older: "desktop.older",
+};
+
+/** Local-timezone YYYY-MM-DD key for a Date. */
+function toLocalDayKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Partition sessions into Pinned / Today / Yesterday / Older accordion groups.
+ * Pinned sessions are shown BOTH in the pinned group and in their original
+ * time-based group (double display).
+ *
+ * Within each group, fork children are ordered right below their parent
+ * (depth-first), and every row carries its fork depth so the compact row can
+ * indent forks the way the tree view does. The pinned group is rendered flat
+ * (forkDepth forced to 0 — no indent there).
+ */
+function buildSessionGroups(sessions: SessionInfo[], allSessions: SessionInfo[]): SessionGroup[] {
+  const now = new Date();
+  const todayKey = toLocalDayKey(now);
+  const yesterdayKey = toLocalDayKey(new Date(now.getTime() - 86400000));
+
+  const groups: Record<GroupKey, SessionInfo[]> = { pinned: [], today: [], yesterday: [], older: [] };
+  for (const s of sessions) {
+    const day = toLocalDayKey(new Date(s.modified));
+    if (s.pinned) groups.pinned.push(s);
+    if (day === todayKey) groups.today.push(s);
+    else if (day === yesterdayKey) groups.yesterday.push(s);
+    else groups.older.push(s);
+  }
+
+  const order: GroupKey[] = ["pinned", "today", "yesterday", "older"];
+  return order
+    .map((key) => ({
+      key,
+      rows: orderGroupRows(groups[key], allSessions, key === "pinned"),
+    }))
+    .filter((g) => g.rows.length > 0);
+}
+
+/**
+ * Order one group's sessions so fork children sit immediately below their
+ * parent (depth-first, roots sorted by modified desc, children of one parent
+ * sorted the same way). Computes each row's fork depth by walking the
+ * parentSessionId chain in the FULL session list (parents may live in another
+ * group). `flat` (pinned group) keeps the ordering but forces forkDepth to 0.
+ */
+function orderGroupRows(sessions: SessionInfo[], allSessions: SessionInfo[], flat: boolean): SessionGroupRow[] {
+  if (sessions.length === 0) return [];
+  const byId = new Map(allSessions.map((s) => [s.id, s]));
+
+  const forkDepthOf = (session: SessionInfo): number => {
+    let depth = 0;
+    let cur: SessionInfo | undefined = session;
+    const visited = new Set<string>();
+    while (cur?.parentSessionId && !visited.has(cur.id)) {
+      visited.add(cur.id);
+      const parent = byId.get(cur.parentSessionId);
+      if (!parent) break;
+      cur = parent;
+      depth++;
+    }
+    return depth;
+  };
+
+  // Map of in-group parent id → its fork children.
+  const inGroup = new Set(sessions.map((s) => s.id));
+  const children = new Map<string, SessionInfo[]>();
+  for (const s of sessions) {
+    if (s.parentSessionId && inGroup.has(s.parentSessionId)) {
+      const arr = children.get(s.parentSessionId) ?? [];
+      arr.push(s);
+      children.set(s.parentSessionId, arr);
+    }
+  }
+  const byModifiedDesc = (a: SessionInfo, b: SessionInfo) => b.modified.localeCompare(a.modified);
+  const roots = sessions.filter((s) => !(s.parentSessionId && inGroup.has(s.parentSessionId))).sort(byModifiedDesc);
+  for (const arr of children.values()) arr.sort(byModifiedDesc);
+
+  const rows: SessionGroupRow[] = [];
+  const emitted = new Set<string>();
+  const visit = (s: SessionInfo) => {
+    if (emitted.has(s.id)) return;
+    emitted.add(s.id);
+    rows.push({ session: s, forkDepth: flat ? 0 : forkDepthOf(s) });
+    for (const child of children.get(s.id) ?? []) visit(child);
+  };
+  for (const root of roots) visit(root);
+  // Safety net for cyclic parent chains — never drop a row.
+  for (const s of sessions) visit(s);
+  return rows;
+}
+
 
 
 export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
@@ -317,6 +437,24 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const wtDropdownRef = useRef<HTMLDivElement>(null);
   const wtNewInputRef = useRef<HTMLInputElement>(null);
   const [sessionsOpen, setSessionsOpen] = useState(true);
+  const [viewStyle, setViewStyle] = useState<SessionViewStyle>(() => {
+    if (typeof window === "undefined") return "list";
+    try {
+      return window.localStorage.getItem(SESSION_VIEW_STYLE_KEY) === "groups" ? "groups" : "list";
+    } catch {
+      return "list";
+    }
+  });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [groupOpen, setGroupOpen] = useState<Record<GroupKey, boolean>>({ pinned: true, today: true, yesterday: true, older: false });
+  const setViewStyleAndPersist = useCallback((style: SessionViewStyle) => {
+    setViewStyle(style);
+    try {
+      window.localStorage.setItem(SESSION_VIEW_STYLE_KEY, style);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [explorerKey, setExplorerKey] = useState(0);
   const [explorerUploadBusy, setExplorerUploadBusy] = useState(false);
@@ -460,7 +598,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       "session_info_changed",
       "agent_settled",
       "auto_compaction_end",
-      "compaction_end",
+      "session_pin_changed",
     ]);
     let throttleTimer: ReturnType<typeof setTimeout> | null = null;
     let scheduled = false;
@@ -788,6 +926,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     onSelectSession(s);
   }, [onSelectSession]);
 
+  /**
+   * Optimistic pin/unpin: flip the local row immediately so the grouped view
+   * reorders without waiting for the server round-trip, then persist in the
+   * background and roll back (with a resync) if the PATCH fails.
+   */
+  const handlePinChange = useCallback((session: SessionInfo, pinned: boolean) => {
+    setAllSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, pinned } : s)));
+    void fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    }).then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    }).catch(() => {
+      // Roll back the optimistic flip and resync from the server.
+      setAllSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, pinned: !pinned } : s)));
+      void loadSessions(false);
+    });
+  }, [loadSessions]);
+
   const handleNewSession = useCallback(() => {
     if (!selectedCwd) return;
     // Generate a temporary UUID client-side — no backend call needed.
@@ -873,8 +1031,29 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         }
       : null);
 
+  // Search filter — applies to BOTH views (title or branch name, fuzzy substring)
+  const searchFilteredSessions = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return filteredSessions;
+    return filteredSessions.filter((s) => {
+      const title = (s.name || s.firstMessage || "").toLowerCase();
+      const branch = (s.worktreeBranch || "").toLowerCase();
+      return title.includes(q) || branch.includes(q);
+    });
+  }, [searchQuery, filteredSessions]);
+
   // Build parent-child tree within the filtered set
-  const sessionTree = buildSessionTree(filteredSessions);
+  const sessionTree = useMemo(() => buildSessionTree(searchFilteredSessions), [searchFilteredSessions]);
+
+  // Grouped accordion view partitions the search-filtered set.
+  // timeTick forces re-evaluation every 60 s so Today / Yesterday / Older
+  // automatically update when the day changes.
+  const [timeTick, setTimeTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTimeTick((t) => t + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const sessionGroups = useMemo(() => buildSessionGroups(searchFilteredSessions, allSessions), [searchFilteredSessions, allSessions, timeTick]);
 
   const currentWt = worktreeState?.worktrees.find((w) => samePath(w.path, selectedCwd ?? ""))
     ?? worktreeState?.worktrees.find((w) => w.isMain)
@@ -931,7 +1110,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     );
   };
   const projectList = (
-    <div style={{ maxHeight: "min(32vh, 240px)", overflowY: "auto", flex: 1, minHeight: 0, padding: "4px" }}>
+    <div className="scroll-overlay" style={{ maxHeight: "min(32vh, 240px)", flex: 1, minHeight: 0, padding: "4px" }}>
       {visibleProjects.length > 0 && (
         <div style={{ padding: "5px 8px 3px", fontSize: 10, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
           {t("desktop.recentProjects")}
@@ -1056,7 +1235,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {showWorktreeSwitcher && <CaretDown size={12} weight="regular" style={{ flexShrink: 0, transition: "transform 0.12s", transform: isWorktreeDropdownOpen ? "rotate(180deg)" : "none" }} aria-hidden="true" />}
             </button>
             <AnimatedDropdown open={showWorktreeSwitcher && isWorktreeDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden" }}>
-              <div style={{ maxHeight: "min(40vh, 300px)", overflowY: "auto" }}>
+              <div className="scroll-overlay" style={{ maxHeight: "min(40vh, 300px)" }}>
                 {worktreeState?.worktrees.map((wt) => {
                   const isCurrent = samePath(wt.path, selectedCwd ?? "") || (wt.isMain && !worktreeState.worktrees.some((w) => samePath(w.path, selectedCwd ?? "")));
                   return (
@@ -1146,6 +1325,47 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             <CaretRight size={9} weight="regular" style={{ transform: sessionsOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} aria-hidden="true" />
             {t("desktop.sessions")}
           </button>
+          {/* View style switcher — list / grouped accordion */}
+          <div style={{ display: "flex", gap: 2, flexShrink: 0, marginRight: 2 }} role="group" aria-label="Session view">
+            <button
+              onClick={() => setViewStyleAndPersist("list")}
+              title={t("desktop.sessionViewList")}
+              aria-label={t("desktop.sessionViewList")}
+              aria-pressed={viewStyle === "list"}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 22, height: 22, padding: 0,
+                background: viewStyle === "list" ? "var(--bg-selected)" : "none",
+                border: "none", borderRadius: 5, flexShrink: 0,
+                color: viewStyle === "list" ? "var(--accent)" : "var(--text-dim)",
+                cursor: "pointer",
+                transition: "color 0.12s, background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (viewStyle !== "list") { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text-muted)"; } }}
+              onMouseLeave={(e) => { if (viewStyle !== "list") { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-dim)"; } }}
+            >
+              <List size={12} weight="regular" aria-hidden="true" />
+            </button>
+            <button
+              onClick={() => setViewStyleAndPersist("groups")}
+              title={t("desktop.sessionViewGroups")}
+              aria-label={t("desktop.sessionViewGroups")}
+              aria-pressed={viewStyle === "groups"}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 22, height: 22, padding: 0,
+                background: viewStyle === "groups" ? "var(--bg-selected)" : "none",
+                border: "none", borderRadius: 5, flexShrink: 0,
+                color: viewStyle === "groups" ? "var(--accent)" : "var(--text-dim)",
+                cursor: "pointer",
+                transition: "color 0.12s, background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (viewStyle !== "groups") { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text-muted)"; } }}
+              onMouseLeave={(e) => { if (viewStyle !== "groups") { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-dim)"; } }}
+            >
+              <StackSimple size={12} weight="regular" aria-hidden="true" />
+            </button>
+          </div>
           <button
             onClick={handleNewSession}
             disabled={!selectedCwd}
@@ -1367,7 +1587,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   overflow: "hidden",
                 }}
               >
-                  <div style={{ maxHeight: "min(40vh, 300px)", overflowY: "auto" }}>
+                  <div className="scroll-overlay" style={{ maxHeight: "min(40vh, 300px)" }}>
                     {worktreeState.worktrees.map((wt) => {
                       const isCurrent = samePath(wt.path, selectedCwd ?? "") || (wt.isMain && !worktreeState.worktrees.some((w) => samePath(w.path, selectedCwd ?? "")));
                       if (wtConfirmRemove === wt.path) {
@@ -1601,7 +1821,32 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       {/* Session list — when both panels open, uses intelligent max-height;
            when explorer is collapsed, expands to fill remaining space. */}
       {sessionsOpen && (
-        <div style={{ flex: explorerOpen ? "0 1 auto" : "1 1 0", overflowY: "auto", padding: "0", minHeight: 0, maxHeight: explorerOpen ? "min(40%, 360px)" : "none" }}>
+        <div className="scroll-overlay" style={{ flex: explorerOpen ? "0 1 auto" : "1 1 0", padding: "0", minHeight: 0, maxHeight: explorerOpen ? "min(40%, 360px)" : "none" }}>
+          {/* Search bar — visible in both views, sticky under the header */}
+          <div style={{ position: "sticky", top: 0, zIndex: 1, padding: "4px 10px 6px", background: "var(--bg)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-hover)", borderRadius: 8, padding: "0 9px", height: 30 }}>
+              <MagnifyingGlass size={13} color="var(--text-dim)" style={{ flexShrink: 0 }} aria-hidden="true" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t("desktop.searchSessions")}
+                aria-label={t("desktop.searchSessions")}
+                style={{ flex: 1, minWidth: 0, background: "none", border: "none", outline: "none", color: "var(--text)", fontSize: 12, fontFamily: "var(--font-mono)" }}
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  aria-label={t("i18n.close")}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, padding: 0, background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", borderRadius: 4, flexShrink: 0 }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-selected)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                >
+                  <X size={11} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          </div>
+
           {loading && (
             <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
               {t("desktop.loading")}
@@ -1612,28 +1857,66 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {error}
             </div>
           )}
-          {!loading && !error && filteredSessions.length === 0 && (
-            <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-              {t("desktop.noSessionsFound")}
-            </div>
+          {!loading && !error && viewStyle === "list" && (
+            <>
+              {searchFilteredSessions.length === 0 && (
+                <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
+                  {t(searchQuery.trim() ? "desktop.noSearchResults" : "desktop.noSessionsFound")}
+                </div>
+              )}
+              {sessionTree.map((node) => (
+                <SessionTreeItem
+                  key={node.session.id}
+                  node={node}
+                  selectedSessionId={selectedSessionId}
+                  runningSessionIds={runningSessionIds}
+                  unreadSessionIds={unreadSessionIds}
+                  onSelectSession={handleSelectSessionFromList}
+                  onRenamed={loadSessions}
+                  selectedSessionStats={selectedSessionStats}
+                  onSessionDeleted={(id) => {
+                    onSessionDeleted?.(id);
+                    loadSessions();
+                  }}
+                  depth={0}
+                />
+              ))}
+            </>
           )}
-          {sessionTree.map((node) => (
-            <SessionTreeItem
-              key={node.session.id}
-              node={node}
-              selectedSessionId={selectedSessionId}
-              runningSessionIds={runningSessionIds}
-              unreadSessionIds={unreadSessionIds}
-              onSelectSession={handleSelectSessionFromList}
-              onRenamed={loadSessions}
-              selectedSessionStats={selectedSessionStats}
-              onSessionDeleted={(id) => {
-                onSessionDeleted?.(id);
-                loadSessions();
-              }}
-              depth={0}
-            />
-          ))}
+          {!loading && !error && viewStyle === "groups" && (
+            <>
+              {searchFilteredSessions.length === 0 && (
+                <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
+                  {t(searchQuery.trim() ? "desktop.noSearchResults" : "desktop.noSessionsFound")}
+                </div>
+              )}
+              {sessionGroups.map((group) => {
+                const searching = searchQuery.trim().length > 0;
+                const isOpen = searching ? true : groupOpen[group.key];
+                return (
+                  <AccordionGroup
+                    key={group.key}
+                    groupKey={group.key}
+                    label={t(GROUP_LABEL_KEYS[group.key])}
+                    rows={group.rows}
+                    isOpen={isOpen}
+                    onToggle={() => setGroupOpen((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                    onSelectSession={handleSelectSessionFromList}
+                    selectedSessionId={selectedSessionId}
+                    runningSessionIds={runningSessionIds}
+                    unreadSessionIds={unreadSessionIds}
+                    allSessions={allSessions}
+                    onPinChange={handlePinChange}
+                    onRenamed={loadSessions}
+                    onSessionDeleted={(id) => {
+                      onSessionDeleted?.(id);
+                      loadSessions();
+                    }}
+                  />
+                );
+              })}
+            </>
+          )}
         </div>
       )}
 
@@ -1730,7 +2013,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </button>
           </div>
           {explorerOpen && (
-            <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+            <div className="scroll-overlay" style={{ flex: 1, overflowX: "hidden" }}>
               <FileExplorer
                 ref={fileExplorerRef}
                 cwd={selectedCwd ?? selectedCwdProp!}
@@ -2522,7 +2805,7 @@ function SessionItem({
                       <X size={14} aria-hidden="true" />
                     </button>
                   </div>
-                  <div style={{ padding: "8px 6px", overflowY: "auto", flex: 1 }}>
+                  <div className="scroll-overlay" style={{ padding: "8px 6px", flex: 1 }}>
                     {titleModelLoading ? (
                       <div style={{ padding: "12px 8px", fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.loading")}</div>
                     ) : titleModels.length === 0 ? (
@@ -2568,6 +2851,345 @@ function SessionItem({
               </div>
             )}
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Accordion group card for the grouped session view. Header toggles expansion
+ * (chevron rotation + right-side Collapse/Expand hint), rows fade in with a
+ * small stagger when the group opens.
+ */
+function AccordionGroup({
+  groupKey, label, rows, isOpen, onToggle, onSelectSession, selectedSessionId,
+  runningSessionIds, unreadSessionIds, allSessions, onPinChange, onRenamed, onSessionDeleted,
+}: {
+  groupKey: GroupKey;
+  label: string;
+  rows: SessionGroupRow[];
+  isOpen: boolean;
+  onToggle: () => void;
+  onSelectSession: (s: SessionInfo) => void;
+  selectedSessionId: string | null;
+  runningSessionIds: Set<string>;
+  unreadSessionIds: Set<string>;
+  allSessions: SessionInfo[];
+  onPinChange?: (session: SessionInfo, pinned: boolean) => void;
+  onRenamed?: () => void;
+  onSessionDeleted?: (id: string) => void;
+}) {
+  const { t } = useI18n();
+  // All groups share the same card background — pinned is not tinted with the
+  // accent color, and older groups keep the same shade as today/yesterday.
+  const cardBg = "var(--bg-panel)";
+
+  return (
+    <div style={{ margin: "0 8px 6px", borderRadius: 10, background: cardBg, border: "1px solid var(--border)", overflow: "hidden" }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          width: "100%", padding: "7px 10px",
+          background: "none", border: "none",
+          color: "var(--text)", cursor: "pointer", textAlign: "left",
+        }}
+      >
+        <CaretDown size={11} weight="regular" aria-hidden="true" style={{ flexShrink: 0, transform: isOpen ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s" }} />
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text-muted)" }}>{label}</span>
+        <span style={{ background: "var(--bg-hover)", borderRadius: 999, padding: "0 6px", fontSize: 10, fontWeight: 600, color: "var(--text-muted)", lineHeight: "16px", flexShrink: 0 }}>{rows.length}</span>
+        <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>{isOpen ? t("desktop.collapseGroup") : t("desktop.expandGroup")}</span>
+      </button>
+      {isOpen && (
+        <div style={{ padding: "2px 4px 6px" }}>
+          {rows.map((row, index) => (
+            <div key={row.session.id} style={{ animation: "accordion-row-in 0.14s ease-out both", animationDelay: `${Math.min(index, 10) * 20}ms` }}>
+              <SessionCompactRow
+                session={row.session}
+                forkDepth={row.forkDepth}
+                isSelected={row.session.id === selectedSessionId}
+                isRunning={runningSessionIds.has(row.session.id)}
+                isUnread={unreadSessionIds.has(row.session.id)}
+                onClick={() => onSelectSession(row.session)}
+                allSessions={allSessions}
+                onPinChange={onPinChange}
+                onRenamed={onRenamed}
+                onDeleted={onSessionDeleted}
+                inPinnedGroup={groupKey === "pinned"}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Compact two-field row for the grouped view: title (line 1) + branch chip and
+ * optional fork indicator (line 2). No inline time — the raw modified date is
+ * exposed via the title's tooltip. Hover reveals pin / auto-name / rename /
+ * delete actions.
+ */
+function SessionCompactRow({
+  session, forkDepth = 0, isSelected, isRunning, isUnread, onClick, allSessions, onPinChange, onRenamed, onDeleted, inPinnedGroup = false,
+}: {
+  session: SessionInfo;
+  /** Indent level for fork children — mirrors the tree view's padding. */
+  forkDepth?: number;
+  isSelected: boolean;
+  isRunning?: boolean;
+  isUnread?: boolean;
+  onClick: () => void;
+  allSessions: SessionInfo[];
+  onPinChange?: (session: SessionInfo, pinned: boolean) => void;
+  onRenamed?: () => void;
+  onDeleted?: (id: string) => void;
+  /** True when this row renders inside the "pinned" accordion group — the
+   *  persistent pin badge is redundant there, so it is hidden. */
+  inPinnedGroup?: boolean;
+}) {
+  const { t } = useI18n();
+  const [hovered, setHovered] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [autoNaming, setAutoNaming] = useState(false);
+  const [forkTooltip, setForkTooltip] = useState(false);
+  const [forkTooltipPos, setForkTooltipPos] = useState<{ top: number; left: number } | null>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
+  const parentSession = session.parentSessionId ? allSessions.find((s) => s.id === session.parentSessionId) : undefined;
+
+  const startRename = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenameValue(title);
+    setRenaming(true);
+  };
+
+  const commitRename = async () => {
+    const name = renameValue.trim();
+    setRenaming(false);
+    if (!name || name === (session.name ?? "")) return;
+    try {
+      await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      onRenamed?.();
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleAutoName = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (autoNaming || session.messageCount === 0) return;
+    setAutoNaming(true);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/auto-name`, { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as { title?: string; error?: string };
+      if (!res.ok || !body.title) throw new Error(body.error || `HTTP ${res.status}`);
+      onRenamed?.();
+    } catch {
+      // ignore
+    } finally {
+      setAutoNaming(false);
+    }
+  };
+
+  const handlePin = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Optimistic — the parent flips the row immediately and persists in the
+    // background, so pinning feels instant instead of waiting for the fetch.
+    onPinChange?.(session, !session.pinned);
+  };
+
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (e.shiftKey) void performDelete();
+    else setConfirmDelete(true);
+  };
+
+  const performDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      onDeleted?.(session.id);
+    } catch {
+      setDeleting(false);
+    }
+  };
+
+  const showForkTooltip = (e: React.MouseEvent) => {
+    const rect = rowRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setForkTooltipPos({ top: rect.top + rect.height / 2 - 15, left: rect.right + 8 });
+    setForkTooltip(true);
+  };
+
+  return (
+    <div
+      ref={rowRef}
+      onClick={confirmDelete || renaming ? undefined : onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => { setHovered(false); setForkTooltip(false); }}
+      style={{
+        display: "flex", flexDirection: "column", justifyContent: "center",
+        padding: "5px 8px 5px 10px",
+        paddingLeft: 10 + forkDepth * 14,
+        position: "relative",
+        cursor: confirmDelete || renaming ? "default" : "pointer",
+        background: confirmDelete
+          ? "rgba(239,68,68,0.06)"
+          : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
+        borderLeft: confirmDelete
+          ? "2px solid #ef4444"
+          : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
+        borderRadius: 6,
+        transition: "background 0.1s",
+        opacity: deleting ? 0.5 : 1,
+      }}
+    >
+      {/* Fork indent guide line — one vertical tick per depth level, aligned
+          with the padding so forks read as children of the session above. */}
+      {forkDepth > 0 && (
+        <span aria-hidden="true" style={{ position: "absolute", left: 12 + (forkDepth - 1) * 14, top: 2, bottom: 2, width: 2, borderRadius: 1, background: "var(--border)", pointerEvents: "none" }} />
+      )}
+      {confirmDelete ? (
+        <>
+          <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {t("desktop.deleteSession", { title: `"${title.slice(0, 22)}${title.length > 22 ? "…" : ""}"` })}
+          </div>
+          <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+            <button onClick={(e) => { e.stopPropagation(); void performDelete(); }} style={{ display: "flex", alignItems: "center", gap: 4, height: 28, padding: "0 11px", background: "#ef4444", border: "none", borderRadius: 6, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+              <Trash size={12} weight="regular" aria-hidden="true" />
+              {t("desktop.delete")}
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }} style={{ height: 28, padding: "0 11px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
+              {t("desktop.cancel")}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Line 1: status indicator + title + hover actions */}
+          <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, height: 20 }}>
+            {isRunning ? <RunningSessionIndicator /> : isUnread ? <UnreadSessionIndicator /> : null}
+            {renaming ? (
+              <input
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
+                  if (e.key === "Escape") { e.preventDefault(); setRenaming(false); }
+                }}
+                aria-label={t("desktop.rename")}
+                style={{ flex: 1, minWidth: 0, height: 18, margin: 0, padding: "0 4px", border: "1px solid var(--accent)", borderRadius: 3, outline: "none", background: "color-mix(in srgb, var(--accent) 18%, var(--bg))", color: "var(--text)", fontSize: 12 }}
+              />
+            ) : (
+              <span title={session.modified} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flex: 1, fontSize: 12, fontWeight: isSelected ? 500 : 400, color: "var(--text)" }}>
+                {title}
+              </span>
+            )}
+            {hovered && !renaming && (
+              <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
+                <button
+                  onClick={handlePin}
+                  title={session.pinned ? t("desktop.unpin") : t("desktop.pin")}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: session.pinned ? "var(--accent)" : "var(--text-dim)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = session.pinned ? "var(--accent)" : "var(--text-muted)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = session.pinned ? "var(--accent)" : "var(--text-dim)"; }}
+                >
+                  <PushPin size={12} weight={session.pinned ? "fill" : "regular"} aria-hidden="true" />
+                </button>
+                <button
+                  onClick={handleAutoName}
+                  disabled={autoNaming || session.messageCount === 0}
+                  title={session.messageCount === 0 ? t("desktop.titleNeedsMessages") : autoNaming ? t("desktop.generatingTitle") : t("desktop.generateTitle")}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--text-dim)", cursor: autoNaming || session.messageCount === 0 ? "default" : "pointer", flexShrink: 0, opacity: autoNaming ? 0.7 : session.messageCount === 0 ? 0.35 : 1, transition: "color 0.12s" }}
+                  onMouseEnter={(e) => { if (autoNaming || session.messageCount === 0) return; e.currentTarget.style.color = "var(--accent)"; }}
+                  onMouseLeave={(e) => { if (autoNaming || session.messageCount === 0) return; e.currentTarget.style.color = "var(--text-dim)"; }}
+                >
+                  {autoNaming ? (
+                    <svg style={{ animation: "spin 1s linear infinite" }} width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+                      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <Sparkle size={12} weight="regular" aria-hidden="true" />
+                  )}
+                </button>
+                <button
+                  onClick={startRename}
+                  title={t("desktop.rename")}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--text-dim)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+                >
+                  <PencilSimple size={12} weight="regular" aria-hidden="true" />
+                </button>
+                <button
+                  onClick={handleDeleteClick}
+                  title={t("desktop.deleteWithShift")}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--text-dim)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+                >
+                  <Trash size={12} weight="regular" aria-hidden="true" />
+                </button>
+              </div>
+            )}
+            {/* Persistent pin badge — shown for pinned sessions outside the
+                pinned group; hidden while hovering (action buttons appear). */}
+            {session.pinned && !inPinnedGroup && !hovered && (
+              <span
+                title={t("desktop.pinned")}
+                style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", opacity: 0.85 }}
+              >
+                <PushPin size={11} weight="fill" color="var(--accent)" aria-hidden="true" />
+              </span>
+            )}
+          </div>
+          {/* Line 2: relative time · message count · git branch chip · fork indicator */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 1, minWidth: 0, height: 16 }}>
+            <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>{formatRelativeTime(session.modified, t)}</span>
+            <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>{t("desktop.messagesCount", { count: session.messageCount })}</span>
+            {session.worktreeBranch && (
+              <span title={session.worktreeBranch} style={{ display: "inline-flex", alignItems: "center", gap: 3, maxWidth: "60%", background: "var(--bg-hover)", borderRadius: 4, padding: "0 5px", height: 15, minWidth: 0, overflow: "hidden" }}>
+                <GitBranch size={8} weight="regular" color="var(--text-dim)" style={{ flexShrink: 0 }} aria-hidden="true" />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", lineHeight: "15px" }}>{session.worktreeBranch}</span>
+              </span>
+            )}
+            {session.parentSessionId && (
+              <span
+                style={{ marginLeft: "auto", flexShrink: 0, display: "inline-flex", alignItems: "center" }}
+                onMouseEnter={showForkTooltip}
+                onMouseLeave={() => setForkTooltip(false)}
+              >
+                <GitFork size={10} weight="regular" color="var(--text-dim)" style={{ cursor: "help" }} aria-hidden="true" />
+              </span>
+            )}
+          </div>
+          {forkTooltip && forkTooltipPos && (() => {
+            const parentTitle = parentSession
+              ? (parentSession.name || parentSession.firstMessage.slice(0, 30) || parentSession.id.slice(0, 8))
+              : "";
+            return (
+              <div style={{ position: "fixed", top: forkTooltipPos.top, left: forkTooltipPos.left, zIndex: 3000, background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px", boxShadow: "0 6px 20px rgba(0,0,0,0.2)", fontSize: 10.5, color: "var(--text-muted)", whiteSpace: "nowrap", pointerEvents: "none", animation: "plan-card-in 0.12s ease-out" }}>
+                {t("desktop.forkedFrom", { title: parentTitle || "—" })}
+              </div>
+            );
+          })()}
         </>
       )}
     </div>

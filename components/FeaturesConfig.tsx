@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Eye, SquaresFour } from "@phosphor-icons/react";
-import type { SafeVisionConfig } from "@/lib/vision-config";
+import { SquaresFour } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { SettingCard, SettingRow, SettingRowLast, SettingNote } from "./SettingCard";
 import { SettingToggle } from "./SettingToggle";
@@ -11,10 +10,6 @@ import { normalizeCollaborationMode, normalizeTokenMode, normalizeToolApprovalMo
 
 interface FeaturesState {
   tasksBoard: boolean;
-}
-
-function SecretField({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder?: string }) {
-  return <input type="password" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12, width: "min(360px, 100%)" }} />;
 }
 
 /** Broadcast when a feature toggle is saved so AppShell can react in real time. */
@@ -106,20 +101,15 @@ export function FeaturesConfig() {
   const [modes, setModes] = useState<ModeSettings | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [vision, setVision] = useState<SafeVisionConfig>({ provider: "custom", baseUrl: "", apiKey: "", model: "", maxTokens: 4096, hasApiKey: false });
-  const [visionKey, setVisionKey] = useState("");
-  const [visionSaved, setVisionSaved] = useState(false);
-  const [visionError, setVisionError] = useState<string | null>(null);
 
   // Load current feature toggles on mount.
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const [featuresRes, modesRes, visionRes] = await Promise.all([
+        const [featuresRes, modesRes] = await Promise.all([
           fetch("/api/features"),
           fetch("/api/modes"),
-          fetch("/api/vision-config"),
         ]);
         if (!cancelled && featuresRes.ok) {
           const data = await featuresRes.json() as Partial<FeaturesState>;
@@ -133,10 +123,6 @@ export function FeaturesConfig() {
             toolApprovalMode: normalizeToolApprovalMode(data.toolApprovalMode),
             permissionRules: data.permissionRules ?? { allow: [], ask: [], deny: [] },
           });
-        }
-        if (!cancelled && visionRes.ok) {
-          const data = await visionRes.json() as SafeVisionConfig;
-          setVision(data);
         }
         if (!cancelled) setLoaded(true);
       } catch {
@@ -168,28 +154,6 @@ export function FeaturesConfig() {
       setSaving(false);
     }
   }, []);
-
-  const saveVision = useCallback(async () => {
-    setSaving(true);
-    setVisionError(null);
-    setVisionSaved(false);
-    try {
-      const response = await fetch("/api/vision-config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...vision, ...(visionKey ? { apiKey: visionKey } : {}) }),
-      });
-      const data = await response.json() as SafeVisionConfig & { error?: string };
-      if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
-      setVision(data);
-      setVisionKey("");
-      setVisionSaved(true);
-    } catch (error) {
-      setVisionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSaving(false);
-    }
-  }, [vision, visionKey]);
 
   const updateMode = useCallback(async (patch: Partial<ModeSettings>) => {
     setSaving(true);
@@ -242,39 +206,6 @@ export function FeaturesConfig() {
                   }
                   description={t("desktop.featuresTasksBoardDesc")}
                 />
-              </SettingRowLast>
-            </SettingCard>
-
-            <SettingCard>
-              <SettingRow>
-                <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "12px 0" }}>
-                  <Eye size={15} aria-hidden="true" />
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.visionConfig")}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t("desktop.visionConfigDesc")}</div>
-                  </div>
-                </div>
-              </SettingRow>
-              <SettingRow>
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 180px) 1fr", gap: 8, alignItems: "center", padding: "8px 0" }}>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.visionProvider")}</span>
-                  <input value={vision.provider} onChange={(event) => setVision((current) => ({ ...current, provider: event.target.value }))} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }} />
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.visionBaseUrl")}</span>
-                  <input value={vision.baseUrl} onChange={(event) => setVision((current) => ({ ...current, baseUrl: event.target.value }))} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }} />
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.visionApiKey")}</span>
-                  <SecretField value={visionKey} onChange={setVisionKey} placeholder={vision.hasApiKey ? "••••••••" : "API key"} />
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.visionModel")}</span>
-                  <input value={vision.model} onChange={(event) => setVision((current) => ({ ...current, model: event.target.value }))} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }} />
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.visionMaxTokens")}</span>
-                  <input type="number" min={1} value={vision.maxTokens} onChange={(event) => setVision((current) => ({ ...current, maxTokens: Number(event.target.value) || 1 }))} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }} />
-                </div>
-              </SettingRow>
-              <SettingRowLast>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0" }}>
-                  <button type="button" onClick={() => void saveVision()} disabled={saving} style={{ padding: "7px 12px", border: "none", borderRadius: 6, background: "var(--accent)", color: "#fff", cursor: saving ? "wait" : "pointer", fontSize: 12 }}>{t("desktop.visionSave")}</button>
-                  {visionSaved && <span style={{ color: "#22c55e", fontSize: 12 }}>{t("desktop.visionSaved")}</span>}
-                  {visionError && <span style={{ color: "#ef4444", fontSize: 12 }}>{visionError}</span>}
-                </div>
               </SettingRowLast>
             </SettingCard>
 
