@@ -134,6 +134,8 @@ interface PiEntry {
     toolCallId?: string;
     toolName?: string;
     timestamp?: number;
+    provider?: string;
+    model?: string;
   };
 }
 
@@ -144,6 +146,7 @@ export function convertReasonixLine(
   line: string,
   parentId: string,
   timestamp: string,
+  model?: { provider: string; modelId: string } | null,
 ): { entry: PiEntry | null; reason?: string } {
   if (!line || line.trim() === "") return { entry: null, reason: "empty" };
 
@@ -224,6 +227,10 @@ export function convertReasonixLine(
         message: {
           role: "assistant",
           content: contentBlocks,
+          // Reasonix 行内消息不带模型信息；从文件名的 model_change 补充，
+          // 避免 pi SDK 用无 provider/model 的 assistant 消息覆盖会话模型
+          // （否则导入会话 context.model 变成空对象、模型选择器不可用）。
+          ...(model ? { provider: model.provider, model: model.modelId } : {}),
         },
       },
     };
@@ -324,9 +331,10 @@ export function convertReasonixFile(
 
   // 3. 转换对话内容
   let prevId: string = modelChangeId;
+  const knownModel = provider !== "unknown" && modelId !== "unknown";
 
   for (const line of lines) {
-    const result = convertReasonixLine(line, prevId, timestamp);
+    const result = convertReasonixLine(line, prevId, timestamp, knownModel ? { provider, modelId } : null);
     if (!result || !result.entry) continue;
     entries.push(result.entry);
     prevId = result.entry.id!;

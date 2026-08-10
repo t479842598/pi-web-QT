@@ -463,6 +463,7 @@ export const zhCNLocale = {
     "desktop.nameCommandDescription": "设置会话显示名称",
     "desktop.sessionCommandDescription": "显示会话消息、令牌和费用统计",
     "desktop.copyCommandDescription": "复制最后一条助手消息",
+    "desktop.selectModel": "选择模型",
     "desktop.selectProject": "选择项目",
     "desktop.selectProjectFirst": "请先选择项目",
     "desktop.noMatchingProjects": "没有匹配的项目",

@@ -2723,7 +2723,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             )}
 
             {/* Model selector — visible always, disabled during streaming */}
-            {modelOptions.length > 0 && currentName && onModelChange && (
+            {modelOptions.length > 0 && onModelChange && (
                 <div ref={dropdownRef} className="chat-input-toolbar-model" style={{ position: "relative", flex: isMobile ? "1 1 auto" : undefined, minWidth: 0 }}>
                   <button
                     onClick={(e) => {
@@ -2761,7 +2761,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     }}
                   >
                     <ProviderIcon id={model?.provider ?? "unknown"} size={14} />
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{currentName}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{currentName ?? t("desktop.selectModel")}</span>
                     <CaretDownIcon
                       size={11}
                       weight="bold"

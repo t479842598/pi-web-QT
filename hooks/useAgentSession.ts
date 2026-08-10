@@ -770,7 +770,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
 
-  const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
+  // A session whose saved model is invalid (e.g. Reasonix imports whose
+  // assistant messages carry no provider/model fields) makes the SDK resolve
+  // context.model to an empty object. Treat it as "no current model" so the
+  // UI falls back to the default instead of showing a dead selector.
+  const contextModel = data?.context.model;
+  const effectiveContextModel =
+    contextModel && contextModel.provider && contextModel.modelId ? contextModel : null;
+  const currentModel = currentModelOverride ?? effectiveContextModel ?? pendingModel ?? null;
   const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
 
   const sessionStats = useMemo(() => {

@@ -463,6 +463,7 @@ export const enLocale = {
     "desktop.nameCommandDescription": "Set the session display name",
     "desktop.sessionCommandDescription": "Show session message, token, and cost stats",
     "desktop.copyCommandDescription": "Copy the last assistant message",
+    "desktop.selectModel": "Select model",
     "desktop.selectProject": "Select project",
     "desktop.selectProjectFirst": "Select a project first",
     "desktop.noMatchingProjects": "No matching projects",
