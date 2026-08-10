@@ -18,10 +18,6 @@
 
 ![Pi Web 网页工作台](./docs/screenshots/web-workspace.png)
 
-<p align="center">
-  <img src="./docs/screenshots/mobile-web.png" alt="Pi Web 移动端界面" width="320" />
-</p>
-
 ## 功能
 
 | 能力 | 说明 |

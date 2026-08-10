@@ -6,10 +6,6 @@
 
 ![Pi Web workspace](./docs/screenshots/web-workspace.png)
 
-<p align="center">
-  <img src="./docs/screenshots/mobile-web.png" alt="Pi Web mobile interface" width="320" />
-</p>
-
 ## Features
 
 - Live Pi Agent responses through SSE, including tool calls and reasoning status.
