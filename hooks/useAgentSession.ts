@@ -431,6 +431,10 @@ export interface ChatInputHandle {
   insertIfEmpty: (content: string) => void;
   prependText: (text: string) => void;
   addImages: (files: File[]) => void;
+  replaceMessage?: (message: import("@/lib/types").UserMessage) => void;
+  addFiles?: (files: File[], dataTransfer?: DataTransfer | null) => void;
+  /** Current rendered height of the composer (px) — used for scroll keep-out. */
+  measureHeight?: () => number;
 }
 
 export interface AttachedImage {
@@ -1584,11 +1588,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const container = scrollContainerRef.current;
     const end = messagesEndRef.current;
     if (!container || !end) return;
+    // Keep-out gap between the last message and the viewport bottom. The
+    // composer below the list can grow taller than the fixed constant
+    // (image previews, multi-line input, yolo banner, queued-banner), so
+    // measure the live composer and never let the last line hide behind it.
+    const composerHeight = opts.chatInputRef?.current?.measureHeight?.() ?? 0;
+    const keepOut = Math.max(BOTTOM_KEEP_OUT_PX, composerHeight);
     const doScroll = () => {
       if (!container || !end) return;
       const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
       const spacerH = CHAT_BOTTOM_SPACER_PX;
-      const target = Math.max(0, endInContainer - spacerH - container.clientHeight + BOTTOM_KEEP_OUT_PX);
+      const target = Math.max(0, endInContainer - spacerH - container.clientHeight + keepOut);
       container.scrollTo({ top: target, behavior });
     };
     doScroll();

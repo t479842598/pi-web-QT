@@ -335,11 +335,13 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       const container = scrollContainerRef.current;
       const end = messagesEndRef.current;
       if (!container || !end) return;
+      const composerHeight = chatInputRef?.current?.measureHeight?.() ?? 0;
+      const keepOut = Math.max(BOTTOM_KEEP_OUT_PX, composerHeight);
       const doScroll = () => {
         if (!container || !end) return;
         const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
         const spacerH = CHAT_BOTTOM_SPACER_PX;
-        const target = Math.max(0, endInContainer - spacerH - container.clientHeight + BOTTOM_KEEP_OUT_PX);
+        const target = Math.max(0, endInContainer - spacerH - container.clientHeight + keepOut);
         container.scrollTo({ top: target, behavior: "auto" });
       };
       doScroll();
@@ -349,7 +351,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       // lands at the true bottom.
       window.setTimeout(doScroll, 200);
     });
-  }, [messagesEndRef, scrollContainerRef, updateChatFades]);
+  }, [messagesEndRef, scrollContainerRef, updateChatFades, chatInputRef]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;

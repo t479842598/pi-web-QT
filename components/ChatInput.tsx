@@ -119,6 +119,8 @@ export interface ChatInputHandle {
   prependText: (text: string) => void;
   addImages: (files: File[]) => void;
   addFiles: (files: File[], dataTransfer?: DataTransfer | null) => void;
+  /** Current rendered height of the composer (px) — used for scroll keep-out. */
+  measureHeight: () => number;
 }
 
 const TOOL_PRESETS = ["off", "default", "full"] as const;
@@ -468,6 +470,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
   const modelSearchRef = useRef<HTMLInputElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const controlsMenuRef = useRef<HTMLDivElement>(null);
@@ -580,6 +583,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         const text = references.join(" ");
         setValue((current) => current + (current && !current.endsWith(" ") ? " " : "") + text);
       }
+    },
+    measureHeight() {
+      return shellRef.current?.getBoundingClientRect().height ?? 0;
     },
   }));
 
@@ -2144,6 +2150,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           )}
           <div
             className={`chat-input-shell ${isStreaming && (onSteer || onFollowUp) ? "is-streaming" : ""} ${toolApprovalMode === "yolo" ? "is-yolo" : ""}`}
+            ref={shellRef}
             onClick={(e) => {
               const target = e.target as HTMLElement;
               if (!target.closest("button, input, select, [role=button]")) textareaRef.current?.focus();
