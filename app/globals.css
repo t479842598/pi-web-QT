@@ -1655,8 +1655,13 @@ span.linenumber {
 }
 .session-info-bar-popover.is-session {
   right: 0;
-  min-width: 320px;
-  max-width: 400px;
+  min-width: 360px;
+  /* Three side-by-side columns (messages / tokens / latest turn) plus the
+     info block above need room; a fixed 400px cap squeezed the last column
+     so its nowrap labels overlapped the middle one. Let the panel grow with
+     its content, clamped only by the viewport. */
+  width: max-content;
+  max-width: min(92vw, 620px);
 }
 .session-info-bar-popover.is-branches {
   left: 0;
@@ -1735,7 +1740,7 @@ span.linenumber {
 }
 .session-stats-compact-grid {
   display: grid;
-  grid-template-columns: max-content max-content;
+  grid-template-columns: minmax(0, max-content) minmax(0, auto);
   column-gap: 14px;
   row-gap: 3px;
   justify-content: start;
@@ -1771,6 +1776,9 @@ span.linenumber {
 .session-stats-column {
   flex: 1 1 auto;
   min-width: 0;
+  /* never let a column's nowrap labels bleed into the neighboring column
+     when the panel is squeezed by the viewport cap */
+  overflow: hidden;
 }
 .session-stats-copy {
   display: inline-flex;
