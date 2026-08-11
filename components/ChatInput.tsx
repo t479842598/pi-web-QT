@@ -568,7 +568,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       processImageFiles(files);
     },
     addFiles(files: File[], dataTransfer?: DataTransfer | null) {
-      if (isStreaming) return;
       const paths = droppedFilePaths(
         files,
         dataTransfer?.getData("text/uri-list") ?? "",
@@ -579,7 +578,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         .map((file, index) => file.type.startsWith("image/") ? null : droppedFileReference(file, paths[index]))
         .filter((reference): reference is string => Boolean(reference));
       if (imageFiles.length) processImageFiles(imageFiles);
-      if (references.length) {
+      // While the agent runs, non-image references are blocked: injecting
+      // paths into the textarea would corrupt the live prompt.
+      if (references.length && !isStreaming) {
         const text = references.join(" ");
         setValue((current) => current + (current && !current.endsWith(" ") ? " " : "") + text);
       }
@@ -590,7 +591,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }));
 
   const processImageFiles = useCallback(async (files: File[]) => {
-    if (isStreaming) return;
     const imageFiles = files.filter((f) => f.type.startsWith("image/"));
     if (!imageFiles.length) return;
     const newImages = await Promise.all(
@@ -610,7 +610,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       )
     );
     setAttachedImages((prev) => [...prev, ...newImages]);
-  }, [isStreaming]);
+  }, []);
 
   const toggleFavorite = useCallback((provider: string, modelId: string) => {
     setFavorites((prev) => {
@@ -830,7 +830,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       : (filteredSlashCommands.length === 1 ? "desktop.command" : "desktop.commands")
   )}`;
   const hasInputText = Boolean(value.trim());
-  const canQueueStreamingMessage = hasInputText && attachedImages.length === 0;
+  const canQueueStreamingMessage = hasInputText || attachedImages.length > 0;
 
   // ── @ file autocomplete ──────────────────────────────────────────────────
   // Recomputed from the text before the caret on every change/caret move.
@@ -1121,7 +1121,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const sendQueued = useCallback((mode: "steer" | "followup") => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
-    if (attachedImages.length) return;
     onAudioUnlock?.();
     const streamingBehavior = mode === "steer" ? "steer" : "followUp";
     if (msg.startsWith("/") && onPromptWithStreamingBehavior) {
@@ -1620,7 +1619,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         type="file"
         accept="image/*"
         multiple
-        disabled={isStreaming}
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
@@ -2173,7 +2171,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   className="chat-input-streaming-action chat-input-streaming-action-steer"
                   onClick={() => sendQueued("steer")}
                   disabled={!canQueueStreamingMessage}
-                  title={attachedImages.length ? t("desktop.imageAttachmentsCannotQueue") : t("desktop.injectMessageNow")}
+                  title={t("desktop.injectMessageNow")}
                   aria-label={t("desktop.steer")}
                 >
                   <ArrowElbowUpLeftIcon size={15} />
@@ -2185,7 +2183,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   className="chat-input-streaming-action"
                   onClick={() => sendQueued("followup")}
                   disabled={!canQueueStreamingMessage}
-                  title={attachedImages.length ? t("desktop.imageAttachmentsCannotQueue") : t("desktop.queueMessageAfterFinish")}
+                  title={t("desktop.queueMessageAfterFinish")}
                   aria-label={t("desktop.followUp")}
                 >
                   <SortDescendingIcon size={15} />

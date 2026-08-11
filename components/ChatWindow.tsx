@@ -431,7 +431,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
 
   const onDrop = useCallback((files: File[], dataTransfer: DataTransfer) => {
-    if (agentRunning) return;
+    // While the agent runs, only image attachments may be added (they queue
+    // with the next steer/follow-up). File references / other additions stay
+    // blocked because inserting text mid-run would corrupt the live prompt.
+    if (agentRunning) {
+      const images = files.filter((f) => f.type.startsWith("image/"));
+      if (images.length) chatInputRef?.current?.addImages(images);
+      return;
+    }
     chatInputRef?.current?.addFiles(files, dataTransfer);
   }, [agentRunning, chatInputRef]);
 
@@ -556,7 +563,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {isDragOver && !agentRunning && (
+      {isDragOver && (
         <div className="pointer-events-none absolute inset-0 z-50 flex animate-[drop-zone-in_0.15s_ease_both] items-center justify-center bg-[rgba(37,99,235,0.06)] backdrop-blur-[1px]">
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             {[0, 0.8, 1.6].map((delay) => (
