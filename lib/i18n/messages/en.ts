@@ -332,6 +332,8 @@ export const enLocale = {
     "desktop.loadingSession": "Loading session...",
     "desktop.scrollToLoadEarlierMessages": "Scroll up to load earlier messages ({count} hidden)",
     "desktop.scrollToBottom": "Scroll to latest",
+    "desktop.filesWritten": "Files changed",
+    "desktop.openWrittenFile": "Open {name}",
     "desktop.taskRunning": "running",
     "desktop.taskTodo": "todo",
     "desktop.taskStatusHint": "Task progress for the current project — click to open the board",

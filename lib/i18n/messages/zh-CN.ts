@@ -332,6 +332,8 @@ export const zhCNLocale = {
     "desktop.loadingSession": "正在加载会话...",
     "desktop.scrollToLoadEarlierMessages": "向上滚动以加载更早的消息（隐藏了 {count} 条）",
     "desktop.scrollToBottom": "滚动到底部",
+    "desktop.filesWritten": "改动的文件",
+    "desktop.openWrittenFile": "打开 {name}",
     "desktop.taskRunning": "进行中",
     "desktop.taskTodo": "待办",
     "desktop.taskStatusHint": "当前项目的任务进度，点击打开任务看板",

@@ -856,7 +856,10 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
     }
 
     fetchContent(filePath).then((d) => {
-      if (d?.language === "markdown" && initialDisplayMode !== "diff") setPreviewMode(true);
+      // HTML gets the same rendered-first treatment as markdown: a generated page
+      // is usually more useful viewed than read as source. Both have a preview
+      // mode already; the source tab stays one click away.
+      if ((d?.language === "markdown" || d?.language === "html") && initialDisplayMode !== "diff") setPreviewMode(true);
     }).finally(() => setLoading(false));
     void fetchGitDiff(filePath);
 

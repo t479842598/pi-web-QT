@@ -8,6 +8,8 @@ import { resolveSlashDisplayText } from "@/lib/slash-display";
 import { isEmptyThinkingBlock } from "@/lib/message-display";
 import { CompactionSummary } from "./CompactionSummary";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
+import { TurnWrittenFiles } from "./TurnWrittenFiles";
+import type { WrittenFile } from "@/lib/turn-written-files";
 import { ArrowBendDownRightIcon } from "@phosphor-icons/react/ArrowBendDownRight";
 import { ArrowDownIcon } from "@phosphor-icons/react/ArrowDown";
 import { ArrowUpIcon } from "@phosphor-icons/react/ArrowUp";
@@ -87,6 +89,13 @@ interface Props {
   showTimestamp?: boolean;
   prevTimestamp?: number;
   sessionId?: string;
+  /**
+   * Files this turn wrote, derived by the caller from the whole turn's
+   * successful write/edit tool calls. ChatWindow computes this because the
+   * saved-message path splits tool calls into their own entries, leaving the
+   * final answer text-only.
+   */
+  writtenFiles?: WrittenFile[];
   /** "Turn this message into a work task" — user messages only. */
   onCreateTask?: (text: string, cwd: string | undefined) => void;
 }
@@ -118,12 +127,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onQuoteReply, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, onCreateTask }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onQuoteReply, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, onCreateTask, writtenFiles }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} onCreateTask={onCreateTask} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} onFork={onFork} forking={forking} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} onFork={onFork} forking={forking} writtenFiles={writtenFiles} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -156,7 +165,8 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.onCreateTask === next.onCreateTask
     && prev.showTimestamp === next.showTimestamp
     && prev.prevTimestamp === next.prevTimestamp
-    && prev.sessionId === next.sessionId;
+    && prev.sessionId === next.sessionId
+    && prev.writtenFiles === next.writtenFiles;
 });
 
 function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, onCreateTask }: {
@@ -361,6 +371,7 @@ function AssistantMessageView({
   entryId,
   onFork,
   forking,
+  writtenFiles,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -375,6 +386,7 @@ function AssistantMessageView({
   entryId?: string;
   onFork?: (entryId: string) => void;
   forking?: boolean;
+  writtenFiles?: WrittenFile[];
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -552,6 +564,10 @@ function AssistantMessageView({
           <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
         ))}
       </div>
+
+      {writtenFiles && writtenFiles.length > 0 && (
+        <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />
+      )}
 
       <div style={{
         display: "flex", alignItems: "center", gap: 8, marginTop: 4,
