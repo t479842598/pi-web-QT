@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
+import { filterDirectoryEntries } from "@/lib/directory-picker-filter";
 
 interface DirectoryEntry {
   name: string;
@@ -63,10 +64,12 @@ export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Pro
   const [drives, setDrives] = useState<DirectoryEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [filterQuery, setFilterQuery] = useState("");
 
   const navigateTo = useCallback(async (directory?: string) => {
     setLoading(true);
     setLoadError(null);
+    setFilterQuery("");
     try {
       const data = await loadDirectories(directory);
       const nextPath = data.path ?? directory ?? "/";
@@ -159,22 +162,40 @@ export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Pro
                 <div style={{ padding: 8, color: "var(--text-dim)", fontSize: 11 }}>{t("directoryPicker.noDrives")}</div>
               )}
             </>
-          ) : directories.length > 0 ? (
-            directories.map((entry) => (
-              <button
-                key={entry.path}
-                className="directory-picker-entry"
-                type="button"
-                onClick={() => void navigateTo(entry.path)}
-                title={entry.path}
-                style={{ width: "100%", minHeight: 30, display: "flex", alignItems: "center", gap: 7, padding: "5px 8px", border: 0, borderRadius: 5, background: "none", color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontFamily: "var(--font-mono)", fontSize: 11 }}
-              >
-                <FolderIcon />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.name}</span>
-              </button>
-            ))
           ) : (
-            <div style={{ padding: 8, color: "var(--text-dim)", fontSize: 11 }}>{t("directoryPicker.noSubdirectories")}</div>
+            <>
+              <input
+                type="text"
+                value={filterQuery}
+                onChange={(event) => setFilterQuery(event.target.value)}
+                placeholder={t("directoryPicker.filterPlaceholder")}
+                aria-label={t("directoryPicker.filterPlaceholder")}
+                style={{ width: "100%", boxSizing: "border-box", marginBottom: 6, padding: "5px 9px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg-panel)", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 11, outline: "none" }}
+              />
+              {(() => {
+                const filtered = filterDirectoryEntries(directories, filterQuery);
+                if (filtered.length > 0) {
+                  return filtered.map((entry) => (
+                    <button
+                      key={entry.path}
+                      className="directory-picker-entry"
+                      type="button"
+                      onClick={() => void navigateTo(entry.path)}
+                      title={entry.path}
+                      style={{ width: "100%", minHeight: 30, display: "flex", alignItems: "center", gap: 7, padding: "5px 8px", border: 0, borderRadius: 5, background: "none", color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontFamily: "var(--font-mono)", fontSize: 11 }}
+                    >
+                      <FolderIcon />
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.name}</span>
+                    </button>
+                  ));
+                }
+                return (
+                  <div style={{ padding: 8, color: "var(--text-dim)", fontSize: 11 }}>
+                    {filterQuery.trim() ? t("directoryPicker.noMatchingDirectories") : t("directoryPicker.noSubdirectories")}
+                  </div>
+                );
+              })()}
+            </>
           )}
           {(loadError || error) && <div style={{ padding: "8px", color: "#dc2626", fontSize: 11 }}>{loadError ?? error}</div>}
         </div>

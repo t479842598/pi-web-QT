@@ -527,6 +527,8 @@ export const enLocale = {
     "directoryPicker.goToParent": "Go to parent directory",
     "directoryPicker.loadingDirectories": "Loading directories…",
     "directoryPicker.noSubdirectories": "No subdirectories",
+    "directoryPicker.noMatchingDirectories": "No matching subdirectories",
+    "directoryPicker.filterPlaceholder": "Filter subdirectories…",
     "directoryPicker.selectCurrentDirectory": "Select current directory",
     "directoryPicker.selectThisFolder": "Select this folder",
     "directoryPicker.noDrives": "No drives found",

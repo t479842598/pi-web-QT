@@ -527,6 +527,8 @@ export const zhCNLocale = {
     "directoryPicker.goToParent": "转到上级目录",
     "directoryPicker.loadingDirectories": "正在加载目录…",
     "directoryPicker.noSubdirectories": "没有子目录",
+    "directoryPicker.noMatchingDirectories": "没有匹配的子目录",
+    "directoryPicker.filterPlaceholder": "筛选子目录…",
     "directoryPicker.selectCurrentDirectory": "选择当前目录",
     "directoryPicker.selectThisFolder": "选择此文件夹",
     "directoryPicker.noDrives": "未找到盘符",
