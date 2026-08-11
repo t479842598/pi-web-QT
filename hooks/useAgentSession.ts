@@ -25,6 +25,7 @@ import {
   normalizeCollaborationMode,
   normalizeTokenMode,
   normalizeToolApprovalMode,
+  stripModeInstructionBlocks,
   type CollaborationMode,
   type ModeSettings,
   type TokenMode,
@@ -271,24 +272,6 @@ const MODE_BLOCK_MARKERS = [
   "<delivery-profile>",
   "<goal-profile>",
 ];
-
-/** If `text` starts with a mode-instruction block followed by a blank line and
- *  the user's own text, return just the user text; otherwise return as-is. */
-function stripModePrefix(text: string): string {
-  const trimmed = text.replace(/^\uFEFF/, "");
-  for (const marker of MODE_BLOCK_MARKERS) {
-    const idx = trimmed.indexOf(marker);
-    if (idx !== 0) continue;
-    // Skip the whole injected block up to the double newline + user content.
-    const sep = trimmed.indexOf("\n\n", marker.length);
-    if (sep >= 0) {
-      const rest = trimmed.slice(sep + 2);
-      if (rest.trim().length > 0) return rest;
-    }
-    return "";
-  }
-  return text;
-}
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
@@ -1814,7 +1797,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             const content = delivered.content;
             if (typeof content === "string") {
               if (MODE_BLOCK_MARKERS.some((m) => content.startsWith(m))) {
-                delivered = { ...delivered, content: stripModePrefix(content) };
+                delivered = { ...delivered, content: stripModeInstructionBlocks(content) };
               }
             } else if (Array.isArray(content)) {
               const textBlocks = content.filter((b) => b.type === "text");
@@ -1825,7 +1808,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
                   content: content.map((b, i) => {
                     if (b.type !== "text" || i !== 0) return b;
                     const raw = (b as { text?: string }).text ?? "";
-                    const stripped = stripModePrefix(raw);
+                    const stripped = stripModeInstructionBlocks(raw);
                     return { ...b, text: stripped };
                   }),
                 };

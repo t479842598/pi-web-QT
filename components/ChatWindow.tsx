@@ -22,6 +22,7 @@ import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ArrowDownIcon } from "@phosphor-icons/react/ArrowDown";
 import type { Virtualizer } from "@tanstack/react-virtual";
 import { useAgentSession, CHAT_BOTTOM_SPACER_PX, BOTTOM_KEEP_OUT_PX, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
+import { stripModeInstructionBlocks } from "@/lib/modes";
 import { useAudio } from "@/hooks/useAudio";
 import { useDeepSeekBalance } from "@/hooks/useDeepSeekBalance";
 import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
@@ -147,10 +148,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     // back into the input, even if the optimistic-message dedup missed.
     let cleaned = message;
     if (typeof message.content === "string") {
-      const stripped = message.content
-        .replace(/<(?:delivery|economy|goal)-profile>[\s\S]*?<\/(?:delivery|economy|goal)-profile>\s*/g, "")
-        .replace(/^You are in PLAN MODE\.\s*\n[\s\S]*?\n(?=\n|$)/, "")
-        .trimStart();
+      const stripped = stripModeInstructionBlocks(message.content);
       if (stripped) cleaned = { ...message, content: stripped };
     }
     chatInputRef?.current?.replaceMessage(cleaned);

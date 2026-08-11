@@ -154,3 +154,26 @@ export function buildModeSystemPrompt(options: ModeSystemPromptOptions): string 
   }
   return blocks.join("\n\n");
 }
+
+/**
+ * Strip every injected mode-instruction block from a prompt/message so the
+ * visible bubble, edit re-fill, or session title shows only what the user
+ * typed. Handles all block forms produced by buildModeSystemPrompt (and the
+ * legacy PLAN MODE prefix): <economy-profile>/<delivery-profile>/
+ * <goal-profile> XML blocks and the "You are in PLAN MODE." heading block.
+ * Blocks may be stacked (plan + token + goal) and/or carry trailing text
+ * ("Goal: …"); a lone prompt whose ENTIRE content is a block yields "".
+ */
+export function stripModeInstructionBlocks(text: string): string {
+  if (!text) return text;
+  let value = text.replace(/^\uFEFF/, "");
+  // XML profile blocks (non-greedy across lines; block may contain newlines).
+  // A goal block may carry a "Goal: …" trailer line directly after the close
+  // tag — fold it into the same removal so no injected text survives.
+  value = value.replace(/<(?:economy|delivery|goal)-profile>\n?[\s\S]*?<\/(?:economy|delivery|goal)-profile>\n*(?:Goal:\s*[^\n]*\n?)?/g, "");
+  // Legacy plan heading block: heading line + instruction list up to the
+  // first blank line that separates it from the user's own text.
+  value = value.replace(/^You are in PLAN MODE\.[\s\S]*?\n(?=\n|$)/, "");
+  // Collapse the separator blank lines left behind when all blocks are gone.
+  return value.replace(/^\s*\n/, "").trimStart();
+}

@@ -9,6 +9,7 @@ import { normalize as normalizePath } from "path";
 import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
+import { stripModeInstructionBlocks } from "./modes";
 import { resolveProject, type ProjectInfo } from "./worktree";
 import { readSettingsJsonUnlocked } from "./settings-lock";
 
@@ -43,7 +44,7 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
       created: s.created instanceof Date ? s.created.toISOString() : String(s.created),
       modified: s.modified instanceof Date ? s.modified.toISOString() : String(s.modified),
       messageCount: s.messageCount,
-      firstMessage: s.firstMessage || "(no messages)",
+      firstMessage: stripModeInstructionBlocks(s.firstMessage || "(no messages)"),
       parentSessionId: s.parentSessionPath ? pathToId.get(normalizePath(s.parentSessionPath)) : undefined,
       projectRoot: project?.projectRoot ?? s.cwd,
       pinned: pinSet.has(s.id),
