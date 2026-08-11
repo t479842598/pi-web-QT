@@ -11,6 +11,7 @@ import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { QuickChangesPanel } from "./QuickChangesPanel";
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { samePath } from "@/lib/paths";
+import { stripModeInstructionBlocks } from "@/lib/modes";
 
 interface Props {
   selectedSessionId: string | null;
@@ -2377,7 +2378,7 @@ function SessionItem({
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [titleModels]);
 
-  const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
+  const title = stripModeInstructionBlocks(session.name) || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
   const hasMessages = session.messageCount > 0
     || (session.id === selectedSessionId && (selectedSessionStats?.userMessages ?? 0) > 0);
 
@@ -2786,20 +2787,20 @@ function SessionItem({
               )}
             </div>
             {/* Metadata row */}
-            <div style={{ marginTop: 2, display: "flex", gap: 8, color: "var(--text-dim)", fontSize: 11, minWidth: 0 }}>
-              <span title={session.modified}>{formatRelativeTime(session.modified, t)}</span>
-              <span>{t("desktop.messagesCount", { count: session.messageCount })}</span>
+            <div style={{ marginTop: 2, display: "flex", gap: 8, color: "var(--text-dim)", fontSize: 11, minWidth: 0, flexWrap: "nowrap", whiteSpace: "nowrap" }}>
+              <span title={session.modified} style={{ flexShrink: 0 }}>{formatRelativeTime(session.modified, t)}</span>
+              <span style={{ flexShrink: 0 }}>{t("desktop.messagesCount", { count: session.messageCount })}</span>
               {session.worktreeBranch && (
                 <span
                   title={t("desktop.worktree", { cwd: session.cwd })}
-                  style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--accent)", minWidth: 0, overflow: "hidden" }}
+                  style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--accent)", minWidth: 0, overflow: "hidden", flex: "1 1 auto" }}
                 >
                   <GitBranch size={9} weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" />
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.worktreeBranch}</span>
                 </span>
               )}
               {session.importedFrom && (
-                <span style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--text-dim)", minWidth: 0, overflow: "hidden" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--text-dim)", minWidth: 0, overflow: "hidden", flexShrink: 1 }}>
                   <DownloadSimple size={9} weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" />
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {session.importedFrom === "reasonix" ? (t("desktop.importFromReasonix") ?? "来自 Reasonix") : session.importedFrom}
@@ -3080,7 +3081,7 @@ function SessionCompactRow({
   const [forkTooltipPos, setForkTooltipPos] = useState<{ top: number; left: number } | null>(null);
   const rowRef = useRef<HTMLDivElement>(null);
 
-  const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
+  const title = stripModeInstructionBlocks(session.name) || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
   const parentSession = session.parentSessionId ? allSessions.find((s) => s.id === session.parentSessionId) : undefined;
 
   const startRename = (e: React.MouseEvent) => {
@@ -3278,7 +3279,7 @@ function SessionCompactRow({
             )}
           </div>
           {/* Line 2: relative time · message count · git branch chip · fork indicator */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 1, minWidth: 0, height: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 1, minWidth: 0, height: 16, flexWrap: "nowrap", whiteSpace: "nowrap" }}>
             <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>{formatRelativeTime(session.modified, t)}</span>
             <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>{t("desktop.messagesCount", { count: session.messageCount })}</span>
             {session.worktreeBranch && (
@@ -3299,7 +3300,7 @@ function SessionCompactRow({
           </div>
           {forkTooltip && forkTooltipPos && (() => {
             const parentTitle = parentSession
-              ? (parentSession.name || parentSession.firstMessage.slice(0, 30) || parentSession.id.slice(0, 8))
+              ? (stripModeInstructionBlocks(parentSession.name) || parentSession.firstMessage.slice(0, 30) || parentSession.id.slice(0, 8))
               : "";
             return (
               <div style={{ position: "fixed", top: forkTooltipPos.top, left: forkTooltipPos.left, zIndex: 3000, background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px", boxShadow: "0 6px 20px rgba(0,0,0,0.2)", fontSize: 10.5, color: "var(--text-muted)", whiteSpace: "nowrap", pointerEvents: "none", animation: "plan-card-in 0.12s ease-out" }}>

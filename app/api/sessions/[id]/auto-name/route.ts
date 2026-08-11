@@ -3,6 +3,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ModelLike } from "@/lib/pi-types";
 import { generateSessionTitle } from "@/lib/session-title";
+import { stripModeInstructionBlocks } from "@/lib/modes";
 import { isApiRequestAllowed } from "@/lib/request-security";
 import { getTitleModel } from "@/lib/settings-title-model";
 import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
@@ -56,9 +57,9 @@ export async function POST(
       );
     }
 
-    session.inner.setSessionName(result.title);
+    session.inner.setSessionName(stripModeInstructionBlocks(result.title));
     invalidateSessionListCache();
-    return NextResponse.json({ title: result.title, usage: result.usage ?? null });
+    return NextResponse.json({ title: stripModeInstructionBlocks(result.title), usage: result.usage ?? null });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },

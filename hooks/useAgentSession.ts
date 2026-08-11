@@ -2354,7 +2354,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         case "name": {
           if (!sid) return complete({ handled: true, error: "No active session to name" });
           if (!args) return complete({ handled: true, error: "Usage: /name <name>" });
-          await sendAgentCommand(sid, { type: "set_session_name", name: args });
+          await sendAgentCommand(sid, { type: "set_session_name", name: stripModeInstructionBlocks(args) });
           if (await loadSession(sid)) promoteNewSession();
           return complete({ handled: true, message: `Session renamed to ${args}` });
         }

@@ -39,6 +39,7 @@ import type { SessionInfo, SubagentStatus } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { ProjectTrustStatus } from "@/lib/api-types";
+import { stripModeInstructionBlocks } from "@/lib/modes";
 
 type SessionCopyField = "file" | "id";
 
@@ -487,7 +488,7 @@ export function AppShell() {
   }, [fileTabs]);
 
   const sessionTitle = selectedSession
-    ? selectedSession.name || selectedSession.firstMessage.slice(0, 50) || selectedSession.id.slice(0, 12)
+    ? stripModeInstructionBlocks(selectedSession.name) || selectedSession.firstMessage.slice(0, 50) || selectedSession.id.slice(0, 12)
     : null;
 
   const handleViewFullHistory = useCallback(() => {

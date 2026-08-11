@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { stripModeInstructionBlocks } from "./modes";
 
 const TITLE_TIMEOUT_MS = 80_000;
 /** Max time to wait for the source session to become idle before snapshotting.
@@ -132,6 +133,10 @@ export function parseGeneratedSessionTitle(raw: string): string {
   value = value.replace(/^(?:session\s+title|title|标题)\s*[:：-]\s*/i, "");
   value = stripWrappingQuotes(value).replace(/\s+/g, " ").trim();
   value = value.replace(/[。.!]+$/u, "").trim();
+  // The model may echo an injected mode-instruction block (delivery/economy/
+  // plan) into the title when the conversation history starts with one.
+  // Strip it so a title never begins with "<delivery-profile>…".
+  value = stripModeInstructionBlocks(value);
 
   if (!/[\p{L}\p{N}]/u.test(value)) {
     throw new Error("The model did not return a usable session title");
