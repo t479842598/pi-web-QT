@@ -178,7 +178,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     isNew,
     branchTree, activeLeafId: branchActiveLeafId, handleLeafChange,
     sessionIdRef, messagesEndRef, scrollContainerRef,
-    lastUserMsgRef,
+    lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef, scrollUserMsgToTop,
     handleSend, executeBash, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue, resolveRecovery, exportQueueData, stageQueueImport,
@@ -789,7 +789,19 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
               const attachVisibleRef = (idx: number, refIndex: number) => (el: HTMLDivElement | null) => {
                 messageRefs.current[refIndex] = el;
-                if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
+                if (idx === lastUserIdx) {
+                  (lastUserMsgRef as { current: HTMLDivElement | null }).current = el;
+                  // Consume the pending scroll-to-user flag exactly when the
+                  // target row mounts. The messages.length effect in
+                  // useAgentSession defers to this: scrolling there while the
+                  // row is not yet attached would read the PREVIOUS user
+                  // message's ref and yank the viewport up to an old turn.
+                  if (el && pendingScrollToUserRef.current) {
+                    pendingScrollToUserRef.current = false;
+                    initialScrollDoneRef.current = true;
+                    scrollUserMsgToTop();
+                  }
+                }
               };
 
               const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean } = {}): ReactNode => {

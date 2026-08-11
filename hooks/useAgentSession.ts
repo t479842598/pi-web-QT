@@ -3082,9 +3082,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     if (messages.length > 0) {
       if (pendingScrollToUserRef.current) {
-        pendingScrollToUserRef.current = false;
         initialScrollDoneRef.current = true;
-        scrollUserMsgToTop();
+        // The virtual list mounts rows asynchronously; if the target user row
+        // has not been attached yet, leave the flag set — attachVisibleRef in
+        // ChatWindow consumes it on mount and scrolls with a live ref.
+        // Scrolling here against a stale ref (the PREVIOUS user row) yanks the
+        // viewport up to an old turn (the "jump to top" report).
+        if (lastUserMsgRef.current) {
+          pendingScrollToUserRef.current = false;
+          scrollUserMsgToTop();
+        }
       } else if (loading || !initialScrollDoneRef.current) {
         if (!loading) initialScrollDoneRef.current = true;
         scrollToBottom("instant");
@@ -3185,6 +3192,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // Refs
     sessionIdRef, eventSourceRef, messagesEndRef, scrollContainerRef,
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,
+    scrollUserMsgToTop,
     // Actions
     handleSend, executeBash, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
