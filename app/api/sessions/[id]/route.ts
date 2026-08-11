@@ -12,6 +12,8 @@ import {
 } from "@/lib/session-reader";
 import { getRpcSession, broadcastSessionBusEvent } from "@/lib/rpc-manager";
 import { mutateSettingsJson } from "@/lib/settings-lock";
+import { computeSessionTotalActiveMs } from "@/lib/session-timing";
+import { stripModeInstructionBlocks } from "@/lib/modes";
 
 // BranchNavigator still traverses recursively, so keep the response tree shallow.
 const MAX_PROJECTED_TREE_DEPTH = 200;
@@ -132,6 +134,7 @@ export async function GET(
     const deferThinking = searchParams.has("deferThinking");
     const deferToolResultImages = searchParams.has("deferMedia");
     const context = buildSessionContext(entries, leafId, { deferThinking, deferToolResultImages });
+    const totalActiveMs = computeSessionTotalActiveMs(entries);
 
     const header = sm.getHeader();
     let modified = header?.timestamp ?? new Date().toISOString();
@@ -151,7 +154,8 @@ export async function GET(
         ? (() => {
             const msg = context.messages.find((m) => m.role === "user")!;
             const c = (msg as { content: unknown }).content;
-            return typeof c === "string" ? c : (Array.isArray(c) ? (c.find((b: { type: string }) => b.type === "text") as { text: string } | undefined)?.text ?? "" : "") || "(no messages)";
+            const raw = typeof c === "string" ? c : (Array.isArray(c) ? (c.find((b: { type: string }) => b.type === "text") as { text: string } | undefined)?.text ?? "" : "") || "";
+            return stripModeInstructionBlocks(raw) || "(no messages)";
           })()
         : "(no messages)",
       parentSessionId,
@@ -164,6 +168,7 @@ export async function GET(
       leafId,
       tree,
       context,
+      totalActiveMs,
     });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

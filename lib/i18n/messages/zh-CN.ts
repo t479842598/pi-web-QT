@@ -303,6 +303,7 @@ export const zhCNLocale = {
     "desktop.sessionInfoInMemory": "内存中",
     "desktop.sessionInfoMessages": "消息",
     "desktop.sessionInfoTokens": "令牌",
+    "desktop.sessionInfoActiveTime": "估算活跃耗时",
     "desktop.sessionInfoUser": "用户",
     "desktop.sessionInfoAssistant": "助手",
     "desktop.sessionInfoToolCalls": "工具调用",

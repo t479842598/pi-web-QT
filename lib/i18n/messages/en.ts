@@ -303,6 +303,7 @@ export const enLocale = {
     "desktop.sessionInfoInMemory": "In-memory",
     "desktop.sessionInfoMessages": "Messages",
     "desktop.sessionInfoTokens": "Tokens",
+    "desktop.sessionInfoActiveTime": "Estimated Active Time",
     "desktop.sessionInfoUser": "User",
     "desktop.sessionInfoAssistant": "Assistant",
     "desktop.sessionInfoToolCalls": "Tool Calls",

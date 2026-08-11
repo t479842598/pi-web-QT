@@ -72,6 +72,8 @@ export interface SessionStatsInfo {
   costCNY?: number;
   /** SDK USD spend for non-deepseek-v4 models. */
   costUSD?: number;
+  /** Estimated active time across all entries in the session file. */
+  totalActiveMs?: number;
   contextUsage?: ContextUsage;
 }
 
