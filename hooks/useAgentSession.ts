@@ -3101,11 +3101,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [messages.length, loading, agentRunning, scrollToBottom, scrollUserMsgToTop]);
 
-  // Settle correction: deferred thinking/media content keeps laying out after
-  // `loading` flips false, so the anchor scroll above may still be stale.
-  // Once the dust settles, if the user is still parked at the bottom, re-run
-  // scrollToBottom so the LAST MESSAGE sits at the keep-out gap above
-  // ChatInput instead of hugging (or being covered by) it.
+  // Settle correction: virtual-list rows measure asynchronously, so the
+  // initial scroll target computed from estimate heights drifts once rows
+  // report their real sizes. Instead of a single 400ms re-scroll, poll until
+  // the container height stabilizes (measurement settled) — but only while
+  // the user is still parked at the bottom and no agent run owns the scroll.
+  // This guarantees an opened session lands on the LAST message, not halfway
+  // up the list after the rows grow.
   const settleScrollDoneRef = useRef(false);
   useEffect(() => {
     if (loading) {
@@ -3114,13 +3116,30 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
     if (settleScrollDoneRef.current || messages.length === 0) return;
     settleScrollDoneRef.current = true;
-    const timer = window.setTimeout(() => {
-      if (agentRunningRef.current) return; // the streaming follow owns the scroll
-      if (completionScrollAllowedRef.current || isNearBottomRef.current) {
-        scrollToBottom("instant");
+    let cancelled = false;
+    let lastHeight = -1;
+    let stableRuns = 0;
+    let timer: number | undefined;
+    const tick = () => {
+      if (cancelled || agentRunningRef.current) return; // streaming follow owns the scroll
+      if (!(completionScrollAllowedRef.current || isNearBottomRef.current)) return;
+      scrollToBottom("instant");
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      if (container.scrollHeight === lastHeight) {
+        stableRuns += 1;
+        if (stableRuns >= 2) return; // measurements settled
+      } else {
+        lastHeight = container.scrollHeight;
+        stableRuns = 0;
       }
-    }, 400);
-    return () => window.clearTimeout(timer);
+      timer = window.setTimeout(tick, 250);
+    };
+    timer = window.setTimeout(tick, 250);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [loading, messages.length, scrollToBottom]);
 
   // Load model list
