@@ -514,6 +514,8 @@ export const enLocale = {
     "desktop.filterProjects": "Filter projects…",
     "desktop.searchProjects": "Search projects…",
     "desktop.recentProjects": "Recent Projects",
+    "desktop.editProjectAlias": "Rename project",
+    "desktop.projectAliasPlaceholder": "Add a remark for this project…",
     "desktop.quickWorkspace": "Quick workspace",
     "desktop.selectFolder": "Select folder",
     "desktop.checking": "Checking…",

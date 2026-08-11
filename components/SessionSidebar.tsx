@@ -502,6 +502,24 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, []);
 
+  // Project display aliases (备注) — fetched from the server, keyed by
+  // project root. Used everywhere the project name is shown; the dropdown
+  // additionally shows the real folder name next to the alias.
+  const [projectAliases, setProjectAliases] = useState<Record<string, string>>({});
+  const loadProjectAliases = useCallback(async () => {
+    try {
+      const res = await fetch("/api/project-aliases");
+      if (!res.ok) return;
+      const data = await res.json() as { aliases?: Record<string, string> };
+      setProjectAliases(data.aliases ?? {});
+    } catch {
+      // Aliases are display-only; a failed load degrades to folder names.
+    }
+  }, []);
+  useEffect(() => {
+    void loadProjectAliases();
+  }, [loadProjectAliases, refreshKey]);
+
   const initialLoadDone = useRef(false);
   useEffect(() => {
     setExplorerOpen(loadExplorerOpen());
@@ -615,6 +633,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         const data = JSON.parse(event.data) as { type?: string } | null;
         if (data && data.type && LIST_REFRESH_EVENT_TYPES.has(data.type)) {
           scheduleReload();
+        } else if (data && data.type === "project_alias_changed") {
+          // Alias edits in another window update this window's alias map
+          // without reloading the session list.
+          void loadProjectAliases();
         }
       } catch {
         // EventSource reconnects; a malformed frame must not alter state.
@@ -624,7 +646,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       source.close();
       if (throttleTimer) clearTimeout(throttleTimer);
     };
-  }, [loadSessions]);
+  }, [loadSessions, loadProjectAliases]);
 
   useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;
@@ -1058,8 +1080,50 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const currentWt = worktreeState?.worktrees.find((w) => samePath(w.path, selectedCwd ?? ""))
     ?? worktreeState?.worktrees.find((w) => w.isMain)
     ?? null;
+  // Look up a project's alias by its root path (samePath so Windows path
+  // forms and case differences still match).
+  const aliasFor = useCallback((project: string): string | undefined => {
+    for (const key of Object.keys(projectAliases)) {
+      if (samePath(key, project)) return projectAliases[key];
+    }
+    return undefined;
+  }, [projectAliases]);
+  // Inline alias editing inside the project dropdown (single row at a time).
+  const [aliasEditingProject, setAliasEditingProject] = useState<string | null>(null);
+  const [aliasDraft, setAliasDraft] = useState("");
+  const aliasInputRef = useRef<HTMLInputElement | null>(null);
+  const startEditAlias = useCallback((project: string) => {
+    setAliasEditingProject(project);
+    setAliasDraft(aliasFor(project) ?? "");
+    setTimeout(() => aliasInputRef.current?.focus(), 0);
+  }, [aliasFor]);
+  const saveAlias = useCallback(async (project: string) => {
+    setAliasEditingProject(null);
+    const alias = aliasDraft.trim();
+    // Optimistic update; the PUT response (server truth) replaces it on
+    // success, and a failure rolls back to the last fetched map.
+    setProjectAliases((prev) => {
+      const key = Object.keys(prev).find((k) => samePath(k, project)) ?? project;
+      const next = { ...prev };
+      if (alias) next[key] = alias;
+      else delete next[key];
+      return next;
+    });
+    try {
+      const res = await fetch("/api/project-aliases", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: project, alias }),
+      });
+      const data = await res.json().catch(() => null) as { aliases?: Record<string, string> } | null;
+      if (!res.ok || !data?.aliases) throw new Error(`HTTP ${res.status}`);
+      setProjectAliases(data.aliases);
+    } catch {
+      void loadProjectAliases();
+    }
+  }, [aliasDraft, loadProjectAliases]);
   const compactProjectLabel = selectedCwd
-    ? pathBaseName(selectedProject ?? selectedCwd)
+    ? aliasFor(selectedProject ?? selectedCwd) ?? pathBaseName(selectedProject ?? selectedCwd)
     : (initialSessionId && !restoredRef.current ? "" : `${t("desktop.selectProject")}…`);
   const selectProject = (project: string) => {
     setSelectedCwd(project);
@@ -1096,17 +1160,70 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const projectItem = (project: string) => {
     const isSelected = project === selectedProject;
     const isQuick = isQuickWorkspace(project, homeDir);
+    const alias = aliasFor(project);
+    const isEditing = aliasEditingProject === project;
+    if (isEditing) {
+      return (
+        <div key={project} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 8px" }}>
+          <input
+            ref={aliasInputRef}
+            value={aliasDraft}
+            onChange={(e) => setAliasDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); void saveAlias(project); }
+              if (e.key === "Escape") { setAliasEditingProject(null); setAliasDraft(alias ?? ""); }
+            }}
+            onBlur={() => void saveAlias(project)}
+            placeholder={t("desktop.projectAliasPlaceholder")}
+            aria-label={t("desktop.projectAliasPlaceholder")}
+            maxLength={80}
+            style={{ flex: 1, minWidth: 0, fontSize: 12, fontFamily: "var(--font-mono)", padding: "4px 8px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--bg)", color: "var(--text)", boxSizing: "border-box" }}
+          />
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { setAliasEditingProject(null); setAliasDraft(alias ?? ""); }}
+            title={t("i18n.close")}
+            aria-label={t("i18n.close")}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", borderRadius: 5, flexShrink: 0 }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-selected)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+          >
+            <X size={11} aria-hidden="true" />
+          </button>
+        </div>
+      );
+    }
     return (
-      <button key={project} onClick={() => selectProject(project)} title={project} style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "3px 8px", background: isSelected ? "var(--bg-selected)" : "transparent", border: "none", borderRadius: 5, color: isSelected ? "var(--accent)" : "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12, fontFamily: "var(--font-mono)", minWidth: 0 }} onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)"; }} onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}>
-        {isQuick ? (
-          <Lightning size={12} color={isSelected ? "var(--accent)" : "var(--text-dim)"} weight={isSelected ? "fill" : "regular"} style={{ flexShrink: 0 }} aria-hidden="true" />
-        ) : isSelected ? (
-          <Check size={12} color="var(--accent)" weight="bold" style={{ flexShrink: 0 }} aria-hidden="true" />
-        ) : (
-          <span style={{ width: 12, flexShrink: 0 }} />
-        )}
-        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pathBaseName(project)}</span>
-      </button>
+      <div
+        key={project}
+        style={{ display: "flex", alignItems: "center", width: "100%", background: isSelected ? "var(--bg-selected)" : "transparent", borderRadius: 5, minWidth: 0 }}
+        onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)"; }}
+        onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
+      >
+        <button onClick={() => selectProject(project)} title={project} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", background: "transparent", border: "none", color: isSelected ? "var(--accent)" : "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12, fontFamily: "var(--font-mono)" }}>
+          {isQuick ? (
+            <Lightning size={12} color={isSelected ? "var(--accent)" : "var(--text-dim)"} weight={isSelected ? "fill" : "regular"} style={{ flexShrink: 0 }} aria-hidden="true" />
+          ) : isSelected ? (
+            <Check size={12} color="var(--accent)" weight="bold" style={{ flexShrink: 0 }} aria-hidden="true" />
+          ) : (
+            <span style={{ width: 12, flexShrink: 0 }} />
+          )}
+          <span style={{ display: "flex", alignItems: "baseline", gap: 6, flex: 1, minWidth: 0 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flex: alias ? "0 1 auto" : "1 1 0" }}>{alias ?? pathBaseName(project)}</span>
+            {alias && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{pathBaseName(project)}</span>}
+          </span>
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); startEditAlias(project); }}
+          title={t("desktop.editProjectAlias")}
+          aria-label={t("desktop.editProjectAlias")}
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, marginRight: 4, background: "none", border: "none", color: isSelected ? "var(--accent)" : "var(--text-dim)", cursor: "pointer", borderRadius: 5, flexShrink: 0, opacity: 0.7 }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.color = isSelected ? "var(--accent)" : "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-selected)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.7"; e.currentTarget.style.color = isSelected ? "var(--accent)" : "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+        >
+          <PencilSimple size={12} weight="regular" aria-hidden="true" />
+        </button>
+      </div>
     );
   };
   const projectList = (
@@ -1473,7 +1590,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           >
             {selectedCwd ? (
               <PathLabel
-                text={displayCwd(selectedProject ?? selectedCwd, homeDir)}
+                text={aliasFor(selectedProject ?? selectedCwd ?? "") ?? displayCwd(selectedProject ?? selectedCwd, homeDir)}
                 style={{
                   flex: 1,
                   fontFamily: "var(--font-mono)",

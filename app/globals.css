@@ -259,6 +259,16 @@ body {
   }
 }
 
+/* Scrollbar styling — standard properties first so Windows Chromium is themed.
+   Chrome/Edge 121+ on Windows ships native overlay scrollbars by default that
+   IGNORE `::-webkit-scrollbar`, leaving the jarring white/gray default bar.
+   Setting scrollbar-width + scrollbar-color opts those elements out of the
+   native overlay and renders a thin classic scrollbar in app tokens. macOS
+   overlay scrollbars ignore both properties, keeping the native look. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
 ::-webkit-scrollbar {
   width: 4px;
   height: 4px;
@@ -727,18 +737,12 @@ pre, code {
   scrollbar-color: var(--border) transparent;
 }
 
-/* Floating overlay scrollbars — do not consume layout width.
-   Chrome/WebKit render an overlay scrollbar (no gutter, floats over content);
-   Firefox does not support `overflow-y: overlay`, so it falls back to a thin
-   classic scrollbar via scrollbar-width. */
+/* Scrollable containers: plain auto overflow so the thin themed scrollbar
+   from the global `*` rule is used everywhere (overflow-y: overlay renders
+   the unthemable native scrollbar on Windows Chromium). */
 .scroll-overlay {
   overflow-y: auto;
   scrollbar-width: thin;
-}
-@supports (overflow-y: overlay) {
-  .scroll-overlay {
-    overflow-y: overlay;
-  }
 }
 
 /* Chat markdown: compact enough for conversations, with a readable document hierarchy. */

@@ -514,6 +514,8 @@ export const zhCNLocale = {
     "desktop.filterProjects": "筛选项目…",
     "desktop.searchProjects": "搜索项目…",
     "desktop.recentProjects": "最近项目",
+    "desktop.editProjectAlias": "修改项目备注",
+    "desktop.projectAliasPlaceholder": "给项目加个备注…",
     "desktop.quickWorkspace": "快速工作区",
     "desktop.selectFolder": "选择文件夹",
     "desktop.checking": "正在检查…",
