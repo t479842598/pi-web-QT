@@ -116,7 +116,8 @@ jobs:
           fi
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "build=${BUILD}" >> "$GITHUB_OUTPUT"
-          sed -i "s/^version: .*/version: ${VER}+${BUILD}/" pubspec.yaml
+          # macOS runner uses BSD sed, which requires the -i backup suffix.
+          sed -i.bak "s/^version: .*/version: ${VER}+${BUILD}/" pubspec.yaml && rm -f pubspec.yaml.bak
           echo "Resolved mobile version: ${VER}+${BUILD}"
 
       - uses: subosito/flutter-action@v2
