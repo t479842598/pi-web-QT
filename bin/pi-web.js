@@ -41,6 +41,11 @@ try {
 
 const { port, hostname, openBrowser } = parseLaunchOptions();
 
+// Apply the same heap cap as the npm scripts so `pi-web` (production entry)
+// never lets the V8 heap balloon to Next.js's auto 50%-of-RAM default.
+const { mergedNodeOptions } = require("./with-memory-limit");
+process.env.NODE_OPTIONS = mergedNodeOptions(process.env.NODE_OPTIONS);
+
 if (!fs.existsSync(nextDir)) {
   console.error("Build artifacts not found. Please report this issue.");
   process.exit(1);

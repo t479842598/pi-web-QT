@@ -116,15 +116,21 @@ export async function GET(
       }, 30_000);
 
       // Cleanup when client disconnects
+      let idleTimeout: ReturnType<typeof setTimeout> | undefined;
       const cleanup = () => {
         clearInterval(heartbeat);
         clearTimeout(coalesceTimer);
+        if (idleTimeout) clearTimeout(idleTimeout);
         unsubscribe();
         controller.close();
       };
 
+      // Idle close: guard against half-open connections that never fire abort.
+      // Mirrors the 2h cap already used by the tasks events route.
+      idleTimeout = setTimeout(cleanup, 2 * 60 * 60 * 1000);
+
       // Detect client disconnect via abort signal
-      req.signal?.addEventListener("abort", cleanup);
+      req.signal?.addEventListener("abort", cleanup, { once: true });
     },
   });
 

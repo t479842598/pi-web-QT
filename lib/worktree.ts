@@ -40,9 +40,25 @@ declare global {
 
 const PROJECT_CACHE_TTL_MS = 60_000;
 
+/** Sweep expired entries at most this often (bounded work per call). */
+const PROJECT_CACHE_SWEEP_INTERVAL_MS = 60_000;
+
 function getProjectCache(): Map<string, { info: ProjectInfo; expiresAt: number }> {
   if (!globalThis.__piProjectCache) globalThis.__piProjectCache = new Map();
   return globalThis.__piProjectCache;
+}
+
+let lastProjectCacheSweep = 0;
+
+/** Drop expired entries so the map does not grow without bound as cwds churn. */
+function sweepProjectCache(): void {
+  const now = Date.now();
+  if (now - lastProjectCacheSweep < PROJECT_CACHE_SWEEP_INTERVAL_MS) return;
+  lastProjectCacheSweep = now;
+  const cache = getProjectCache();
+  for (const [cwd, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(cwd);
+  }
 }
 
 export function invalidateProjectCache(): void {
@@ -75,6 +91,7 @@ function inferRemovedWorktree(cwd: string): ProjectInfo | null {
 }
 
 export async function resolveProject(cwd: string): Promise<ProjectInfo> {
+  sweepProjectCache();
   const cache = getProjectCache();
   const cached = cache.get(cwd);
   if (cached && cached.expiresAt > Date.now()) return cached.info;

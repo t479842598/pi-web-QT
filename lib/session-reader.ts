@@ -118,6 +118,24 @@ function getPathToIdCache(): Map<string, string> {
   return globalThis.__piPathToSessionIdCache;
 }
 
+/**
+ * Cap on the number of id→path / path→id cache entries. Sessions are created
+ * for many cwds over the lifetime of a dev server; without a bound these two
+ * maps grow forever even after session files are deleted externally.
+ */
+const SESSION_PATH_CACHE_MAX = 4096;
+
+function evictSessionPathCache(): void {
+  const pathCache = getPathCache();
+  const reverseCache = getPathToIdCache();
+  // Drop the oldest entries (Map preserves insertion order) when over budget.
+  while (pathCache.size > SESSION_PATH_CACHE_MAX) {
+    const oldestId = pathCache.keys().next().value;
+    if (oldestId === undefined) break;
+    invalidateSessionPathCache(oldestId as string);
+  }
+}
+
 export async function resolveSessionPath(sessionId: string): Promise<string | null> {
   const cached = getPathCache().get(sessionId);
   if (cached) return cached;
@@ -150,6 +168,7 @@ export function cacheSessionPath(sessionId: string, filePath: string): void {
   }
   pathCache.set(sessionId, pathKey);
   reverseCache.set(pathKey, sessionId);
+  evictSessionPathCache();
 }
 
 export function invalidateSessionPathCache(sessionId: string): void {
