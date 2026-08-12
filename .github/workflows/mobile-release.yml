@@ -168,13 +168,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          set -x
           VER="${{ steps.version.outputs.version }}"
+          # Locate built artifacts regardless of nesting depth.
+          find artifacts -type f \( -name '*.apk' -o -name '*.aab' -o -name '*.ipa' \) | tee /tmp/found_assets.txt
           # Ensure the release exists (creates it if the web release flow has
           # not run yet), then attach the mobile artifacts.
           gh release view "v${VER}" >/dev/null 2>&1 || gh release create "v${VER}" --title "v${VER}" --generate-notes
-          FILES=(artifacts/android-release/*.apk artifacts/android-release/*.aab artifacts/ios-release/*.ipa)
           ARGS=()
-          for f in "${FILES[@]}"; do
-            [ -f "$f" ] && ARGS+=(--clobber "$f")
-          done
+          while IFS= read -r f; do
+            [ -n "$f" ] && [ -f "$f" ] && ARGS+=(--clobber "$f")
+          done < /tmp/found_assets.txt
+          if [ "${#ARGS[@]}" -eq 0 ]; then
+            echo "::error::No mobile artifacts found to upload"
+            exit 1
+          fi
           gh release upload "v${VER}" "${ARGS[@]}"
