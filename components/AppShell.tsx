@@ -662,7 +662,6 @@ export function AppShell() {
         isDark={isDark}
         toggleTheme={toggleTheme}
         isMobile={isMobile}
-        showChat={showChat}
         showTasks={showTasks}
         tasksBoardEnabled={tasksBoardEnabled}
         onToggleTasks={handleToggleTasks}

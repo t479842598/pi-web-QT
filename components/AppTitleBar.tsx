@@ -23,7 +23,6 @@ interface AppTitleBarProps {
   isDark: boolean;
   toggleTheme: (origin?: { x: number; y: number }) => void;
   isMobile: boolean;
-  showChat: boolean;
   showTasks: boolean;
   tasksBoardEnabled: boolean;
   onToggleTasks: () => void;
@@ -99,7 +98,6 @@ export function AppTitleBar({
   isDark,
   toggleTheme,
   isMobile,
-  showChat,
   showTasks,
   tasksBoardEnabled,
   onToggleTasks,
@@ -127,7 +125,8 @@ export function AppTitleBar({
         ref={topBarRef}
         className="app-title-bar"
         style={{
-          display: "flex",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
           alignItems: "center",
           flexShrink: 0,
           borderBottom: "1px solid var(--border)",
@@ -137,53 +136,56 @@ export function AppTitleBar({
           zIndex: 600,
         }}
       >
-        {/* Sidebar toggle */}
-        <button
-          className="app-no-drag"
-          onClick={onSidebarToggle}
-          title={sidebarOpen ? translate("desktop.hideSidebar") : translate("desktop.showSidebar")}
-          aria-label={sidebarOpen ? translate("desktop.hideSidebar") : translate("desktop.showSidebar")}
-          style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: 36, height: 36, padding: 0,
-            background: sidebarOpen ? "var(--bg-selected)" : "none", border: "none",
-            color: sidebarOpen ? "var(--text)" : "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "background 0.12s, color 0.12s",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = sidebarOpen ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = sidebarOpen ? "var(--text)" : "var(--text-muted)"; }}
-        >
-          {sidebarOpen ? <SidebarSimple size={16} aria-hidden="true" /> : <List size={16} aria-hidden="true" />}
-        </button>
+        {/* Left zone: sidebar toggle + workspace controls (project tabs).
+            Shares 1fr with the right zone so the centered title never moves
+            when tabs are added/removed. */}
+        <div style={{ display: "flex", alignItems: "center", minWidth: 0, height: "100%" }}>
+          <button
+            className="app-no-drag"
+            onClick={onSidebarToggle}
+            title={sidebarOpen ? translate("desktop.hideSidebar") : translate("desktop.showSidebar")}
+            aria-label={sidebarOpen ? translate("desktop.hideSidebar") : translate("desktop.showSidebar")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 36, height: 36, padding: 0, flexShrink: 0,
+              background: sidebarOpen ? "var(--bg-selected)" : "none", border: "none",
+              color: sidebarOpen ? "var(--text)" : "var(--text-muted)", cursor: "pointer", transition: "background 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = sidebarOpen ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = sidebarOpen ? "var(--text)" : "var(--text-muted)"; }}
+          >
+            {sidebarOpen ? <SidebarSimple size={16} aria-hidden="true" /> : <List size={16} aria-hidden="true" />}
+          </button>
 
-        <div
-          className="app-no-drag"
-          ref={onWorkspaceControlsHostChange}
-          style={{
-            flex: "0 1 auto",
-            minWidth: 0,
-            maxWidth: "min(68vw, 920px)",
-            height: "100%",
-            display: "flex",
-            alignItems: "center",
-            padding: "0 8px 0 0",
-            overflow: "visible",
-          }}
-        />
+          <div
+            className="app-no-drag"
+            ref={onWorkspaceControlsHostChange}
+            style={{
+              flex: "0 1 auto",
+              minWidth: 0,
+              maxWidth: "min(60vw, 820px)",
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              padding: "0 8px 0 0",
+              overflow: "visible",
+            }}
+          />
+        </div>
 
-        {showChat && (
-          <div style={{ display: "flex", alignItems: "stretch", height: "100%" }} />
-        )}
-
-        {/* Flexible title spacer for the active session title. */}
+        {/* Center zone: active session title + branch chip. The grid column
+            is `auto` so it only takes the title's intrinsic width; left and
+            right zones share the remaining 1fr each, keeping the title
+            perfectly centered regardless of tab count. */}
         <div
           className="app-title-drag"
           style={{
-            flex: 1,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             height: "100%",
             minWidth: 0,
+            maxWidth: "min(40vw, 480px)",
             padding: "0 12px",
             userSelect: "none",
           }}
@@ -223,6 +225,9 @@ export function AppTitleBar({
         </div>
 
 
+        {/* Right zone: task board / file panel / theme / settings buttons.
+            Grid column shares 1fr with the left zone (symmetric). */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%" }}>
 
         {/* Task board toggle — desktop only, hidden when the feature is off */}
         {!isMobile && tasksBoardEnabled && (
@@ -286,6 +291,8 @@ export function AppTitleBar({
         >
           <Gear size={16} aria-hidden="true" />
         </button>
+
+        </div>
 
       </div>
 
