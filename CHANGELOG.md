@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### 新增
+- **顶部项目 tab 栏** — 桌面端标题栏左侧新增项目 tab：默认显示当前项目一个 tab，最多 5 个（固定宽度、超长省略）；首个 tab 无关闭按钮、点击下拉可切换项目，其余 tab 带 ✕ 可关闭；最右 tab 右侧 + 号新增项目（支持「选择文件夹…」）；tab 列表持久化到 localStorage；移动端不显示。
+- **主题实时预览** — 设置页主题 tag 悬停即时预览配色（不写入本地存储），移开恢复原主题，点击才生效。
+- **日志筛选增强** — 日志页错误码下拉改为动态聚合日志中实际出现的全部状态码；新增日志级别（error/warning/info）筛选。
+
+### 变更
+- **移除 OpenCode Zen 网关** — 删除账号/代理池、429 自动切号、日限额冷却与外部 OpenAI 兼容网关（127.0.0.1:7474）；opencode/opencode-go 回归普通供应商，在模型设置页单独填写 API key（存 `auth.json`），设置页不再有 OpenCode Zen tab。
+- **主题单 key 模型** — 主题选择改由单一 `pi-theme` 键承载，暗黑/明亮模式共用同一套主题（各用各的 light/dark 变体）；修复所选主题（如 `vitesse-dark`）刷新后被重置成默认的问题；旧版 per-mode 键自动迁移。
+- **自定义供应商支持 http baseUrl** — 添加供应商时允许 `http://`（含 localhost/内网）地址，本机 Ollama/LM Studio/vLLM 等可完整走通「保存→获取模型→测试→聊天」；仍拒绝非 http/https 协议。
+
+### 修复
+- **日志仅保留 web 模型调用与运行日志** — 彻底移除 opencode-zen 各来源（external/switch/runtime/sync）的日志，历史遗留条目启动时自动清洗；新增全部供应商的模型调用日志（成功 info / 失败 error 含状态码，source=`model-call`）。
+- **修复 SSE 长连接空闲泄漏** — agent 事件流与运行中会话流增加 2 小时空闲关闭，防止半开连接长期占用。
+
 ## v0.9.23 — 2026-08-11（正式版）
 
 ### 新增
