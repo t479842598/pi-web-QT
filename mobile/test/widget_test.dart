@@ -375,8 +375,10 @@ void main() {
       '这是一段足够长的测试文字，用于确认输入框自动换行后会纵向展开，并且发送按钮不会遮挡文字内容。',
     );
     await tester.pump();
-    expect(find.byKey(const Key('composer-multiline')), findsOneWidget);
-    expect(find.byKey(const Key('composer-multiline-actions')), findsOneWidget);
+    // The composer uses a single stable structure (buttons stay on the right,
+    // the text field grows vertically) so the IME composition is never
+    // interrupted by a layout switch.
+    expect(find.byKey(const Key('composer-single-line')), findsOneWidget);
     expect(find.byTooltip('发送'), findsOneWidget);
     await tester.enterText(find.byType(TextField).last, '');
     await tester.pump();

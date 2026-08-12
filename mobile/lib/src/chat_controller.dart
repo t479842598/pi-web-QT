@@ -66,11 +66,25 @@ class ChatController extends ChangeNotifier {
     return result;
   }
 
+  /// Notifies listeners unless the controller has been disposed. Async methods
+  /// that outlive dispose (background loads, reconnects) must use this instead
+  /// of a bare [notifyListeners] to avoid a used-after-dispose crash.
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
   Future<void> initialize() async {
     await refreshSessions();
+    // Kick off model/skill catalogs in the background once a working directory
+    // is known; the UI does not block on them at startup.
     final cwd = draftCwd;
     if (cwd != null) {
-      await Future.wait([loadModels(cwd), loadSkills(cwd)]);
+      unawaited(
+        Future.wait<void>([
+          loadModels(cwd),
+          loadSkills(cwd),
+        ]).then<void>((_) {}, onError: (Object _) {}),
+      );
     }
   }
 
@@ -94,7 +108,7 @@ class ChatController extends ChangeNotifier {
       rethrow;
     } finally {
       loadingSessions = false;
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -115,7 +129,7 @@ class ChatController extends ChangeNotifier {
       error = _errorText(cause);
     } finally {
       loadingModels = false;
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -136,7 +150,7 @@ class ChatController extends ChangeNotifier {
       skillsError = _errorText(cause);
     } finally {
       loadingSkills = false;
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -153,7 +167,7 @@ class ChatController extends ChangeNotifier {
       error = _errorText(cause);
     } finally {
       changingModel = false;
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -171,6 +185,7 @@ class ChatController extends ChangeNotifier {
     }
     selectedSession = session;
     activeSessionId = session.id;
+    _ensureSessionInFlight = null;
     draftCwd = session.cwd;
     streamingMessage = null;
     running = session.running;
@@ -180,18 +195,35 @@ class ChatController extends ChangeNotifier {
     messages.clear();
     notifyListeners();
     try {
-      final snapshot = await api.getSession(session.id);
-      messages.addAll(snapshot.messages);
-      await Future.wait([
-        loadModels(session.cwd, preferred: snapshot.model),
+      // Fetch the session, model catalog, and skills in parallel; the latter
+      // two only need the cwd and do not depend on the message payload.
+      // Session fetch failures are reported but never block the model/skill
+      // catalogs from loading.
+      final results = await Future.wait<Object?>([
+        api
+            .getSession(session.id)
+            .then<Object?>((value) => value)
+            .catchError((Object cause) => _errorText(cause)),
+        loadModels(session.cwd),
         loadSkills(session.cwd),
       ]);
+      final snapshot = results[0];
+      if (snapshot is SessionSnapshot) {
+        messages.addAll(snapshot.messages);
+        if (snapshot.model != null && snapshot.model!.key.isNotEmpty) {
+          final preferred = snapshot.model;
+          final match = models.where((m) => m == preferred).firstOrNull;
+          if (match != null) selectedModel = match;
+        }
+      } else if (snapshot is String) {
+        error = snapshot;
+      }
       if (running) await _connectEvents(session.id);
     } catch (cause) {
       error = _errorText(cause);
     } finally {
       loadingMessages = false;
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -199,6 +231,7 @@ class ChatController extends ChangeNotifier {
     await _closeEvents();
     selectedSession = null;
     activeSessionId = null;
+    _ensureSessionInFlight = null;
     draftCwd = cwd;
     messages.clear();
     streamingMessage = null;
@@ -208,7 +241,7 @@ class ChatController extends ChangeNotifier {
     slashCommands.clear();
     slashCommandsForSessionId = null;
     await Future.wait([loadModels(cwd, preferred: model), loadSkills(cwd)]);
-    notifyListeners();
+    _notify();
   }
 
   Future<void> deleteSession(PiSession session) async {
@@ -231,7 +264,7 @@ class ChatController extends ChangeNotifier {
         slashCommandsForSessionId = null;
       }
       error = null;
-      notifyListeners();
+      _notify();
       try {
         await refreshSessions();
       } catch (_) {
@@ -240,11 +273,11 @@ class ChatController extends ChangeNotifier {
       }
     } catch (cause) {
       error = _errorText(cause);
-      notifyListeners();
+      _notify();
       rethrow;
     } finally {
       deletingSessionIds.remove(session.id);
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -254,6 +287,11 @@ class ChatController extends ChangeNotifier {
   }) async {
     final message = text.trim();
     if ((message.isEmpty && images.isEmpty) || running) return;
+    if (message.length > 200000) {
+      error = _tr('消息过长，请分段发送');
+      notifyListeners();
+      return;
+    }
     error = null;
     status = null;
     final imageLabel = images.isEmpty
@@ -281,7 +319,7 @@ class ChatController extends ChangeNotifier {
     } catch (cause) {
       running = false;
       error = _errorText(cause);
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -307,7 +345,7 @@ class ChatController extends ChangeNotifier {
       return slashCommands;
     } finally {
       loadingSlashCommands = false;
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -429,6 +467,8 @@ class ChatController extends ChangeNotifier {
     return const BuiltinCommandResult(handled: false);
   }
 
+  Future<String>? _ensureSessionInFlight;
+
   Future<String> _ensureSession() async {
     final existing = activeSessionId;
     if (existing != null) return existing;
@@ -436,9 +476,25 @@ class ChatController extends ChangeNotifier {
     if (cwd == null || cwd.isEmpty) {
       throw PiApiException(_tr('请先选择工作目录'));
     }
+    // Reuse an in-flight creation so concurrent callers (send + slash-command
+    // loading) never create two sessions for the same directory.
+    final inFlight = _ensureSessionInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _createSession(cwd);
+    _ensureSessionInFlight = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_ensureSessionInFlight, future)) {
+        _ensureSessionInFlight = null;
+      }
+    }
+  }
+
+  Future<String> _createSession(String cwd) async {
     final sessionId = await api.createSession(cwd, model: selectedModel);
     activeSessionId = sessionId;
-    notifyListeners();
+    _notify();
     return sessionId;
   }
 
@@ -451,19 +507,19 @@ class ChatController extends ChangeNotifier {
         compacting = false;
         running = false;
         status = null;
-        notifyListeners();
+        _notify();
       } else {
         await api.abort(id);
       }
     } catch (cause) {
       error = _errorText(cause);
-      notifyListeners();
+      _notify();
     }
   }
 
   void dismissError() {
     error = null;
-    notifyListeners();
+    _notify();
   }
 
   /// Replaces a message in [messages] (identity match) with the deferred
@@ -476,13 +532,17 @@ class ChatController extends ChangeNotifier {
       thinkingEntryId: null,
       thinkingBlockIndex: null,
     );
-    notifyListeners();
+    _notify();
   }
 
   Future<void> _closeEvents() async {
     _streamGeneration += 1;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    // Complete any pending handshake so awaiting callers do not hang on a
+    // Completer that is about to be discarded.
+    final pending = _connected;
+    if (pending != null && !pending.isCompleted) pending.complete();
     _connected = null;
     final subscription = _eventSubscription;
     _eventSubscription = null;
@@ -499,7 +559,13 @@ class ChatController extends ChangeNotifier {
     final connected = Completer<void>();
     _connected = connected;
     final stream = await api.events(sessionId);
-    if (_disposed || generation != _streamGeneration) return;
+    if (_disposed || generation != _streamGeneration) {
+      // A newer connect/close took over while the HTTP request was in flight.
+      // Drain the stream so the underlying socket is released instead of
+      // leaking until the server times out.
+      stream.drain<void>().catchError((Object _) {});
+      return;
+    }
     _eventSubscription = stream.listen(
       (event) {
         if (generation == _streamGeneration) _handleEvent(event);
@@ -518,16 +584,30 @@ class ChatController extends ChangeNotifier {
       },
       cancelOnError: false,
     );
-    await connected.future.timeout(const Duration(seconds: 10));
-    if (generation == _streamGeneration) {
+    await connected.future.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () {},
+    );
+    if (!_disposed && generation == _streamGeneration) {
       _reconnectAttempts = 0;
       status = null;
-      notifyListeners();
+      _notify();
     }
   }
 
   void _recoverEventStream(String sessionId, int generation) {
     if (_disposed || generation != _streamGeneration || !running) return;
+    // Give up after a bounded number of retries; a server that stays down
+    // should not keep the app polling every few seconds forever.
+    if (_reconnectAttempts >= 6) {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      running = false;
+      status = null;
+      error ??= _tr('连接失败，请检查网络后重试');
+      notifyListeners();
+      return;
+    }
     status = _tr('连接暂时中断，正在自动重连…');
     notifyListeners();
     _reconnectTimer?.cancel();
@@ -546,6 +626,7 @@ class ChatController extends ChangeNotifier {
   }
 
   void _handleEvent(Map<String, dynamic> event) {
+    if (_disposed) return;
     final type = event['type']?.toString();
     if (type == 'connected') {
       if (!(_connected?.isCompleted ?? true)) _connected!.complete();
@@ -609,12 +690,22 @@ class ChatController extends ChangeNotifier {
     final id = activeSessionId;
     if (id != null) {
       try {
-        final snapshot = await api.getSession(id);
+        // Refresh the conversation and the session list in parallel; neither
+        // depends on the other.
+        final results = await Future.wait<Object?>([
+          api.getSession(id),
+          api.getSessions(),
+        ]);
+        // The user may have switched sessions or disposed the controller while
+        // these requests were in flight; never let a stale snapshot clobber
+        // the active conversation.
+        if (_disposed || id != activeSessionId) return;
+        final snapshot = results[0] as SessionSnapshot;
         messages
           ..clear()
           ..addAll(snapshot.messages);
         if (snapshot.model != null) selectedModel = snapshot.model;
-        final loaded = await api.getSessions();
+        final loaded = (results[1] as List<PiSession>);
         loaded.sort((a, b) {
           final byDirectory = a.cwd.toLowerCase().compareTo(
             b.cwd.toLowerCase(),
@@ -628,10 +719,11 @@ class ChatController extends ChangeNotifier {
           ..addAll(loaded);
         selectedSession = sessions.where((item) => item.id == id).firstOrNull;
       } catch (cause) {
+        if (_disposed) return;
         error ??= _errorText(cause);
       }
     }
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   String _errorText(Object value) {
@@ -656,7 +748,11 @@ class ChatController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    // Invalidate any in-flight event stream so late callbacks (onDone, timer
+    // retries) are discarded instead of touching disposed state.
+    _streamGeneration += 1;
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _eventSubscription?.cancel();
     api.close();
     super.dispose();

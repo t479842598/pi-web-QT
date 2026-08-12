@@ -175,7 +175,7 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
                   ],
                 ),
               ),
-              Expanded(child: _modelList(context, models)),
+              Expanded(child: _modelList(context, models, keyword)),
             ],
           ),
         ),
@@ -183,14 +183,18 @@ class _ModelPickerSheetState extends State<_ModelPickerSheet> {
     );
   }
 
-  Widget _modelList(BuildContext context, List<PiModel> models) {
+  Widget _modelList(
+    BuildContext context,
+    List<PiModel> models,
+    String keyword,
+  ) {
     if (widget.controller.loadingModels) {
       return const Center(child: CircularProgressIndicator());
     }
     if (models.isEmpty) {
       return Center(
         child: Text(
-          context.tr('没有找到匹配模型'),
+          keyword.isEmpty ? context.tr('暂无可用的模型') : context.tr('没有找到匹配模型'),
           style: TextStyle(
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),

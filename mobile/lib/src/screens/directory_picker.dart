@@ -37,7 +37,7 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
   final _searchController = TextEditingController();
   final _scrollController = ScrollController();
   DirectoryListing? _listing;
-  bool _loading = true;
+  bool _loading = false;
   bool _creating = false;
   String? _error;
 
@@ -57,6 +57,7 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
   }
 
   Future<void> _navigate([String? path]) async {
+    if (_loading) return;
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _loading = true;
@@ -71,7 +72,9 @@ class _DirectoryPickerSheetState extends State<_DirectoryPickerSheet> {
         _searchController.clear();
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) _scrollController.jumpTo(0);
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.jumpTo(0);
+        }
       });
     } catch (cause) {
       if (mounted) {
@@ -465,7 +468,15 @@ class _CreateDirectoryDialogState extends State<_CreateDirectoryDialog> {
 
   void _submit() {
     final name = _nameController.text.trim();
-    if (name.isNotEmpty) Navigator.pop(context, name);
+    // Reject path separators and traversal components up front; the server
+    // would reject them with a confusing raw error otherwise.
+    if (name.isNotEmpty &&
+        !name.contains('/') &&
+        !name.contains('\\') &&
+        name != '.' &&
+        name != '..') {
+      Navigator.pop(context, name);
+    }
   }
 
   @override

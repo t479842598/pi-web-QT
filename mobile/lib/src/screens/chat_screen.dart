@@ -54,6 +54,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _stickToBottom = true;
   bool _showJumpToBottom = false;
   bool _slashCommandsRequested = false;
+  bool _postFrameScheduled = false;
+  bool _pickingImages = false;
   String? _visibleSessionId;
   final List<_PendingImage> _pendingImages = [];
 
@@ -103,6 +105,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollController.removeListener(_trackScrollPosition);
     _messageController.dispose();
     _scrollController.dispose();
+    _pendingImages.clear();
     super.dispose();
   }
 
@@ -114,7 +117,11 @@ class _ChatScreenState extends State<ChatScreen> {
       _showJumpToBottom = false;
     }
     setState(() {});
+    if (_postFrameScheduled) return;
+    _postFrameScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _postFrameScheduled = false;
+      if (!mounted) return;
       if (_stickToBottom && _scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
@@ -275,7 +282,13 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _pickImages() async {
-    if (chat.running || _pendingImages.length >= 10) return;
+    if (chat.running ||
+        _pendingImages.length >= 10 ||
+        _pickingImages ||
+        !mounted) {
+      return;
+    }
+    _pickingImages = true;
     try {
       final files = await ImagePicker().pickMultiImage(
         imageQuality: 88,
@@ -315,6 +328,8 @@ class _ChatScreenState extends State<ChatScreen> {
           context,
         ).showSnackBar(SnackBar(content: Text(context.tr('无法读取所选图片'))));
       }
+    } finally {
+      _pickingImages = false;
     }
   }
 
@@ -1046,7 +1061,14 @@ class _ImagePreview extends StatelessWidget {
             Positioned.fill(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(14),
-                child: Image.memory(image.bytes, fit: BoxFit.cover),
+                child: Image.memory(
+                  image.bytes,
+                  fit: BoxFit.cover,
+                  // Decode at a small size; the preview is only 72 px wide.
+                  // Without this the full-resolution image is decoded on every
+                  // rebuild, which is both slow and memory-heavy.
+                  cacheWidth: 144,
+                ),
               ),
             ),
             Positioned(
@@ -1619,82 +1641,41 @@ class _ComposerState extends State<_Composer> {
               constraints: const BoxConstraints(maxWidth: 840),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(28, 5, 28, 10),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final multiline = _isMultiline(
-                      context,
-                      constraints.maxWidth,
-                    );
-                    return Container(
-                      key: const Key('chat-composer'),
-                      constraints: const BoxConstraints(minHeight: 50),
-                      decoration: BoxDecoration(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.surfaceContainerHigh,
-                        borderRadius: BorderRadius.circular(
-                          multiline ? 26 : 999,
+                child: Container(
+                  key: const Key('chat-composer'),
+                  constraints: const BoxConstraints(minHeight: 50),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                    boxShadow: AppleShadows.card,
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Row(
+                      key: const Key('composer-single-line'),
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(left: 5),
+                          child: _addButton(context),
                         ),
-                        border: Border.all(
-                          color: Theme.of(context).colorScheme.outlineVariant,
+                        Expanded(
+                          child: _textField(
+                            context,
+                            const EdgeInsets.fromLTRB(6, 14, 6, 14),
+                          ),
                         ),
-                        boxShadow: AppleShadows.card,
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: Material(
-                        color: Colors.transparent,
-                        child: multiline
-                            ? Column(
-                                key: const Key('composer-multiline'),
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  _textField(
-                                    context,
-                                    const EdgeInsets.fromLTRB(16, 12, 16, 2),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      5,
-                                      0,
-                                      6,
-                                      5,
-                                    ),
-                                    child: Row(
-                                      key: const Key(
-                                        'composer-multiline-actions',
-                                      ),
-                                      children: [
-                                        _addButton(context),
-                                        const Spacer(),
-                                        _sendButton(context),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : Row(
-                                key: const Key('composer-single-line'),
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(left: 5),
-                                    child: _addButton(context),
-                                  ),
-                                  Expanded(
-                                    child: _textField(
-                                      context,
-                                      const EdgeInsets.fromLTRB(6, 14, 6, 14),
-                                    ),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.all(6),
-                                    child: _sendButton(context),
-                                  ),
-                                ],
-                              ),
-                      ),
-                    );
-                  },
+                        Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: _sendButton(context),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1702,19 +1683,6 @@ class _ComposerState extends State<_Composer> {
         ],
       ),
     );
-  }
-
-  bool _isMultiline(BuildContext context, double maxWidth) {
-    final text = controller.text;
-    if (text.contains('\n')) return true;
-    if (text.isEmpty) return false;
-    final availableWidth = maxWidth > 140 ? maxWidth - 120 : 40.0;
-    final painter = TextPainter(
-      text: TextSpan(text: text, style: Theme.of(context).textTheme.bodyLarge),
-      textDirection: Directionality.of(context),
-      maxLines: 1,
-    )..layout(maxWidth: availableWidth);
-    return painter.didExceedMaxLines;
   }
 
   Widget _textField(BuildContext context, EdgeInsets contentPadding) =>

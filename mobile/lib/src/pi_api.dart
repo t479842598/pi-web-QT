@@ -63,12 +63,25 @@ class PiApi {
         _ => _tr('服务器请求失败（HTTP {status}）', {'status': response.statusCode}),
       };
       final message = body is Map ? body['error']?.toString() : null;
+      if (message == null || message.isEmpty) {
+        throw PiApiException(fallback, statusCode: response.statusCode);
+      }
+      // Surface a short response excerpt alongside the server's error text so
+      // protocol mismatches are debuggable instead of a bare HTTP status.
+      final bodyText = utf8.decode(response.bodyBytes, allowMalformed: true);
+      final excerpt = bodyText.trim().replaceAll(RegExp(r'\s+'), ' ');
+      final detail = excerpt.isNotEmpty && excerpt.length > 4
+          ? '$message（$excerpt）'
+          : message;
+      throw PiApiException(detail, statusCode: response.statusCode);
+    }
+    if (body is! Map) {
+      final bodyText = utf8.decode(response.bodyBytes, allowMalformed: true);
+      final excerpt = bodyText.trim();
       throw PiApiException(
-        message ?? fallback,
-        statusCode: response.statusCode,
+        excerpt.isEmpty ? _tr('服务器未返回数据，请稍后重试') : _tr('服务器返回了无法识别的数据'),
       );
     }
-    if (body is! Map) throw PiApiException(_tr('服务器返回了无法识别的数据'));
     return Map<String, dynamic>.from(body);
   }
 
@@ -77,11 +90,10 @@ class PiApi {
         .get(_uri('/api/sessions'), headers: _headers)
         .timeout(const Duration(seconds: 15));
     final body = await _decode(response);
-    final running =
-        (body['runningSessionIds'] as List?)
-            ?.map((e) => e.toString())
-            .toSet() ??
-        <String>{};
+    final runningList = body['runningSessionIds'];
+    final running = (runningList is List ? runningList : const [])
+        .map((e) => e.toString())
+        .toSet();
     return (body['sessions'] as List? ?? const []).whereType<Map>().map((
       value,
     ) {
@@ -362,7 +374,18 @@ class PiApi {
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .where((line) => line.startsWith('data:'))
-        .map((line) => jsonDecode(line.substring(5).trim()))
+        .map((line) {
+          final data = line.substring(5).trim();
+          if (data.isEmpty) return null;
+          try {
+            return jsonDecode(data);
+          } catch (_) {
+            // A proxy or misbehaving server may interleave non-JSON payloads
+            // (heartbeat comments, HTML error pages). Skip the line instead of
+            // crashing the whole stream.
+            return null;
+          }
+        })
         .where((value) => value is Map)
         .map((value) => Map<String, dynamic>.from(value as Map));
   }

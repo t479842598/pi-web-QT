@@ -56,8 +56,10 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
         (value) => value.name == preferences.getString('pi-language'),
         orElse: () => AppLanguagePreference.system,
       );
-      _controller?.setLanguage(_language);
     });
+    // The controller may be created later (concurrent _restore); the restored
+    // language is re-applied when the controller is handed over.
+    _controller?.setLanguage(_language);
   }
 
   Future<void> _setThemeMode(ThemeMode mode) async {
@@ -109,11 +111,19 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
       _controller = controller;
       _restoring = false;
     });
+    // Apply the restored language preference to the fresh controller in case
+    // _restoreDisplayPreferences completed before it was created.
+    controller?.setLanguage(_language);
   }
 
   Future<void> _login(ServerProfile profile) async {
     final controller = ChatController(PiApi(profile, language: _language));
-    await controller.initialize();
+    try {
+      await controller.initialize();
+    } catch (_) {
+      controller.dispose();
+      rethrow;
+    }
     final saved = await _store.save(profile);
     if (!mounted) {
       controller.dispose();
@@ -124,6 +134,7 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
       _profile = saved;
       _controller = controller;
     });
+    controller.setLanguage(_language);
   }
 
   /// Disconnects the current session only; the saved server list stays intact
@@ -160,6 +171,7 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
       _profile = target;
       _controller = controller;
     });
+    controller.setLanguage(_language);
   }
 
   String _errorTextForSwitch() =>
@@ -168,7 +180,16 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
   /// Removes a saved server entry (and its stored password). When the removed
   /// profile was active, returns to the login screen.
   Future<void> _removeProfile(String id) async {
-    await _store.delete(id);
+    try {
+      await _store.delete(id);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_errorTextForSwitch())));
+      }
+      return;
+    }
     if (!mounted) return;
     if (_profile?.id == id) {
       _controller?.dispose();
