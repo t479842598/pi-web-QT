@@ -163,24 +163,17 @@ jobs:
           VER="${GITHUB_REF_NAME#v}"
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+      - name: Gather asset paths
+        id: assets
         run: |
-          set -x
-          VER="${{ steps.version.outputs.version }}"
-          # Locate built artifacts regardless of nesting depth.
-          find artifacts -type f \( -name '*.apk' -o -name '*.aab' -o -name '*.ipa' \) | tee /tmp/found_assets.txt
-          # Ensure the release exists (creates it if the web release flow has
-          # not run yet), then attach the mobile artifacts.
-          gh release view "v${VER}" >/dev/null 2>&1 || gh release create "v${VER}" --title "v${VER}" --generate-notes
-          ARGS=()
-          while IFS= read -r f; do
-            [ -n "$f" ] && [ -f "$f" ] && ARGS+=(--clobber "$f")
-          done < /tmp/found_assets.txt
-          if [ "${#ARGS[@]}" -eq 0 ]; then
-            echo "::error::No mobile artifacts found to upload"
-            exit 1
-          fi
-          gh release upload "v${VER}" "${ARGS[@]}"
+          find artifacts -type f \( -name '*.apk' -o -name '*.aab' -o -name '*.ipa' \) > /tmp/assets.txt
+          cat /tmp/assets.txt
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: /tmp/assets.txt
+          fail_on_unmatched_files: false
