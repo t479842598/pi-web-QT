@@ -1531,7 +1531,7 @@ class _TypingIndicator extends StatelessWidget {
   );
 }
 
-class _Composer extends StatelessWidget {
+class _Composer extends StatefulWidget {
   const _Composer({
     required this.controller,
     required this.running,
@@ -1558,6 +1558,32 @@ class _Composer extends StatelessWidget {
   final ValueChanged<int> onRemoveImage;
   final VoidCallback onSend;
   final VoidCallback onStop;
+
+  @override
+  State<_Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<_Composer> {
+  final _focusNode = FocusNode();
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  TextEditingController get controller => widget.controller;
+  bool get running => widget.running;
+  String? get slashQuery => widget.slashQuery;
+  List<PiSlashCommand> get slashCommands => widget.slashCommands;
+  bool get slashCommandsLoading => widget.slashCommandsLoading;
+  Set<String> get dormantSkillNames => widget.dormantSkillNames;
+  List<_PendingImage> get pendingImages => widget.pendingImages;
+  ValueChanged<PiSlashCommand> get onSlashCommand => widget.onSlashCommand;
+  VoidCallback get onPickImages => widget.onPickImages;
+  ValueChanged<int> get onRemoveImage => widget.onRemoveImage;
+  VoidCallback get onSend => widget.onSend;
+  VoidCallback get onStop => widget.onStop;
 
   @override
   Widget build(BuildContext context) {
@@ -1693,7 +1719,12 @@ class _Composer extends StatelessWidget {
 
   Widget _textField(BuildContext context, EdgeInsets contentPadding) =>
       TextField(
+        // Stable key keeps the same EditableText element alive when the outer
+        // layout switches between single-line (Row) and multiline (Column),
+        // so focus and the soft keyboard are not dropped mid-typing.
+        key: const Key('composer-text-field'),
         controller: controller,
+        focusNode: _focusNode,
         enabled: !running,
         minLines: 1,
         maxLines: 6,
