@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { isIP } from "node:net";
 import { resolveModelDiscoveryAuth } from "@/lib/model-discovery-auth";
 import { buildModelsListUrl, parseDiscoveredModels } from "@/lib/model-discovery";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
@@ -7,35 +6,6 @@ import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security"
 export const dynamic = "force-dynamic";
 
 const DISCOVERY_TIMEOUT_MS = 20_000;
-
-/** Reject private, loopback, link-local, and unspecified networks to block SSRF
- *  against internal hosts or cloud metadata endpoints via the attacker-chosen
- *  baseUrl. */
-function isPrivateHost(hostname: string): boolean {
-  const lower = hostname.toLocaleLowerCase();
-  if (lower === "localhost" || lower.endsWith(".localhost")) return true;
-  if (isIP(lower) === 4) {
-    const parts = lower.split(".").map(Number);
-    const [a, b] = parts;
-    if (a === 10) return true;
-    if (a === 127) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 0) return true;
-    if (a >= 224) return true; // multicast + reserved
-    return false;
-  }
-  if (isIP(lower) === 6) {
-    const firstGroup = lower.split(":").find((part) => part !== "");
-    const prefix = firstGroup?.toLocaleLowerCase() ?? "";
-    if (prefix === "fe80") return true; // link-local
-    if (prefix === "fc" || prefix === "fd") return true; // unique local
-    if (prefix === "::" || prefix === "0") return true; // unspecified
-    return false;
-  }
-  return false;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -86,12 +56,11 @@ export async function POST(req: Request) {
     } catch {
       return NextResponse.json({ error: "Base URL is invalid" }, { status: 400 });
     }
-    // SSRF guard: only public HTTPS hosts are acceptable model-list endpoints.
-    if (endpoint.protocol !== "https:") {
-      return NextResponse.json({ error: "Only https:// base URLs are allowed" }, { status: 400 });
-    }
-    if (isPrivateHost(endpoint.hostname)) {
-      return NextResponse.json({ error: "Private and local network addresses are not allowed" }, { status: 400 });
+    // Protocol guard: allow http/https base URLs (local LLMs like Ollama/LM Studio
+    // are http-only). See ADR-0004: the route is already guarded by isApiRequestAllowed
+    // (local request + Host whitelist), so the SSRF exposure is limited to local callers.
+    if (endpoint.protocol !== "https:" && endpoint.protocol !== "http:") {
+      return NextResponse.json({ error: "Only http:// and https:// base URLs are allowed" }, { status: 400 });
     }
 
     const auth = await resolveModelDiscoveryAuth(providerName, body.provider);

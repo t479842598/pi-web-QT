@@ -16,16 +16,15 @@ export async function GET(req: Request) {
       const heartbeat = setInterval(() => {
         try { controller.enqueue(encoder.encode(":\n\n")); } catch { /* closed */ }
       }, 30_000);
-      let idleTimeout: ReturnType<typeof setTimeout> | undefined;
-      const cleanup = () => {
+      function cleanup() {
         clearInterval(heartbeat);
-        if (idleTimeout) clearTimeout(idleTimeout);
+        clearTimeout(idleTimeout);
         unsubscribe();
         try { controller.close(); } catch { /* closed */ }
-      };
+      }
       req.signal.addEventListener("abort", cleanup, { once: true });
       // Idle close: guard against half-open connections that never fire abort.
-      idleTimeout = setTimeout(cleanup, 2 * 60 * 60 * 1000);
+      const idleTimeout = setTimeout(cleanup, 2 * 60 * 60 * 1000);
     },
   });
   return new Response(stream, {

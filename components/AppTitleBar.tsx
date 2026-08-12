@@ -40,6 +40,8 @@ interface AppTitleBarProps {
   onOpenSettings: () => void;
   sessionTitle: string | null;
   onWorkspaceControlsHostChange?: (node: HTMLDivElement | null) => void;
+  /** Host slot for the git-branch chip displayed to the right of the session title. */
+  onTitleRightHostChange?: (node: HTMLDivElement | null) => void;
 }
 
 /** Renders a placeholder icon until mounted, then the correct theme icon.
@@ -114,6 +116,7 @@ export function AppTitleBar({
   onOpenSettings,
   sessionTitle,
   onWorkspaceControlsHostChange,
+  onTitleRightHostChange,
 }: AppTitleBarProps) {
   const { t: translate } = useI18n();
   const [titleModalOpen, setTitleModalOpen] = useState(false);
@@ -158,7 +161,7 @@ export function AppTitleBar({
           style={{
             flex: "0 1 auto",
             minWidth: 0,
-            maxWidth: "min(52vw, 560px)",
+            maxWidth: "min(68vw, 920px)",
             height: "100%",
             display: "flex",
             alignItems: "center",
@@ -211,6 +214,12 @@ export function AppTitleBar({
               {sessionTitle}
             </button>
           )}
+          {/* Branch chip slot — SessionSidebar portals the current git branch here. */}
+          <div
+            className="app-no-drag"
+            ref={onTitleRightHostChange}
+            style={{ flexShrink: 0, display: "flex", alignItems: "center", marginLeft: 4 }}
+          />
         </div>
 
 

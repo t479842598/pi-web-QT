@@ -20,43 +20,57 @@ function notify() { listeners.forEach((cb) => cb()); }
 
 const KEY_MODE = "pi-theme-mode";
 const KEY_THEME = "pi-theme";
-/** Light/dark independent theme memory (each mode keeps its own theme). */
+/** Legacy per-mode keys (pre single-key model). Migrated once into KEY_THEME. */
 const KEY_THEME_LIGHT = "pi-theme-light";
 const KEY_THEME_DARK = "pi-theme-dark";
 const KEY_BORDER_DEPTH = "pi-border-depth";
 
-/** Legacy migration: fold a single-value theme key into the per-mode keys. */
-function migrateLegacyTheme(mode: ResolvedMode): string | null {
+/**
+ * Single-key model (B1): one theme set for both light and dark modes.
+ * Read `pi-theme`; if absent, migrate legacy per-mode keys once into it
+ * (keeping the FULL theme name — no `-dark`/`-light` suffix stripping,
+ * which previously broke sets like `vitesse-dark`), then drop the old keys.
+ */
+function migrateLegacyTheme(): string | null {
   try {
-    const legacy = localStorage.getItem(KEY_THEME);
-    if (!legacy || legacy === "dark" || legacy === "light") return null;
-    const key = mode === "dark" ? KEY_THEME_DARK : KEY_THEME_LIGHT;
-    if (!localStorage.getItem(key)) {
-      localStorage.setItem(key, legacy);
+    const existing = localStorage.getItem(KEY_THEME);
+    if (existing) {
+      // Already on single-key model — just drop any stale per-mode keys.
+      localStorage.removeItem(KEY_THEME_DARK);
+      localStorage.removeItem(KEY_THEME_LIGHT);
+      return existing;
     }
-    localStorage.removeItem(KEY_THEME);
-    return legacy;
+    const dark = localStorage.getItem(KEY_THEME_DARK);
+    const light = localStorage.getItem(KEY_THEME_LIGHT);
+    const legacy = dark ?? light;
+    if (legacy) {
+      localStorage.setItem(KEY_THEME, legacy);
+      localStorage.removeItem(KEY_THEME_DARK);
+      localStorage.removeItem(KEY_THEME_LIGHT);
+      return legacy;
+    }
   } catch {}
   return null;
 }
 
-/** Read the theme for a resolved mode; per-mode keys win, legacy single key migrates. */
-function readThemeForMode(mode: ResolvedMode): string {
+/** Read the theme — single-key model: both modes share it. */
+function readThemeForMode(): string {
   try {
-    const key = mode === "dark" ? KEY_THEME_DARK : KEY_THEME_LIGHT;
-    const v = localStorage.getItem(key);
+    const v = localStorage.getItem(KEY_THEME);
     if (v) return v;
-    const migrated = migrateLegacyTheme(mode);
+    const migrated = migrateLegacyTheme();
     if (migrated) return migrated;
   } catch {}
   return "";
 }
 
-/** Write the theme for a resolved mode and drop the legacy single key. */
-function writeThemeForMode(mode: ResolvedMode, name: string): void {
+/** Write the theme for a resolved mode — single-key model: both modes share it. */
+function writeThemeForMode(_mode: ResolvedMode, name: string): void {
   try {
-    localStorage.setItem(mode === "dark" ? KEY_THEME_DARK : KEY_THEME_LIGHT, name);
-    localStorage.removeItem(KEY_THEME);
+    if (name) localStorage.setItem(KEY_THEME, name);
+    else localStorage.removeItem(KEY_THEME);
+    localStorage.removeItem(KEY_THEME_DARK);
+    localStorage.removeItem(KEY_THEME_LIGHT);
   } catch {}
 }
 
@@ -112,7 +126,7 @@ function getThemeSnapshot(): string {
   if (typeof document === "undefined") return "";
   const dt = document.documentElement.dataset.theme;
   if (dt) return dt;
-  return readThemeForMode(resolveEffectiveMode(getModeSnapshot()));
+  return readThemeForMode();
 }
 
 function getServerSnapshot(): ThemeMode { return "dark"; }
@@ -348,7 +362,7 @@ export function useTheme() {
     return subscribeSystemColorScheme(() => {
       if (getModeSnapshot() === "system") {
         const newResolved = getSystemPrefersDark() ? "dark" : "light";
-        const tn = readThemeForMode(newResolved);
+        const tn = readThemeForMode();
         syncDOM(newResolved, "system", tn);
         applyModeAndTheme(newResolved, tn);
         applyBorderDepth(readBorderDepth());
@@ -380,7 +394,7 @@ export function useTheme() {
     applyingRef.current = true;
 
     const rmode = resolveEffectiveMode(nextMode);
-    const tn = readThemeForMode(rmode);
+    const tn = readThemeForMode();
 
     try {
       await applyModeAndTheme(rmode, tn);
@@ -392,6 +406,28 @@ export function useTheme() {
       applyingRef.current = false;
     }
   }, [syncDOM]);
+
+  /** Preview a theme set without persisting it (hover preview).
+   *  Applies the theme for the current resolved mode only; writes nothing. */
+  const previewTheme = useCallback(async (name: string) => {
+    await applyModeAndTheme(resolvedMode, name);
+    const el = document.documentElement;
+    if (name) el.dataset.theme = name;
+    else delete el.dataset.theme;
+    applyBorderDepth(readBorderDepth());
+    notify();
+  }, [resolvedMode]);
+
+  /** Cancel preview and re-apply the persisted theme. */
+  const clearPreview = useCallback(async () => {
+    const t = readThemeForMode();
+    await applyModeAndTheme(resolvedMode, t);
+    const el = document.documentElement;
+    if (t) el.dataset.theme = t;
+    else delete el.dataset.theme;
+    applyBorderDepth(readBorderDepth());
+    notify();
+  }, [resolvedMode]);
 
   /** Toggle between light / dark (explicit modes). */
   const toggleTheme = useCallback((origin?: ToggleOrigin) => {
@@ -436,6 +472,8 @@ export function useTheme() {
     themeName: storedThemeName,
     setMode: setModeAction,
     setTheme,
+    previewTheme,
+    clearPreview,
     toggleTheme,
     isDark,
     /** Border visibility depth (0 = invisible, 50 = theme default, 100 = max contrast). */

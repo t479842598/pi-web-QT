@@ -27,13 +27,25 @@
 | 会话导入 | 从 Reasonix 等工具导入历史对话记录，自动发现项目与会话，支持合并或新建项目；导入后可选批量并行生成标题。 |
 | 项目与文件 | 通过目录选择器加载项目，浏览文件、Diff、图片、音频、PDF、DOCX。 |
 | 模型与认证 | 在网页中管理模型、OAuth/API Key、连通性测试和默认模型；支持从供应商自动获取模型列表与 models.dev 定价预设一键填入。 |
-| OpenCode Zen | 多账号/代理池管理、429 自动切号与日限额冷却；外部调用（OpenAI 兼容网关）允许 Cline / Roo Code / Open WebUI / ZCode 等客户端直接接入账号池。 |
 | 备份恢复 | 一键导出/导入核心配置、技能、插件、MCP 服务器与会话（可选含密钥），跨平台自动适配路径与命令。 |
 | 技能与插件 | 查询、安装、启停 Skills 与 package 插件。 |
 | Git Worktree | 在同一项目下创建、切换和移除 Worktree。 |
 | 任务看板 | 桌面端四列看板：把任务交给 agent 在 worktree 分支中执行，支持验收、合并、归档、每项目设置（Beta）。 |
 | 主题与语言 | 支持 Pi TUI 主题、亮暗模式及中文/English。 |
 | 移动端 | 适配 Safari/Chrome 窄屏布局；模型选择和发送操作保持可见。 |
+
+## 原生移动客户端
+
+本仓库同时包含 Android / iOS 原生客户端（Flutter），位于 [`mobile/`](./mobile/)，支持：
+
+- 连接自建 Pi Web（域名或 IP），可保存多台服务器并快速切换；
+- 按远端工作目录浏览会话，会话内搜索与最近项目快捷切换；
+- SSE 流式对话、按需加载思考过程、图片附件、模型与技能浏览；
+- 只读查看当前项目的 Git 变更与文件 diff；
+- 宽屏（iPad / 折叠屏）自动切换常驻双栏布局；
+- 简体中文 / 日本語 / English 三语界面。
+
+安装与自建打包说明见 [`mobile/README.md`](./mobile/README.md)。发布时通过 GitHub Actions 在 tag 上自动产出 Android APK/AAB 与 iOS 未签名 IPA，见 [mobile-release workflow](./.github/workflows/mobile-release.yml)。
 
 ## 快速开始
 
@@ -234,7 +246,7 @@ docs/           部署说明、截图与功能文档
 
 ## Web-only 说明
 
-本仓库不含 Electron 主进程、安装向导、桌面端打包依赖或 GitHub Release 打包工作流。请使用浏览器访问部署后的 Pi Web 服务。
+本仓库不含 Electron 主进程、安装向导或桌面端打包依赖。请使用浏览器访问部署后的 Pi Web 服务。原生移动端（Android/iOS）打包见 [mobile-release workflow](./.github/workflows/mobile-release.yml)。
 
 ## 许可证
 

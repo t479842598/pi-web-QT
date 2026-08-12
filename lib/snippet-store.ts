@@ -3,8 +3,8 @@
  *
  * Snippets power the `#` autocomplete in the chat composer: typing `#name`
  * shows matching snippets and selecting one expands the token to its content.
- * Storage mirrors opencode-zen's pattern: atomic private write + proper-lockfile
- * so concurrent saves from multiple windows cannot corrupt the file.
+ * Storage uses atomic private write + proper-lockfile so concurrent saves
+ * from multiple windows cannot corrupt the file.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -78,6 +78,7 @@ export function AppShell() {
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
   const [titleWorkspaceControlsHost, setTitleWorkspaceControlsHost] = useState<HTMLDivElement | null>(null);
+  const [titleRightWorkspaceControlsHost, setTitleRightWorkspaceControlsHost] = useState<HTMLDivElement | null>(null);
   const [welcomeWorkspaceControlsHost, setWelcomeWorkspaceControlsHost] = useState<HTMLDivElement | null>(null);
 
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
@@ -619,7 +620,7 @@ export function AppShell() {
         onOpenFile={handleOpenFile}
         selectedSessionStats={sessionStats}
         onOpenSettings={(tab) => {
-          const supported: SettingsTab[] = ["models", "skills", "plugins", "opencode-zen", "chat", "features", "logs"];
+          const supported: SettingsTab[] = ["models", "skills", "plugins", "chat", "features", "logs"];
           openSettings(supported.includes(tab as SettingsTab) ? tab as SettingsTab : "models");
         }}
         explorerRefreshKey={explorerRefreshKey}
@@ -628,6 +629,7 @@ export function AppShell() {
         workspaceControlsHosts={{
           title: titleWorkspaceControlsHost,
           welcome: welcomeWorkspaceControlsHost,
+          titleRight: titleRightWorkspaceControlsHost,
         }}
         // Workspace controls (title bar + welcome page) are always shown,
         // including before a project is active, so new users can pick a
@@ -676,6 +678,7 @@ export function AppShell() {
         onOpenSettings={() => openSettings("models")}
         sessionTitle={sessionTitle}
         onWorkspaceControlsHostChange={setTitleWorkspaceControlsHost}
+        onTitleRightHostChange={setTitleRightWorkspaceControlsHost}
       />
       {showChat && projectTrust?.requiresTrust && !projectTrust.trusted && (
         <button

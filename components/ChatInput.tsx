@@ -424,9 +424,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const nextPasteIdRef = useRef(0);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
-  // 当前 OpenCode Zen 激活账号的备注名，显示在模型下拉的网关分组标题里，
-  // 让使用中的模型一眼看出走的是哪个导入账号。
-  const [zenActiveNote, setZenActiveNote] = useState<string | null>(null);
   const [viewport, setViewport] = useState({ height: 0, width: 0, offsetTop: 0 });
   const [modelSearch, setModelSearch] = useState("");
   const [favorites, setFavorites] = useState<Set<string>>(() => {
@@ -1554,21 +1551,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   // user can start typing a filter immediately.
   useEffect(() => {
     if (modelDropdownOpen) modelSearchRef.current?.focus();
-  }, [modelDropdownOpen]);
-
-  // Refresh the active Zen account label whenever the model dropdown opens,
-  // so a manual account switch (or a 429 rotation) is reflected immediately.
-  useEffect(() => {
-    if (!modelDropdownOpen) return;
-    let cancelled = false;
-    fetch("/api/opencode-zen")
-      .then((response) => response.ok ? response.json() as Promise<{ accounts?: Array<{ id: string; note: string }>; activeAccountId?: string }> : null)
-      .then((data) => {
-        if (cancelled || !data) return;
-        setZenActiveNote(data.accounts?.find((account) => account.id === data.activeAccountId)?.note ?? null);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
   }, [modelDropdownOpen]);
 
   // ── Task status row (input-bar summary) ───────────────────────────────────
@@ -2949,9 +2931,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         <div key={group.provider}>
                           <button
                             onClick={() => toggleProviderExpand(group.provider)}
-                            title={group.provider === "opencode" || group.provider === "opencode-go"
-                              ? (zenActiveNote ? `OpenCode Zen · ${zenActiveNote}` : group.provider)
-                              : group.provider}
+                            title={group.provider}
                             style={{
                               display: "flex", alignItems: "center", gap: 4,
                               width: "100%", maxWidth: "100%", padding: "6px 12px 4px",
@@ -2968,9 +2948,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                           >
                             {caret}
                             <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
-                            {group.provider === "opencode" || group.provider === "opencode-go"
-                              ? `OpenCode Zen${zenActiveNote ? ` · 账号：${zenActiveNote}` : ""}`
-                              : group.provider}
+                            {group.provider}
                             </span>
                           </button>
                           {isExpanded && group.options.map((opt) => {

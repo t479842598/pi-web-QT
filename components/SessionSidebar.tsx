@@ -6,6 +6,7 @@ import { ArrowClockwise, CaretDown, CaretRight, Check, Cpu, DownloadSimple, Fold
 import type { SessionInfo } from "@/lib/types";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { useI18n } from "@/hooks/useI18n";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { QuickChangesPanel } from "./QuickChangesPanel";
@@ -33,6 +34,8 @@ interface Props {
   workspaceControlsHosts?: {
     title?: HTMLElement | null;
     welcome?: HTMLElement | null;
+    /** Slot beside the session title for the git-branch chip. */
+    titleRight?: HTMLElement | null;
   };
   /** Hide both workspace controls on the empty welcome page. */
   showWorkspaceControls?: boolean;
@@ -412,6 +415,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const rememberPickedProject = useCallback((cwd: string | null) => {
     if (!cwd) return;
     setPickedProjects((prev) => (prev.includes(cwd) ? prev : [...prev, cwd]));
+  }, []);
+
+  // ── Project tab bar state (desktop top bar) ──────────────────────────────
+  const isMobile = useIsMobile();
+  const PROJECT_TABS_KEY = "pi-project-tabs";
+  const MAX_PROJECT_TABS = 5;
+  const [projectTabs, setProjectTabs] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(PROJECT_TABS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed)) return parsed.filter((p): p is string => typeof p === "string" && p.length > 0).slice(0, MAX_PROJECT_TABS);
+      }
+    } catch {}
+    return [];
+  });
+  const persistProjectTabs = useCallback((tabs: string[]) => {
+    setProjectTabs(tabs);
+    try { window.localStorage.setItem(PROJECT_TABS_KEY, JSON.stringify(tabs)); } catch {}
   }, []);
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -979,7 +1002,51 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [selectedCwd, onNewSession]);
 
   const selectedProject = projectRootFor(selectedCwd);
+  // Keep the active project as the first tab whenever it changes externally.
+  useEffect(() => {
+    const proj = selectedProject ?? selectedCwd;
+    if (!proj) return;
+    setProjectTabs((prev) => {
+      if (prev[0] === proj) return prev;
+      const next = [proj, ...prev.filter((p) => p !== proj)].slice(0, MAX_PROJECT_TABS);
+      try { window.localStorage.setItem(PROJECT_TABS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [selectedProject, selectedCwd]);
   const recentProjects = getRecentProjects(allSessions, selectedCwd ? projectRootFor(selectedCwd) ?? selectedCwd : null, pickedProjects);
+
+  // ── Project tab bar handlers ─────────────────────────────────────────────
+  const [addTabDropdownOpen, setAddTabDropdownOpen] = useState(false);
+  const addTabDropdownRef = useRef<HTMLDivElement | null>(null);
+  const removeProjectTab = (project: string) => {
+    const next = projectTabs.filter((p) => p !== project);
+    persistProjectTabs(next.length > 0 ? next : [selectedProject ?? project]);
+    // If the closed tab was active, fall back to the first remaining tab.
+    if (selectedProject === project) {
+      const fallback = next[0] ?? project;
+      if (fallback !== project) selectProject(fallback);
+    }
+  };
+  const addProjectTab = (project: string) => {
+    if (projectTabs.includes(project)) {
+      selectProject(project);
+      return;
+    }
+    const next = [...projectTabs, project].slice(-MAX_PROJECT_TABS);
+    persistProjectTabs(next);
+    selectProject(project);
+  };
+  // Close the + dropdown on outside click.
+  useEffect(() => {
+    if (!addTabDropdownOpen) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!addTabDropdownRef.current?.contains(event.target as Node)) {
+        setAddTabDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointer);
+    return () => document.removeEventListener("mousedown", onPointer);
+  }, [addTabDropdownOpen]);
   const visibleProjects = projectFilter.trim()
     ? recentProjects.filter((p) => p.toLowerCase().includes(projectFilter.trim().toLowerCase()))
     : recentProjects;
@@ -1254,12 +1321,197 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     ? (currentWt.branch ?? pathBaseName(currentWt.path))
     : inactiveWorktreeSelector?.label;
   const hasWorkspaceControlsHosts = Boolean(workspaceControlsHosts?.title || workspaceControlsHosts?.welcome);
+
+  // ── Project tab bar (desktop top bar) ────────────────────────────────────
+  // Candidate projects for the + dropdown: recent projects not already open.
+  const addTabCandidates = recentProjects.filter((p) => !projectTabs.includes(p));
+  const projectTabBar = !isMobile ? (
+    <div className="app-no-drag" style={{ display: "flex", alignItems: "center", height: "100%", gap: 2, flexShrink: 0 }}>
+      {projectTabs.map((project, index) => {
+        const active = samePath(project, selectedProject ?? selectedCwd ?? "");
+        const label = aliasFor(project) ?? pathBaseName(project);
+        const isFirst = index === 0;
+        return (
+          <div key={project} style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
+            <button
+              type="button"
+              onClick={() => selectProject(project)}
+              title={project}
+              aria-label={label}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "0 4px 0 10px",
+                width: 132,
+                background: active ? "var(--bg-selected)" : "none",
+                border: "none",
+                borderLeft: "1px solid var(--border)",
+                color: active ? "var(--text)" : "var(--text-muted)",
+                cursor: "pointer",
+                fontSize: 12,
+                fontFamily: "var(--font-mono)",
+                lineHeight: 1,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                transition: "background 0.12s, color 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = active ? "var(--text)" : "var(--text-muted)"; }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{label}</span>
+            </button>
+            {isFirst ? (
+              // First tab: no close button — a caret opens the project picker so
+              // the current project can be switched from here.
+              <button
+                type="button"
+                onClick={() => setWorkspaceProjectDropdownOpen((open) => (open === "title" ? null : "title"))}
+                title={t("desktop.selectProject")}
+                aria-label={t("desktop.selectProject")}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 22, padding: 0,
+                  background: active ? "var(--bg-selected)" : "none",
+                  border: "none",
+                  borderLeft: "1px solid var(--border)",
+                  color: "var(--text-dim)",
+                  cursor: "pointer",
+                  transition: "background 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = "var(--text-dim)"; }}
+              >
+                <CaretDown size={12} weight="regular" aria-hidden="true" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => removeProjectTab(project)}
+                title={t("i18n.close")}
+                aria-label={t("i18n.close")}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 22, padding: 0,
+                  background: active ? "var(--bg-selected)" : "none",
+                  border: "none",
+                  borderLeft: "1px solid var(--border)",
+                  color: "var(--text-dim)",
+                  cursor: "pointer",
+                  transition: "background 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = "var(--text-dim)"; }}
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {/* + button: only after the last tab; hidden at the 5-tab cap. */}
+      {projectTabs.length < MAX_PROJECT_TABS && (
+        <div ref={addTabDropdownRef} style={{ position: "relative", display: "flex", alignItems: "center", height: "100%", flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => setAddTabDropdownOpen((open) => !open)}
+            title={t("desktop.addProjectTab")}
+            aria-label={t("desktop.addProjectTab")}
+            aria-expanded={addTabDropdownOpen}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 30, height: "100%", padding: 0,
+              background: addTabDropdownOpen ? "var(--bg-selected)" : "none",
+              border: "none",
+              borderLeft: "1px solid var(--border)",
+              color: addTabDropdownOpen ? "var(--text)" : "var(--text-muted)",
+              cursor: "pointer",
+              transition: "background 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = addTabDropdownOpen ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = addTabDropdownOpen ? "var(--text)" : "var(--text-muted)"; }}
+          >
+            <Plus size={14} aria-hidden="true" />
+          </button>
+          <AnimatedDropdown open={addTabDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "min(38vh, 300px)" }}>
+            <div className="scroll-overlay" style={{ maxHeight: "min(32vh, 240px)", flex: 1, minHeight: 0, padding: "4px" }}>
+              {addTabCandidates.length > 0 && (
+                <div style={{ padding: "5px 8px 3px", fontSize: 10, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                  {t("desktop.recentProjects")}
+                </div>
+              )}
+              {addTabCandidates.map((project) => (
+                <button
+                  key={project}
+                  type="button"
+                  onClick={() => { addProjectTab(project); setAddTabDropdownOpen(false); }}
+                  title={project}
+                  style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "6px 8px", background: "transparent", border: "none", borderRadius: 5, color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12, fontFamily: "var(--font-mono)" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{aliasFor(project) ?? pathBaseName(project)}</span>
+                  {aliasFor(project) && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{pathBaseName(project)}</span>}
+                </button>
+              ))}
+              {addTabCandidates.length === 0 && projectTabs.length >= MAX_PROJECT_TABS && (
+                <div style={{ padding: "8px", fontSize: 12, color: "var(--text-dim)" }}>{t("desktop.maxProjectTabs")}</div>
+              )}
+            </div>
+            <div style={{ borderTop: "1px solid var(--border)", padding: "4px", flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => { setAddTabDropdownOpen(false); handleCustomPathClick(); }}
+                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 8px", background: "transparent", border: "none", borderRadius: 5, color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
+              >
+                <FolderOpen size={14} weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" />
+                <span>{t("desktop.selectFolder")}</span>
+              </button>
+            </div>
+          </AnimatedDropdown>
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  // Git-branch chip shown to the right of the session title (moved out of the
+  // title-bar worktree switcher per the top-bar redesign).
+  const branchChip = currentWt?.branch ? (
+    <span
+      title={`${t("desktop.branch")}: ${currentWt.branch}`}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 5,
+        maxWidth: 160,
+        padding: "2px 8px",
+        border: "1px solid var(--border)",
+        borderRadius: 999,
+        background: "var(--bg-card)",
+        color: "var(--text-muted)",
+        fontSize: 11,
+        fontFamily: "var(--font-mono)",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        flexShrink: 0,
+      }}
+    >
+      <GitBranch size={11} weight="regular" aria-hidden="true" />
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentWt.branch}</span>
+    </span>
+  ) : null;
+
   const workspaceControls = (location: "title" | "welcome") => {
     const isLargeWorkspaceControl = location === "welcome";
     const isProjectDropdownOpen = workspaceProjectDropdownOpen === location;
     const isWorktreeDropdownOpen = workspaceWorktreeDropdownOpen === location;
+    // On desktop the project tab bar replaces the standalone title-bar project
+    // dropdown button (tab 1's caret opens the same picker); the dropdown
+    // anchor itself stays for the welcome page and the sidebar fallback.
+    const hideProjectButton = location === "title" && !isMobile;
     return showWorkspaceControls ? (
       <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "flex-start", gap: isLargeWorkspaceControl ? 6 : 2, height: isLargeWorkspaceControl ? "auto" : "100%", minWidth: 0, width: isLargeWorkspaceControl ? "100%" : undefined }}>
+        {!hideProjectButton && (
         <div style={{ position: "relative", minWidth: 0, width: isLargeWorkspaceControl ? "fit-content" : undefined, maxWidth: isLargeWorkspaceControl ? "min(100%, 560px)" : undefined }}>
           <button
             className={`app-no-drag app-titlebar-context-control workspace-project-control${isLargeWorkspaceControl ? " workspace-project-control-large" : ""}`}
@@ -1307,6 +1559,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             {projectActions}
           </AnimatedDropdown>
         </div>
+        )}
 
         {(showWorktreeSwitcher || inactiveWorktreeSelector) && (
           <div style={{ position: "relative", minWidth: 0 }}>
@@ -1349,7 +1602,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               }}
             >
               <GitBranch size={16} weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" />
-              <span className="worktree-title-label"><PathLabel text={compactWorktreeLabel ?? ""} style={{ flex: 1, minWidth: 0, color: "inherit", direction: "ltr", fontFamily: "inherit" }} /></span>
+              {/* Branch text moved to the session-title-right chip; the welcome
+                  location keeps its full label. */}
+              {isLargeWorkspaceControl && <span className="worktree-title-label"><PathLabel text={compactWorktreeLabel ?? ""} style={{ flex: 1, minWidth: 0, color: "inherit", direction: "ltr", fontFamily: "inherit" }} /></span>}
               {showWorktreeSwitcher && <CaretDown size={12} weight="regular" style={{ flexShrink: 0, transition: "transform 0.12s", transform: isWorktreeDropdownOpen ? "rotate(180deg)" : "none" }} aria-hidden="true" />}
             </button>
             <AnimatedDropdown open={showWorktreeSwitcher && isWorktreeDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden" }}>
@@ -1412,11 +1667,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       )}
       {(Object.entries(workspaceControlsHosts ?? {}) as Array<["title" | "welcome", HTMLElement | null | undefined]>).map(([location, host]) => host && createPortal(
         <div ref={(node) => { workspaceDropdownRefs.current[location] = node; }}>
+          {location === "title" && projectTabBar}
           {workspaceControls(location)}
         </div>,
         host,
         location,
       ))}
+      {workspaceControlsHosts?.titleRight && createPortal(
+        branchChip,
+        workspaceControlsHosts.titleRight,
+        "titleRight",
+      )}
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Header */}
       <div style={{ flexShrink: 0 }}>

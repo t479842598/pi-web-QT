@@ -9,6 +9,7 @@ import type { ErrorLogEntry } from "@/lib/error-log-types";
 export function LogsConfig() {
   const { t } = useI18n();
   const [allEntries, setAllEntries] = useState<ErrorLogEntry[]>([]);
+  const [level, setLevel] = useState("");
   const [statusCode, setStatusCode] = useState("");
   const [source, setSource] = useState("");
   const [query, setQuery] = useState("");
@@ -39,16 +40,24 @@ export function LogsConfig() {
     [allEntries],
   );
 
+  // Dynamic status-code options: every code that actually appears in the log,
+  // so filtering covers all real cases (200/3xx/422/…) rather than a fixed list.
+  const availableStatusCodes = useMemo(
+    () => [...new Set(allEntries.map((entry) => entry.statusCode).filter((code): code is number => code !== undefined))].sort((a, b) => a - b),
+    [allEntries],
+  );
+
   const entries = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return allEntries
+      .filter((entry) => !level || entry.level === level)
       .filter((entry) => !statusCode || entry.statusCode === Number(statusCode))
       .filter((entry) => !source || entry.source === source)
       .filter((entry) => !needle
         || [entry.message, entry.details, entry.provider, entry.model, entry.source]
           .filter(Boolean).some((value) => value!.toLocaleLowerCase().includes(needle)))
       .slice(0, 200);
-  }, [allEntries, statusCode, source, query]);
+  }, [allEntries, level, statusCode, source, query]);
 
   const clear = async () => {
     try {
@@ -78,9 +87,13 @@ export function LogsConfig() {
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <select value={level} onChange={(event) => setLevel(event.target.value)} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }}>
+          <option value="">{t("desktop.logsAllLevels")}</option>
+          {["error", "warning", "info"].map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
         <select value={statusCode} onChange={(event) => setStatusCode(event.target.value)} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }}>
           <option value="">{t("desktop.logsAllCodes")}</option>
-          {[200, 400, 401, 403, 404, 408, 409, 413, 429, 500, 502, 503, 504].map((code) => <option key={code} value={code}>{code}</option>)}
+          {availableStatusCodes.map((code) => <option key={code} value={code}>{code}</option>)}
         </select>
         <select value={source} onChange={(event) => setSource(event.target.value)} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }}>
           <option value="">{t("desktop.logsAllSources")}</option>

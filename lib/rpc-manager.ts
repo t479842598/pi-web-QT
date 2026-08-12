@@ -1,5 +1,6 @@
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage, AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
@@ -19,7 +20,6 @@ import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-ty
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS } from "./custom-ui-terminal";
 import { recordErrorLog } from "./error-log";
-import { configureOpenCodeZenRuntime, createOpenCodeZenFetch, getOpenCodeZenPrimaryKey, isOpenCodeZenProvider, OPENCODE_ZEN_PROVIDER_IDS, subscribeOpenCodeZenSwitch } from "./opencode-zen";
 
 // ============================================================================
 // Types
@@ -226,7 +226,6 @@ export class AgentSessionWrapper {
   private pendingApprovals = new Map<string, PendingApproval>();
   private approvalSeq = 0;
   private approvalHookInstalled = false;
-  private opencodeSwitchUnsubscribe: (() => void) | null = null;
 
   constructor(public readonly inner: AgentSessionLike, public readonly cwd: string) {
     // Existing conversations keep their own approval mode/policy (per-session
@@ -271,9 +270,6 @@ export class AgentSessionWrapper {
 
   start(): void {
     this.installApprovalHook();
-    this.opencodeSwitchUnsubscribe = subscribeOpenCodeZenSwitch((event) => {
-      this.emit({ type: "opencode_zen_switch", ...event });
-    });
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       if (event.type === "agent_end" || event.type === "message_end" || event.type === "entry_appended" || event.type === "session_info_changed") {
         invalidateSessionListCache();
@@ -1147,8 +1143,6 @@ export class AgentSessionWrapper {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.inner.isBashRunning) this.inner.abortBash();
     this.unsubscribe?.();
-    this.opencodeSwitchUnsubscribe?.();
-    this.opencodeSwitchUnsubscribe = null;
     for (const pending of this.pendingUiResponses.values()) pending.cancel();
     for (const id of Array.from(this.activeCustomUis.keys())) this.closeCustomUi(id, undefined);
     this.pendingUiResponses.clear();
@@ -1584,32 +1578,6 @@ export function getRpcSession(sessionId: string): AgentSessionWrapper | undefine
   return getRegistry().get(sessionId);
 }
 
-/** Apply the current OpenCode Zen pool key to already-running sessions without
- * touching the shared auth.json credential. The request fetch wrapper still
- * rotates keys per call; this only satisfies the SDK's configured-auth guard.
- *
- * A single session must never fail a settings save: the config file is already
- * persisted by the caller, so sync problems only degrade that session's auth
- * snapshot and are recorded (redacted) for the error log instead. */
-export async function syncOpenCodeZenRuntime(): Promise<void> {
-  const apiKey = getOpenCodeZenPrimaryKey();
-  await Promise.allSettled(Array.from(getRegistry().values()).map(async (session) => {
-    if (!session.isAlive()) return;
-    try {
-      if (apiKey) await configureOpenCodeZenRuntime(session.inner.modelRuntime);
-      else await Promise.all(OPENCODE_ZEN_PROVIDER_IDS.map((provider) => session.inner.modelRuntime.removeRuntimeApiKey(provider)));
-    } catch (error) {
-      recordErrorLog({
-        level: "warning",
-        source: "opencode-zen-sync",
-        provider: "opencode",
-        sessionId: session.sessionId,
-        message: `OpenCode Zen runtime 同步失败：${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
-  }));
-}
-
 export function hasBusyRpcSessionForCwd(cwd: string): boolean {
   const targetCwd = normalizeRpcCwd(cwd);
   if (getStartingSessionCwds().has(targetCwd)) return true;
@@ -1730,6 +1698,74 @@ export function broadcastSessionBusEvent(type: string, sessionId: string, payloa
  * The initial model, thinking level, and enabled-model scope are supplied during
  * construction so a prompt cannot observe an intermediate configuration.
  */
+
+/**
+ * Wrap an assistant-message event stream to log the web's model call outcome.
+ * The stream terminates with `done` (success) or `error` (failure/abort); the
+ * agent loop always settles it through `result()`, and iteration may also throw
+ * on transport errors. Both paths are covered without touching the payload.
+ */
+function withModelCallLogging(
+  stream: AssistantMessageEventStream,
+  meta: { provider: string; modelId: string; sessionId: string },
+): AssistantMessageEventStream {
+  const startedAt = Date.now();
+  const { provider, modelId, sessionId } = meta;
+
+  const log = (final: AssistantMessage) => {
+    const elapsedMs = Date.now() - startedAt;
+    const failed = final.stopReason === "error" || final.stopReason === "aborted";
+    const errorText = final.errorMessage?.trim();
+    // Prefer an explicit HTTP status from the error text; fall back to the
+    // shared inference (recordErrorLog) for whitelisted codes in the message.
+    const statusMatch = errorText?.match(/\bHTTP\s+(\d{3})\b|\bstatus(?:\s+code)?\s*[:=]?\s*(\d{3})\b/);
+    const statusCode = statusMatch
+      ? Number(statusMatch[1] ?? statusMatch[2])
+      : undefined;
+    recordErrorLog({
+      level: failed ? "error" : "info",
+      source: "model-call",
+      provider,
+      model: modelId,
+      sessionId,
+      ...(statusCode !== undefined ? { statusCode } : {}),
+      message: failed
+        ? `模型调用失败 ${provider}/${modelId}${errorText ? `：${errorText}` : ""}`
+        : `模型调用成功 ${provider}/${modelId}`,
+      details: failed ? undefined : `耗时 ${elapsedMs}ms`,
+    });
+  };
+
+  // The agent loop awaits stream.result() after (or instead of) iterating.
+  const originalResult = stream.result.bind(stream);
+  stream.result = async () => {
+    const final = await originalResult();
+    log(final);
+    return final;
+  };
+
+  // Transport-level throws skip the result() path — log those too.
+  const originalIterate = stream[Symbol.asyncIterator].bind(stream);
+  stream[Symbol.asyncIterator] = () => {
+    const iterator = originalIterate();
+    return {
+      next: () => iterator.next().catch((error: unknown) => {
+        recordErrorLog({
+          level: "error",
+          source: "model-call",
+          provider,
+          model: modelId,
+          sessionId,
+          message: `模型调用传输错误 ${provider}/${modelId}：${error instanceof Error ? error.message : String(error)}`,
+        });
+        throw error;
+      }),
+    };
+  };
+
+  return stream;
+}
+
 export async function startRpcSession(
   sessionId: string,
   sessionFile: string,
@@ -1784,7 +1820,6 @@ export async function startRpcSession(
       agentDir,
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
-    if (getOpenCodeZenPrimaryKey()) await configureOpenCodeZenRuntime(services.modelRuntime);
     const scope = await resolveVisibleModels(
       services.modelRuntime,
       services.settingsManager.getEnabledModels(),
@@ -1810,18 +1845,27 @@ export async function startRpcSession(
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
 
-    // AgentSession's public factory does not expose a per-provider fetch hook,
-    // but its Agent stream function is intentionally mutable. Wrap only the
-    // OpenCode provider so other providers keep the normal transport.
+    // Record the web's own model-call traffic for every provider: success as
+    // info, failures as error with a status code when inferable. Wrapping the
+    // stream function (AgentSession's public factory exposes no per-provider
+    // hook, but the Agent stream function is intentionally mutable) keeps the
+    // log view focused on web model calls + pi-web runtime logs.
     const agent = (inner as unknown as { agent: { streamFunction: StreamFn } }).agent;
     const baseStream = agent.streamFunction;
-    agent.streamFunction = (model, context, options) => baseStream(
-      model,
-      context,
-      isOpenCodeZenProvider(model.provider)
-        ? { ...options, fetch: createOpenCodeZenFetch(options?.fetch as typeof globalThis.fetch | undefined, options?.sessionId) }
-        : options,
-    );
+    agent.streamFunction = (model, context, options) => {
+      const raw = baseStream(model, context, options);
+      return raw instanceof Promise
+        ? raw.then((stream) => withModelCallLogging(stream, {
+          provider: model.provider,
+          modelId: model.id,
+          sessionId,
+        }))
+        : withModelCallLogging(raw, {
+          provider: model.provider,
+          modelId: model.id,
+          sessionId,
+        });
+    };
 
     const persistedPreferences = await persistExplicitStartupPreferences(
       services.settingsManager,

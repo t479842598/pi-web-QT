@@ -354,7 +354,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
 
       <Field label={t("desktop.modelsBaseUrl")}>
         <TextInput value={provider.baseUrl ?? ""} onChange={(v) => set("baseUrl", v || undefined)}
-          placeholder="https://api.example.com/v1" mono />
+          placeholder="http(s)://host:port/v1" mono />
       </Field>
 
       <Field label={t("desktop.modelsApiKey")}>
@@ -1849,14 +1849,12 @@ export function ModelsConfig({
     ...oauthProviders.map((provider) => provider.id),
     ...apiKeyProviders.map((provider) => provider.id),
   ]);
-  // OpenCode Zen has its own account/proxy management panel. Keep it out of
-  // the generic provider editor so users cannot accidentally overwrite the
-  // gateway-managed credentials or endpoint.
+  // Custom providers not covered by the built-in/auth lists.
   const customProviders = providers.filter(([providerId]) =>
-    !builtinProviderIds.has(providerId) && providerId !== "opencode" && providerId !== "opencode-go",
+    !builtinProviderIds.has(providerId),
   );
   const activeOAuth = oauthProviders.filter((p) => p.loggedIn);
-  const visibleApiKeyProviders = apiKeyProviders.filter((p) => p.id !== "opencode" && p.id !== "opencode-go");
+  const visibleApiKeyProviders = apiKeyProviders;
   const activeApiKey = visibleApiKeyProviders.filter((p) => p.configured);
 
   useEffect(() => {

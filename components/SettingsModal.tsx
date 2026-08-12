@@ -14,13 +14,12 @@ import { ProxyConfig } from "./ProxyConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { LogsConfig } from "./LogsConfig";
 import { SnippetsConfig } from "./SnippetsConfig";
-import { OpenCodeZenConfig } from "./OpenCodeZenConfig";
 import { SubagentsConfig } from "./SubagentsConfig";
 import { UsageConfig } from "./UsageConfig";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 
-export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins" | "opencode-zen" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import" | "mcp" | "subagents";
+export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import" | "mcp" | "subagents";
 
 interface SettingsModalProps {
   initialTab?: SettingsTab;
@@ -38,7 +37,6 @@ const tabs: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
   { id: "models", labelKey: "desktop.models", Icon: Cpu },
   { id: "skills", labelKey: "desktop.skills", Icon: Stack },
   { id: "plugins", labelKey: "desktop.plugins", Icon: Plug },
-  { id: "opencode-zen", labelKey: "desktop.opencodeZen", Icon: Cpu },
   { id: "proxy", labelKey: "desktop.proxy", Icon: Network },
   { id: "features", labelKey: "desktop.features", Icon: Lightning },
   { id: "logs", labelKey: "desktop.logs", Icon: List },
@@ -67,9 +65,9 @@ export function SettingsModal({
   );
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
-  // Multiple embedded configs can register a close-time flush (models.json
-  // and OpenCode Zen auto-save both need to persist pending edits before the
-  // dialog unmounts).
+  // Multiple embedded configs can register a close-time flush (e.g. the
+  // models.json editor needs to persist pending edits before the dialog
+  // unmounts).
   const flushRefs = useRef(new Set<() => Promise<void>>());
   const registerFlush = useCallback((flush: () => Promise<void>) => {
     flushRefs.current.add(flush);
@@ -84,7 +82,7 @@ export function SettingsModal({
     setCloseError(null);
     try {
       // Flush every registered config independently: one failing flush must
-      // not prevent the others (e.g. OpenCode Zen auto-save) from persisting.
+      // not prevent the others from persisting.
       const results = await Promise.allSettled([...flushRefs.current].map((flush) => flush()));
       const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
       if (firstError) throw firstError.reason;
@@ -257,9 +255,6 @@ export function SettingsModal({
               <PluginsConfig cwd={cwd} sessionId={sessionId} embedded onReloadedAction={onSessionReloadedAction} />
             </div>
           )}
-          <div style={{ display: activeTab === "opencode-zen" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <OpenCodeZenConfig onRegisterFlush={registerFlush} />
-          </div>
           <div style={{ display: activeTab === "proxy" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <ProxyConfig />
           </div>

@@ -131,7 +131,7 @@ function VariantDots({ hasDark, hasLight, darkColor, lightColor, t }: {
 // ── Main ────────────────────────────────────────────────────────────────────
 
 export function DisplayConfig() {
-  const { mode, resolvedMode, themeName, setMode, setTheme, borderDepth, setBorderDepth } = useTheme();
+  const { mode, resolvedMode, themeName, setMode, setTheme, previewTheme, clearPreview, borderDepth, setBorderDepth } = useTheme();
   const { locale: language, setLocale: setLanguage, t } = useI18n();
   const [themeSets, setThemeSets] = useState<ThemeSetInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -155,6 +155,17 @@ export function DisplayConfig() {
     setApplying(name);
     setTheme(name).finally(() => setApplying(null));
   }, [setTheme]);
+
+  /** Hover preview: apply without persisting. Fire-and-forget; the
+   *  last-leaving mouseleave restores via clearPreview. */
+  const handleThemeHover = useCallback((name: string | null) => {
+    setHoveredTag(name);
+    if (name !== null) {
+      void previewTheme(name);
+    } else {
+      void clearPreview();
+    }
+  }, [previewTheme, clearPreview]);
 
   const handleModeChange = useCallback((m: ThemeMode) => {
     setMode(m);
@@ -214,8 +225,8 @@ export function DisplayConfig() {
             <button
               type="button" onClick={() => handleThemeChange("")} disabled={applying !== null}
               style={tagStyle(themeName === "", hoveredTag === "__default__", applying !== null)}
-              onMouseEnter={() => setHoveredTag("__default__")}
-              onMouseLeave={() => setHoveredTag(null)}
+              onMouseEnter={() => handleThemeHover("")}
+              onMouseLeave={() => handleThemeHover(null)}
             >
               {t("desktop.defaultTheme")}
             </button>
@@ -225,8 +236,8 @@ export function DisplayConfig() {
                 key={ts.name} type="button"
                 onClick={() => handleThemeChange(ts.name)} disabled={applying !== null}
                 style={tagStyle(themeName === ts.name, hoveredTag === ts.name, applying === ts.name)}
-                onMouseEnter={() => setHoveredTag(ts.name)}
-                onMouseLeave={() => setHoveredTag(null)}
+                onMouseEnter={() => handleThemeHover(ts.name)}
+                onMouseLeave={() => handleThemeHover(null)}
               >
                 {ts.displayName}
                 <VariantDots hasDark={ts.hasDark} hasLight={ts.hasLight} darkColor={ts.accent} lightColor={ts.accentLight} t={t} />

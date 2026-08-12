@@ -1742,11 +1742,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setApprovalRequests((prev) => prev.filter((r) => r.id !== id));
         break;
       }
-      case "opencode_zen_switch":
-        if (!event.sessionId || event.sessionId === sessionIdRef.current) {
-          addNotice({ type: "success", message: `OpenCode Zen 已切换账号和代理：${String(event.to ?? "unknown")}` });
-        }
-        break;
       case "prompt_error":
         addNotice({ type: "error", message: (event.errorMessage as string | undefined) ?? "Command failed" });
         break;

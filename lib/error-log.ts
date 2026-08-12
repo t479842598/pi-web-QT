@@ -22,8 +22,17 @@ declare global {
 
 const MAX_ENTRIES = 500;
 const LOG_FILE = "pi-web-error-log.json";
-const STATUS_CODES = new Set([400, 401, 403, 404, 408, 409, 413, 429, 500, 502, 503, 504]);
+const STATUS_CODES = new Set([400, 401, 402, 403, 404, 406, 408, 409, 413, 422, 429, 451, 500, 502, 503, 504]);
 const MAX_TEXT_LENGTH = 20_000;
+
+/** Sources belonging to the removed OpenCode Zen gateway. These are never
+ *  shown in the log UI; historical entries are purged once on load. */
+const ZEN_SOURCES = new Set([
+  "opencode-zen-external",
+  "opencode-zen-switch",
+  "opencode-zen-runtime",
+  "opencode-zen-sync",
+]);
 
 function logPath(): string {
   return join(getAgentDir(), LOG_FILE);
@@ -37,7 +46,13 @@ function state(): ErrorLogState {
     try {
       if (existsSync(logPath())) {
         const parsed = JSON.parse(readFileSync(logPath(), "utf8")) as unknown;
-        if (Array.isArray(parsed)) current.entries = parsed.filter(isEntry).slice(-MAX_ENTRIES);
+        if (Array.isArray(parsed)) {
+          const kept = parsed.filter(isEntry).slice(-MAX_ENTRIES);
+          const withoutZen = kept.filter((entry) => !ZEN_SOURCES.has(entry.source));
+          // One-time purge of gateway history; persist only if something changed.
+          if (withoutZen.length !== kept.length) persist(withoutZen);
+          current.entries = withoutZen;
+        }
       }
     } catch {
       current.entries = [];
@@ -108,7 +123,11 @@ export function recordErrorLog(input: Omit<Partial<ErrorLogEntry>, "id" | "times
 export function getErrorLogs(filters: ErrorLogFilters = {}): ErrorLogEntry[] {
   const query = filters.query?.trim().toLocaleLowerCase();
   const limit = Math.min(Math.max(filters.limit ?? 200, 1), MAX_ENTRIES);
+  // Hidden by default; an explicit zen source query still works (preserves the
+  // upstream test contract of filtering by source directly).
+  const explicitlyZen = filters.source !== undefined && ZEN_SOURCES.has(filters.source);
   return state().entries
+    .filter((entry) => explicitlyZen || !ZEN_SOURCES.has(entry.source))
     .filter((entry) => filters.statusCode === undefined || entry.statusCode === filters.statusCode)
     .filter((entry) => !filters.level || entry.level === filters.level)
     .filter((entry) => !filters.source || entry.source === filters.source)
