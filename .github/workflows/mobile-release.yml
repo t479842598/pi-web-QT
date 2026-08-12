@@ -135,8 +135,23 @@ jobs:
           flutter analyze
           flutter test
 
-      - name: Build unsigned IPA
-        run: flutter build ipa --release --no-codesign
+      - name: Build iOS app bundle
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        run: |
+          APP="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::Runner.app not found at $APP"
+            exit 1
+          fi
+          mkdir -p build/ios/ipa/Payload
+          cp -R "$APP" build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -qr "../../../ios-unsigned.ipa" Payload
+          cd ../../..
+          rm -rf build/ios/ipa/Payload
+          ls -la ios-unsigned.ipa
 
       - name: Upload IPA to release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -146,5 +161,5 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            mobile/build/ios/ipa/*.ipa
+            mobile/ios-unsigned.ipa
           fail_on_unmatched_files: false
