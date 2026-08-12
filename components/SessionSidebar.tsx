@@ -1026,12 +1026,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [selectedProject, dropdownPinnedProject]);
   const removeProjectTab = (project: string) => {
     const next = projectTabs.filter((p) => p !== project);
-    // Tabs are user-managed and may all be closed; the current project stays
-    // in the leading dropdown regardless (no fallback switch needed).
     persistProjectTabs(next);
+    // All tabs closed: fall back to the leading dropdown's pinned project.
+    if (next.length === 0 && dropdownPinnedProject && !samePath(dropdownPinnedProject, selectedCwd ?? "")) {
+      selectProject(dropdownPinnedProject, true);
+    }
   };
   const addProjectTab = (project: string) => {
-    if (projectTabs.some((p) => samePath(p, project))) {
+    // Already the dropdown's pinned project or an open tab? Just switch to it
+    // (no duplicate tab, no error).
+    if ((dropdownPinnedProject && samePath(dropdownPinnedProject, project))
+      || projectTabs.some((p) => samePath(p, project))) {
       selectProject(project);
       return;
     }
@@ -1331,8 +1336,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const hasWorkspaceControlsHosts = Boolean(workspaceControlsHosts?.title || workspaceControlsHosts?.welcome);
 
   // ── Project tab bar (desktop top bar) ────────────────────────────────────
-  // Candidate projects for the + dropdown: recent projects not already open.
-  const addTabCandidates = recentProjects.filter((p) => !projectTabs.includes(p));
+  // Candidate projects for the + dropdown: recent projects not already open
+  // as a tab and not the dropdown's own pinned project.
+  const addTabCandidates = recentProjects.filter((p) =>
+    !projectTabs.includes(p) && !(dropdownPinnedProject && samePath(dropdownPinnedProject, p)),
+  );
   const projectTabBar = !isMobile ? (
     <div className="app-no-drag" style={{ display: "flex", alignItems: "center", height: "100%", gap: 2, flexShrink: 1, minWidth: 0 }}>
       {/* Leading project picker — the original dropdown kept at the far left. */}
