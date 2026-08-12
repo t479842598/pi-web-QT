@@ -125,8 +125,7 @@ export function AppTitleBar({
         ref={topBarRef}
         className="app-title-bar"
         style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
+          display: "flex",
           alignItems: "center",
           flexShrink: 0,
           borderBottom: "1px solid var(--border)",
@@ -136,10 +135,9 @@ export function AppTitleBar({
           zIndex: 600,
         }}
       >
-        {/* Left zone: sidebar toggle + workspace controls (project tabs).
-            Shares 1fr with the right zone so the centered title never moves
-            when tabs are added/removed. */}
-        <div style={{ display: "flex", alignItems: "center", minWidth: 0, height: "100%" }}>
+        {/* Left zone: sidebar toggle + workspace controls (project picker +
+            tabs). Takes its content width; shrinks before the title does. */}
+        <div style={{ display: "flex", alignItems: "center", minWidth: 0, height: "100%", flex: "0 1 auto" }}>
           <button
             className="app-no-drag"
             onClick={onSidebarToggle}
@@ -173,19 +171,18 @@ export function AppTitleBar({
           />
         </div>
 
-        {/* Center zone: active session title + branch chip. The grid column
-            is `auto` so it only takes the title's intrinsic width; left and
-            right zones share the remaining 1fr each, keeping the title
-            perfectly centered regardless of tab count. */}
+        {/* Center zone: active session title + branch chip + worktree switcher.
+            flex:1 takes the remaining space; the title stays centered in that
+            space (shifting right as tabs grow) and never overlaps the tabs. */}
         <div
           className="app-title-drag"
           style={{
+            flex: 1,
+            minWidth: 0,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             height: "100%",
-            minWidth: 0,
-            maxWidth: "min(40vw, 480px)",
             padding: "0 12px",
             userSelect: "none",
           }}
@@ -225,9 +222,8 @@ export function AppTitleBar({
         </div>
 
 
-        {/* Right zone: task board / file panel / theme / settings buttons.
-            Grid column shares 1fr with the left zone (symmetric). */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%" }}>
+        {/* Right zone: task board / file panel / theme / settings buttons. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%", flexShrink: 0 }}>
 
         {/* Task board toggle — desktop only, hidden when the feature is off */}
         {!isMobile && tasksBoardEnabled && (

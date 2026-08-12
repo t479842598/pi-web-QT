@@ -1002,33 +1002,25 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [selectedCwd, onNewSession]);
 
   const selectedProject = projectRootFor(selectedCwd);
-  // The tab list keeps a stable order (browser-style). The first tab is the
-  // "current project" slot: it seeds when the list is empty, and an
-  // externally-changed project (e.g. picked from the sidebar) is inserted at
-  // the front if missing — never re-ordering tabs that are already open.
-  useEffect(() => {
-    const proj = selectedProject ?? selectedCwd;
-    if (!proj) return;
-    setProjectTabs((prev) => {
-      if (prev.some((p) => samePath(p, proj))) return prev;
-      const next = [proj, ...prev].slice(0, MAX_PROJECT_TABS);
-      try { window.localStorage.setItem(PROJECT_TABS_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
-  }, [selectedProject, selectedCwd]);
+  // Project tabs are user-managed: every tab is added via the + button and
+  // closed via its ✕. The leading project dropdown shows the current project;
+  // a tab is highlighted only when its project is the current one (sync is
+  // purely visual via the `active` check at render time).
   const recentProjects = getRecentProjects(allSessions, selectedCwd ? projectRootFor(selectedCwd) ?? selectedCwd : null, pickedProjects);
 
   // ── Project tab bar handlers ─────────────────────────────────────────────
   const [addTabDropdownOpen, setAddTabDropdownOpen] = useState(false);
   const addTabDropdownRef = useRef<HTMLDivElement | null>(null);
+  /** Project shown in the leading dropdown. When the user switches via the
+   *  dropdown it is pinned here; clicking a tab does NOT change it (the tab's
+   *  project is shown in the session title instead), so the two stay
+   *  independent until the user picks from the dropdown again. */
+  const [dropdownPinnedProject, setDropdownPinnedProject] = useState<string | null>(null);
   const removeProjectTab = (project: string) => {
     const next = projectTabs.filter((p) => p !== project);
-    persistProjectTabs(next.length > 0 ? next : [selectedProject ?? project]);
-    // If the closed tab was active, fall back to the first remaining tab.
-    if (selectedProject === project) {
-      const fallback = next[0] ?? project;
-      if (fallback !== project) selectProject(fallback);
-    }
+    // Tabs are user-managed and may all be closed; the current project stays
+    // in the leading dropdown regardless (no fallback switch needed).
+    persistProjectTabs(next);
   };
   const addProjectTab = (project: string) => {
     if (projectTabs.some((p) => samePath(p, project))) {
@@ -1195,10 +1187,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, [aliasDraft, loadProjectAliases]);
   const compactProjectLabel = selectedCwd
-    ? aliasFor(selectedProject ?? selectedCwd) ?? pathBaseName(selectedProject ?? selectedCwd)
+    ? (() => {
+        // The leading dropdown shows the project the user last picked from the
+        // dropdown itself (or the current project before any tab switch).
+        const shown = dropdownPinnedProject ?? selectedCwd;
+        return aliasFor(shown) ?? pathBaseName(shown);
+      })()
     : (initialSessionId && !restoredRef.current ? "" : `${t("desktop.selectProject")}…`);
-  const selectProject = (project: string) => {
+  const selectProject = (project: string, fromDropdown = false) => {
     setSelectedCwd(project);
+    if (fromDropdown) setDropdownPinnedProject(project);
     setProjectFilter("");
     setDirectoryPickerOpen(false);
     setCustomPathError(null);
@@ -1272,7 +1270,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)"; }}
         onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
       >
-        <button onClick={() => selectProject(project)} title={project} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", background: "transparent", border: "none", color: isSelected ? "var(--accent)" : "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12, fontFamily: "var(--font-mono)" }}>
+        <button onClick={() => selectProject(project, true)} title={project} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", background: "transparent", border: "none", color: isSelected ? "var(--accent)" : "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12, fontFamily: "var(--font-mono)" }}>
           {isQuick ? (
             <Lightning size={12} color={isSelected ? "var(--accent)" : "var(--text-dim)"} weight={isSelected ? "fill" : "regular"} style={{ flexShrink: 0 }} aria-hidden="true" />
           ) : isSelected ? (
@@ -1378,101 +1376,62 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           {projectActions}
         </AnimatedDropdown>
       </div>
-      {projectTabs.map((project, index) => {
+      {projectTabs.map((project) => {
         const active = samePath(project, selectedProject ?? selectedCwd ?? "");
         const label = aliasFor(project) ?? pathBaseName(project);
-        const isFirst = index === 0;
         return (
           <div key={project} style={{ display: "flex", alignItems: "stretch", height: "100%", flexShrink: 0 }}>
-            {isFirst ? (
-              // First tab: the current project. No close button (kept as the
-              // base tab), no caret — the standalone project dropdown sits to
-              // its left in the title bar.
-              <button
-                type="button"
-                onClick={() => selectProject(project)}
-                title={project}
-                aria-label={label}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "0 10px",
-                  width: 124,
-                  height: "100%",
-                  flexShrink: 0,
-                  background: active ? "var(--bg-selected)" : "none",
-                  border: "none",
-                  borderLeft: "1px solid var(--border)",
-                  color: active ? "var(--text)" : "var(--text-muted)",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontFamily: "var(--font-mono)",
-                  lineHeight: 1,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  transition: "background 0.12s, color 0.12s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = active ? "var(--text)" : "var(--text-muted)"; }}
-              >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{label}</span>
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => selectProject(project)}
-                  title={project}
-                  aria-label={label}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    padding: "0 4px 0 10px",
-                    width: 112,
-                    height: "100%",
-                    flexShrink: 0,
-                    background: active ? "var(--bg-selected)" : "none",
-                    border: "none",
-                    borderLeft: "1px solid var(--border)",
-                    color: active ? "var(--text)" : "var(--text-muted)",
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontFamily: "var(--font-mono)",
-                    lineHeight: 1,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    transition: "background 0.12s, color 0.12s",
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = active ? "var(--text)" : "var(--text-muted)"; }}
-                >
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{label}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeProjectTab(project)}
-                  title={t("i18n.close")}
-                  aria-label={t("i18n.close")}
-                  style={{
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    width: 22, padding: 0, height: "100%",
-                    background: active ? "var(--bg-selected)" : "none",
-                    border: "none",
-                    borderLeft: "1px solid var(--border)",
-                    color: "var(--text-dim)",
-                    cursor: "pointer",
-                    transition: "background 0.12s, color 0.12s",
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = "var(--text-dim)"; }}
-                >
-                  <X size={12} aria-hidden="true" />
-                </button>
-              </>
-            )}
+            <button
+              type="button"
+              onClick={() => selectProject(project)}
+              title={project}
+              aria-label={label}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "0 4px 0 10px",
+                width: 112,
+                height: "100%",
+                flexShrink: 0,
+                background: active ? "var(--bg-selected)" : "none",
+                border: "none",
+                borderLeft: "1px solid var(--border)",
+                color: active ? "var(--text)" : "var(--text-muted)",
+                cursor: "pointer",
+                fontSize: 12,
+                fontFamily: "var(--font-mono)",
+                lineHeight: 1,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                transition: "background 0.12s, color 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = active ? "var(--text)" : "var(--text-muted)"; }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{label}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => removeProjectTab(project)}
+              title={t("i18n.close")}
+              aria-label={t("i18n.close")}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 22, padding: 0, height: "100%",
+                background: active ? "var(--bg-selected)" : "none",
+                border: "none",
+                borderLeft: "1px solid var(--border)",
+                color: "var(--text-dim)",
+                cursor: "pointer",
+                transition: "background 0.12s, color 0.12s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = "var(--text-dim)"; }}
+            >
+              <X size={12} aria-hidden="true" />
+            </button>
           </div>
-        );
-      })}
+        );      })}
       {/* + button: only after the last tab; hidden at the 5-tab cap. */}
       {projectTabs.length < MAX_PROJECT_TABS && (
         <div ref={addTabDropdownRef} style={{ position: "relative", display: "flex", alignItems: "center", height: "100%", flexShrink: 0 }}>
@@ -1566,6 +1525,51 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     </span>
   ) : null;
 
+  // Compact worktree switcher shown beside the branch chip (right of the
+  // session title). The branch name lives in the chip; this is the action
+  // button that switches worktrees.
+  const titleWorktreeControl = showWorktreeSwitcher ? (
+    <div style={{ position: "relative", display: "flex", alignItems: "center", flexShrink: 0 }}>
+      <button
+        type="button"
+        className="app-no-drag"
+        onClick={() => setWorkspaceWorktreeDropdownOpen((open) => (open === "title" ? null : "title"))}
+        aria-label={t("desktop.switchWorktree")}
+        aria-expanded={workspaceWorktreeDropdownOpen === "title"}
+        title={currentWt ? t("desktop.switchWorktreeWithPath", { path: currentWt.path }) : t("desktop.switchWorktree")}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 30, height: 30, padding: 0,
+          background: workspaceWorktreeDropdownOpen === "title" ? "var(--bg-selected)" : "none",
+          border: "1px solid var(--border)",
+          borderRadius: 999,
+          color: workspaceWorktreeDropdownOpen === "title" ? "var(--text)" : "var(--text-muted)",
+          cursor: "pointer",
+          flexShrink: 0,
+          transition: "background 0.12s, color 0.12s, border-color 0.12s",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = workspaceWorktreeDropdownOpen === "title" ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = workspaceWorktreeDropdownOpen === "title" ? "var(--text)" : "var(--text-muted)"; }}
+      >
+        <GitBranch size={14} weight="regular" aria-hidden="true" />
+      </button>
+      <AnimatedDropdown open={workspaceWorktreeDropdownOpen === "title"} style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden" }}>
+        <div className="scroll-overlay" style={{ maxHeight: "min(40vh, 300px)" }}>
+          {worktreeState?.worktrees.map((wt) => {
+            const isCurrent = samePath(wt.path, selectedCwd ?? "") || (wt.isMain && !worktreeState.worktrees.some((w) => samePath(w.path, selectedCwd ?? "")));
+            return (
+              <button key={wt.path} onClick={() => { setSelectedCwd(wt.path); setWtDropdownOpen(false); setWorkspaceWorktreeDropdownOpen(null); setWtError(null); }} title={wt.path} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 10px", background: "var(--bg)", border: "none", borderBottom: "1px solid var(--border)", color: isCurrent ? "var(--text)" : "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                {isCurrent ? <Check size={10} color="var(--accent)" weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" /> : <span style={{ width: 10, flexShrink: 0 }} />}
+                <PathLabel text={wt.branch ?? displayCwd(wt.path, homeDir)} style={{ flex: 1 }} />
+                {wt.isMain && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{t("desktop.main")}</span>}
+              </button>
+            );
+          })}
+        </div>
+      </AnimatedDropdown>
+    </div>
+  ) : null;
+
   const workspaceControls = (location: "title" | "welcome") => {
     const isLargeWorkspaceControl = location === "welcome";
     const isProjectDropdownOpen = workspaceProjectDropdownOpen === location;
@@ -1625,7 +1629,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
         )}
 
-        {(showWorktreeSwitcher || inactiveWorktreeSelector) && (
+        {/* Worktree switcher — shown only in the welcome (large) layout; in the
+            title bar it lives beside the branch chip on the right of the
+            session title. */}
+        {isLargeWorkspaceControl && (showWorktreeSwitcher || inactiveWorktreeSelector) && (
           <div style={{ position: "relative", minWidth: 0 }}>
             <button
               className="app-no-drag app-titlebar-context-control workspace-worktree-control"
@@ -1740,7 +1747,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         location,
       ))}
       {workspaceControlsHosts?.titleRight && createPortal(
-        branchChip,
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          {branchChip}
+          {titleWorktreeControl}
+        </div>,
         workspaceControlsHosts.titleRight,
         "titleRight",
       )}
