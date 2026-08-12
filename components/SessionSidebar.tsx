@@ -448,7 +448,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Wrapper nodes of the two workspace-control portals (title bar / welcome).
   // One ref per location: it contains both dropdowns of that location, so a
   // single outside-click check covers the project and worktree menus.
-  const workspaceDropdownRefs = useRef<Record<"title" | "welcome", HTMLDivElement | null>>({ title: null, welcome: null });
+  const workspaceDropdownRefs = useRef<Record<"title" | "welcome" | "titleRight", HTMLDivElement | null>>({ title: null, welcome: null, titleRight: null });
   // Worktree switcher state
   const [worktreeState, setWorktreeState] = useState<WorktreeState | null>(null);
   const [wtDropdownOpen, setWtDropdownOpen] = useState(false);
@@ -1011,11 +1011,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // ── Project tab bar handlers ─────────────────────────────────────────────
   const [addTabDropdownOpen, setAddTabDropdownOpen] = useState(false);
   const addTabDropdownRef = useRef<HTMLDivElement | null>(null);
-  /** Project shown in the leading dropdown. When the user switches via the
-   *  dropdown it is pinned here; clicking a tab does NOT change it (the tab's
-   *  project is shown in the session title instead), so the two stay
-   *  independent until the user picks from the dropdown again. */
+  /** Project shown in the leading dropdown. It is pinned here on first load
+   *  and whenever the user switches via the dropdown itself; clicking a tab
+   *  does NOT change it (the tab's project is shown in the session title
+   *  instead). The dropdown button switches to its pinned project on click
+   *  unless that project is already the current one (then it opens the list). */
   const [dropdownPinnedProject, setDropdownPinnedProject] = useState<string | null>(null);
+  // Pin the leading dropdown to the initial project once, so clicking tabs
+  // later never changes what the dropdown shows.
+  useEffect(() => {
+    if (!dropdownPinnedProject && selectedProject) {
+      setDropdownPinnedProject(selectedProject);
+    }
+  }, [selectedProject, dropdownPinnedProject]);
   const removeProjectTab = (project: string) => {
     const next = projectTabs.filter((p) => p !== project);
     // Tabs are user-managed and may all be closed; the current project stays
@@ -1029,8 +1037,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
     const next = [...projectTabs, project].slice(0, MAX_PROJECT_TABS);
     persistProjectTabs(next);
-    // Append without switching: the new tab stays where it was added and the
-    // user clicks it (or picks it again) to make it active.
+    // Append the tab (it stays where it was added — no reordering) and switch
+    // to the newly added project immediately.
+    selectProject(project);
   };
   // Close the + dropdown on outside click.
   useEffect(() => {
@@ -1186,13 +1195,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       void loadProjectAliases();
     }
   }, [aliasDraft, loadProjectAliases]);
-  const compactProjectLabel = selectedCwd
-    ? (() => {
-        // The leading dropdown shows the project the user last picked from the
-        // dropdown itself (or the current project before any tab switch).
-        const shown = dropdownPinnedProject ?? selectedCwd;
-        return aliasFor(shown) ?? pathBaseName(shown);
-      })()
+  const compactProjectLabel = dropdownPinnedProject
+    ? aliasFor(dropdownPinnedProject) ?? pathBaseName(dropdownPinnedProject)
     : (initialSessionId && !restoredRef.current ? "" : `${t("desktop.selectProject")}…`);
   const selectProject = (project: string, fromDropdown = false) => {
     setSelectedCwd(project);
@@ -1270,7 +1274,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)"; }}
         onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
       >
-        <button onClick={() => selectProject(project, true)} title={project} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", background: "transparent", border: "none", color: isSelected ? "var(--accent)" : "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12, fontFamily: "var(--font-mono)" }}>
+        <button onClick={() => selectProject(project, true)} title={project} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", background: "transparent", border: "none", color: isSelected ? "var(--accent)" : "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12, fontFamily: "var(--font-mono)", transition: "background 0.1s" }}
+          onMouseDown={(e) => { e.currentTarget.style.background = "var(--bg-selected)"; }}
+        >
           {isQuick ? (
             <Lightning size={12} color={isSelected ? "var(--accent)" : "var(--text-dim)"} weight={isSelected ? "fill" : "regular"} style={{ flexShrink: 0 }} aria-hidden="true" />
           ) : isSelected ? (
@@ -1333,8 +1339,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       <div style={{ position: "relative", display: "flex", alignItems: "center", height: "100%", flexShrink: 0 }}>
         <button
           className="app-no-drag app-titlebar-context-control workspace-project-control"
-          onClick={() => setWorkspaceProjectDropdownOpen((open) => (open === "title" ? null : "title"))}
-          title={selectedProject ?? selectedCwd ?? t("desktop.selectProject")}
+          onClick={() => {
+            // The dropdown is independent of the tabs: clicking it switches to
+            // its pinned project unless that is already the current one — in
+            // that case it just opens/closes the project list.
+            if (dropdownPinnedProject && selectedCwd && !samePath(dropdownPinnedProject, selectedCwd)) {
+              selectProject(dropdownPinnedProject, true);
+              return;
+            }
+            setWorkspaceProjectDropdownOpen((open) => (open === "title" ? null : "title"));
+          }}
+          title={dropdownPinnedProject ?? selectedCwd ?? t("desktop.selectProject")}
           aria-label={t("desktop.selectProject")}
           aria-expanded={workspaceProjectDropdownOpen === "title"}
           style={{
@@ -1566,6 +1581,30 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             );
           })}
         </div>
+        {!wtNewOpen ? (
+          <button onClick={(e) => { e.stopPropagation(); setWtNewOpen(true); setWtError(null); setTimeout(() => wtNewInputRef.current?.focus(), 0); }} title={t("desktop.createWorktree")} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 10px", background: "none", border: "none", borderTop: "1px solid var(--border)", color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 11 }}>
+            <span>{t("desktop.newWorktree")}</span>
+          </button>
+        ) : (
+          <div style={{ padding: "6px 8px", borderTop: "1px solid var(--border)" }}>
+            <input
+              ref={wtNewInputRef}
+              value={wtNewBranch}
+              onChange={(e) => { setWtNewBranch(e.target.value); setWtError(null); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); void handleCreateWorktree(); }
+                if (e.key === "Escape") { setWtNewOpen(false); setWtNewBranch(""); setWtError(null); }
+              }}
+              placeholder={t("desktop.branchName")}
+              style={{ width: "100%", fontSize: 11, fontFamily: "var(--font-mono)", padding: "5px 8px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--bg)", color: "var(--text)", boxSizing: "border-box" }}
+            />
+            <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
+              <button onClick={() => void handleCreateWorktree()} disabled={wtBusy || !wtNewBranch.trim()} style={{ flex: 1, padding: "4px 0", background: "var(--accent)", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: wtBusy || !wtNewBranch.trim() ? "not-allowed" : "pointer", opacity: wtBusy || !wtNewBranch.trim() ? 0.65 : 1 }}>{wtBusy ? t("desktop.creating") : t("desktop.create")}</button>
+              <button onClick={() => { setWtNewOpen(false); setWtNewBranch(""); setWtError(null); }} style={{ flex: 1, padding: "4px 0", background: "var(--bg-hover)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-muted)", fontSize: 11, cursor: "pointer" }}>{t("desktop.cancel")}</button>
+            </div>
+            {wtError && <div style={{ marginTop: 5, color: "#dc2626", fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>{wtError}</div>}
+          </div>
+        )}
       </AnimatedDropdown>
     </div>
   ) : null;
@@ -1747,7 +1786,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         location,
       ))}
       {workspaceControlsHosts?.titleRight && createPortal(
-        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+        <div ref={(node) => { workspaceDropdownRefs.current.titleRight = node; }} style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           {branchChip}
           {titleWorktreeControl}
         </div>,

@@ -490,7 +490,14 @@ export function AppShell() {
 
   const sessionTitle = selectedSession
     ? stripModeInstructionBlocks(selectedSession.name) || selectedSession.firstMessage.slice(0, 50) || selectedSession.id.slice(0, 12)
-    : null;
+    : (() => {
+        // No session selected (fresh project / right after switching a tab):
+        // show the current project's name in the title instead.
+        const cwd = activeCwd ?? newSessionCwd;
+        if (!cwd) return null;
+        const base = cwd.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop();
+        return base || cwd;
+      })();
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
