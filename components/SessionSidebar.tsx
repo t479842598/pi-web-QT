@@ -1436,33 +1436,46 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         const active = samePath(project, selectedProject ?? selectedCwd ?? "");
         const label = aliasFor(project) ?? pathBaseName(project);
         return (
-          <div key={project} style={{ display: "flex", alignItems: "stretch", height: "100%", flexShrink: 0 }}>
+          <div
+            key={project}
+            className="project-tab"
+            title={project}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+              height: 28,
+              maxWidth: 220,
+              flexShrink: 0,
+              padding: "0 4px 0 10px",
+              borderRadius: 7,
+              background: active ? "var(--bg-selected)" : "var(--bg-card)",
+              border: `1px solid ${active ? "color-mix(in srgb, var(--accent) 45%, var(--border))" : "var(--border)"}`,
+              color: active ? "var(--text)" : "var(--text-muted)",
+              cursor: "pointer",
+              transition: "background 0.12s, border-color 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = active ? "var(--bg-selected)" : "var(--bg-hover)";
+              e.currentTarget.style.borderColor = active ? "color-mix(in srgb, var(--accent) 60%, var(--border))" : "var(--border-hover)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = active ? "var(--bg-selected)" : "var(--bg-card)";
+              e.currentTarget.style.borderColor = active ? "color-mix(in srgb, var(--accent) 45%, var(--border))" : "var(--border)";
+            }}
+          >
             <button
               type="button"
               onClick={() => selectProject(project)}
-              title={project}
               aria-label={label}
               style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "0 4px 0 10px",
-                width: 112,
-                height: "100%",
-                flexShrink: 0,
-                background: active ? "var(--bg-selected)" : "none",
-                border: "none",
-                borderLeft: "1px solid var(--border)",
-                color: active ? "var(--text)" : "var(--text-muted)",
-                cursor: "pointer",
-                fontSize: 12,
-                fontFamily: "var(--font-mono)",
-                lineHeight: 1,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                transition: "background 0.12s, color 0.12s",
+                display: "flex", alignItems: "center", flex: 1, minWidth: 0,
+                height: "100%", padding: 0,
+                background: "none", border: "none",
+                color: "inherit", cursor: "pointer",
+                fontSize: 12, fontFamily: "var(--font-mono)", lineHeight: 1,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = active ? "var(--text)" : "var(--text-muted)"; }}
             >
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{label}</span>
             </button>
@@ -1473,18 +1486,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               aria-label={t("i18n.close")}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
-                width: 22, padding: 0, height: "100%",
-                background: active ? "var(--bg-selected)" : "none",
-                border: "none",
-                borderLeft: "1px solid var(--border)",
+                width: 18, height: 18, padding: 0,
+                borderRadius: 5,
+                background: "none", border: "none",
                 color: "var(--text-dim)",
-                cursor: "pointer",
-                transition: "background 0.12s, color 0.12s",
+                cursor: "pointer", flexShrink: 0,
+                opacity: active ? 1 : 0.75,
+                transition: "background 0.12s, color 0.12s, opacity 0.12s",
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = active ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = "var(--text-dim)"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--text) 12%, transparent)"; e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.opacity = "1"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.opacity = active ? "1" : "0.75"; }}
             >
-              <X size={12} aria-hidden="true" />
+              <X size={11} weight="bold" aria-hidden="true" />
             </button>
           </div>
         );      })}
