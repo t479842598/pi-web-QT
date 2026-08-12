@@ -436,6 +436,39 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setProjectTabs(tabs);
     try { window.localStorage.setItem(PROJECT_TABS_KEY, JSON.stringify(tabs)); } catch {}
   }, []);
+  // Drop persisted tabs whose directory no longer exists (e.g. a volume was
+  // unmounted or the project was moved). Clicking such a tab used to surface
+  // a "Directory does not exist" console error from the project-trust check.
+  useEffect(() => {
+    if (projectTabs.length === 0) return;
+    let cancelled = false;
+    const validate = async () => {
+      const results = await Promise.all(projectTabs.map(async (project) => {
+        try {
+          const res = await fetch("/api/cwd/validate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cwd: project }),
+          });
+          if (!res.ok) return false;
+          const data = await res.json().catch(() => ({})) as { cwd?: string };
+          return typeof data.cwd === "string";
+        } catch {
+          return false;
+        }
+      }));
+      if (cancelled) return;
+      const kept = projectTabs.filter((_, i) => results[i]);
+      if (kept.length !== projectTabs.length) {
+        try { window.localStorage.setItem(PROJECT_TABS_KEY, JSON.stringify(kept)); } catch {}
+        setProjectTabs(kept);
+      }
+    };
+    void validate();
+    return () => { cancelled = true; };
+    // Run once on mount; projectTabs in deps keeps it stable across persists.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [workspaceProjectDropdownOpen, setWorkspaceProjectDropdownOpen] = useState<"title" | "welcome" | null>(null);
