@@ -1,0 +1,501 @@
+import 'package:flutter/material.dart';
+
+enum AppLanguagePreference { system, zhHans, ja, en }
+
+enum AppLanguage {
+  zhHans(Locale('zh', 'CN')),
+  ja(Locale('ja')),
+  en(Locale('en'));
+
+  const AppLanguage(this.locale);
+  final Locale locale;
+}
+
+AppLanguage resolveAppLanguage(
+  AppLanguagePreference preference,
+  List<Locale> systemLocales,
+) {
+  switch (preference) {
+    case AppLanguagePreference.zhHans:
+      return AppLanguage.zhHans;
+    case AppLanguagePreference.ja:
+      return AppLanguage.ja;
+    case AppLanguagePreference.en:
+      return AppLanguage.en;
+    case AppLanguagePreference.system:
+      final locale = systemLocales.firstOrNull;
+      if (locale == null) return AppLanguage.en;
+      if (locale.languageCode == 'ja') return AppLanguage.ja;
+      if (locale.languageCode == 'en') return AppLanguage.en;
+      if (locale.languageCode == 'zh') {
+        final script = locale.scriptCode?.toLowerCase();
+        final country = locale.countryCode?.toUpperCase();
+        if (script == 'hans' || country == 'CN' || country == 'SG') {
+          return AppLanguage.zhHans;
+        }
+      }
+      return AppLanguage.en;
+  }
+}
+
+class AppLanguageScope extends InheritedWidget {
+  const AppLanguageScope({
+    super.key,
+    required this.language,
+    required this.preference,
+    required this.onPreferenceChanged,
+    required super.child,
+  });
+
+  final AppLanguage language;
+  final AppLanguagePreference preference;
+  final ValueChanged<AppLanguagePreference> onPreferenceChanged;
+
+  static AppLanguageScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<AppLanguageScope>();
+
+  @override
+  bool updateShouldNotify(AppLanguageScope oldWidget) =>
+      language != oldWidget.language || preference != oldWidget.preference;
+}
+
+extension AppLocalizationContext on BuildContext {
+  AppLanguage get appLanguage =>
+      AppLanguageScope.maybeOf(this)?.language ?? AppLanguage.zhHans;
+
+  AppLanguagePreference get appLanguagePreference =>
+      AppLanguageScope.maybeOf(this)?.preference ??
+      AppLanguagePreference.system;
+
+  ValueChanged<AppLanguagePreference>? get onAppLanguageChanged =>
+      AppLanguageScope.maybeOf(this)?.onPreferenceChanged;
+
+  String tr(String source, [Map<String, Object?> values = const {}]) =>
+      AppLocalizations.text(appLanguage, source, values);
+}
+
+class AppLocalizations {
+  const AppLocalizations._();
+
+  static String text(
+    AppLanguage language,
+    String source, [
+    Map<String, Object?> values = const {},
+  ]) {
+    final translated = switch (language) {
+      AppLanguage.zhHans => source,
+      AppLanguage.en => _english[source] ?? source,
+      AppLanguage.ja => _japanese[source] ?? _english[source] ?? source,
+    };
+    return values.entries.fold(
+      translated,
+      (result, entry) =>
+          result.replaceAll('{${entry.key}}', entry.value?.toString() ?? ''),
+    );
+  }
+
+  static const _english = <String, String>{
+    '跟随系统': 'System default',
+    '简体中文': 'Simplified Chinese',
+    '日语': 'Japanese',
+    '英语': 'English',
+    '语言': 'Language',
+    '选择应用语言': 'Choose app language',
+    '系统语言不受支持时使用英语': 'English is used when the system language is unsupported',
+    '关闭': 'Close',
+    '取消': 'Cancel',
+    '删除': 'Delete',
+    '重试': 'Retry',
+    '清除': 'Clear',
+    '重新加载': 'Reload',
+    '登录': 'Connect',
+    '连接你的 Pi': 'Connect to your Pi',
+    '输入域名或 IP 地址，账号固定为 pi。服务器未启用认证时，密码可留空':
+        'Enter a domain or IP address. The username is fixed to pi; leave the password empty when authentication is disabled.',
+    '服务器地址': 'Server address',
+    '域名或 IP 地址': 'Domain or IP address',
+    '密码（可选）': 'Password (optional)',
+    '显示密码': 'Show password',
+    '隐藏密码': 'Hide password',
+    '密码会加密保存在本机。通过公网或域名访问时，请务必使用 HTTPS。':
+        'The password is stored securely on this device. Always use HTTPS for public or domain access.',
+    '切换浅色模式': 'Switch to light mode',
+    '切换深色模式': 'Switch to dark mode',
+    '功能与显示': 'Features & display',
+    '也可以从屏幕右边缘向左滑打开': 'You can also swipe left from the right edge',
+    '选择工作目录': 'Choose working directory',
+    '选择目录并开始新对话': 'Choose a directory to start a new chat',
+    '技能': 'Skills',
+    '正在读取已加载技能…': 'Loading skills…',
+    '{count} 个已加载技能': '{count} loaded skills',
+    '深色模式': 'Dark mode',
+    '浅色模式': 'Light mode',
+    '立即切换 App 的显示外观': 'Change the app appearance immediately',
+    '简洁输出': 'Compact output',
+    '运行时隐藏中间过程，只显示最终答案':
+        'Hide intermediate steps and show only the final answer',
+    '中间消息不会绘制在聊天页，但当前服务仍会发送数据；服务端支持按需详情后才能进一步节省流量。':
+        'Intermediate messages are hidden in chat, but the server still sends them until on-demand details are supported.',
+    '当前会实时显示思考、工具调用和中间消息。':
+        'Thinking, tool calls, and intermediate messages are shown live.',
+    '当前跟随系统外观': 'Currently follows system appearance',
+    '外观设置已保存在本机': 'Appearance setting saved on this device',
+    '对话': 'Chats',
+    '搜索会话': 'Search chats',
+    '没有找到匹配会话': 'No matching chats',
+    '暂无会话': 'No chats yet',
+    'Git 变更': 'Git changes',
+    '查看当前项目的变更': 'View changes in the current project',
+    '未跟踪': 'Untracked',
+    '已修改': 'Modified',
+    '已暂存': 'Staged',
+    '已删除': 'Deleted',
+    '已重命名': 'Renamed',
+    '查看变更': 'View diff',
+    '工作区没有变更': 'No changes in the working tree',
+    '当前目录不是 Git 仓库': 'This directory is not a Git repository',
+    '无法读取该文件的变更': 'Could not read the diff for this file',
+    '+{additions} / -{deletions}': '+{additions} / -{deletions}',
+    '清除搜索': 'Clear search',
+    '新建对话': 'New chat',
+    '切换服务器 / 退出': 'Switch server / Sign out',
+    '打开对话菜单': 'Open chat menu',
+    '选择模型': 'Choose model',
+    '跳到最新消息': 'Jump to latest message',
+    '会话信息': 'Session information',
+    '删除对话？': 'Delete chat?',
+    '“{title}”将从服务器永久删除，此操作无法撤销。':
+        '“{title}” will be permanently deleted from the server. This cannot be undone.',
+    '对话已删除': 'Chat deleted',
+    '删除失败，请稍后重试': 'Delete failed. Try again later.',
+    '今天想让 Pi 做什么？': 'What would you like Pi to do?',
+    '先创建一个对话并选择远程工作目录': 'Create a chat and choose a remote working directory',
+    '先创建一个对话并选择远端工作目录': 'Create a chat and choose a remote working directory',
+    '询问 Pi': 'Ask Pi',
+    '添加本地图片': 'Add local images',
+    '停止': 'Stop',
+    '发送': 'Send',
+    '正在加载资源…': 'Loading resources…',
+    '没有找到匹配命令': 'No matching commands',
+    '{count} 个快捷命令': '{count} commands',
+    '{count} 个匹配命令': '{count} matching commands',
+    '已隐藏': 'Hidden',
+    '思考过程': 'Thinking',
+    '加载思考过程': 'Load thinking',
+    '正在加载思考过程…': 'Loading thinking…',
+    '思考过程加载失败：{error}': 'Could not load thinking: {error}',
+    '正在思考…': 'Thinking…',
+    '处理详情': 'Process details',
+    'Pi 正在处理': 'Pi is working',
+    '{count} 个步骤': '{count} steps',
+    '{count} 条消息': '{count} messages',
+    '{count} 个工具调用': '{count} tool calls',
+    '最多添加 10 张图片，且每张不能超过 10 MB':
+        'Add up to 10 images, each no larger than 10 MB.',
+    '无法读取所选图片': 'Unable to read the selected images',
+    '选择此目录': 'Select this directory',
+    '新建文件夹': 'New folder',
+    '上一级目录': 'Parent directory',
+    '输入完整目录路径': 'Enter a full directory path',
+    '打开路径': 'Open path',
+    '筛选当前目录': 'Filter current directory',
+    '当前目录没有子目录': 'No subdirectories here',
+    '没有匹配的目录': 'No matching directories',
+    '选择 {name}': 'Select {name}',
+    '选择当前目录': 'Select current directory',
+    '将在 {path} 中创建': 'Create inside {path}',
+    '文件夹名称': 'Folder name',
+    '创建并进入': 'Create and open',
+    '尚未选择模型': 'No model selected',
+    '当前：{name} · {provider}': 'Current: {name} · {provider}',
+    '搜索模型名称、提供商或 ID': 'Search model, provider, or ID',
+    '{count} 个可用模型': '{count} available models',
+    '筛选结果': 'Filtered results',
+    '没有找到匹配模型': 'No matching models',
+    '搜索技能名称、说明或路径': 'Search skills, descriptions, or paths',
+    '刷新技能': 'Refresh skills',
+    '请先选择工作目录': 'Choose a working directory first',
+    '项目': 'Project',
+    '全局': 'Global',
+    '路径': 'Path',
+    '内置': 'Built-in',
+    '扩展': 'Extension',
+    '提示词': 'Prompt',
+    '其他': 'Other',
+    '可调用': 'Available',
+    '休眠': 'Dormant',
+    '展开查看': 'Show',
+    '收起': 'Collapse',
+    '删除对话': 'Delete chat',
+    '{path} · {count} 个对话': '{path} · {count} chats',
+    '[图片]': '[Image]',
+    '[图片 × {count}]': '[Images × {count}]',
+    '请输入服务器地址': 'Enter a server address',
+    '服务器地址格式不正确': 'Invalid server address',
+    '只支持 HTTP 或 HTTPS 地址': 'Only HTTP and HTTPS addresses are supported',
+    '新对话': 'New chat',
+    '模型请求失败：': 'Model request failed:',
+    '调用工具：`{name}`': 'Using tool: `{name}`',
+    '账号或密码错误': 'Incorrect username or password',
+    '服务器请求失败（HTTP {status}）': 'Server request failed (HTTP {status})',
+    '服务器返回了无法识别的数据': 'The server returned unrecognized data',
+    '服务器没有返回新目录路径': 'The server did not return the new directory path',
+    '服务器没有返回会话 ID': 'The server did not return a session ID',
+    '事件流连接失败': 'Event stream connection failed',
+    '对话正在运行，请稍后再执行内置命令': 'The chat is running. Try the built-in command later.',
+    '正在压缩对话上下文…': 'Compacting chat context…',
+    '已压缩对话上下文': 'Chat context compacted',
+    '已重新加载会话资源': 'Session resources reloaded',
+    '用法：/name <对话名称>': 'Usage: /name <chat name>',
+    '对话已重命名为“{name}”': 'Chat renamed to “{name}”',
+    '当前没有可复制的助手回复': 'There is no assistant reply to copy',
+    '已复制最后一条助手回复': 'Last assistant reply copied',
+    '事件流意外断开': 'Event stream disconnected unexpectedly',
+    '连接暂时中断，正在自动重连…': 'Connection interrupted. Reconnecting…',
+    '消息发送失败': 'Message failed to send',
+    '模型繁忙，正在自动重试…': 'Model is busy. Retrying…',
+    '工具': 'Tool',
+    '正在运行 {name}…': 'Running {name}…',
+    '正在整理结果…': 'Preparing results…',
+    '连接超时，请检查服务器地址和网络':
+        'Connection timed out. Check the server address and network.',
+    '模型服务当前繁忙（429），Pi 已自动重试但仍未成功。请稍后重试或切换模型。':
+        'The model service is busy (429). Pi retried but could not complete the request. Try again later or switch models.',
+    '网络连接暂时中断，App 会自动重连。':
+        'The network connection was interrupted. The app will reconnect automatically.',
+    '同名文件夹已经存在': 'A folder with this name already exists',
+    '当前目录没有创建文件夹的权限': 'You cannot create folders in this directory',
+    '只能在已授权的工作目录中创建文件夹':
+        'Folders can only be created inside an authorized working directory',
+    '当前服务端暂不支持创建文件夹，请先更新 Pi Web':
+        'This server does not support creating folders. Update Pi Web first.',
+    '创建文件夹失败：{error}': 'Could not create folder: {error}',
+    '技能 · {count}': 'Skills · {count}',
+    '当前项目资源未加载，项目级技能可能不在列表中。':
+        'Project resources are not loaded, so project skills may be missing.',
+    '加载时发现 {count} 条诊断信息': '{count} diagnostics found while loading',
+    '技能加载失败': 'Could not load skills',
+    '当前目录没有加载技能': 'No skills loaded for this directory',
+    '没有找到匹配技能': 'No matching skills',
+    '可以先在 Pi Web 中安装或配置技能。': 'Install or configure skills in Pi Web first.',
+    '请换一个关键字再试。': 'Try another keyword.',
+    '{active} 个开启 · {total} 个技能': '{active} active · {total} skills',
+    '休眠 · {count}': 'Dormant · {count}',
+    '压缩当前对话上下文': 'Compact the current chat context',
+    '重新加载会话、模型和资源': 'Reload session, models, and resources',
+    '设置当前对话名称': 'Rename the current chat',
+    '查看当前会话统计信息': 'View current session statistics',
+    '复制最后一条助手回复': 'Copy the last assistant reply',
+    '切换服务器': 'Switch server',
+    '退出登录': 'Sign out',
+    '已保存的服务器': 'Saved servers',
+    '移除': 'Remove',
+    '当前服务器': 'Current server',
+    '还没有已保存的服务器': 'No saved servers yet',
+    '无法连接到该服务器，请检查地址和网络':
+        'Could not connect to this server. Check the address and network.',
+    '服务器拒绝了该请求（403）。若使用域名连接，请确认已在服务器的 PI_WEB_ALLOWED_HOSTS 中放行该域名。':
+        'The server rejected this request (403). If you connect by domain name, confirm the domain is allowed in the server\'s PI_WEB_ALLOWED_HOSTS.',
+    '当前服务端暂不支持创建文件夹，请到 Pi Web 桌面端创建后再刷新':
+        'This server does not support creating folders. Create them in Pi Web desktop and refresh.',
+  };
+
+  static const _japanese = <String, String>{
+    '跟随系统': 'システム設定',
+    '简体中文': '簡体字中国語',
+    '日语': '日本語',
+    '英语': '英語',
+    '语言': '言語',
+    '选择应用语言': 'アプリの言語を選択',
+    '系统语言不受支持时使用英语': 'システム言語が未対応の場合は英語を使用します',
+    '关闭': '閉じる',
+    '取消': 'キャンセル',
+    '删除': '削除',
+    '重试': '再試行',
+    '清除': 'クリア',
+    '重新加载': '再読み込み',
+    '登录': '接続',
+    '连接你的 Pi': 'Pi に接続',
+    '输入域名或 IP 地址，账号固定为 pi。服务器未启用认证时，密码可留空':
+        'ドメインまたは IP アドレスを入力します。ユーザー名は pi 固定で、認証が無効な場合はパスワードを空にできます。',
+    '服务器地址': 'サーバーアドレス',
+    '域名或 IP 地址': 'ドメインまたは IP アドレス',
+    '密码（可选）': 'パスワード（任意）',
+    '显示密码': 'パスワードを表示',
+    '隐藏密码': 'パスワードを非表示',
+    '密码会加密保存在本机。通过公网或域名访问时，请务必使用 HTTPS。':
+        'パスワードはこの端末に安全に保存されます。外部からの接続には HTTPS を使用してください。',
+    '切换浅色模式': 'ライトモードに切り替え',
+    '切换深色模式': 'ダークモードに切り替え',
+    '功能与显示': '機能と表示',
+    '也可以从屏幕右边缘向左滑打开': '画面右端から左へスワイプしても開けます',
+    '选择工作目录': '作業ディレクトリを選択',
+    '选择目录并开始新对话': 'ディレクトリを選んで新しいチャットを開始',
+    '技能': 'スキル',
+    '正在读取已加载技能…': 'スキルを読み込み中…',
+    '{count} 个已加载技能': '読み込み済みスキル: {count}',
+    '深色模式': 'ダークモード',
+    '浅色模式': 'ライトモード',
+    '立即切换 App 的显示外观': 'アプリの外観をすぐに切り替えます',
+    '简洁输出': '簡潔表示',
+    '运行时隐藏中间过程，只显示最终答案': '実行中の経過を隠し、最終結果だけを表示',
+    '对话': 'チャット',
+    '搜索会话': 'チャットを検索',
+    '没有找到匹配会话': '一致するチャットはありません',
+    '暂无会话': 'チャットはまだありません',
+    '清除搜索': '検索をクリア',
+    'Git 变更': 'Git の変更',
+    '查看当前项目的变更': '現在のプロジェクトの変更を表示',
+    '未跟踪': '未追跡',
+    '已修改': '変更あり',
+    '已暂存': 'ステージ済み',
+    '已删除': '削除済み',
+    '已重命名': '名前変更済み',
+    '查看变更': '差分を表示',
+    '工作区没有变更': '作業ツリーに変更はありません',
+    '当前目录不是 Git 仓库': 'このディレクトリは Git リポジトリではありません',
+    '无法读取该文件的变更': 'このファイルの差分を読み込めませんでした',
+    '+{additions} / -{deletions}': '+{additions} / -{deletions}',
+    '新建对话': '新しいチャット',
+    '切换服务器 / 退出': 'サーバー切り替え / ログアウト',
+    '打开对话菜单': 'チャットメニューを開く',
+    '选择模型': 'モデルを選択',
+    '跳到最新消息': '最新メッセージへ',
+    '删除对话？': 'チャットを削除しますか？',
+    '对话已删除': 'チャットを削除しました',
+    '今天想让 Pi 做什么？': 'Pi に何をしてもらいますか？',
+    '询问 Pi': 'Pi に質問',
+    '添加本地图片': '端末の画像を追加',
+    '停止': '停止',
+    '发送': '送信',
+    '正在加载资源…': 'リソースを読み込み中…',
+    '没有找到匹配命令': '一致するコマンドはありません',
+    '已隐藏': '非表示',
+    '思考过程': '思考過程',
+    '加载思考过程': '思考過程を読み込む',
+    '正在加载思考过程…': '思考過程を読み込み中…',
+    '思考过程加载失败：{error}': '思考過程を読み込めませんでした: {error}',
+    '正在思考…': '思考中…',
+    '处理详情': '処理の詳細',
+    'Pi 正在处理': 'Pi が処理中',
+    '选择此目录': 'このディレクトリを選択',
+    '新建文件夹': '新しいフォルダ',
+    '上一级目录': '上位ディレクトリ',
+    '输入完整目录路径': '完全なパスを入力',
+    '打开路径': 'パスを開く',
+    '筛选当前目录': '現在のディレクトリを絞り込む',
+    '当前目录没有子目录': 'サブディレクトリはありません',
+    '没有匹配的目录': '一致するディレクトリはありません',
+    '创建并进入': '作成して開く',
+    '尚未选择模型': 'モデル未選択',
+    '搜索模型名称、提供商或 ID': 'モデル名、プロバイダ、ID を検索',
+    '筛选结果': '絞り込み結果',
+    '没有找到匹配模型': '一致するモデルはありません',
+    '搜索技能名称、说明或路径': 'スキル名、説明、パスを検索',
+    '刷新技能': 'スキルを更新',
+    '请先选择工作目录': '先に作業ディレクトリを選択してください',
+    '项目': 'プロジェクト',
+    '全局': 'グローバル',
+    '路径': 'パス',
+    '内置': '組み込み',
+    '扩展': '拡張',
+    '提示词': 'プロンプト',
+    '其他': 'その他',
+    '可调用': '利用可能',
+    '休眠': '休止中',
+    '展开查看': '表示',
+    '收起': '閉じる',
+    '会话信息': 'セッション情報',
+    '“{title}”将从服务器永久删除，此操作无法撤销。': '「{title}」はサーバーから完全に削除されます。この操作は取り消せません。',
+    '删除失败，请稍后重试': '削除できませんでした。後でもう一度お試しください。',
+    '先创建一个对话并选择远端工作目录': '新しいチャットを作成し、リモート作業ディレクトリを選択してください',
+    '{count} 个快捷命令': '{count} 件のコマンド',
+    '{count} 个匹配命令': '{count} 件の一致するコマンド',
+    '{count} 个步骤': '{count} ステップ',
+    '{count} 条消息': '{count} 件のメッセージ',
+    '{count} 个工具调用': '{count} 件のツール呼び出し',
+    '最多添加 10 张图片，且每张不能超过 10 MB': '画像は最大 10 枚、1 枚あたり 10 MB まで追加できます。',
+    '无法读取所选图片': '選択した画像を読み込めませんでした',
+    '选择 {name}': '{name} を選択',
+    '选择当前目录': '現在のディレクトリを選択',
+    '将在 {path} 中创建': '{path} に作成します',
+    '文件夹名称': 'フォルダ名',
+    '当前：{name} · {provider}': '現在: {name} · {provider}',
+    '{count} 个可用模型': '利用可能なモデル: {count}',
+    '删除对话': 'チャットを削除',
+    '{path} · {count} 个对话': '{path} · {count} 件のチャット',
+    '[图片]': '[画像]',
+    '[图片 × {count}]': '[画像 × {count}]',
+    '请输入服务器地址': 'サーバーアドレスを入力してください',
+    '服务器地址格式不正确': 'サーバーアドレスの形式が正しくありません',
+    '只支持 HTTP 或 HTTPS 地址': 'HTTP または HTTPS のみ対応しています',
+    '新对话': '新しいチャット',
+    '模型请求失败：': 'モデルのリクエストに失敗しました:',
+    '调用工具：`{name}`': 'ツールを使用: `{name}`',
+    '账号或密码错误': 'ユーザー名またはパスワードが正しくありません',
+    '服务器请求失败（HTTP {status}）': 'サーバーリクエストに失敗しました（HTTP {status}）',
+    '服务器返回了无法识别的数据': 'サーバーから認識できないデータが返されました',
+    '服务器没有返回新目录路径': 'サーバーから新しいディレクトリパスが返されませんでした',
+    '服务器没有返回会话 ID': 'サーバーからセッション ID が返されませんでした',
+    '事件流连接失败': 'イベントストリームへの接続に失敗しました',
+    '对话正在运行，请稍后再执行内置命令': 'チャットの実行中です。組み込みコマンドは後で実行してください。',
+    '正在压缩对话上下文…': 'チャットのコンテキストを圧縮中…',
+    '已压缩对话上下文': 'チャットのコンテキストを圧縮しました',
+    '已重新加载会话资源': 'セッションリソースを再読み込みしました',
+    '用法：/name <对话名称>': '使い方: /name <チャット名>',
+    '对话已重命名为“{name}”': 'チャット名を「{name}」に変更しました',
+    '当前没有可复制的助手回复': 'コピーできるアシスタントの返信がありません',
+    '已复制最后一条助手回复': '最後のアシスタント返信をコピーしました',
+    '事件流意外断开': 'イベントストリームが予期せず切断されました',
+    '连接暂时中断，正在自动重连…': '接続が中断されました。再接続中…',
+    '消息发送失败': 'メッセージを送信できませんでした',
+    '模型繁忙，正在自动重试…': 'モデルが混雑しています。再試行中…',
+    '工具': 'ツール',
+    '正在运行 {name}…': '{name} を実行中…',
+    '正在整理结果…': '結果を整理中…',
+    '连接超时，请检查服务器地址和网络': '接続がタイムアウトしました。サーバーアドレスとネットワークを確認してください。',
+    '模型服务当前繁忙（429），Pi 已自动重试但仍未成功。请稍后重试或切换模型。':
+        'モデルサービスが混雑しています（429）。後でもう一度試すか、モデルを切り替えてください。',
+    '网络连接暂时中断，App 会自动重连。': 'ネットワーク接続が中断されました。アプリが自動的に再接続します。',
+    '同名文件夹已经存在': '同じ名前のフォルダがすでにあります',
+    '当前目录没有创建文件夹的权限': 'このディレクトリにフォルダを作成する権限がありません',
+    '只能在已授权的工作目录中创建文件夹': '許可された作業ディレクトリ内にのみフォルダを作成できます',
+    '当前服务端暂不支持创建文件夹，请先更新 Pi Web': 'このサーバーはフォルダ作成に対応していません。先に Pi Web を更新してください。',
+    '创建文件夹失败：{error}': 'フォルダを作成できませんでした: {error}',
+    '技能 · {count}': 'スキル · {count}',
+    '当前项目资源未加载，项目级技能可能不在列表中。': 'プロジェクトリソースが未読み込みのため、プロジェクトスキルが表示されない場合があります。',
+    '加载时发现 {count} 条诊断信息': '読み込み時に {count} 件の診断が見つかりました',
+    '技能加载失败': 'スキルを読み込めませんでした',
+    '当前目录没有加载技能': 'このディレクトリにはスキルがありません',
+    '没有找到匹配技能': '一致するスキルはありません',
+    '可以先在 Pi Web 中安装或配置技能。': '先に Pi Web でスキルをインストールまたは設定してください。',
+    '请换一个关键字再试。': '別のキーワードをお試しください。',
+    '{active} 个开启 · {total} 个技能': '有効 {active} · 全 {total} スキル',
+    '休眠 · {count}': '休止中 · {count}',
+    '压缩当前对话上下文': '現在のチャットコンテキストを圧縮',
+    '重新加载会话、模型和资源': 'セッション、モデル、リソースを再読み込み',
+    '设置当前对话名称': '現在のチャット名を変更',
+    '查看当前会话统计信息': '現在のセッション統計を表示',
+    '复制最后一条助手回复': '最後のアシスタント返信をコピー',
+    '切换服务器': 'サーバーを切り替え',
+    '退出登录': 'ログアウト',
+    '已保存的服务器': '保存済みサーバー',
+    '移除': '削除',
+    '当前服务器': '現在のサーバー',
+    '还没有已保存的服务器': '保存済みのサーバーはありません',
+    '无法连接到该服务器，请检查地址和网络': 'このサーバーに接続できませんでした。アドレスとネットワークを確認してください。',
+    '服务器拒绝了该请求（403）。若使用域名连接，请确认已在服务器的 PI_WEB_ALLOWED_HOSTS 中放行该域名。':
+        'サーバーがこのリクエストを拒否しました（403）。ドメインで接続する場合、サーバーの PI_WEB_ALLOWED_HOSTS にそのドメインが許可されているか確認してください。',
+    '当前服务端暂不支持创建文件夹，请到 Pi Web 桌面端创建后再刷新':
+        'このサーバーはフォルダ作成に対応していません。Pi Web デスクトップで作成してから更新してください。',
+    '中间消息不会绘制在聊天页，但当前服务仍会发送数据；服务端支持按需详情后才能进一步节省流量。':
+        '途中のメッセージはチャットに表示されませんが、現在のサーバーはデータを送信します。',
+    '当前会实时显示思考、工具调用和中间消息。': '思考、ツール呼び出し、途中のメッセージをリアルタイムで表示します。',
+    '当前跟随系统外观': '現在はシステムの外観に従っています',
+    '外观设置已保存在本机': '外観設定をこの端末に保存しました',
+  };
+}
+
+extension _FirstLocaleOrNull<T> on List<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}

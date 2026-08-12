@@ -65,3 +65,20 @@ ref-repos
 # local port/temp data files (not part of the project)
 /可用端口列表.txt
 /可用端口清单.tsv
+
+# mobile (Flutter) build artifacts
+/mobile/.dart_tool/
+/mobile/build/
+/mobile/.flutter-plugins-dependencies
+/mobile/android/local.properties
+/mobile/android/.gradle/
+/mobile/ios/Pods/
+/mobile/ios/.symlinks/
+/mobile/ios/Flutter/ephemeral/
+/mobile/ios/Flutter/Generated.xcconfig
+/mobile/ios/Flutter/flutter_export_environment.sh
+
+# local tooling / scratch (not part of releases)
+.kunsdd/
+.tmp-*.py
+*.tgz

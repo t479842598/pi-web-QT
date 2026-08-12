@@ -1,0 +1,295 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'apple_theme.dart';
+import 'chat_controller.dart';
+import 'localization.dart';
+import 'models.dart';
+import 'pi_api.dart';
+import 'profile_store.dart';
+import 'screens/chat_screen.dart';
+import 'screens/login_screen.dart';
+
+class PiMobileApp extends StatefulWidget {
+  const PiMobileApp({super.key});
+
+  @override
+  State<PiMobileApp> createState() => _PiMobileAppState();
+}
+
+class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
+  final _store = ProfileStore();
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  ServerProfile? _profile;
+  ChatController? _controller;
+  bool _restoring = true;
+  ThemeMode _themeMode = ThemeMode.system;
+  bool _compactOutput = true;
+  AppLanguagePreference _languagePreference = AppLanguagePreference.system;
+
+  AppLanguage get _language => resolveAppLanguage(
+    _languagePreference,
+    WidgetsBinding.instance.platformDispatcher.locales,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _restoreDisplayPreferences();
+    _restore();
+  }
+
+  Future<void> _restoreDisplayPreferences() async {
+    final preferences = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final savedTheme = preferences.getString('pi-theme-mode');
+    setState(() {
+      _themeMode = switch (savedTheme) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
+      _compactOutput = preferences.getBool('pi-compact-output') ?? true;
+      _languagePreference = AppLanguagePreference.values.firstWhere(
+        (value) => value.name == preferences.getString('pi-language'),
+        orElse: () => AppLanguagePreference.system,
+      );
+      _controller?.setLanguage(_language);
+    });
+  }
+
+  Future<void> _setThemeMode(ThemeMode mode) async {
+    setState(() => _themeMode = mode);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('pi-theme-mode', mode.name);
+  }
+
+  Future<void> _setCompactOutput(bool enabled) async {
+    setState(() => _compactOutput = enabled);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool('pi-compact-output', enabled);
+  }
+
+  Future<void> _setLanguagePreference(AppLanguagePreference preference) async {
+    setState(() => _languagePreference = preference);
+    _controller?.setLanguage(_language);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('pi-language', preference.name);
+  }
+
+  @override
+  void didChangeLocales(List<Locale>? locales) {
+    if (_languagePreference != AppLanguagePreference.system || !mounted) {
+      return;
+    }
+    setState(() {});
+    _controller?.setLanguage(_language);
+  }
+
+  Future<void> _restore() async {
+    final profile = await _store.read();
+    ChatController? controller;
+    if (profile != null) {
+      controller = ChatController(PiApi(profile, language: _language));
+      try {
+        await controller.initialize();
+      } catch (_) {
+        controller.dispose();
+        controller = null;
+      }
+    }
+    if (!mounted) {
+      controller?.dispose();
+      return;
+    }
+    setState(() {
+      _profile = profile;
+      _controller = controller;
+      _restoring = false;
+    });
+  }
+
+  Future<void> _login(ServerProfile profile) async {
+    final controller = ChatController(PiApi(profile, language: _language));
+    await controller.initialize();
+    final saved = await _store.save(profile);
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    _controller?.dispose();
+    setState(() {
+      _profile = saved;
+      _controller = controller;
+    });
+  }
+
+  /// Disconnects the current session only; the saved server list stays intact
+  /// so the user can switch back quickly.
+  Future<void> _logout() async {
+    await _store.clearActive();
+    _controller?.dispose();
+    if (!mounted) return;
+    setState(() {
+      _profile = null;
+      _controller = null;
+    });
+  }
+
+  /// Switches to another saved server and connects to it.
+  Future<void> _switchServer(String id) async {
+    final profiles = await _store.readAll();
+    final target = profiles.where((profile) => profile.id == id).firstOrNull;
+    if (target == null || !mounted) return;
+    final controller = ChatController(PiApi(target, language: _language));
+    try {
+      await controller.initialize();
+    } catch (_) {
+      controller.dispose();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_errorTextForSwitch())));
+      return;
+    }
+    await _store.setActive(id);
+    _controller?.dispose();
+    setState(() {
+      _profile = target;
+      _controller = controller;
+    });
+  }
+
+  String _errorTextForSwitch() =>
+      AppLocalizations.text(_language, '无法连接到该服务器，请检查地址和网络');
+
+  /// Removes a saved server entry (and its stored password). When the removed
+  /// profile was active, returns to the login screen.
+  Future<void> _removeProfile(String id) async {
+    await _store.delete(id);
+    if (!mounted) return;
+    if (_profile?.id == id) {
+      _controller?.dispose();
+      setState(() {
+        _profile = null;
+        _controller = null;
+      });
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<List<ServerProfile>> _savedProfiles() => _store.readAll();
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final language = _language;
+    return MaterialApp(
+      navigatorKey: _navigatorKey,
+      debugShowCheckedModeBanner: false,
+      title: 'Pi Mobile',
+      locale: language.locale,
+      supportedLocales: AppLanguage.values.map((value) => value.locale),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      themeMode: _themeMode,
+      theme: buildAppleTheme(Brightness.light),
+      darkTheme: buildAppleTheme(Brightness.dark),
+      builder: (context, child) => AppLanguageScope(
+        language: language,
+        preference: _languagePreference,
+        onPreferenceChanged: _setLanguagePreference,
+        child: child ?? const SizedBox.shrink(),
+      ),
+      home: _restoring
+          ? const _Splash()
+          : _profile == null
+          ? _LoginWithSavedServers(
+              onLogin: _login,
+              onToggleTheme: _toggleTheme,
+              loadProfiles: _savedProfiles,
+              onDeleteProfile: _removeProfile,
+            )
+          : _controller == null
+          ? _LoginWithSavedServers(
+              initialProfile: _profile,
+              onLogin: _login,
+              onToggleTheme: _toggleTheme,
+              loadProfiles: _savedProfiles,
+              onDeleteProfile: _removeProfile,
+            )
+          : ChatScreen(
+              controller: _controller!,
+              profile: _profile!,
+              onLogout: _logout,
+              onSwitchServer: _switchServer,
+              themeMode: _themeMode,
+              onThemeModeChanged: _setThemeMode,
+              compactOutput: _compactOutput,
+              onCompactOutputChanged: _setCompactOutput,
+              languagePreference: _languagePreference,
+              onLanguagePreferenceChanged: _setLanguagePreference,
+            ),
+    );
+  }
+
+  void _toggleTheme() {
+    final brightness = _navigatorKey.currentContext == null
+        ? WidgetsBinding.instance.platformDispatcher.platformBrightness
+        : Theme.of(_navigatorKey.currentContext!).brightness;
+    _setThemeMode(
+      brightness == Brightness.dark ? ThemeMode.light : ThemeMode.dark,
+    );
+  }
+}
+
+class _Splash extends StatelessWidget {
+  const _Splash();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(body: Center(child: CircularProgressIndicator()));
+  }
+}
+
+class _LoginWithSavedServers extends StatelessWidget {
+  const _LoginWithSavedServers({
+    required this.onLogin,
+    required this.onToggleTheme,
+    required this.loadProfiles,
+    required this.onDeleteProfile,
+    this.initialProfile,
+  });
+
+  final ServerProfile? initialProfile;
+  final Future<void> Function(ServerProfile profile) onLogin;
+  final VoidCallback? onToggleTheme;
+  final Future<List<ServerProfile>> Function() loadProfiles;
+  final Future<void> Function(String id) onDeleteProfile;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<ServerProfile>>(
+      future: loadProfiles(),
+      builder: (context, snapshot) => LoginScreen(
+        initialProfile: initialProfile,
+        onLogin: onLogin,
+        onToggleTheme: onToggleTheme,
+        savedProfiles: snapshot.data ?? const [],
+        onDeleteProfile: onDeleteProfile,
+      ),
+    );
+  }
+}

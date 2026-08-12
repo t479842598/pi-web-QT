@@ -128,6 +128,8 @@ Prepared from commits in `v<previous>..v<version>`.
 
 ## 6. Create or Update the GitHub Release
 
+> **更新日志（Release notes）**：README 不再内置更新日志。每个版本的更新日志只在此步写入 GitHub Release 的 notes（见下方 `--notes-file`）。写日志时聚焦该版本「新增 / 变更 / 修复」三类，中文与英文各一份；历史版本日志保留在已有 Release 的 notes 中，不复制回 README。
+
 Create a new release:
 
 ```bash
@@ -175,3 +177,14 @@ Expected:
 - npm exact version resolves.
 - `main` is aligned with `origin/main`.
 - `HEAD` points at the release commit and `v<version>` tag.
+
+## 7. Mobile artifacts (automatic)
+
+Pushing the `v<version>` tag also triggers `.github/workflows/mobile-release.yml`, which builds the Flutter client in `mobile/` and attaches to the same release:
+
+- `app-release.apk` and `app-release.aab` (Android)
+- `*.ipa` unsigned (iOS, sideload via AltStore / Sideloadly)
+
+The mobile version is derived from the tag (`v1.2.0` → `1.2.0+<build>`), independent of the web version. The workflow creates the release if it does not exist yet, so it works even when this manual flow runs first or last.
+
+If the release already exists (created by this manual flow), the workflow uploads with `--clobber` and simply adds the mobile assets. No extra manual step is needed beyond pushing the tag.
