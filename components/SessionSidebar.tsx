@@ -420,7 +420,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // ── Project tab bar state (desktop top bar) ──────────────────────────────
   const isMobile = useIsMobile();
   const PROJECT_TABS_KEY = "pi-project-tabs";
-  const MAX_PROJECT_TABS = 5;
+  const MAX_PROJECT_TABS = 4;
   const [projectTabs, setProjectTabs] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try {

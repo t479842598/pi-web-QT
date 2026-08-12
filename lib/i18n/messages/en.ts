@@ -518,7 +518,7 @@ export const enLocale = {
     "desktop.searchProjects": "Search projects…",
     "desktop.recentProjects": "Recent Projects",
     "desktop.addProjectTab": "Add project tab",
-    "desktop.maxProjectTabs": "Up to 5 project tabs",
+    "desktop.maxProjectTabs": "Up to 4 project tabs (1 dropdown + 4 tabs)",
     "desktop.branch": "Branch",
     "desktop.editProjectAlias": "Rename project",
     "desktop.projectAliasPlaceholder": "Add a remark for this project…",

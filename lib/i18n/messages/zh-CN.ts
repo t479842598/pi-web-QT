@@ -518,7 +518,7 @@ export const zhCNLocale = {
     "desktop.searchProjects": "搜索项目…",
     "desktop.recentProjects": "最近项目",
     "desktop.addProjectTab": "新增项目 tab",
-    "desktop.maxProjectTabs": "最多 5 个项目 tab",
+    "desktop.maxProjectTabs": "最多 4 个项目 tab（下拉框 1 个 + tab 4 个）",
     "desktop.branch": "分支",
     "desktop.editProjectAlias": "修改项目备注",
     "desktop.projectAliasPlaceholder": "给项目加个备注…",
