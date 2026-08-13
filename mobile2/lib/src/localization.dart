@@ -138,6 +138,8 @@ class AppLocalizations {
     'accent.orange': 'Honey orange',
     'accent.classic': 'Classic',
     '简洁输出': 'Compact output',
+    '开：思考与过程横向折叠，只显示答案；关：思考、处理、工具调用竖向展开':
+        'On: thinking & process fold horizontally, answer only; Off: thinking, steps and tool calls expand vertically',
     '运行时隐藏中间过程，只显示最终答案':
         'Hide intermediate steps and show only the final answer',
     '中间消息不会绘制在聊天页，但当前服务仍会发送数据；服务端支持按需详情后才能进一步节省流量。':
@@ -492,6 +494,8 @@ class AppLocalizations {
     'accent.orange': 'ハニーオレンジ',
     'accent.classic': 'クラシック',
     '简洁输出': '簡潔表示',
+    '开：思考与过程横向折叠，只显示答案；关：思考、处理、工具调用竖向展开':
+        'オン：思考とプロセスは折りたたみ、回答のみ表示；オフ：思考・処理・ツール呼び出しを縦に展開',
     '运行时隐藏中间过程，只显示最终答案': '実行中の経過を隠し、最終結果だけを表示',
     '对话': 'チャット',
     '任务': 'タスク',

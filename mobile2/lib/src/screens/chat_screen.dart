@@ -126,29 +126,6 @@ class _ChatScreenState extends State<ChatScreen> {
     chat.addListener(_onChanged);
     _messageController.addListener(_onComposerChanged);
     _scrollController.addListener(_trackScrollPosition);
-    _restoreThinkingFormat();
-  }
-
-  /// 思考过程显示格式（全局偏好）：true=竖向串联（连续显示），false=横向折叠条目。
-  static bool thinkingVertical = false;
-
-  bool get _thinkingVertical => thinkingVertical;
-
-  /// 读取思考显示格式偏好（本地持久化）。
-  Future<void> _restoreThinkingFormat() async {
-    final preferences = await SharedPreferences.getInstance();
-    final vertical = preferences.getBool('pi-thinking-vertical') ?? false;
-    _ChatScreenState.thinkingVertical = vertical;
-    if (mounted) setState(() {});
-  }
-
-  /// 切换思考显示格式并持久化。
-  Future<void> _toggleThinkingFormat() async {
-    final next = !_thinkingVertical;
-    _ChatScreenState.thinkingVertical = next;
-    setState(() {});
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool('pi-thinking-vertical', next);
   }
 
   @override
@@ -1067,17 +1044,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: _RoundToolbarButton(
-              key: const Key('thinking-format-button'),
-              onPressed: _toggleThinkingFormat,
-              tooltip: context.tr('切换思考显示格式'),
-              icon: _thinkingVertical
-                  ? Icons.view_agenda_outlined
-                  : Icons.view_day_outlined,
-            ),
-          ),
-          Padding(
             padding: const EdgeInsets.only(right: 12),
             child: _RoundToolbarButton(
               key: const Key('function-display-button'),
@@ -1276,14 +1242,24 @@ class _ChatScreenState extends State<ChatScreen> {
       final message = messages[index];
       if (message.role != 'user') {
         result.add(
-          _MessageBubble(message: message, onLoadThinking: _loadThinking, onFork: _forkFrom),
+          _MessageBubble(
+            message: message,
+            onLoadThinking: _loadThinking,
+            onFork: _forkFrom,
+            thinkingVertical: !widget.compactOutput,
+          ),
         );
         index += 1;
         continue;
       }
 
       result.add(
-        _MessageBubble(message: message, onLoadThinking: _loadThinking, onFork: _forkFrom),
+        _MessageBubble(
+          message: message,
+          onLoadThinking: _loadThinking,
+          onFork: _forkFrom,
+          thinkingVertical: !widget.compactOutput,
+        ),
       );
       var end = index + 1;
       while (end < messages.length && messages[end].role != 'user') {
@@ -1321,6 +1297,7 @@ class _ChatScreenState extends State<ChatScreen> {
               message: messages[current],
               onLoadThinking: _loadThinking,
               onFork: _forkFrom,
+              thinkingVertical: !widget.compactOutput,
             ),
           );
         }
@@ -1340,6 +1317,7 @@ class _ChatScreenState extends State<ChatScreen> {
               inProcessGroup: true,
               onLoadThinking: _loadThinking,
               onFork: _forkFrom,
+              thinkingVertical: !widget.compactOutput,
             ),
           );
           processMessageCount += 1;
@@ -1354,6 +1332,7 @@ class _ChatScreenState extends State<ChatScreen> {
             inProcessGroup: true,
             onLoadThinking: _loadThinking,
             onFork: _forkFrom,
+              thinkingVertical: !widget.compactOutput,
           ),
         );
         processMessageCount += 1;
@@ -1364,6 +1343,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _ProcessDetailsGroup(
             messageCount: processMessageCount,
             toolCallCount: toolCallCount,
+            defaultExpanded: !widget.compactOutput,
             children: processWidgets,
           ),
         );
@@ -1373,6 +1353,7 @@ class _ChatScreenState extends State<ChatScreen> {
           message: answer.copyWith(thinking: '', processText: ''),
           onLoadThinking: _loadThinking,
           onFork: _forkFrom,
+              thinkingVertical: !widget.compactOutput,
         ),
       );
       for (var current = finalAnswer + 1; current < end; current++) {
@@ -1381,6 +1362,7 @@ class _ChatScreenState extends State<ChatScreen> {
             message: messages[current],
             onLoadThinking: _loadThinking,
             onFork: _forkFrom,
+              thinkingVertical: !widget.compactOutput,
           ),
         );
       }
@@ -1402,6 +1384,7 @@ class _ChatScreenState extends State<ChatScreen> {
           thinking: streaming?.thinking ?? '',
           streamingText: streaming?.text ?? '',
           showStreamingText: !widget.compactOutput,
+          thinkingVertical: !widget.compactOutput,
           messageCount: compactProcessMessages,
           toolCallCount: compactToolCalls,
         ),
@@ -1742,6 +1725,7 @@ class _MessageBubble extends StatelessWidget {
     this.inProcessGroup = false,
     this.onLoadThinking,
     this.onFork,
+    this.thinkingVertical = false,
   });
   final ChatMessage message;
   final bool streaming;
@@ -1753,6 +1737,9 @@ class _MessageBubble extends StatelessWidget {
 
   /// Fork 回调：以本条消息为分支点创建新会话（网页端「分叉」）。
   final Future<void> Function(ChatMessage message)? onFork;
+
+  /// 竖向显示形式下思考连续显示（网页端 ProcessNarrative）。
+  final bool thinkingVertical;
 
   /// Caps bubble width so iPad landscape and wide windows keep readable lines.
   /// Width scales with the screen up to a fixed ceiling.
@@ -1899,7 +1886,7 @@ class _MessageBubble extends StatelessWidget {
                         _ThinkingSection(
                           thinking: message.thinking,
                           streaming: streaming,
-                          vertical: _ChatScreenState.thinkingVertical,
+                          vertical: thinkingVertical,
                         )
                       else if (message.thinkingEntryId != null &&
                           message.thinkingBlockIndex != null)
@@ -2045,10 +2032,14 @@ class _ProcessDetailsGroup extends StatefulWidget {
     required this.messageCount,
     required this.toolCallCount,
     required this.children,
+    this.defaultExpanded = false,
   });
   final int messageCount;
   final int toolCallCount;
   final List<Widget> children;
+
+  /// 竖向显示形式下默认展开（网页端 ProcessGroup 展开即完整过程）。
+  final bool defaultExpanded;
 
   @override
   State<_ProcessDetailsGroup> createState() => _ProcessDetailsGroupState();
@@ -2063,6 +2054,7 @@ class _LiveProcessPanel extends StatelessWidget {
     required this.showStreamingText,
     required this.messageCount,
     required this.toolCallCount,
+    this.thinkingVertical = false,
   });
 
   /// 'waiting_model' | 'running_command' | 'running_tools' | null.
@@ -2073,6 +2065,9 @@ class _LiveProcessPanel extends StatelessWidget {
   final bool showStreamingText;
   final int messageCount;
   final int toolCallCount;
+
+  /// 竖向显示形式下思考连续显示（网页端 ProcessNarrative）。
+  final bool thinkingVertical;
 
   @override
   Widget build(BuildContext context) {
@@ -2139,7 +2134,7 @@ class _LiveProcessPanel extends StatelessWidget {
             _ThinkingSection(
               thinking: thinking,
               streaming: true,
-              vertical: _ChatScreenState.thinkingVertical,
+              vertical: thinkingVertical,
             ),
           ],
           if (showStreamingText && streamingText.trim().isNotEmpty) ...[
@@ -2387,7 +2382,7 @@ class _StreamingText extends StatelessWidget {
 }
 
 class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
-  bool _expanded = false;
+  late bool _expanded = widget.defaultExpanded;
 
   @override
   Widget build(BuildContext context) {
@@ -2848,13 +2843,6 @@ class _RunStatusRowState extends State<_RunStatusRow> {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              _QuickChip(
-                icon: Icons.more_horiz_rounded,
-                label: context.tr('更多'),
-                onTap: () =>
-                    Scaffold.of(context).openEndDrawer(),
-              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -3241,9 +3229,11 @@ class _ComposerState extends State<_Composer> {
         ),
       );
 
-  Widget _addButton(BuildContext context) => SizedBox.square(
-    dimension: 40,
-    child: PopupMenuButton<String>(
+  Widget _addButton(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(left: 5, top: 5, bottom: 5),
+    child: SizedBox.square(
+      dimension: 40,
+      child: PopupMenuButton<String>(
       key: const Key('add-menu'),
       onSelected: (value) {
         switch (value) {
@@ -3325,42 +3315,42 @@ class _ComposerState extends State<_Composer> {
         ),
       ],
     ),
+    ),
   );
 
   Widget _sendButton(BuildContext context) {
-    // While running, the key is a stop button only when the composer is empty;
-    // with text/images it sends (steer) into the live run. Long-press queues
-    // the message as a follow-up instead of steering.
+    // 对齐网页端：运行中显示红色停止按钮（无论输入框是否有内容）；
+    // 空闲时显示发送按钮。运行中输入内容时仍可长按排队（follow-up）。
     final hasContent =
         controller.text.trim().isNotEmpty || pendingImages.isNotEmpty;
     final canQueue = running && hasContent && onSendFollowUp != null;
+    if (running) {
+      return SizedBox.square(
+        dimension: 38,
+        child: IconButton(
+          onPressed: onStop,
+          onLongPress: canQueue
+              ? () {
+                  onSendFollowUp!();
+                }
+              : null,
+          tooltip: context.tr('停止'),
+          style: IconButton.styleFrom(
+            backgroundColor: Theme.of(
+              context,
+            ).colorScheme.error.withValues(alpha: .12),
+            foregroundColor: Theme.of(context).colorScheme.error,
+          ),
+          icon: const Icon(Icons.stop_rounded, size: 20),
+        ),
+      );
+    }
     return SizedBox.square(
       dimension: 38,
       child: IconButton.filled(
-        onPressed: running && !hasContent ? onStop : onSend,
-        onLongPress: canQueue
-            ? () {
-                onSendFollowUp!();
-              }
-            : null,
-        tooltip: context.tr(
-          running && !hasContent
-              ? '停止'
-              : canQueue
-              ? '发送（长按排队）'
-              : '发送',
-        ),
-        icon: AnimatedSwitcher(
-          duration: MediaQuery.disableAnimationsOf(context)
-              ? Duration.zero
-              : const Duration(milliseconds: 160),
-          child: Icon(
-            running && !hasContent
-                ? Icons.stop_rounded
-                : Icons.arrow_upward_rounded,
-            key: ValueKey('$running-$hasContent'),
-          ),
-        ),
+        onPressed: onSend,
+        tooltip: context.tr('发送'),
+        icon: const Icon(Icons.arrow_upward_rounded, size: 18),
       ),
     );
   }
@@ -4142,7 +4132,9 @@ class _FunctionDrawer extends StatelessWidget {
                                   secondary: const Icon(Icons.compress_rounded),
                                   title: Text(context.tr('简洁输出')),
                                   subtitle: Text(
-                                    context.tr('运行时隐藏中间过程，只显示最终答案'),
+                                    context.tr(
+                                      '开：思考与过程横向折叠，只显示答案；关：思考、处理、工具调用竖向展开',
+                                    ),
                                   ),
                                 ),
                                 const Divider(indent: 56),
