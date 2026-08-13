@@ -2578,39 +2578,7 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
   late bool _expanded = widget.defaultExpanded;
   bool _userToggled = false;
   int _activeTab = 0;
-  final Set<String> _openSteps = {};
   List<_ProcessStep> _steps = const [];
-  /// 组内显示模式：'tabs' 横向块状 | 'timeline' 树形（持久化）。
-  String _displayMode = 'tabs';
-
-  @override
-  void initState() {
-    super.initState();
-    _loadDisplayMode();
-  }
-
-  /// 读取持久化的显示模式（与网页端 pi-process-display-mode 同语义）。
-  Future<void> _loadDisplayMode() async {
-    final preferences = await SharedPreferences.getInstance();
-    final stored = preferences.getString('pi-process-display-mode');
-    if (mounted && (stored == 'tabs' || stored == 'timeline')) {
-      setState(() => _displayMode = stored!);
-    }
-  }
-
-  /// 切换显示模式（组内 setState，不触发列表重建，避免滚动跳动）。
-  void _setDisplayMode(String mode) {
-    setState(() {
-      _displayMode = mode;
-      _expanded = true;
-      _userToggled = true;
-    });
-    unawaited(
-      SharedPreferences.getInstance().then(
-        (preferences) => preferences.setString('pi-process-display-mode', mode),
-      ),
-    );
-  }
 
   @override
   void didChangeDependencies() {
@@ -2785,24 +2753,6 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
                   label: Text(details, style: const TextStyle(fontSize: 12)),
                 ),
               ),
-              // 显示模式切换：横向块状 / 树形（原位置，与网页端一致）
-              IconButton(
-                tooltip: context.tr(
-                  _displayMode == 'tabs'
-                      ? '切换为时间线视图'
-                      : '切换为块状视图',
-                ),
-                iconSize: 16,
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _setDisplayMode(
-                  _displayMode == 'tabs' ? 'timeline' : 'tabs',
-                ),
-                icon: Icon(
-                  _displayMode == 'tabs'
-                      ? Icons.account_tree_outlined
-                      : Icons.view_week_outlined,
-                ),
-              ),
             ],
           ),
           if (_expanded) _buildExpanded(context),
@@ -2814,10 +2764,7 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
   Widget _buildExpanded(BuildContext context) {
     final steps = _steps;
     if (steps.isEmpty) return const SizedBox.shrink();
-    if (_displayMode == 'tabs') {
-      return _buildTabs(context);
-    }
-    return _buildTimeline(context);
+    return _buildTabs(context);
   }
 
   /// tabs 模式：一行多个步骤块，点选显示内容（对齐网页端）。
@@ -2901,114 +2848,8 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
       ),
     );
   }
-
-  /// timeline 模式：树状结构，每一步连接，点击展开内容（对齐网页端）。
-  Widget _buildTimeline(BuildContext context) {
-    final steps = _steps;
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, left: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var index = 0; index < steps.length; index++)
-            _buildTimelineStep(context, steps[index], index, steps.length),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTimelineStep(
-    BuildContext context,
-    _ProcessStep step,
-    int index,
-    int total,
-  ) {
-    final cs = Theme.of(context).colorScheme;
-    final open = _openSteps.contains(step.id);
-    final isLast = index == total - 1;
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 22,
-            child: Column(
-              children: [
-                Icon(step.icon, size: 15, color: cs.onSurfaceVariant),
-                if (!isLast)
-                  Expanded(
-                    child: Container(width: 1, color: cs.outlineVariant),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(bottom: isLast ? 0 : 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  InkWell(
-                    borderRadius: BorderRadius.circular(6),
-                    onTap: step.hasContent
-                        ? () => setState(() {
-                              if (open) {
-                                _openSteps.remove(step.id);
-                              } else {
-                                _openSteps.add(step.id);
-                              }
-                            })
-                        : null,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 3,
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              step.label,
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w500,
-                                color: step.isError
-                                    ? cs.error
-                                    : cs.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                          if (step.hasContent)
-                            AnimatedRotation(
-                              turns: open ? .25 : 0,
-                              duration: const Duration(milliseconds: 180),
-                              child: Icon(
-                                Icons.chevron_right,
-                                size: 16,
-                                color: cs.outline,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (open)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: _StepContent(step: step, widget: widget),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
-/// 单个步骤的内容区（思考 Markdown / 过程文本 / 工具卡片）。
 class _StepContent extends StatelessWidget {
   const _StepContent({required this.step, required this.widget});
 
