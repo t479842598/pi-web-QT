@@ -106,6 +106,32 @@ class ChatController extends ChangeNotifier {
   bool _reconciling = false;
   bool _snapshotInFlight = false;
 
+  // ── Streaming UI throttle（message_update 高频事件合并渲染）──────────
+  Timer? _streamThrottleTimer;
+  bool _streamThrottlePending = false;
+
+  /// 流式更新节流：40ms 窗口内合并多次 notifyListeners，
+  /// 避免每条 chunk 都触发全页 rebuild + Markdown 重解析（卡顿主因）。
+  void _notifyStreaming() {
+    if (_streamThrottleTimer?.isActive ?? false) return;
+    _streamThrottleTimer = Timer(const Duration(milliseconds: 40), () {
+      _streamThrottleTimer = null;
+      if (!_disposed) notifyListeners();
+    });
+    // 立即通知一次，保证首个 chunk 响应及时
+    if (!_streamThrottlePending) {
+      _streamThrottlePending = true;
+      notifyListeners();
+    }
+  }
+
+  /// 节流计时器在 dispose 时清理。
+  void _disposeStreamThrottle() {
+    _streamThrottleTimer?.cancel();
+    _streamThrottleTimer = null;
+    _streamThrottlePending = false;
+  }
+
   /// Called by the app when it resumes from background (WidgetsBindingObserver
   /// didChangeAppLifecycleState → resumed). Triggers an immediate reconcile
   /// so stale `running` flags are corrected before the user can tap anything.
@@ -1239,6 +1265,9 @@ class ChatController extends ChangeNotifier {
             language: _language,
           );
         }
+        // 高频流式更新走节流，避免每 chunk 全页 rebuild
+        _notifyStreaming();
+        return;
       case 'message_end':
         final value = event['message'];
         if (value is Map) {
@@ -1404,6 +1433,7 @@ class ChatController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _stopReconcileTimer();
+    _disposeStreamThrottle();
     stopTasksPolling();
     // Invalidate any in-flight event stream so late callbacks (onDone, timer
     // retries) are discarded instead of touching disposed state.

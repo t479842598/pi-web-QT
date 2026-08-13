@@ -140,6 +140,14 @@ class AppLocalizations {
     '简洁输出': 'Compact output',
     '开：思考与过程横向折叠，只显示答案；关：思考、处理、工具调用竖向展开':
         'On: thinking & process fold horizontally, answer only; Off: thinking, steps and tool calls expand vertically',
+    '过程': 'Process',
+    '切换为时间线视图': 'Switch to timeline view',
+    '切换为块状视图': 'Switch to tab view',
+    '{count} 个思考': '{count} thinking',
+    '本地色板': 'Local palette',
+    '网页端主题色': 'Web theme colors',
+    '暂无可用主题': 'No themes available',
+    '选择本地色板或网页端主题色': 'Pick a local swatch or a web theme accent',
     '运行时隐藏中间过程，只显示最终答案':
         'Hide intermediate steps and show only the final answer',
     '中间消息不会绘制在聊天页，但当前服务仍会发送数据；服务端支持按需详情后才能进一步节省流量。':
@@ -496,6 +504,14 @@ class AppLocalizations {
     '简洁输出': '簡潔表示',
     '开：思考与过程横向折叠，只显示答案；关：思考、处理、工具调用竖向展开':
         'オン：思考とプロセスは折りたたみ、回答のみ表示；オフ：思考・処理・ツール呼び出しを縦に展開',
+    '过程': 'プロセス',
+    '切换为时间线视图': 'タイムライン表示に切り替え',
+    '切换为块状视图': 'タブ表示に切り替え',
+    '{count} 个思考': '思考 {count} 件',
+    '本地色板': 'ローカルパレット',
+    '网页端主题色': 'Webテーマカラー',
+    '暂无可用主题': '利用可能なテーマはありません',
+    '选择本地色板或网页端主题色': 'ローカルカラーまたはWebテーマのアクセントを選択',
     '运行时隐藏中间过程，只显示最终答案': '実行中の経過を隠し、最終結果だけを表示',
     '对话': 'チャット',
     '任务': 'タスク',

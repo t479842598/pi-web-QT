@@ -38,6 +38,41 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
   Map<String, String> _themeVarsLight = const {};
   Map<String, String> _themeVarsDark = const {};
 
+  /// Cached ThemeData（避免每次 build 重建导致切换主题卡顿）。
+  ThemeData? _cachedLightTheme;
+  ThemeData? _cachedDarkTheme;
+  Color _cachedLightAccent = AppleColors.accent;
+  Color _cachedDarkAccent = AppleColors.accent;
+  Map<String, String> _cachedLightVars = const {};
+  Map<String, String> _cachedDarkVars = const {};
+
+  /// 主题缓存键变化时重建 ThemeData；否则复用缓存。
+  ThemeData _lightTheme() {
+    if (_cachedLightTheme == null ||
+        _cachedLightAccent != _accent ||
+        _cachedLightVars != _themeVarsLight) {
+      _cachedLightTheme = _themeVarsLight.isEmpty
+          ? buildAppleTheme(Brightness.light, accent: _accent)
+          : buildThemeFromVars(_themeVarsLight, dark: false);
+      _cachedLightAccent = _accent;
+      _cachedLightVars = _themeVarsLight;
+    }
+    return _cachedLightTheme!;
+  }
+
+  ThemeData _darkTheme() {
+    if (_cachedDarkTheme == null ||
+        _cachedDarkAccent != _accent ||
+        _cachedDarkVars != _themeVarsDark) {
+      _cachedDarkTheme = _themeVarsDark.isEmpty
+          ? buildAppleTheme(Brightness.dark, accent: _accent)
+          : buildThemeFromVars(_themeVarsDark, dark: true);
+      _cachedDarkAccent = _accent;
+      _cachedDarkVars = _themeVarsDark;
+    }
+    return _cachedDarkTheme!;
+  }
+
   /// Guards against stale async theme-var loads (quick theme A→B switching).
   int _themeLoadGeneration = 0;
 
@@ -300,12 +335,8 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
         GlobalCupertinoLocalizations.delegate,
       ],
       themeMode: _themeMode,
-      theme: _themeVarsLight.isEmpty
-          ? buildAppleTheme(Brightness.light, accent: _accent)
-          : buildThemeFromVars(_themeVarsLight, dark: false),
-      darkTheme: _themeVarsDark.isEmpty
-          ? buildAppleTheme(Brightness.dark, accent: _accent)
-          : buildThemeFromVars(_themeVarsDark, dark: true),
+      theme: _lightTheme(),
+      darkTheme: _darkTheme(),
       builder: (context, child) => AppLanguageScope(
         language: language,
         preference: _languagePreference,

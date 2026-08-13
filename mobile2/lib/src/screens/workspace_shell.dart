@@ -140,16 +140,10 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   }
 
   Future<void> _openSession(PiSession session) async {
-    try {
-      await widget.controller.openSession(session);
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.tr('无法打开该会话'))),
-        );
-      }
-      return;
-    }
+    // 立即进入会话页：消息/模型/技能在 ChatScreen 内部异步加载（有 loading
+    // 指示器）。不再 await openSession 完成 —— 避免点击后长时间无响应
+    // （首屏多个网络请求串行时用户感觉“点不进去”）。
+    unawaited(widget.controller.openSession(session).catchError((_) {}));
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(

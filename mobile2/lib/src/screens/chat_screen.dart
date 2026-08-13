@@ -1305,46 +1305,32 @@ class _ChatScreenState extends State<ChatScreen> {
         continue;
       }
 
-      final processWidgets = <Widget>[];
+      final processMessages = <ChatMessage>[];
       var processMessageCount = 0;
       var toolCallCount = 0;
       for (var current = index + 1; current < finalAnswer; current++) {
         final process = messages[current];
         if (_hasDisplayableContent(process)) {
-          processWidgets.add(
-            _MessageBubble(
-              message: process,
-              inProcessGroup: true,
-              onLoadThinking: _loadThinking,
-              onFork: _forkFrom,
-              thinkingVertical: !widget.compactOutput,
-            ),
-          );
+          processMessages.add(process);
           processMessageCount += 1;
           toolCallCount += process.toolCallCount;
         }
       }
       final answer = messages[finalAnswer];
       if (answer.thinking.isNotEmpty || answer.processText.isNotEmpty) {
-        processWidgets.add(
-          _MessageBubble(
-            message: answer.copyWith(text: ''),
-            inProcessGroup: true,
-            onLoadThinking: _loadThinking,
-            onFork: _forkFrom,
-              thinkingVertical: !widget.compactOutput,
-          ),
-        );
+        processMessages.add(answer.copyWith(text: ''));
         processMessageCount += 1;
         toolCallCount += answer.toolCallCount;
       }
-      if (processWidgets.isNotEmpty) {
+      if (processMessages.isNotEmpty) {
         result.add(
           _ProcessDetailsGroup(
+            processMessages: processMessages,
             messageCount: processMessageCount,
             toolCallCount: toolCallCount,
             defaultExpanded: !widget.compactOutput,
-            children: processWidgets,
+            onLoadThinking: _loadThinking,
+            thinkingVertical: !widget.compactOutput,
           ),
         );
       }
@@ -1722,14 +1708,12 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
     this.streaming = false,
-    this.inProcessGroup = false,
     this.onLoadThinking,
     this.onFork,
     this.thinkingVertical = false,
   });
   final ChatMessage message;
   final bool streaming;
-  final bool inProcessGroup;
 
   /// Fetches deferred thinking for [message]. When null, thinking is only
   /// shown if already loaded.
@@ -1776,7 +1760,7 @@ class _MessageBubble extends StatelessWidget {
         alignment: user ? Alignment.centerRight : Alignment.centerLeft,
         child: Container(
           constraints: BoxConstraints(maxWidth: _bubbleMaxWidth(context, user)),
-        margin: EdgeInsets.symmetric(vertical: inProcessGroup ? 3 : 6),
+        margin: const EdgeInsets.symmetric(vertical: 6),
         // Web client: user bubble padding 9×14; tool cards keep a tighter pad.
         padding: EdgeInsets.symmetric(
           horizontal: user ? 14 : (tool ? 10 : 0),
@@ -2029,17 +2013,23 @@ class _MessageBubble extends StatelessWidget {
 
 class _ProcessDetailsGroup extends StatefulWidget {
   const _ProcessDetailsGroup({
+    required this.processMessages,
     required this.messageCount,
     required this.toolCallCount,
-    required this.children,
     this.defaultExpanded = false,
+    this.onLoadThinking,
+    this.thinkingVertical = false,
   });
+
+  /// 中间过程消息（工具调用/思考/过程文本）。
+  final List<ChatMessage> processMessages;
   final int messageCount;
   final int toolCallCount;
-  final List<Widget> children;
 
   /// 竖向显示形式下默认展开（网页端 ProcessGroup 展开即完整过程）。
   final bool defaultExpanded;
+  final Future<void> Function(ChatMessage message)? onLoadThinking;
+  final bool thinkingVertical;
 
   @override
   State<_ProcessDetailsGroup> createState() => _ProcessDetailsGroupState();
@@ -2381,8 +2371,169 @@ class _StreamingText extends StatelessWidget {
   );
 }
 
+/// 过程中的一个步骤（对齐网页端 ProcessGroup 的 Step 概念）。
+class _ProcessStep {
+  const _ProcessStep({
+    required this.id,
+    required this.label,
+    required this.icon,
+    this.thinking = '',
+    this.processText = '',
+    this.toolCalls = const [],
+    this.isError = false,
+  });
+
+  final String id;
+  final String label;
+  final IconData icon;
+  final String thinking;
+  final String processText;
+  final List<PiToolCall> toolCalls;
+  final bool isError;
+
+  bool get hasContent =>
+      thinking.isNotEmpty || processText.isNotEmpty || toolCalls.isNotEmpty;
+}
+
 class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
   late bool _expanded = widget.defaultExpanded;
+  String _displayMode = 'tabs'; // 'tabs' | 'timeline'（与网页端一致，默认 tabs）
+  int _activeTab = 0;
+  final Set<String> _openSteps = {};
+  List<_ProcessStep> _steps = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _buildSteps();
+    _loadDisplayMode();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ProcessDetailsGroup oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.processMessages != widget.processMessages) {
+      _buildSteps();
+    }
+  }
+
+  Future<void> _loadDisplayMode() async {
+    final preferences = await SharedPreferences.getInstance();
+    final stored = preferences.getString('pi-process-display-mode');
+    if (mounted && (stored == 'tabs' || stored == 'timeline')) {
+      setState(() => _displayMode = stored!);
+    }
+  }
+
+  Future<void> _setDisplayMode(String mode) async {
+    setState(() => _displayMode = mode);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('pi-process-display-mode', mode);
+  }
+
+  /// 从过程消息构建步骤（对齐网页端 buildProcessSteps）：
+  /// 思考消息合并为一个「思考」步骤；工具调用每个一个步骤；文本步骤。
+  void _buildSteps() {
+    final steps = <_ProcessStep>[];
+    String pendingThinking = '';
+    final pendingMessages = <ChatMessage>[];
+
+    void flushThinking() {
+      if (pendingThinking.isEmpty) return;
+      steps.add(
+        _ProcessStep(
+          id: 'thinking-${steps.length}',
+          label: context.tr('思考过程'),
+          icon: Icons.psychology_outlined,
+          thinking: pendingThinking,
+          isError: pendingMessages.any((m) => m.isError),
+        ),
+      );
+      pendingThinking = '';
+      pendingMessages.clear();
+    }
+
+    for (final message in widget.processMessages) {
+      if (message.thinking.isNotEmpty) {
+        pendingThinking = [pendingThinking, message.thinking]
+            .where((s) => s.isNotEmpty)
+            .join('\n\n');
+        pendingMessages.add(message);
+        continue;
+      }
+      if (message.toolCalls.isNotEmpty) {
+        flushThinking();
+        for (final toolCall in message.toolCalls) {
+          steps.add(
+            _ProcessStep(
+              id: 'tool-${steps.length}',
+              label: toolCall.name,
+              icon: _toolIcon(toolCall.name),
+              toolCalls: [toolCall],
+              isError: message.isError,
+            ),
+          );
+        }
+        continue;
+      }
+      if (message.processText.isNotEmpty) {
+        flushThinking();
+        steps.add(
+          _ProcessStep(
+            id: 'text-${steps.length}',
+            label: context.tr('过程'),
+            icon: Icons.notes_rounded,
+            processText: message.processText,
+            isError: message.isError,
+          ),
+        );
+      }
+    }
+    flushThinking();
+    if (steps.isEmpty && widget.processMessages.isNotEmpty) {
+      // 兜底：全部内容都无分类时，把每个消息作为文本步骤
+      for (final message in widget.processMessages) {
+        final text = [message.thinking, message.processText, message.text]
+            .where((s) => s.isNotEmpty)
+            .join('\n');
+        if (text.isNotEmpty) {
+          steps.add(
+            _ProcessStep(
+              id: 'fallback-${steps.length}',
+              label: context.tr('过程'),
+              icon: Icons.notes_rounded,
+              processText: text,
+              isError: message.isError,
+            ),
+          );
+        }
+      }
+    }
+    _steps = steps;
+  }
+
+  IconData _toolIcon(String name) {
+    final n = name.toLowerCase();
+    if (n.contains('read') || n.contains('grep') || n.contains('search')) {
+      return Icons.search_rounded;
+    }
+    if (n.contains('write') || n.contains('edit') || n.contains('patch')) {
+      return Icons.edit_rounded;
+    }
+    if (n.contains('bash') || n.contains('shell') || n.contains('exec')) {
+      return Icons.terminal_rounded;
+    }
+    if (n.contains('web') || n.contains('fetch') || n.contains('http')) {
+      return Icons.public_rounded;
+    }
+    if (n.contains('file') || n.contains('ls')) {
+      return Icons.folder_outlined;
+    }
+    if (n.contains('delete') || n.contains('rm')) {
+      return Icons.delete_outline;
+    }
+    return Icons.handyman_outlined;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2391,52 +2542,325 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
         : const Duration(milliseconds: 240);
     final details = <String>[
       context.tr('处理详情'),
-      context.tr('{count} 条消息', {'count': widget.messageCount}),
       if (widget.toolCallCount > 0)
         context.tr('{count} 个工具调用', {'count': widget.toolCallCount}),
+      if (_steps.any((s) => s.thinking.isNotEmpty))
+        context.tr('{count} 个思考', {
+          'count': _steps.where((s) => s.thinking.isNotEmpty).length,
+        }),
     ].join(' · ');
+    final steps = _steps;
+    final singleStep =
+        steps.length == 1 && steps.first.thinking.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => setState(() => _expanded = !_expanded),
-              style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                minimumSize: const Size(0, 30),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          Row(
+            children: [
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                  style: TextButton.styleFrom(
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onSurfaceVariant,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
+                    ),
+                    minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: AnimatedRotation(
+                    turns: _expanded ? .25 : 0,
+                    duration: motionDuration,
+                    curve: Curves.easeOutQuart,
+                    child: const Icon(Icons.chevron_right, size: 18),
+                  ),
+                  label: Text(details, style: const TextStyle(fontSize: 12)),
+                ),
               ),
-              icon: AnimatedRotation(
-                turns: _expanded ? .25 : 0,
-                duration: motionDuration,
-                curve: Curves.easeOutQuart,
-                child: const Icon(Icons.chevron_right, size: 18),
-              ),
-              label: Text(details, style: const TextStyle(fontSize: 12)),
-            ),
+              if (steps.length > 1 && !singleStep)
+                IconButton(
+                  tooltip: context.tr(
+                    _displayMode == 'tabs' ? '切换为时间线视图' : '切换为块状视图',
+                  ),
+                  iconSize: 16,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _setDisplayMode(
+                    _displayMode == 'tabs' ? 'timeline' : 'tabs',
+                  ),
+                  icon: Icon(
+                    _displayMode == 'tabs'
+                        ? Icons.account_tree_outlined
+                        : Icons.view_week_outlined,
+                  ),
+                ),
+            ],
           ),
           AnimatedSize(
             duration: motionDuration,
             curve: Curves.easeOutQuart,
-            child: _expanded
-                ? Container(
-                    margin: const EdgeInsets.only(top: 6, left: 7),
-                    padding: const EdgeInsets.only(left: 8),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        left: BorderSide(color: Theme.of(context).dividerColor),
-                      ),
-                    ),
-                    child: Column(children: widget.children),
-                  )
-                : const SizedBox.shrink(),
+            child: _expanded ? _buildExpanded(context) : const SizedBox.shrink(),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildExpanded(BuildContext context) {
+    final steps = _steps;
+    if (steps.isEmpty) return const SizedBox.shrink();
+    if (steps.length == 1 && steps.first.thinking.isNotEmpty) {
+      // 单思考步骤：直接展开思考内容（竖向）。
+      return Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: _StepContent(step: steps.first, widget: widget),
+      );
+    }
+    if (_displayMode == 'tabs') {
+      return _buildTabs(context);
+    }
+    return _buildTimeline(context);
+  }
+
+  /// tabs 模式：一行多个步骤块，点选显示内容（对齐网页端）。
+  Widget _buildTabs(BuildContext context) {
+    final steps = _steps;
+    if (_activeTab >= steps.length) _activeTab = steps.length - 1;
+    final active = steps[_activeTab];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (var index = 0; index < steps.length; index++)
+                _buildTabChip(context, steps[index], index),
+            ],
+          ),
+        ),
+        Container(
+          margin: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerLow.withValues(alpha: .6),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: _StepContent(step: active, widget: widget),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTabChip(BuildContext context, _ProcessStep step, int index) {
+    final cs = Theme.of(context).colorScheme;
+    final isActive = _activeTab == index;
+    final isError = step.isError;
+    return Material(
+      color: isActive
+          ? (isError
+              ? cs.error.withValues(alpha: .15)
+              : cs.primary.withValues(alpha: .12))
+          : cs.surfaceContainerHigh.withValues(alpha: .7),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => setState(() => _activeTab = index),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                step.icon,
+                size: 13,
+                color: isError
+                    ? cs.error
+                    : isActive
+                    ? cs.primary
+                    : cs.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                step.label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                  color: isError
+                      ? cs.error
+                      : isActive
+                      ? cs.primary
+                      : cs.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// timeline 模式：树状结构，每一步连接，点击展开内容（对齐网页端）。
+  Widget _buildTimeline(BuildContext context) {
+    final steps = _steps;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, left: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var index = 0; index < steps.length; index++)
+            _buildTimelineStep(context, steps[index], index, steps.length),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimelineStep(
+    BuildContext context,
+    _ProcessStep step,
+    int index,
+    int total,
+  ) {
+    final cs = Theme.of(context).colorScheme;
+    final open = _openSteps.contains(step.id);
+    final isLast = index == total - 1;
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 22,
+            child: Column(
+              children: [
+                Icon(step.icon, size: 15, color: cs.onSurfaceVariant),
+                if (!isLast)
+                  Expanded(
+                    child: Container(width: 1, color: cs.outlineVariant),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: isLast ? 0 : 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: step.hasContent
+                        ? () => setState(() {
+                              if (open) {
+                                _openSteps.remove(step.id);
+                              } else {
+                                _openSteps.add(step.id);
+                              }
+                            })
+                        : null,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              step.label,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w500,
+                                color: step.isError
+                                    ? cs.error
+                                    : cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                          if (step.hasContent)
+                            AnimatedRotation(
+                              turns: open ? .25 : 0,
+                              duration: const Duration(milliseconds: 180),
+                              child: Icon(
+                                Icons.chevron_right,
+                                size: 16,
+                                color: cs.outline,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (open)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: _StepContent(step: step, widget: widget),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 单个步骤的内容区（思考 Markdown / 过程文本 / 工具卡片）。
+class _StepContent extends StatelessWidget {
+  const _StepContent({required this.step, required this.widget});
+
+  final _ProcessStep step;
+  final _ProcessDetailsGroup widget;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (step.thinking.isNotEmpty) ...[
+          _ThinkingSection(
+            thinking: step.thinking,
+            streaming: false,
+            vertical: true,
+          ),
+          const SizedBox(height: 6),
+        ],
+        if (step.toolCalls.isNotEmpty) ...[
+          for (final toolCall in step.toolCalls)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: _ToolCallCard(
+                name: toolCall.name,
+                arguments: toolCall.arguments,
+                running: false,
+                isError: step.isError,
+                resultText: null,
+                duration: null,
+              ),
+            ),
+          const SizedBox(height: 2),
+        ],
+        if (step.processText.isNotEmpty)
+          MarkdownBody(
+            data: step.processText,
+            selectable: true,
+            styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+              p: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -3177,7 +3601,7 @@ class _ComposerState extends State<_Composer> {
                     color: Colors.transparent,
                     child: Row(
                       key: const Key('composer-single-line'),
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Padding(
                           padding: const EdgeInsets.only(left: 5),
@@ -3905,7 +4329,25 @@ class _FunctionDrawer extends StatelessWidget {
         ),
         child: Material(
           color: Colors.transparent,
-          child: SafeArea(
+          child: Theme(
+            // 设置菜单使用更紧凑的字号（对齐网页端设置面板）
+            data: Theme.of(context).copyWith(
+              listTileTheme: ListTileThemeData(
+                titleTextStyle: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+                subtitleTextStyle: TextStyle(
+                  fontSize: 11.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                iconColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                dense: true,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+            child: SafeArea(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -4094,34 +4536,30 @@ class _FunctionDrawer extends StatelessWidget {
                                 ),
                                 if (onAccentChanged != null) ...[
                                   const Divider(indent: 56),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 12,
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                                  ListTile(
+                                    leading: const Icon(Icons.color_lens_outlined),
+                                    title: Text(context.tr('主题色')),
+                                    subtitle: Text(context.tr('选择本地色板或网页端主题色')),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Text(
-                                          context.tr('主题色'),
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.titleSmall?.copyWith(
-                                            fontWeight: FontWeight.w600,
+                                        Container(
+                                          width: 18,
+                                          height: 18,
+                                          decoration: BoxDecoration(
+                                            color: accent,
+                                            shape: BoxShape.circle,
                                           ),
                                         ),
-                                        const SizedBox(height: 10),
-                                        AccentPicker(
-                                          selected: accent,
-                                          onChanged: onAccentChanged!,
-                                          labels: {
-                                            for (final (name, key)
-                                                in appleAccentChoices)
-                                              name: context.tr(key),
-                                          },
-                                        ),
+                                        const Icon(Icons.chevron_right),
                                       ],
+                                    ),
+                                    onTap: () => showAccentMenu(
+                                      context,
+                                      controller: controller,
+                                      selected: accent,
+                                      onChanged: onAccentChanged!,
+                                      onThemeSet: onThemeSetChanged,
                                     ),
                                   ),
                                 ],
@@ -4220,6 +4658,7 @@ class _FunctionDrawer extends StatelessWidget {
           ),
         ),
       ),
+    ),
     );
   }
 }
@@ -4911,4 +5350,138 @@ class _SessionReferenceSheetState extends State<_SessionReferenceSheet> {
       ),
     );
   }
+}
+
+/// 主题色独立菜单：网页端主题集色板（点击即切换主题）+ 本地色板。
+/// 对齐网页端 DisplayConfig：主题集 accent 与自定义 accent 二选一。
+Future<void> showAccentMenu(
+  BuildContext context, {
+  required ChatController controller,
+  required Color selected,
+  required ValueChanged<Color> onChanged,
+  ValueChanged<String>? onThemeSet,
+}) async {
+  List<ThemeSet> themes = const [];
+  try {
+    themes = await controller.api.getThemes();
+  } catch (_) {
+    themes = const [];
+  }
+  if (!context.mounted) return;
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+            child: Text(
+              sheetContext.tr('主题色'),
+              style: Theme.of(
+                sheetContext,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
+          const Divider(height: 1),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // ── 本地色板 ──
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
+                    child: Text(
+                      sheetContext.tr('本地色板'),
+                      style: Theme.of(sheetContext).textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: AccentPicker(
+                      selected: selected,
+                      onChanged: (color) {
+                        Navigator.pop(sheetContext);
+                        onChanged(color);
+                      },
+                      labels: {
+                        for (final (name, key) in appleAccentChoices)
+                          name: sheetContext.tr(key),
+                      },
+                    ),
+                  ),
+                  const Divider(indent: 20, endIndent: 20),
+                  // ── 网页端主题集色板 ──
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
+                    child: Text(
+                      sheetContext.tr('网页端主题色'),
+                      style: Theme.of(sheetContext).textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  if (themes.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        sheetContext.tr('暂无可用主题'),
+                        style: TextStyle(
+                          color: Theme.of(
+                            sheetContext,
+                          ).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  else
+                    for (final theme in themes)
+                      ListTile(
+                        dense: true,
+                        leading: _accentSwatch(sheetContext, theme.accentLight),
+                        title: Text(theme.displayName),
+                        subtitle: theme.accent != null
+                            ? Text(
+                                theme.accent!,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontFamily: 'monospace',
+                                  color: Theme.of(
+                                    sheetContext,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              )
+                            : null,
+                        trailing: const Icon(Icons.chevron_right, size: 18),
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          onThemeSet?.call(theme.name);
+                        },
+                      ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// 圆形象征色块。
+Widget _accentSwatch(BuildContext context, String? hex) {
+  final color = colorFromHex(hex);
+  return Container(
+    width: 20,
+    height: 20,
+    decoration: BoxDecoration(
+      color: color ?? Theme.of(context).colorScheme.outlineVariant,
+      shape: BoxShape.circle,
+    ),
+  );
 }
