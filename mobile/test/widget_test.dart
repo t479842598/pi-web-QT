@@ -747,6 +747,102 @@ void main() {
     expect(find.text('尚未完成的流式结果'), findsNothing);
   });
 
+  testWidgets('live working panel shows running tool cards and phase', (
+    tester,
+  ) async {
+    final profile = ServerProfile(
+      baseUrl: 'https://example.test',
+      username: 'pi',
+      password: 'test-only',
+    );
+    final controller = ChatController(PiApi(profile))
+      ..draftCwd = '/mnt/code'
+      ..running = true
+      ..agentPhase = 'running_tools'
+      ..messages.add(const ChatMessage(role: 'user', text: '执行任务'))
+      ..liveToolSteps.addAll([
+        LiveToolStep(
+          name: 'bash',
+          toolCallId: 'tc-1',
+          arguments: const {'command': 'ls -la'},
+          startedAt: DateTime.now().subtract(const Duration(seconds: 3)),
+        )..finishedAt = DateTime.now(),
+        LiveToolStep(
+          name: 'read_file',
+          toolCallId: 'tc-2',
+          arguments: const {'path': 'lib/main.dart'},
+          startedAt: DateTime.now(),
+        ),
+      ]);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChatScreen(
+          controller: controller,
+          profile: profile,
+          compactOutput: true,
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pump();
+    // Phase line names the currently running tool, web-client style.
+    expect(find.textContaining('正在运行工具: read_file'), findsOneWidget);
+    // Both tool cards are visible: completed one with duration, running one
+    // with a spinner.
+    expect(find.text('bash'), findsOneWidget);
+    expect(find.text('ls -la'), findsOneWidget);
+    expect(find.text('read_file'), findsOneWidget);
+    expect(find.text('lib/main.dart'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsWidgets);
+  });
+
+  testWidgets('tool card expands to show arguments and result', (tester) async {
+    final profile = ServerProfile(
+      baseUrl: 'https://example.test',
+      username: 'pi',
+      password: 'test-only',
+    );
+    final controller = ChatController(PiApi(profile))
+      ..draftCwd = '/mnt/code'
+      ..running = false
+      ..messages.addAll([
+        const ChatMessage(role: 'user', text: '执行任务'),
+        const ChatMessage(
+          role: 'assistant',
+          text: '完成',
+          toolCalls: [
+            PiToolCall(
+              name: 'bash',
+              toolCallId: 'tc-1',
+              arguments: {'command': 'ls -la'},
+            ),
+          ],
+          toolCallCount: 1,
+        ),
+      ]);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChatScreen(
+          controller: controller,
+          profile: profile,
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('bash'), findsOneWidget);
+    expect(find.text('输入参数'), findsNothing);
+
+    await tester.tap(find.text('bash'));
+    await tester.pumpAndSettle();
+    expect(find.text('输入参数'), findsOneWidget);
+    expect(find.textContaining('"command"'), findsOneWidget);
+  });
+
   testWidgets('left swipe opens the function drawer', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;

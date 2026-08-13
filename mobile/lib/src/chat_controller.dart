@@ -7,6 +7,35 @@ import 'models.dart';
 import 'pi_api.dart';
 import 'localization.dart';
 
+/// One tool call in the current run, tracked live from
+/// `tool_execution_start`/`tool_execution_end` events so the UI can show a
+/// web-client-style working panel (name, args preview, duration, result)
+/// instead of a single text line.
+class LiveToolStep {
+  LiveToolStep({
+    required this.name,
+    required this.toolCallId,
+    required this.arguments,
+    required this.startedAt,
+  });
+
+  final String name;
+  final String toolCallId;
+  final Map<String, dynamic>? arguments;
+  final DateTime startedAt;
+  DateTime? finishedAt;
+  bool isError = false;
+  String? resultText;
+
+  bool get running => finishedAt == null;
+
+  Duration? get duration {
+    final end = finishedAt;
+    if (end == null) return null;
+    return end.difference(startedAt);
+  }
+}
+
 class ChatController extends ChangeNotifier {
   ChatController(this.api) : _language = api.language;
 
@@ -47,6 +76,14 @@ class ChatController extends ChangeNotifier {
   String? error;
   String? status;
   String? skillsError;
+
+  /// Live tool calls of the current run, in execution order. Cleared when the
+  /// run settles. Drives the real-time working panel in the chat.
+  final List<LiveToolStep> liveToolSteps = [];
+
+  /// Current agent phase label source: 'waiting_model' | 'running_command' |
+  /// 'running_tools' | null (idle). Mirrors the web client's phase indicator.
+  String? agentPhase;
   bool projectSkillResourcesLoaded = true;
   String? slashCommandsForSessionId;
 
@@ -189,6 +226,8 @@ class ChatController extends ChangeNotifier {
     draftCwd = session.cwd;
     streamingMessage = null;
     running = session.running;
+    agentPhase = null;
+    liveToolSteps.clear();
     loadingMessages = true;
     error = null;
     status = null;
@@ -236,6 +275,8 @@ class ChatController extends ChangeNotifier {
     messages.clear();
     streamingMessage = null;
     running = false;
+    agentPhase = null;
+    liveToolSteps.clear();
     error = null;
     status = null;
     slashCommands.clear();
@@ -637,6 +678,8 @@ class ChatController extends ChangeNotifier {
     switch (type) {
       case 'agent_start':
         running = true;
+        agentPhase = 'waiting_model';
+        liveToolSteps.clear();
       case 'message_start':
       case 'message_update':
         final value = event['message'];
@@ -672,18 +715,65 @@ class ChatController extends ChangeNotifier {
         running = false;
         status = null;
         streamingMessage = null;
+        agentPhase = null;
+        liveToolSteps.clear();
         unawaited(_finishRun());
       case 'tool_execution_start':
         final name = event['toolName']?.toString() ?? _tr('工具');
+        agentPhase = 'running_tools';
+        liveToolSteps.add(
+          LiveToolStep(
+            name: name,
+            toolCallId: event['toolCallId']?.toString() ??
+                '${liveToolSteps.length}-$name',
+            arguments: event['arguments'] is Map
+                ? Map<String, dynamic>.from(event['arguments'] as Map)
+                : null,
+            startedAt: DateTime.now(),
+          ),
+        );
         streamingMessage = ChatMessage(
           role: 'status',
           text: _tr('正在运行 {name}…', {'name': name}),
           toolName: name,
         );
       case 'tool_execution_end':
+        final callId = event['toolCallId']?.toString();
+        final step = callId == null
+            ? liveToolSteps.lastOrNull
+            : liveToolSteps
+                  .where((item) => item.toolCallId == callId)
+                  .lastOrNull;
+        if (step != null) {
+          step.finishedAt = DateTime.now();
+          step.isError = event['isError'] == true;
+          step.resultText = _toolResultText(event['result']);
+        }
+        if (liveToolSteps.every((item) => item.finishedAt != null)) {
+          agentPhase = null;
+        }
         streamingMessage = ChatMessage(role: 'status', text: _tr('正在整理结果…'));
     }
     notifyListeners();
+  }
+
+  /// Flattens a `tool_execution_end` result payload into displayable text.
+  /// Handles both a plain string and the `{ content: [{type:'text',...}] }`
+  /// shape used by pi's ToolResultMessage.
+  String? _toolResultText(Object? result) {
+    if (result is String) return result.isEmpty ? null : result;
+    if (result is! Map) return null;
+    final content = result['content'];
+    if (content is List) {
+      final texts = content
+          .whereType<Map>()
+          .map((block) => block['text']?.toString() ?? '')
+          .where((text) => text.trim().isNotEmpty)
+          .toList();
+      return texts.isEmpty ? null : texts.join('\n');
+    }
+    final text = result['text']?.toString();
+    return text == null || text.isEmpty ? null : text;
   }
 
   Future<void> _finishRun() async {
@@ -761,4 +851,5 @@ class ChatController extends ChangeNotifier {
 
 extension _FirstOrNull<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
+  T? get lastOrNull => isEmpty ? null : last;
 }

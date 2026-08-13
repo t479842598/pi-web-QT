@@ -753,22 +753,15 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       final liveTail = chat.running && end == messages.length;
       if (liveTail) {
-        if (widget.compactOutput) {
-          compactLiveTail = true;
-          for (var current = index + 1; current < end; current++) {
-            if (_hasDisplayableContent(messages[current])) {
-              compactProcessMessages += 1;
-              compactToolCalls += messages[current].toolCallCount;
-            }
-          }
-        } else {
-          for (var current = index + 1; current < end; current++) {
-            result.add(
-              _MessageBubble(
-                message: messages[current],
-                onLoadThinking: _loadThinking,
-              ),
-            );
+        // While the run is active the live working panel renders the
+        // real-time tool steps, thinking and streamed text; historical
+        // process messages stay visible after the run settles inside the
+        // collapsible process group (same as the web client).
+        compactLiveTail = true;
+        for (var current = index + 1; current < end; current++) {
+          if (_hasDisplayableContent(messages[current])) {
+            compactProcessMessages += 1;
+            compactToolCalls += messages[current].toolCallCount;
           }
         }
         index = end;
@@ -851,13 +844,23 @@ class _ChatScreenState extends State<ChatScreen> {
       index = end;
     }
     final streaming = chat.streamingMessage;
-    if (widget.compactOutput && (compactLiveTail || streaming != null)) {
+    final hasLiveWork =
+        chat.running &&
+        (compactLiveTail ||
+            streaming != null ||
+            chat.liveToolSteps.isNotEmpty);
+    if (hasLiveWork) {
       if (streaming != null && _hasDisplayableContent(streaming)) {
         compactProcessMessages += 1;
         compactToolCalls += streaming.toolCallCount;
       }
       result.add(
-        _CompactRunningStatus(
+        _LiveProcessPanel(
+          phase: chat.agentPhase,
+          toolSteps: List<LiveToolStep>.of(chat.liveToolSteps),
+          thinking: streaming?.thinking ?? '',
+          streamingText: streaming?.text ?? '',
+          showStreamingText: !widget.compactOutput,
           messageCount: compactProcessMessages,
           toolCallCount: compactToolCalls,
         ),
@@ -1246,8 +1249,24 @@ class _MessageBubble extends StatelessWidget {
                           (message.thinkingEntryId != null &&
                               message.thinkingBlockIndex != null)) &&
                       (message.processText.isNotEmpty ||
-                          message.text.isNotEmpty))
+                          message.text.isNotEmpty ||
+                          message.toolCalls.isNotEmpty))
                     const SizedBox(height: 8),
+                  if (message.toolCalls.isNotEmpty) ...[
+                    for (final toolCall in message.toolCalls)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: _ToolCallCard(
+                          name: toolCall.name,
+                          arguments: toolCall.arguments,
+                          running: false,
+                          isError: false,
+                          resultText: null,
+                          duration: null,
+                        ),
+                      ),
+                    const SizedBox(height: 2),
+                  ],
                   if (message.processText.isNotEmpty)
                     MarkdownBody(
                       data: message.processText,
@@ -1306,44 +1325,321 @@ class _ProcessDetailsGroup extends StatefulWidget {
   State<_ProcessDetailsGroup> createState() => _ProcessDetailsGroupState();
 }
 
-class _CompactRunningStatus extends StatelessWidget {
-  const _CompactRunningStatus({
+class _LiveProcessPanel extends StatelessWidget {
+  const _LiveProcessPanel({
+    required this.phase,
+    required this.toolSteps,
+    required this.thinking,
+    required this.streamingText,
+    required this.showStreamingText,
     required this.messageCount,
     required this.toolCallCount,
   });
 
+  /// 'waiting_model' | 'running_command' | 'running_tools' | null.
+  final String? phase;
+  final List<LiveToolStep> toolSteps;
+  final String thinking;
+  final String streamingText;
+  final bool showStreamingText;
   final int messageCount;
   final int toolCallCount;
 
   @override
   Widget build(BuildContext context) {
-    final details = <String>[
-      context.tr('Pi 正在处理'),
-      if (messageCount > 0) context.tr('{count} 个步骤', {'count': messageCount}),
-      if (toolCallCount > 0)
-        context.tr('{count} 个工具调用', {'count': toolCallCount}),
-    ].join(' · ');
+    final cs = Theme.of(context).colorScheme;
+    final runningNames = toolSteps
+        .where((step) => step.running)
+        .map((step) => step.name)
+        .take(3)
+        .toList();
+    final phaseText = switch (phase) {
+      'waiting_model' => context.tr('等待模型'),
+      'running_command' => context.tr('运行命令'),
+      'running_tools' when runningNames.isNotEmpty =>
+        context.tr('正在运行工具: {names}', {
+          'names': runningNames.join(', '),
+        }),
+      _ => <String>[
+        context.tr('Pi 正在处理'),
+        if (messageCount > 0)
+          context.tr('{count} 个步骤', {'count': messageCount}),
+        if (toolCallCount > 0)
+          context.tr('{count} 个工具调用', {'count': toolCallCount}),
+      ].join(' · '),
+    };
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox.square(
-            dimension: 16,
-            child: CircularProgressIndicator(strokeWidth: 2),
+          Row(
+            children: [
+              const SizedBox.square(
+                dimension: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  phaseText,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              details,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+          if (toolSteps.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            for (final step in toolSteps)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _ToolCallCard(
+                  name: step.name,
+                  arguments: step.arguments,
+                  running: step.running,
+                  isError: step.isError,
+                  resultText: step.resultText,
+                  duration: step.duration,
+                ),
+              ),
+          ],
+          if (thinking.trim().isNotEmpty) ...[const SizedBox(height: 8), _ThinkingSection(
+            thinking: thinking,
+            streaming: true,
+          )],
+          if (showStreamingText && streamingText.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _StreamingText(data: streamingText),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Collapsible tool card mirroring the web client's ToolCallBlock: monospace
+/// name + single-line argument preview + duration + status colour, expanding
+/// to the full JSON arguments and result text.
+class _ToolCallCard extends StatefulWidget {
+  const _ToolCallCard({
+    required this.name,
+    required this.arguments,
+    required this.running,
+    required this.isError,
+    required this.resultText,
+    required this.duration,
+  });
+
+  final String name;
+  final Map<String, dynamic>? arguments;
+  final bool running;
+  final bool isError;
+  final String? resultText;
+  final Duration? duration;
+
+  @override
+  State<_ToolCallCard> createState() => _ToolCallCardState();
+}
+
+class _ToolCallCardState extends State<_ToolCallCard> {
+  bool _expanded = false;
+
+  String _preview() =>
+      PiToolCall(name: widget.name, arguments: widget.arguments).preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final ts = Theme.of(context).textTheme;
+    final duration = widget.duration;
+    final seconds = duration == null
+        ? null
+        : (duration.inMilliseconds / 1000).toStringAsFixed(1);
+    final borderColor = widget.running
+        ? cs.outlineVariant
+        : widget.isError
+        ? cs.error.withValues(alpha: .55)
+        : const Color(0x5934c759); // success green, 35% alpha
+    final motionDuration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 200);
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: borderColor),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                children: [
+                  if (widget.running)
+                    const SizedBox.square(
+                      dimension: 13,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(
+                      widget.isError
+                          ? Icons.error_rounded
+                          : Icons.check_circle_rounded,
+                      size: 15,
+                      color: widget.isError ? cs.error : const Color(0xff34c759),
+                    ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      widget.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: widget.isError ? cs.error : null,
+                      ),
+                    ),
+                  ),
+                  if (_preview().isNotEmpty) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _preview(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ts.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (seconds != null) ...[const SizedBox(width: 8), Text(
+                    '${seconds}s',
+                    style: ts.bodySmall?.copyWith(
+                      color: cs.outline,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  )],
+                  const SizedBox(width: 4),
+                  AnimatedRotation(
+                    turns: _expanded ? .25 : 0,
+                    duration: motionDuration,
+                    curve: Curves.easeOutQuart,
+                    child: const Icon(Icons.chevron_right, size: 16),
+                  ),
+                ],
               ),
             ),
+          ),
+          AnimatedSize(
+            duration: motionDuration,
+            curve: Curves.easeOutQuart,
+            child: _expanded
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Divider(height: 1),
+                        if (widget.arguments != null &&
+                            widget.arguments!.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            context.tr('输入参数'),
+                            style: ts.labelSmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          _MonoBlock(
+                            text: const JsonEncoder.withIndent('  ').convert(
+                              widget.arguments,
+                            ),
+                          ),
+                        ],
+                        if (widget.resultText != null) ...[const SizedBox(
+                          height: 8,
+                        ), Text(
+                          context.tr('结果'),
+                          style: ts.labelSmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ), const SizedBox(height: 4), _MonoBlock(
+                          text: widget.resultText!,
+                          color: widget.isError ? cs.error : null,
+                        )],
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
           ),
         ],
       ),
     );
   }
+}
+
+/// Monospace preformatted block for JSON arguments / tool output.
+class _MonoBlock extends StatelessWidget {
+  const _MonoBlock({required this.text, this.color});
+  final String text;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 12,
+          height: 1.45,
+          color: color ?? cs.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+/// Streamed assistant text shown while the run is active (compact output off).
+class _StreamingText extends StatelessWidget {
+  const _StreamingText({required this.data});
+  final String data;
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: MarkdownBody(
+        data: data,
+        selectable: true,
+        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+          p: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.6),
+        ),
+      ),
+    ),
+  );
 }
 
 class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
@@ -1418,7 +1714,9 @@ class _ThinkingSection extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
-        initiallyExpanded: false,
+        // Auto-expand while streaming so live reasoning is visible without a
+        // tap; the web client behaves the same way.
+        initiallyExpanded: streaming,
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         visualDensity: VisualDensity.compact,

@@ -390,6 +390,47 @@ class PiImageAttachment {
   };
 }
 
+class PiToolCall {
+  const PiToolCall({
+    required this.name,
+    this.toolCallId,
+    this.arguments,
+  });
+
+  final String name;
+  final String? toolCallId;
+
+  /// Structured tool arguments; kept separate from the flattened
+  /// [ChatMessage.processText] so the UI can render collapsible tool cards
+  /// with argument previews like the web client.
+  final Map<String, dynamic>? arguments;
+
+  /// Single-line preview of the most meaningful argument, mirroring the web
+  /// client's `getToolPreview` (command/path/pattern/query first).
+  String get preview {
+    final args = arguments;
+    if (args == null || args.isEmpty) return '';
+    for (final key in const [
+      'command',
+      'path',
+      'pattern',
+      'query',
+      'name',
+      'file',
+      'text',
+    ]) {
+      final value = args[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+      if (value is List && value.isNotEmpty) {
+        return value.map((item) => item.toString()).join(', ');
+      }
+    }
+    return args.values.map((v) => v.toString()).join(', ');
+  }
+}
+
 class ChatMessage {
   const ChatMessage({
     required this.role,
@@ -397,6 +438,7 @@ class ChatMessage {
     this.thinking = '',
     this.processText = '',
     this.toolCallCount = 0,
+    this.toolCalls = const [],
     this.toolName,
     this.isError = false,
     this.thinkingEntryId,
@@ -422,6 +464,7 @@ class ChatMessage {
       thinking: content.thinking,
       processText: content.processText,
       toolCallCount: content.toolCallCount,
+      toolCalls: content.toolCalls,
       toolName: json['toolName']?.toString(),
       isError: json['isError'] == true,
       thinkingEntryId: content.thinkingEntryId,
@@ -435,6 +478,7 @@ class ChatMessage {
   final String thinking;
   final String processText;
   final int toolCallCount;
+  final List<PiToolCall> toolCalls;
   final String? toolName;
   final bool isError;
 
@@ -449,6 +493,7 @@ class ChatMessage {
     String? text,
     String? thinking,
     String? processText,
+    List<PiToolCall>? toolCalls,
     String? thinkingEntryId,
     int? thinkingBlockIndex,
   }) => ChatMessage(
@@ -457,6 +502,7 @@ class ChatMessage {
     thinking: thinking ?? this.thinking,
     processText: processText ?? this.processText,
     toolCallCount: toolCallCount,
+    toolCalls: toolCalls ?? this.toolCalls,
     toolName: toolName,
     isError: isError,
     thinkingEntryId: thinkingEntryId ?? this.thinkingEntryId,
@@ -471,6 +517,7 @@ class ParsedMessageContent {
     required this.thinking,
     required this.processText,
     required this.toolCallCount,
+    this.toolCalls = const [],
     this.thinkingEntryId,
     this.thinkingBlockIndex,
   });
@@ -478,6 +525,7 @@ class ParsedMessageContent {
   final String thinking;
   final String processText;
   final int toolCallCount;
+  final List<PiToolCall> toolCalls;
 
   /// Reference for deferred thinking blocks (pi-web-QT `deferThinking`).
   final String? thinkingEntryId;
@@ -519,6 +567,7 @@ ParsedMessageContent parseMessageContent(
   final parts = <String>[];
   final thinkingParts = <String>[];
   final processParts = <String>[];
+  final toolCalls = <PiToolCall>[];
   var toolCallCount = 0;
   String? thinkingEntryId;
   int? thinkingBlockIndex;
@@ -551,6 +600,17 @@ ParsedMessageContent parseMessageContent(
         }
       case 'toolCall':
         final name = block['toolName'] ?? block['name'] ?? 'tool';
+        toolCalls.add(
+          PiToolCall(
+            name: name.toString(),
+            toolCallId: block['id']?.toString(),
+            arguments: block['arguments'] is Map
+                ? Map<String, dynamic>.from(
+                    Map<String, dynamic>.from(block['arguments'] as Map),
+                  )
+                : null,
+          ),
+        );
         processParts.add(
           AppLocalizations.text(language, '调用工具：`{name}`', {'name': name}),
         );
@@ -564,6 +624,7 @@ ParsedMessageContent parseMessageContent(
     thinking: thinkingParts.join('\n\n'),
     processText: processParts.join('\n\n'),
     toolCallCount: toolCallCount,
+    toolCalls: toolCalls,
     thinkingEntryId: thinkingEntryId,
     thinkingBlockIndex: thinkingBlockIndex,
   );
