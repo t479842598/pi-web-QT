@@ -11,6 +11,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../apple_theme.dart';
+import '../font_scale.dart';
 import '../chat_controller.dart';
 import '../localization.dart';
 import '../models.dart';
@@ -75,6 +76,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _slashViewCompact = true; // true=横排chips, false=竖排分组列表
   bool _postFrameScheduled = false;
   bool _pickingImages = false;
+  /// 过程显示模式：'tabs'（横向块状，默认）| 'timeline'（树形）。
+  String _processDisplayMode = 'tabs';
   String? _visibleSessionId;
   final List<_PendingImage> _pendingImages = [];
 
@@ -126,6 +129,24 @@ class _ChatScreenState extends State<ChatScreen> {
     chat.addListener(_onChanged);
     _messageController.addListener(_onComposerChanged);
     _scrollController.addListener(_trackScrollPosition);
+    _restoreProcessDisplayMode();
+  }
+
+  /// 读取过程显示模式偏好（与网页端 pi-process-display-mode 同语义）。
+  Future<void> _restoreProcessDisplayMode() async {
+    final preferences = await SharedPreferences.getInstance();
+    final stored = preferences.getString('pi-process-display-mode');
+    if (mounted && (stored == 'tabs' || stored == 'timeline')) {
+      setState(() => _processDisplayMode = stored!);
+    }
+  }
+
+  /// 切换过程显示模式并持久化。
+  Future<void> _setProcessDisplayMode(String mode) async {
+    if (mode == _processDisplayMode) return;
+    setState(() => _processDisplayMode = mode);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('pi-process-display-mode', mode);
   }
 
   @override
@@ -1044,6 +1065,39 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                  value: 'tabs',
+                  icon: Icon(Icons.view_week_outlined, size: 15),
+                  tooltip: '横向显示',
+                ),
+                ButtonSegment(
+                  value: 'timeline',
+                  icon: Icon(Icons.account_tree_outlined, size: 15),
+                  tooltip: '树形显示',
+                ),
+              ],
+              selected: {_processDisplayMode},
+              onSelectionChanged: (selection) =>
+                  _setProcessDisplayMode(selection.first),
+              showSelectedIcon: false,
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                padding: WidgetStatePropertyAll(
+                  const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                ),
+                side: WidgetStatePropertyAll(
+                  BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+          Padding(
             padding: const EdgeInsets.only(right: 12),
             child: _RoundToolbarButton(
               key: const Key('function-display-button'),
@@ -1149,7 +1203,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   onResume: chat.resumeGoal,
                   onStop: chat.stopGoal,
                 ),
-              if (chat.running) _RunStatusRow(chat: chat),
+
               _Composer(
                 controller: _messageController,
                 running: chat.running,
@@ -1262,6 +1316,7 @@ class _ChatScreenState extends State<ChatScreen> {
               defaultExpanded: !chat.running,
               onLoadThinking: _loadThinking,
               thinkingVertical: !widget.compactOutput,
+            displayMode: _processDisplayMode,
             ),
           );
         }
@@ -1324,6 +1379,7 @@ class _ChatScreenState extends State<ChatScreen> {
               defaultExpanded: !chat.running,
               onLoadThinking: _loadThinking,
               thinkingVertical: !widget.compactOutput,
+            displayMode: _processDisplayMode,
             ),
           );
         }
@@ -1367,6 +1423,7 @@ class _ChatScreenState extends State<ChatScreen> {
             defaultExpanded: !chat.running,
             onLoadThinking: _loadThinking,
             thinkingVertical: !widget.compactOutput,
+            displayMode: _processDisplayMode,
           ),
         );
       }
@@ -2045,6 +2102,7 @@ class _ProcessDetailsGroup extends StatefulWidget {
     this.defaultExpanded = false,
     this.onLoadThinking,
     this.thinkingVertical = false,
+    this.displayMode = 'tabs',
   });
 
   /// 中间过程消息（工具调用/思考/过程文本）。
@@ -2056,6 +2114,9 @@ class _ProcessDetailsGroup extends StatefulWidget {
   final bool defaultExpanded;
   final Future<void> Function(ChatMessage message)? onLoadThinking;
   final bool thinkingVertical;
+
+  /// 显示模式（由聊天页顶部按钮全局控制）：'tabs' 横向块状 | 'timeline' 树形。
+  final String displayMode;
 
   @override
   State<_ProcessDetailsGroup> createState() => _ProcessDetailsGroupState();
@@ -2540,16 +2601,9 @@ class _ProcessStep {
 class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
   late bool _expanded = widget.defaultExpanded;
   bool _userToggled = false;
-  String _displayMode = 'tabs'; // 'tabs' | 'timeline'（与网页端一致，默认 tabs）
   int _activeTab = 0;
   final Set<String> _openSteps = {};
   List<_ProcessStep> _steps = const [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadDisplayMode();
-  }
 
   @override
   void didChangeDependencies() {
@@ -2571,24 +2625,6 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
         !_userToggled) {
       _expanded = widget.defaultExpanded;
     }
-  }
-
-  Future<void> _loadDisplayMode() async {
-    final preferences = await SharedPreferences.getInstance();
-    final stored = preferences.getString('pi-process-display-mode');
-    if (mounted && (stored == 'tabs' || stored == 'timeline')) {
-      setState(() => _displayMode = stored!);
-    }
-  }
-
-  Future<void> _setDisplayMode(String mode) async {
-    setState(() {
-      _displayMode = mode;
-      // 切换视图模式时自动展开（折叠状态下用户看不到切换效果）
-      _expanded = true;
-    });
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString('pi-process-display-mode', mode);
   }
 
   /// 从过程消息构建步骤（对齐网页端 buildProcessSteps）：
@@ -2709,9 +2745,6 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
           'count': _steps.where((s) => s.thinking.isNotEmpty).length,
         }),
     ].join(' · ');
-    final steps = _steps;
-    final singleStep =
-        steps.length == 1 && steps.first.thinking.isNotEmpty;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -2745,22 +2778,6 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
                   label: Text(details, style: const TextStyle(fontSize: 12)),
                 ),
               ),
-              if (steps.length > 1 && !singleStep)
-                IconButton(
-                  tooltip: context.tr(
-                    _displayMode == 'tabs' ? '切换为时间线视图' : '切换为块状视图',
-                  ),
-                  iconSize: 16,
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () => _setDisplayMode(
-                    _displayMode == 'tabs' ? 'timeline' : 'tabs',
-                  ),
-                  icon: Icon(
-                    _displayMode == 'tabs'
-                        ? Icons.account_tree_outlined
-                        : Icons.view_week_outlined,
-                  ),
-                ),
             ],
           ),
           AnimatedSize(
@@ -2783,7 +2800,7 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
         child: _StepContent(step: steps.first, widget: widget),
       );
     }
-    if (_displayMode == 'tabs') {
+    if (widget.displayMode == 'tabs') {
       return _buildTabs(context);
     }
     return _buildTimeline(context);
@@ -3330,165 +3347,6 @@ class _SessionInfoBar extends StatelessWidget {
 
 /// MonkeyCode-style running status row above the composer: spinner + label +
 /// typing dots + live elapsed seconds.
-class _RunStatusRow extends StatefulWidget {
-  const _RunStatusRow({required this.chat});
-
-  final ChatController chat;
-
-  @override
-  State<_RunStatusRow> createState() => _RunStatusRowState();
-}
-
-class _RunStatusRowState extends State<_RunStatusRow> {
-  late final DateTime _startedAt = DateTime.now();
-  Timer? _ticker;
-  int _elapsedSeconds = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) {
-        setState(() => _elapsedSeconds = DateTime.now().difference(_startedAt).inSeconds);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _ticker?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final phase = widget.chat.agentPhase;
-    final label = phase == null || phase.isEmpty
-        ? context.tr('AI 正在处理')
-        : phase;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const SizedBox.square(
-                dimension: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              Text(
-                _formatElapsed(_elapsedSeconds),
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          // MonkeyCode-style quick-command chips while running.
-          Row(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      _QuickChip(
-                        icon: Icons.arrow_forward_rounded,
-                        label: context.tr('继续'),
-                        onTap: () {
-                          final chat = widget.chat;
-                          if (chat.running) {
-                            chat.send('继续', queueMode: 'steer');
-                          }
-                        },
-                      ),
-                      const SizedBox(width: 8),
-                      _QuickChip(
-                        icon: Icons.auto_awesome_rounded,
-                        label: context.tr('使用技能'),
-                        onTap: () =>
-                            showSkillsSheet(context, controller: widget.chat),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-
-  static String _formatElapsed(int seconds) {
-    final minutes = seconds ~/ 60;
-    final secs = seconds % 60;
-    return minutes > 0 ? '$minutes:${secs.toString().padLeft(2, '0')}' : '$secs';
-  }
-}
-
-class _QuickChip extends StatelessWidget {
-  const _QuickChip({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surfaceContainer,
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 14, color: scheme.primary),
-              const SizedBox(width: 5),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurface,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 目标协作模式状态条（精简版 GoalBanner）：状态点 + 目标文本 + 用时 + 暂停/继续/停止。
 class _GoalBanner extends StatelessWidget {
   const _GoalBanner({
     required this.status,
@@ -4729,14 +4587,23 @@ class _FunctionDrawer extends StatelessWidget {
                                   ),
                                 ],
                                 const Divider(indent: 56),
-                                SwitchListTile(
-                                  value: compactOutput,
-                                  onChanged: onCompactOutputChanged,
-                                  secondary: const Icon(Icons.compress_rounded),
-                                  title: Text(context.tr('简洁输出')),
-                                  subtitle: Text(
-                                    context.tr(
-                                      '开：思考与过程横向折叠，只显示答案；关：思考、处理、工具调用竖向展开',
+                                ValueListenableBuilder<double>(
+                                  valueListenable: fontScaleNotifier,
+                                  builder: (context, fontScale, _) =>
+                                      ListTile(
+                                    leading: const Icon(
+                                      Icons.format_size_rounded,
+                                    ),
+                                    title: Text(context.tr('字体大小')),
+                                    subtitle: Slider(
+                                      value: fontScale,
+                                      min: 0.8,
+                                      max: 1.3,
+                                      divisions: 5,
+                                      label:
+                                          '${(fontScale * 100).round()}%',
+                                      onChanged: (value) =>
+                                          setFontScale(value),
                                     ),
                                   ),
                                 ),

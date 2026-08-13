@@ -387,15 +387,28 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         padding: const EdgeInsets.fromLTRB(8, 16, 8, 6),
         child: Row(
           children: [
+            Icon(
+              Icons.folder_outlined,
+              size: 15,
+              color: scheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
             Expanded(
-              child: Text(
-                _aliasOf(group.key, group.key),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurfaceVariant,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(6),
+                onTap: () => _newChat(group.key),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Text(
+                    _aliasOf(group.key, group.key),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -488,7 +501,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w600,
                                 color: scheme.onSurface,
                               ),
@@ -506,7 +519,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 10.5,
+                                fontSize: 9.5,
                                 color: scheme.onSurfaceVariant,
                               ),
                             ),
@@ -515,7 +528,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                           Text(
                             _relativeTime(s.modified),
                             style: TextStyle(
-                              fontSize: 10,
+                              fontSize: 9,
                               color: scheme.onSurfaceVariant,
                             ),
                           ),
@@ -525,7 +538,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                               'count': s.messageCount,
                             }),
                             style: TextStyle(
-                              fontSize: 10,
+                              fontSize: 9,
                               color: scheme.onSurfaceVariant,
                             ),
                           ),

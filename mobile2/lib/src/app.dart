@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'apple_theme.dart';
+import 'font_scale.dart';
 import 'chat_controller.dart';
 import 'localization.dart';
 import 'models.dart';
@@ -86,6 +87,7 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _restoreDisplayPreferences();
+    loadFontScale();
     _restore();
   }
 
@@ -337,11 +339,20 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
       themeMode: _themeMode,
       theme: _lightTheme(),
       darkTheme: _darkTheme(),
-      builder: (context, child) => AppLanguageScope(
-        language: language,
-        preference: _languagePreference,
-        onPreferenceChanged: _setLanguagePreference,
-        child: child ?? const SizedBox.shrink(),
+      builder: (context, child) => ValueListenableBuilder<double>(
+        valueListenable: fontScaleNotifier,
+        builder: (context, fontScale, _) => MediaQuery(
+          // 全局字体缩放（textScaler 应用于所有页面）
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(fontScale),
+          ),
+          child: AppLanguageScope(
+            language: language,
+            preference: _languagePreference,
+            onPreferenceChanged: _setLanguagePreference,
+            child: child ?? const SizedBox.shrink(),
+          ),
+        ),
       ),
       home: _restoring
           ? const _Splash()

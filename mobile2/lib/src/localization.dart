@@ -148,6 +148,7 @@ class AppLocalizations {
     '网页端主题色': 'Web theme colors',
     '暂无可用主题': 'No themes available',
     '选择本地色板或网页端主题色': 'Pick a local swatch or a web theme accent',
+    '字体大小': 'Font size',
     '运行时隐藏中间过程，只显示最终答案':
         'Hide intermediate steps and show only the final answer',
     '中间消息不会绘制在聊天页，但当前服务仍会发送数据；服务端支持按需详情后才能进一步节省流量。':
@@ -512,6 +513,7 @@ class AppLocalizations {
     '网页端主题色': 'Webテーマカラー',
     '暂无可用主题': '利用可能なテーマはありません',
     '选择本地色板或网页端主题色': 'ローカルカラーまたはWebテーマのアクセントを選択',
+    '字体大小': 'フォントサイズ',
     '运行时隐藏中间过程，只显示最终答案': '実行中の経過を隠し、最終結果だけを表示',
     '对话': 'チャット',
     '任务': 'タスク',
