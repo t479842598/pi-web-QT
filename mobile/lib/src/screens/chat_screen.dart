@@ -54,6 +54,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _stickToBottom = true;
   bool _showJumpToBottom = false;
   bool _slashCommandsRequested = false;
+  bool _slashViewCompact = true; // true=横排chips, false=竖排分组列表
   bool _postFrameScheduled = false;
   bool _pickingImages = false;
   String? _visibleSessionId;
@@ -211,6 +212,10 @@ class _ChatScreenState extends State<ChatScreen> {
       text: value,
       selection: TextSelection.collapsed(offset: value.length),
     );
+  }
+
+  void _onToggleSlashView() {
+    setState(() => _slashViewCompact = !_slashViewCompact);
   }
 
   Future<void> _scrollToBottom() async {
@@ -660,6 +665,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 slashCommands: _filteredSlashCommands,
                 slashCommandsLoading: chat.loadingSlashCommands,
                 dormantSkillNames: _dormantSkillNames,
+                slashViewCompact: _slashViewCompact,
+                onToggleSlashView: _onToggleSlashView,
                 pendingImages: _pendingImages,
                 onSlashCommand: _applySlashCommand,
                 onPickImages: _pickImages,
@@ -1561,6 +1568,8 @@ class _Composer extends StatefulWidget {
     required this.slashCommands,
     required this.slashCommandsLoading,
     required this.dormantSkillNames,
+    required this.slashViewCompact,
+    required this.onToggleSlashView,
     required this.pendingImages,
     required this.onSlashCommand,
     required this.onPickImages,
@@ -1574,6 +1583,8 @@ class _Composer extends StatefulWidget {
   final List<PiSlashCommand> slashCommands;
   final bool slashCommandsLoading;
   final Set<String> dormantSkillNames;
+  final bool slashViewCompact;
+  final VoidCallback onToggleSlashView;
   final List<_PendingImage> pendingImages;
   final ValueChanged<PiSlashCommand> onSlashCommand;
   final VoidCallback onPickImages;
@@ -1600,6 +1611,8 @@ class _ComposerState extends State<_Composer> {
   List<PiSlashCommand> get slashCommands => widget.slashCommands;
   bool get slashCommandsLoading => widget.slashCommandsLoading;
   Set<String> get dormantSkillNames => widget.dormantSkillNames;
+  bool get slashViewCompact => widget.slashViewCompact;
+  VoidCallback get onToggleSlashView => widget.onToggleSlashView;
   List<_PendingImage> get pendingImages => widget.pendingImages;
   ValueChanged<PiSlashCommand> get onSlashCommand => widget.onSlashCommand;
   VoidCallback get onPickImages => widget.onPickImages;
@@ -1620,6 +1633,8 @@ class _ComposerState extends State<_Composer> {
               commands: slashCommands,
               loading: slashCommandsLoading,
               dormantSkillNames: dormantSkillNames,
+              compact: slashViewCompact,
+              onToggleView: onToggleSlashView,
               onSelected: onSlashCommand,
             ),
           if (pendingImages.isNotEmpty)
@@ -1743,6 +1758,8 @@ class _SlashCommandPalette extends StatelessWidget {
     required this.commands,
     required this.loading,
     required this.dormantSkillNames,
+    required this.compact,
+    required this.onToggleView,
     required this.onSelected,
   });
 
@@ -1750,107 +1767,189 @@ class _SlashCommandPalette extends StatelessWidget {
   final List<PiSlashCommand> commands;
   final bool loading;
   final Set<String> dormantSkillNames;
+  final bool compact;
+  final VoidCallback onToggleView;
   final ValueChanged<PiSlashCommand> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    final groups = <String, List<PiSlashCommand>>{};
-    for (final command in commands) {
-      groups.putIfAbsent(command.source, () => []).add(command);
-    }
-    final children = <Widget>[];
-    for (final source in const ['builtin', 'extension', 'prompt', 'skill']) {
-      final items = groups[source];
-      if (items == null || items.isEmpty) continue;
-      children.add(
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 5),
-          child: Row(
-            children: [
-              Text(
-                items.first.sourceLabelFor(context.appLanguage),
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+    final cs = Theme.of(context).colorScheme;
+    final ts = Theme.of(context).textTheme;
+
+    // ── header ──
+    final header = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              query.isEmpty
+                  ? context.tr('{count} 个快捷命令', {'count': commands.length})
+                  : context.tr('{count} 个匹配命令', {'count': commands.length}),
+              style: ts.labelMedium,
+            ),
+          ),
+          if (loading) ...[
+            const SizedBox.square(
+              dimension: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 7),
+            Text(
+              context.tr('正在加载资源…'),
+              style: ts.labelSmall,
+            ),
+            const SizedBox(width: 4),
+          ],
+          // ── view toggle ──
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: Icon(
+              compact ? Icons.view_list_rounded : Icons.grid_view_rounded,
+              size: 18,
+            ),
+            tooltip: compact
+                ? context.tr('展开列表')
+                : context.tr('紧凑视图'),
+            onPressed: onToggleView,
+          ),
+        ],
+      ),
+    );
+
+    // ── empty state ──
+    final empty = !loading && commands.isEmpty;
+
+    // ── body: compact chips ──
+    Widget buildChips() {
+      return SizedBox(
+        height: 44,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          itemCount: commands.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 6),
+          itemBuilder: (_, i) {
+            final cmd = commands[i];
+            final dormant =
+                cmd.isSkill && dormantSkillNames.contains(cmd.skillName);
+            return ChoiceChip(
+              label: Text(
+                '/${cmd.name}',
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  color: dormant ? cs.outline : null,
                 ),
               ),
-              const Spacer(),
-              Text(
-                '${items.length}',
-                style: Theme.of(context).textTheme.labelSmall,
+              avatar: Icon(
+                cmd.isSkill
+                    ? Icons.auto_awesome_outlined
+                    : Icons.terminal_rounded,
+                size: 14,
+                color: dormant ? cs.outline : cs.primary,
               ),
-            ],
-          ),
+              selected: false,
+              onSelected: (_) => onSelected(cmd),
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            );
+          },
         ),
       );
-      children.addAll(
-        items.map((command) {
-          final dormant =
-              command.isSkill && dormantSkillNames.contains(command.skillName);
-          return InkWell(
-            onTap: () => onSelected(command),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    command.isSkill
-                        ? Icons.auto_awesome_outlined
-                        : Icons.terminal_rounded,
-                    size: 18,
-                    color: dormant
-                        ? Theme.of(context).colorScheme.outline
-                        : Theme.of(context).colorScheme.primary,
+    }
+
+    // ── body: vertical grouped list ──
+    Widget buildGroupedList() {
+      final groups = <String, List<PiSlashCommand>>{};
+      for (final cmd in commands) {
+        groups.putIfAbsent(cmd.source, () => []).add(cmd);
+      }
+      final children = <Widget>[];
+      for (final source in const ['builtin', 'extension', 'prompt', 'skill']) {
+        final items = groups[source];
+        if (items == null || items.isEmpty) continue;
+        children.add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 5),
+            child: Row(
+              children: [
+                Text(
+                  items.first.sourceLabelFor(context.appLanguage),
+                  style: ts.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurfaceVariant,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                '/${command.name}',
-                                style: TextStyle(
-                                  fontFamily: 'monospace',
-                                  fontWeight: FontWeight.w600,
-                                  color: dormant
-                                      ? Theme.of(context).colorScheme.outline
-                                      : null,
+                ),
+                const Spacer(),
+                Text('${items.length}', style: ts.labelSmall),
+              ],
+            ),
+          ),
+        );
+        children.addAll(
+          items.map((cmd) {
+            final dormant =
+                cmd.isSkill && dormantSkillNames.contains(cmd.skillName);
+            return InkWell(
+              onTap: () => onSelected(cmd),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      cmd.isSkill
+                          ? Icons.auto_awesome_outlined
+                          : Icons.terminal_rounded,
+                      size: 18,
+                      color: dormant ? cs.outline : cs.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  '/${cmd.name}',
+                                  style: TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w600,
+                                    color: dormant ? cs.outline : null,
+                                  ),
                                 ),
                               ),
-                            ),
-                            if (dormant) ...[
-                              const SizedBox(width: 7),
-                              _CommandBadge(text: context.tr('已隐藏')),
+                              if (dormant) ...[
+                                const SizedBox(width: 7),
+                                _CommandBadge(text: context.tr('已隐藏')),
+                              ],
                             ],
-                          ],
-                        ),
-                        if (command.description.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            command.description,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
                           ),
+                          if (cmd.description.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              cmd.description,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: ts.bodySmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          );
-        }),
-      );
+            );
+          }),
+        );
+      }
+      return Flexible(child: ListView(children: children));
     }
 
     return Container(
@@ -1864,44 +1963,17 @@ class _SlashCommandPalette extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      query.isEmpty
-                          ? context.tr('{count} 个快捷命令', {
-                              'count': commands.length,
-                            })
-                          : context.tr('{count} 个匹配命令', {
-                              'count': commands.length,
-                            }),
-                      style: Theme.of(context).textTheme.labelMedium,
-                    ),
-                  ),
-                  if (loading) ...[
-                    const SizedBox.square(
-                      dimension: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      context.tr('正在加载资源…'),
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
-                  ],
-                ],
-              ),
-            ),
+            header,
             const Divider(height: 1),
-            if (!loading && commands.isEmpty)
+            if (empty)
               Padding(
                 padding: const EdgeInsets.all(18),
                 child: Text(context.tr('没有找到匹配命令')),
               )
+            else if (compact)
+              buildChips()
             else
-              Flexible(child: ListView(children: children)),
+              buildGroupedList(),
           ],
         ),
       ),

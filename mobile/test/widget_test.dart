@@ -566,7 +566,7 @@ void main() {
     expect(find.text('对话已删除'), findsOneWidget);
   });
 
-  testWidgets('slash input shows built-in and skill commands', (tester) async {
+  testWidgets('slash input shows built-in and skill commands in compact chip view', (tester) async {
     final profile = ServerProfile(
       baseUrl: 'https://example.test',
       username: 'pi',
@@ -588,7 +588,7 @@ void main() {
     await tester.enterText(find.byType(TextField).last, '/');
     await tester.pumpAndSettle();
     expect(api.createdSession, isTrue);
-    expect(find.text('内置'), findsOneWidget);
+    // Compact mode: chips visible, no group headers
     expect(find.text('/compact'), findsOneWidget);
     expect(
       controller.slashCommands.any((item) => item.name == 'skill:review'),
@@ -603,7 +603,6 @@ void main() {
 
     await tester.enterText(find.byType(TextField).last, '/skill:b');
     await tester.pump();
-    expect(find.text('技能'), findsOneWidget);
     expect(find.text('/skill:build'), findsOneWidget);
     expect(find.text('/skill:review'), findsNothing);
 
@@ -615,6 +614,48 @@ void main() {
       '/skill:build ',
     );
     expect(find.text('/skill:build'), findsNothing);
+  });
+
+  testWidgets('slash command palette toggle between compact and list view', (tester) async {
+    final profile = ServerProfile(
+      baseUrl: 'https://example.test',
+      username: 'pi',
+      password: 'test-only',
+    );
+    final api = _SlashTestApi(profile);
+    final controller = ChatController(api)..draftCwd = '/mnt/code';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChatScreen(
+          controller: controller,
+          profile: profile,
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField).last, '/');
+    await tester.pumpAndSettle();
+
+    // Default: compact chips — group headers not visible
+    expect(find.text('内置'), findsNothing);
+    expect(find.text('/compact'), findsOneWidget);
+
+    // Toggle to list view — group headers now visible
+    final toggle = find.byIcon(Icons.view_list_rounded);
+    expect(toggle, findsOneWidget);
+    await tester.tap(toggle);
+    await tester.pump();
+    expect(find.text('内置'), findsOneWidget);
+    expect(find.text('/compact'), findsOneWidget);
+
+    // Toggle back to compact — group headers hidden again
+    final toggleBack = find.byIcon(Icons.grid_view_rounded);
+    expect(toggleBack, findsOneWidget);
+    await tester.tap(toggleBack);
+    await tester.pump();
+    expect(find.text('内置'), findsNothing);
   });
 
   testWidgets('completed turns fold process details like the web client', (
