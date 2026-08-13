@@ -1509,12 +1509,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // SSE 事件流不可用（如本地代理拦截长连接）时 agentRunning 可能始终为 false，
     // 旧实现 while(agentRunningRef.current && …) 会直接跳过轮询导致 UI 永久卡住。
     // 改为无条件轮询：agent 在跑则重置空闲窗口继续等；空闲（完成）立即 finish。
+    // 服务不可达（fetch 连续失败）或窗口耗尽时不能静默退出：恢复 UI 并明确提示，
+    // 否则 agentRunning 会一直卡 true，后续发送被 handleSend 的守卫静默拦截。
     let idleSince = Date.now();
+    let consecutiveFailures = 0;
     while (Date.now() - idleSince < PROMPT_SETTLE_MAX_MS) {
       if (promptRunIdRef.current !== runId) return;
       try {
         const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
         if (res.ok) {
+          consecutiveFailures = 0;
           const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
           const state = data.state;
           const active = Boolean(data.running && state && (state.isStreaming || state.isPromptRunning));
@@ -1524,13 +1528,30 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             await finishPromptWithoutStream(sid, runId);
             return;
           }
+        } else {
+          consecutiveFailures += 1;
         }
       } catch {
-        // SSE remains the primary completion path.
+        // 服务不可达（进程崩溃/未启动/网络断开）：轮询没有意义，连续失败即恢复 UI 并提示。
+        consecutiveFailures += 1;
+      }
+      if (consecutiveFailures >= 3) {
+        if (promptRunIdRef.current !== runId) return;
+        addNotice({ type: "error", message: "Cannot reach the pi-web service. Make sure it is running, then refresh the page." });
+        rpcPromptPendingRef.current = false;
+        optimisticUserMessageKeyRef.current = null;
+        settleUiStage();
+        return;
       }
       await delay(PROMPT_SETTLE_POLL_MS * 5);
     }
-  }, [finishPromptWithoutStream]);
+    // 窗口耗尽仍未确认完成：同样恢复 UI 并提示（旧实现此处静默退出 → 永久卡死）。
+    if (promptRunIdRef.current !== runId) return;
+    addNotice({ type: "error", message: "Message delivery could not be confirmed. Refresh the page to see the latest state." });
+    rpcPromptPendingRef.current = false;
+    optimisticUserMessageKeyRef.current = null;
+    settleUiStage();
+  }, [addNotice, finishPromptWithoutStream, settleUiStage]);
 
   // Reconcile client streaming state with the server. When SSE events are
   // missed (network drop, mobile tab backgrounded, half-open connection),
@@ -2195,6 +2216,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           });
         }
         addNotice({ type: "error", message: e.message });
+      } else {
+        // Non-SSE failures (server down, 500, network error) were previously
+        // silent: the message stayed in the list but nothing else happened.
+        // Surface them so the user knows the send did not go through.
+        addNotice({ type: "error", message: `Failed to send message: ${e instanceof Error ? e.message : String(e)}` });
       }
       optimisticUserMessageKeyRef.current = null;
       agentRunningRef.current = false;

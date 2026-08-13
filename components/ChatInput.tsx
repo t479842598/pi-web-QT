@@ -110,6 +110,8 @@ interface Props {
   draftKey?: string;
   /** Session working directory — enables the @ file autocomplete menu */
   cwd?: string | null;
+  /** Task board feature flag — when disabled, skip the tasks SSE connection. */
+  tasksBoardEnabled?: boolean;
 }
 
 export interface ChatInputHandle {
@@ -383,6 +385,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onPromptWithStreamingBehavior,
   draftKey,
   cwd,
+  tasksBoardEnabled = true,
 }: Props, ref) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -1558,7 +1561,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   // project's task board for the current cwd and refreshes on task changes.
   const [taskStats, setTaskStats] = useState<{ running: number; todo: number } | null>(null);
   useEffect(() => {
-    if (!cwd) { setTaskStats(null); return; }
+    if (!cwd || !tasksBoardEnabled) { setTaskStats(null); return; }
     let cancelled = false;
     const load = async () => {
       try {
@@ -1582,7 +1585,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     const source = new EventSource("/api/tasks/events");
     source.onmessage = () => void load();
     return () => { cancelled = true; source.close(); };
-  }, [cwd]);
+  }, [cwd, tasksBoardEnabled]);
 
 
 

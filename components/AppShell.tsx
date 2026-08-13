@@ -869,6 +869,7 @@ export function AppShell() {
               onSessionForked={handleSessionForked}
               modelsRefreshKey={modelsRefreshKey}
               chatInputRef={chatInputRef}
+              tasksBoardEnabled={tasksBoardEnabled}
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
               onSubagentsChange={handleSubagentsChange}

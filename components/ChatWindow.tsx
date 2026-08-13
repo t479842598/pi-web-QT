@@ -51,6 +51,8 @@ interface Props {
   onWorkspaceControlsHostChange?: (node: HTMLDivElement | null) => void;
   onViewFullHistory?: () => void;
   systemPrompt: string | null;
+  /** Task board feature flag — forwarded to ChatInput to skip its SSE connection when disabled. */
+  tasksBoardEnabled?: boolean;
 }
 
 function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -122,7 +124,7 @@ function withAssistantBlocks(
 
 
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSubagentsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onWorkspaceControlsHostChange, onViewFullHistory, systemPrompt }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSubagentsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onWorkspaceControlsHostChange, onViewFullHistory, systemPrompt, tasksBoardEnabled }: Props) {
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -471,6 +473,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       ref={chatInputRef}
       onSend={handleSend}
       onBash={executeBash}
+      tasksBoardEnabled={tasksBoardEnabled}
       onAbort={handleAbort}
       onSteer={agentRunning ? handleSteer : undefined}
       onFollowUp={agentRunning ? handleFollowUp : undefined}
