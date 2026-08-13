@@ -1,6 +1,6 @@
 name: Release All (Web 版本三端打包)
 
-# 打 v* tag（如 v0.9.26）触发，一次产出：
+# 打 v* tag（如 v0.9.27）触发，一次产出：
 #   - mobile/  (Flutter)      → pi-web-*.apk/.aab/.ipa
 #   - mobile2/ (Flutter)      → pi-web-new-*.apk/.aab/.ipa
 #   - desktop/ (Tauri 桌面端) → 三平台安装包
@@ -20,6 +20,7 @@ permissions:
 
 env:
   FLUTTER_CHANNEL: stable
+  NODE_ENV: development
 
 jobs:
   # ============ 1. mobile/（Flutter 旧版，产物命名 pi-web） ============
@@ -60,9 +61,9 @@ jobs:
       - name: Rename artifacts (pi-web)
         run: |
           VER="${{ steps.version.outputs.version }}"
-          mkdir -p ../../dist
-          cp build/app/outputs/flutter-apk/app-release.apk ../../dist/pi-web-${VER}.apk
-          cp build/app/outputs/bundle/release/app-release.aab ../../dist/pi-web-${VER}.aab
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/dist/pi-web-${VER}.apk"
+          cp build/app/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/dist/pi-web-${VER}.aab"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
@@ -96,9 +97,10 @@ jobs:
       - run: flutter build ios --release --no-codesign
       - name: Package unsigned IPA (pi-web)
         run: |
-          mkdir -p ../../dist build/ios/ipa/Payload
+          VER="${{ steps.version.outputs.version }}"
+          mkdir -p "$GITHUB_WORKSPACE/dist" build/ios/ipa/Payload
           cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
-          cd build/ios/ipa && zip -qr "../../../../dist/pi-web-${{ steps.version.outputs.version }}.ipa" Payload
+          cd build/ios/ipa && zip -qr "$GITHUB_WORKSPACE/dist/pi-web-${VER}.ipa" Payload
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
@@ -146,9 +148,9 @@ jobs:
       - name: Rename artifacts (pi-web-new)
         run: |
           VER="${{ steps.version.outputs.version }}"
-          mkdir -p ../../dist
-          cp build/app/outputs/flutter-apk/app-release.apk ../../dist/pi-web-new-${VER}.apk
-          cp build/app/outputs/bundle/release/app-release.aab ../../dist/pi-web-new-${VER}.aab
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/dist/pi-web-new-${VER}.apk"
+          cp build/app/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/dist/pi-web-new-${VER}.aab"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
@@ -182,9 +184,10 @@ jobs:
       - run: flutter build ios --release --no-codesign
       - name: Package unsigned IPA (pi-web-new)
         run: |
-          mkdir -p ../../dist build/ios/ipa/Payload
+          VER="${{ steps.version.outputs.version }}"
+          mkdir -p "$GITHUB_WORKSPACE/dist" build/ios/ipa/Payload
           cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
-          cd build/ios/ipa && zip -qr "../../../../dist/pi-web-new-${{ steps.version.outputs.version }}.ipa" Payload
+          cd build/ios/ipa && zip -qr "$GITHUB_WORKSPACE/dist/pi-web-new-${VER}.ipa" Payload
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
@@ -215,7 +218,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install desktop npm deps (tauri CLI)
+        shell: bash
+        run: cd desktop && npm ci
       - name: Sync version (web -> desktop)
+        shell: bash
         run: |
           node scripts/sync-version.mjs
           VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
