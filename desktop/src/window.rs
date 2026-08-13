@@ -243,18 +243,11 @@ pub fn rebuild_tray(app: &AppHandle, cfg: &Config) {
     install_app_menu(app, cfg);
 }
 
-/// 启动路由（桌面）：恢复上次服务器 > 连接页。
-/// 不再自动连本地/自动拉起——由用户在连接页选择服务器、获取本机链接或一键启动。
+/// 启动路由（桌面）：总是进入连接页，由用户自己填写服务器地址。
+/// 不自动恢复上次服务器、不自动连本地、不自动使用本地密钥/密码。
 #[cfg(not(mobile))]
-pub fn route_startup(app: &AppHandle, cfg: &Config) {
-    // 1. 恢复上次使用的服务器
-    if let Some(id) = &cfg.last_server_id {
-        if let Some(srv) = cfg.find(id) {
-            let _ = open_server_window(app, srv);
-            return;
-        }
-    }
-    // 2. 连接页（用户选择服务器 / 获取本机链接 / 启动本机 pi-web）
+pub fn route_startup(app: &AppHandle, _cfg: &Config) {
+    // 连接页：用户填写 URL（+密码）、点「获取本机链接」或「启动本机 pi-web」
     let _ = open_connect_window(app);
 }
 
