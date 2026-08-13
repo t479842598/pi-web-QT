@@ -420,6 +420,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // ── Project tab bar state (desktop top bar) ──────────────────────────────
   const isMobile = useIsMobile();
   const PROJECT_TABS_KEY = "pi-project-tabs";
+  // Mirrored in lib/project-tab-state.ts (server-side cap) — keep in sync.
   const MAX_PROJECT_TABS = 4;
   const [projectTabs, setProjectTabs] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
@@ -435,6 +436,98 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const persistProjectTabs = useCallback((tabs: string[]) => {
     setProjectTabs(tabs);
     try { window.localStorage.setItem(PROJECT_TABS_KEY, JSON.stringify(tabs)); } catch {}
+    // Cross-device sync: the server file is the shared source of truth for
+    // every window/device connected to this pi-web server.
+    void fetch("/api/project-state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tabs }),
+    }).catch(() => { /* offline — localStorage keeps the local copy */ });
+  }, []);
+
+  // ── Cross-device sync of the project tab bar / dropdown pin ─────────────
+  // Refs mirroring state that stable callbacks / SSE handlers must read
+  // without stale closures (and without re-subscribing EventSource on change).
+  const projectTabsRef = useRef<string[]>(projectTabs);
+  useEffect(() => { projectTabsRef.current = projectTabs; }, [projectTabs]);
+  const selectedCwdRef = useRef<string | null>(selectedCwd);
+  useEffect(() => { selectedCwdRef.current = selectedCwd; }, [selectedCwd]);
+  /** Dropdown pin last seen from the server (remote-change detection). */
+  const serverPinnedRef = useRef<string | null>(null);
+
+  /**
+   * Fetch the server-side project state (tabs + dropdown pin) and apply it.
+   * - tabs: server always wins (it is the shared source of truth).
+   * - pinnedProject: applied to the dropdown pin always; the current project
+   *   is switched only when the pin genuinely changed remotely (`adoptSelection`
+   *   && pin differs from the last seen server pin) — a plain tab-list edit
+   *   on another device must not yank this device's project, and neither may
+   *   the echo of our own dropdown selection (selectProject marks the pin as
+   *   seen at PUT time). `adoptFirst` is the mount-restore case: with a clean
+   *   URL the first pin ever observed may set the current project, since there
+   *   is no user interaction to yank yet.
+   * - `pushLocal`: first sync on a server with no stored tabs migrates this
+   *   device's pre-sync localStorage tabs to the server.
+   */
+  const syncProjectStateFromServer = useCallback(async (opts: { adoptSelection?: boolean; adoptFirst?: boolean; pushLocal?: boolean }) => {
+    try {
+      const res = await fetch("/api/project-state");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({})) as { tabs?: string[]; pinnedProject?: string | null };
+      let remoteTabs = Array.isArray(data.tabs)
+        ? data.tabs.filter((p): p is string => typeof p === "string" && p.length > 0).slice(0, MAX_PROJECT_TABS)
+        : null;
+      const pinned = typeof data.pinnedProject === "string" && data.pinnedProject ? data.pinnedProject : null;
+
+      if (opts.pushLocal && remoteTabs !== null && remoteTabs.length === 0 && projectTabsRef.current.length > 0) {
+        // Fresh server: publish this device's pre-sync localStorage tabs, and
+        // adopt the sanitized pushed list from the PUT response — the stale
+        // pre-push read ([]) must not wipe the just-pushed tabs from state.
+        try {
+          const putRes = await fetch("/api/project-state", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tabs: projectTabsRef.current }),
+          });
+          const putData = putRes.ok ? await putRes.json().catch(() => null) as { tabs?: string[] } | null : null;
+          remoteTabs = putData && Array.isArray(putData.tabs)
+            ? putData.tabs.filter((p): p is string => typeof p === "string" && p.length > 0).slice(0, MAX_PROJECT_TABS)
+            : projectTabsRef.current; // PUT failed — keep the local list
+        } catch {
+          remoteTabs = projectTabsRef.current;
+        }
+      }
+
+      if (remoteTabs !== null) {
+        setProjectTabs(remoteTabs);
+        try { window.localStorage.setItem(PROJECT_TABS_KEY, JSON.stringify(remoteTabs)); } catch {}
+      }
+      if (pinned) {
+        const seen = serverPinnedRef.current;
+        const pinChanged = seen !== null && !samePath(seen, pinned);
+        serverPinnedRef.current = pinned;
+        setDropdownPinnedProject(pinned);
+        if (opts.adoptFirst || (opts.adoptSelection && pinChanged)) {
+          if (!samePath(pinned, selectedCwdRef.current ?? "")) setSelectedCwd(pinned);
+        }
+      }
+    } catch {
+      // Server unavailable — keep the local copy; the next event/refetch retries.
+    }
+  }, []);
+
+  // Pull the server state once on mount: adopt the tab list always; adopt the
+  // dropdown pin as the current project only when no explicit ?session= / ?cwd=
+  // URL restore is in flight (so a shared link is never yanked to the pin).
+  useEffect(() => {
+    let adoptSelection = true;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      adoptSelection = !params.has("session") && !params.has("cwd");
+    } catch { /* URL unreadable — adopt */ }
+    void syncProjectStateFromServer({ adoptSelection: false, adoptFirst: adoptSelection, pushLocal: true });
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // Drop persisted tabs whose directory no longer exists (e.g. a volume was
   // unmounted or the project was moved). Clicking such a tab used to surface
@@ -466,7 +559,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     };
     void validate();
     return () => { cancelled = true; };
-    // Run once on mount; projectTabs in deps keeps it stable across persists.
+    // Run once on mount against the initial tabs (server-side state is already
+    // pruned by /api/project-state, so this only covers the localStorage copy).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [homeDir, setHomeDir] = useState<string>("");
@@ -694,6 +788,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           // Alias edits in another window update this window's alias map
           // without reloading the session list.
           void loadProjectAliases();
+        } else if (data && data.type === "project_state_changed") {
+          // Project tab / dropdown-pin edits in another window or device apply
+          // immediately (and switch the current project when the pin changed).
+          void syncProjectStateFromServer({ adoptSelection: true });
         }
       } catch {
         // EventSource reconnects; a malformed frame must not alter state.
@@ -703,7 +801,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       source.close();
       if (throttleTimer) clearTimeout(throttleTimer);
     };
-  }, [loadSessions, loadProjectAliases]);
+  }, [loadSessions, loadProjectAliases, syncProjectStateFromServer]);
 
   useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;
@@ -1238,7 +1336,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     : (initialSessionId && !restoredRef.current ? "" : `${t("desktop.selectProject")}…`);
   const selectProject = (project: string, fromDropdown = false) => {
     setSelectedCwd(project);
-    if (fromDropdown) setDropdownPinnedProject(project);
+    if (fromDropdown) {
+      setDropdownPinnedProject(project);
+      // Mark the pin as seen by the server so the echo of this very PUT can
+      // never look like a remote change and yank the selection back.
+      serverPinnedRef.current = project;
+      // Cross-device sync of the dropdown's pinned project (the top project
+      // picker area), so other windows/devices follow the selection.
+      void fetch("/api/project-state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinnedProject: project }),
+      }).catch(() => {});
+    }
     setProjectFilter("");
     setDirectoryPickerOpen(false);
     setCustomPathError(null);
