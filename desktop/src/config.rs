@@ -3,8 +3,6 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
-use crate::keyring;
-
 pub const DEFAULT_LOCAL_URL: &str = "http://127.0.0.1:30141";
 pub const DEFAULT_USERNAME: &str = "pi";
 const CONFIG_FILE: &str = "config.json";
@@ -28,41 +26,28 @@ pub struct Server {
 }
 
 impl Server {
-    /// 取密码：优先 keyring，降级 inline。
+    /// 取密码：明文配置。
     pub fn password(&self) -> Option<String> {
         if !self.has_password {
             return None;
         }
-        // inline 降级值优先（正常路径 set_password 成功后 inline 会被清空，
-        // 仅当 keyring 不可用或测试构造时存在）
-        if let Some(inline) = &self.password_inline {
-            return Some(inline.clone());
-        }
-        keyring::get(&self.id).ok().filter(|p| !p.is_empty())
+        self.password_inline.clone()
     }
 
-    /// 写入密码：keyring 成功则不落明文；失败降级 inline。
+    /// 写入密码：明文存配置（不用系统钥匙串，避免 macOS 弹钥匙串授权框）。
     pub fn set_password(&mut self, password: &str) {
         if password.is_empty() {
             self.has_password = false;
             self.password_inline = None;
-            let _ = keyring::delete(&self.id);
             return;
         }
         self.has_password = true;
-        match keyring::set(&self.id, password) {
-            Ok(()) => self.password_inline = None,
-            Err(e) => {
-                eprintln!("[desktop] keyring 不可用，降级明文存储: {e}");
-                self.password_inline = Some(password.to_string());
-            }
-        }
+        self.password_inline = Some(password.to_string());
     }
 
     pub fn clear_password(&mut self) {
         self.has_password = false;
         self.password_inline = None;
-        let _ = keyring::delete(&self.id);
     }
 }
 

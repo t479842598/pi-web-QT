@@ -7,8 +7,7 @@ use tauri::menu::Menu;
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-use crate::config::{Config, Server, DEFAULT_LOCAL_URL};
-use crate::probe;
+use crate::config::{Config, Server};
 use crate::AppState;
 
 pub const CONNECT_LABEL: &str = "connect";
@@ -19,7 +18,7 @@ pub fn server_label(id: &str) -> String {
 }
 
 /// 拼装带 Basic Auth userinfo 的 URL（url crate 自动 percent-encode 用户名密码）。
-/// 无密码时不带 userinfo（本地未设 PI_WEB_PASSWORD 的场景）。
+/// 无密码时不带 userinfo；附加 ?piweb_connected=1 标识桌面壳环境（网页端据此显示设置入口）。
 pub fn build_url(server: &Server) -> String {
     let base = url::Url::parse(&server.base_url)
         .unwrap_or_else(|_| url::Url::parse("http://localhost").unwrap());
@@ -28,6 +27,7 @@ pub fn build_url(server: &Server) -> String {
         let _ = u.set_username(&server.username);
         let _ = u.set_password(Some(&pw));
     }
+    u.query_pairs_mut().append_pair("piweb_connected", "1");
     u.to_string()
 }
 
@@ -103,7 +103,37 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
         .title(&server.name)
         .inner_size(1280.0, 820.0)
         .min_inner_size(800.0, 600.0)
-        .center();
+        .center()
+        // 网页端设置里的「切换服务器」走 piweb-switch:// 自定义导航：
+        //   piweb-switch://manage -> 打开连接页
+        //   piweb-switch://<id>   -> 当前窗口导航到该服务器
+        .on_navigation({
+            let app_handle = app.clone();
+            let label_owner = label.clone();
+            move |url| {
+                let s = url.as_str();
+                if let Some(rest) = s.strip_prefix("piweb-switch://") {
+                    if rest == "manage" {
+                        let _ = open_connect_window(&app_handle);
+                    } else if !rest.is_empty() {
+                        let state = app_handle.state::<AppState>();
+                        let cfg = state.config.lock().unwrap().clone();
+                        if let Some(srv) = cfg.find(rest) {
+                            let target = build_url(srv);
+                            if let Ok(u) = url::Url::parse(&target) {
+                                if let Some(w) = app_handle.get_webview_window(&label_owner) {
+                                    let _ = w.navigate(u);
+                                    let _ = w.set_title(&srv.name);
+                                }
+                            }
+                        }
+                    }
+                    false // 阻止原始导航
+                } else {
+                    true
+                }
+            }
+        });
     if let Some(m) = menu {
         builder = builder.menu(m);
     }

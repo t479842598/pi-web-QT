@@ -24,10 +24,6 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 dirs = "6"
 
-# keyring 仅桌面 + iOS（Android 无 Secret Service/Keychain，改用明文降级存储）
-[target.'cfg(not(target_os = "android"))'.dependencies]
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
-
 [features]
 default = []
 # 发布打包时启用（需 tauri.conf.json 配好 updater.pubkey，且 CI 注入 TAURI_SIGNING_PRIVATE_KEY）

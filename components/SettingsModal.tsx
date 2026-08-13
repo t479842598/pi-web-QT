@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { ChatCenteredText, ChartBar, Cpu, Database, DownloadSimple, Lightning, List, ListBullets, Monitor, Network, Plug, Robot, Stack, TerminalWindow, X } from "@phosphor-icons/react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChatCenteredText, ChartBar, Cpu, Database, DownloadSimple, Lightning, List, ListBullets, Monitor, Network, Plug, PlugsConnected, Robot, Stack, TerminalWindow, X } from "@phosphor-icons/react";
 import { BackupConfig } from "./BackupConfig";
 import { ChatConfig } from "./ChatConfig";
 import { DisplayConfig } from "./DisplayConfig";
@@ -16,10 +16,11 @@ import { LogsConfig } from "./LogsConfig";
 import { SnippetsConfig } from "./SnippetsConfig";
 import { SubagentsConfig } from "./SubagentsConfig";
 import { UsageConfig } from "./UsageConfig";
+import { ServerSwitchConfig } from "./ServerSwitchConfig";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 
-export type SettingsTab = "display" | "chat" | "models" | "skills" | "plugins" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import" | "mcp" | "subagents";
+export type SettingsTab = "server" | "display" | "chat" | "models" | "skills" | "plugins" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import" | "mcp" | "subagents";
 
 interface SettingsModalProps {
   initialTab?: SettingsTab;
@@ -32,6 +33,7 @@ interface SettingsModalProps {
 }
 
 const tabs: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
+  { id: "server", labelKey: "desktop.server", Icon: PlugsConnected },
   { id: "display", labelKey: "desktop.display", Icon: Monitor },
   { id: "chat", labelKey: "desktop.chat", Icon: ChatCenteredText },
   { id: "models", labelKey: "desktop.models", Icon: Cpu },
@@ -63,6 +65,12 @@ export function SettingsModal({
   const [activeTab, setActiveTab] = useState<SettingsTab>(
     initialTab === "skills" || initialTab === "plugins" ? (cwd ? initialTab : "display") : initialTab,
   );
+  // 桌面壳环境（URL 带 ?piweb_connected=1）：显示「服务器」配置入口；纯浏览器隐藏
+  const [desktopShell, setDesktopShell] = useState(false);
+  useEffect(() => {
+    setDesktopShell(new URLSearchParams(window.location.search).has("piweb_connected"));
+  }, []);
+  const visibleTabs = desktopShell ? tabs : tabs.filter(({ id }) => id !== "server");
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
   // Multiple embedded configs can register a close-time flush (e.g. the
@@ -185,7 +193,7 @@ export function SettingsModal({
               WebkitOverflowScrolling: isMobile ? "touch" : undefined,
             }}
           >
-            {tabs.filter(({ id }) => !(isMobile && id === "import")).map(({ id, labelKey, Icon }) => {
+            {visibleTabs.filter(({ id }) => !(isMobile && id === "import")).map(({ id, labelKey, Icon }) => {
               const disabled = (id === "skills" || id === "plugins") && !cwd;
               const active = activeTab === id;
               return (
@@ -236,6 +244,9 @@ export function SettingsModal({
             })}
           </nav>
 
+          <div style={{ display: activeTab === "server" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
+            <ServerSwitchConfig />
+          </div>
           <div style={{ display: activeTab === "display" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <DisplayConfig />
           </div>

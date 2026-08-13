@@ -26,7 +26,9 @@ fn server(base: &str, password: Option<&str>, is_local: bool) -> Server {
 #[test]
 fn build_url_no_password() {
     let s = server("http://127.0.0.1:30141", None, true);
-    assert_eq!(window::build_url(&s), "http://127.0.0.1:30141/");
+    let u = window::build_url(&s);
+    assert!(u.starts_with("http://127.0.0.1:30141/"), "got {u}");
+    assert!(u.contains("piweb_connected=1"), "桌面环境标识缺失: {u}");
 }
 
 #[test]
