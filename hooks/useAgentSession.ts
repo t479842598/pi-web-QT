@@ -1506,16 +1506,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const waitForPromptSettlement = useCallback(async (sid: string, runId = promptRunIdRef.current) => {
     await delay(PROMPT_SETTLE_INITIAL_DELAY_MS);
-    const startedAt = Date.now();
-
-    while (agentRunningRef.current && Date.now() - startedAt < PROMPT_SETTLE_MAX_MS) {
+    // SSE 事件流不可用（如本地代理拦截长连接）时 agentRunning 可能始终为 false，
+    // 旧实现 while(agentRunningRef.current && …) 会直接跳过轮询导致 UI 永久卡住。
+    // 改为无条件轮询：agent 在跑则重置空闲窗口继续等；空闲（完成）立即 finish。
+    let idleSince = Date.now();
+    while (Date.now() - idleSince < PROMPT_SETTLE_MAX_MS) {
       if (promptRunIdRef.current !== runId) return;
       try {
         const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
         if (res.ok) {
           const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
           const state = data.state;
-          if (!data.running || !state || (!state.isStreaming && !state.isPromptRunning)) {
+          const active = Boolean(data.running && state && (state.isStreaming || state.isPromptRunning));
+          if (active) {
+            idleSince = Date.now(); // 仍在运行：重置窗口，持续等待
+          } else {
             await finishPromptWithoutStream(sid, runId);
             return;
           }
@@ -1523,7 +1528,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       } catch {
         // SSE remains the primary completion path.
       }
-      await delay(PROMPT_SETTLE_POLL_MS);
+      await delay(PROMPT_SETTLE_POLL_MS * 5);
     }
   }, [finishPromptWithoutStream]);
 
@@ -2127,7 +2132,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
             }
           }
-          await ensureEventsConnected(sid);
+          // SSE 连接失败（代理拦截长连接等）不应阻止发送：最多等 4 秒，连不上则
+          // 降级发送，由 waitForPromptSettlement 轮询对账兜底。
+          const sseReady = await Promise.race([
+            ensureEventsConnected(sid).then(() => true).catch(() => false),
+            delay(4000).then(() => false),
+          ]);
           promptRequestStarted = true;
           await sendAgentCommand(sid, {
             type: "prompt",
@@ -2135,6 +2145,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             ...(piImages?.length ? { images: piImages } : {}),
           });
           promoteNewSession(1, message);
+          if (!sseReady) void waitForPromptSettlement(sid, promptRunId);
           // Server-side goal engine: register the goal so it auto-continues
           // even if the page is closed/refreshed (wish-style development).
           if (collaborationModeRef.current === "goal" && !isSlashCommandPrompt) {
@@ -2143,13 +2154,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
       } else if (session) {
         sentSessionId = session.id;
-        await ensureEventsConnected(session.id);
+        // SSE 连接失败（代理拦截长连接等）不应阻止发送：最多等 4 秒，连不上则
+        // 降级发送，由 waitForPromptSettlement 轮询对账兜底。
+        const sseReady = await Promise.race([
+          ensureEventsConnected(session.id).then(() => true).catch(() => false),
+          delay(4000).then(() => false),
+        ]);
         promptRequestStarted = true;
         await sendAgentCommand(session.id, {
           type: "prompt",
           message: sentMessage,
           ...(piImages?.length ? { images: piImages } : {}),
         });
+        if (!sseReady) void waitForPromptSettlement(session.id, promptRunId);
         if (collaborationModeRef.current === "goal" && !isSlashCommandPrompt) {
           void sendAgentCommand(session.id, { type: "goal_start", goalText: trimmedMessage }).catch(() => {});
         }
