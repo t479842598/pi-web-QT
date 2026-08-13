@@ -7,6 +7,7 @@ import {
   Gear,
   List,
   Moon,
+  PlugsConnected,
   SidebarSimple,
   SquaresFour,
   Sun,
@@ -118,6 +119,22 @@ export function AppTitleBar({
 }: AppTitleBarProps) {
   const { t: translate } = useI18n();
   const [titleModalOpen, setTitleModalOpen] = useState(false);
+  // 桌面壳环境（URL 带 ?piweb_connected=1）：显示「切换服务器」入口
+  const [desktopShell, setDesktopShell] = useState(false);
+
+  useEffect(() => {
+    try {
+      setDesktopShell(
+        new URLSearchParams(window.location.search).has("piweb_connected"),
+      );
+    } catch {
+      setDesktopShell(false);
+    }
+  }, []);
+
+  const switchServer = () => {
+    window.location.href = "piweb-switch://manage";
+  };
 
   return (
     <>
@@ -268,6 +285,28 @@ export function AppTitleBar({
         {/* Theme toggle — defer render until client mount to avoid
             SSR hydration mismatch on icon and attributes. */}
         <ThemeToggleButton isDark={isDark} toggleTheme={toggleTheme} translate={translate} />
+
+        {/* 切换服务器 — 仅桌面壳（URL 带 ?piweb_connected=1）显示 */}
+        {desktopShell && (
+          <button
+            className="app-no-drag"
+            type="button"
+            onClick={switchServer}
+            title={translate("desktop.serverSwitch")}
+            aria-label={translate("desktop.serverSwitch")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 36, height: 36, padding: 0,
+              background: "none", border: "none",
+              color: "var(--text-muted)", cursor: "pointer", flexShrink: 0,
+              transition: "background 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
+          >
+            <PlugsConnected size={16} aria-hidden="true" />
+          </button>
+        )}
 
         {/* Settings */}
         <button
