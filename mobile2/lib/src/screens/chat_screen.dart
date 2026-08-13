@@ -76,8 +76,6 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _slashViewCompact = true; // true=横排chips, false=竖排分组列表
   bool _postFrameScheduled = false;
   bool _pickingImages = false;
-  /// 过程显示模式：'tabs'（横向块状，默认）| 'timeline'（树形）。
-  String _processDisplayMode = 'tabs';
   String? _visibleSessionId;
   final List<_PendingImage> _pendingImages = [];
 
@@ -129,24 +127,6 @@ class _ChatScreenState extends State<ChatScreen> {
     chat.addListener(_onChanged);
     _messageController.addListener(_onComposerChanged);
     _scrollController.addListener(_trackScrollPosition);
-    _restoreProcessDisplayMode();
-  }
-
-  /// 读取过程显示模式偏好（与网页端 pi-process-display-mode 同语义）。
-  Future<void> _restoreProcessDisplayMode() async {
-    final preferences = await SharedPreferences.getInstance();
-    final stored = preferences.getString('pi-process-display-mode');
-    if (mounted && (stored == 'tabs' || stored == 'timeline')) {
-      setState(() => _processDisplayMode = stored!);
-    }
-  }
-
-  /// 切换过程显示模式并持久化。
-  Future<void> _setProcessDisplayMode(String mode) async {
-    if (mode == _processDisplayMode) return;
-    setState(() => _processDisplayMode = mode);
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString('pi-process-display-mode', mode);
   }
 
   @override
@@ -1319,8 +1299,6 @@ class _ChatScreenState extends State<ChatScreen> {
               defaultExpanded: !chat.running,
               onLoadThinking: _loadThinking,
               thinkingVertical: !widget.compactOutput,
-            displayMode: _processDisplayMode,
-            onDisplayModeChanged: _setProcessDisplayMode,
             ),
           );
         }
@@ -1383,8 +1361,6 @@ class _ChatScreenState extends State<ChatScreen> {
               defaultExpanded: !chat.running,
               onLoadThinking: _loadThinking,
               thinkingVertical: !widget.compactOutput,
-            displayMode: _processDisplayMode,
-            onDisplayModeChanged: _setProcessDisplayMode,
             ),
           );
         }
@@ -1428,8 +1404,6 @@ class _ChatScreenState extends State<ChatScreen> {
             defaultExpanded: !chat.running,
             onLoadThinking: _loadThinking,
             thinkingVertical: !widget.compactOutput,
-            displayMode: _processDisplayMode,
-            onDisplayModeChanged: _setProcessDisplayMode,
           ),
         );
       }
@@ -2108,8 +2082,6 @@ class _ProcessDetailsGroup extends StatefulWidget {
     this.defaultExpanded = false,
     this.onLoadThinking,
     this.thinkingVertical = false,
-    this.displayMode = 'tabs',
-    this.onDisplayModeChanged,
   });
 
   /// 中间过程消息（工具调用/思考/过程文本）。
@@ -2121,10 +2093,6 @@ class _ProcessDetailsGroup extends StatefulWidget {
   final bool defaultExpanded;
   final Future<void> Function(ChatMessage message)? onLoadThinking;
   final bool thinkingVertical;
-
-  /// 显示模式（由聊天页顶部按钮全局控制）：'tabs' 横向块状 | 'timeline' 树形。
-  final String displayMode;
-  final ValueChanged<String>? onDisplayModeChanged;
 
   @override
   State<_ProcessDetailsGroup> createState() => _ProcessDetailsGroupState();
@@ -2612,6 +2580,37 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
   int _activeTab = 0;
   final Set<String> _openSteps = {};
   List<_ProcessStep> _steps = const [];
+  /// 组内显示模式：'tabs' 横向块状 | 'timeline' 树形（持久化）。
+  String _displayMode = 'tabs';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDisplayMode();
+  }
+
+  /// 读取持久化的显示模式（与网页端 pi-process-display-mode 同语义）。
+  Future<void> _loadDisplayMode() async {
+    final preferences = await SharedPreferences.getInstance();
+    final stored = preferences.getString('pi-process-display-mode');
+    if (mounted && (stored == 'tabs' || stored == 'timeline')) {
+      setState(() => _displayMode = stored!);
+    }
+  }
+
+  /// 切换显示模式（组内 setState，不触发列表重建，避免滚动跳动）。
+  void _setDisplayMode(String mode) {
+    setState(() {
+      _displayMode = mode;
+      _expanded = true;
+      _userToggled = true;
+    });
+    unawaited(
+      SharedPreferences.getInstance().then(
+        (preferences) => preferences.setString('pi-process-display-mode', mode),
+      ),
+    );
+  }
 
   @override
   void didChangeDependencies() {
@@ -2789,35 +2788,24 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
               // 显示模式切换：横向块状 / 树形（原位置，与网页端一致）
               IconButton(
                 tooltip: context.tr(
-                  widget.displayMode == 'tabs'
+                  _displayMode == 'tabs'
                       ? '切换为时间线视图'
                       : '切换为块状视图',
                 ),
                 iconSize: 16,
                 visualDensity: VisualDensity.compact,
-                onPressed: () {
-                  widget.onDisplayModeChanged?.call(
-                    widget.displayMode == 'tabs' ? 'timeline' : 'tabs',
-                  );
-                  // 切换视图模式时自动展开（折叠状态下用户看不到切换效果）
-                  setState(() {
-                    _userToggled = true;
-                    _expanded = true;
-                  });
-                },
+                onPressed: () => _setDisplayMode(
+                  _displayMode == 'tabs' ? 'timeline' : 'tabs',
+                ),
                 icon: Icon(
-                  widget.displayMode == 'tabs'
+                  _displayMode == 'tabs'
                       ? Icons.account_tree_outlined
                       : Icons.view_week_outlined,
                 ),
               ),
             ],
           ),
-          AnimatedSize(
-            duration: motionDuration,
-            curve: Curves.easeOutQuart,
-            child: _expanded ? _buildExpanded(context) : const SizedBox.shrink(),
-          ),
+          if (_expanded) _buildExpanded(context),
         ],
       ),
     );
@@ -2826,14 +2814,7 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
   Widget _buildExpanded(BuildContext context) {
     final steps = _steps;
     if (steps.isEmpty) return const SizedBox.shrink();
-    if (steps.length == 1 && steps.first.thinking.isNotEmpty) {
-      // 单思考步骤：直接展开思考内容（竖向）。
-      return Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: _StepContent(step: steps.first, widget: widget),
-      );
-    }
-    if (widget.displayMode == 'tabs') {
+    if (_displayMode == 'tabs') {
       return _buildTabs(context);
     }
     return _buildTimeline(context);
