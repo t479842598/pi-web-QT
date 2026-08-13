@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../chat_controller.dart';
 import '../localization.dart';
@@ -52,12 +53,29 @@ class WorkspaceShell extends StatefulWidget {
 class _WorkspaceShellState extends State<WorkspaceShell> {
   String _query = '';
   bool _loading = true;
+  /// 置顶会话 id 集合（本地持久化）。
+  Set<String> _pinnedIds = {};
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onController);
+    _loadPinned();
     _bootstrap();
+  }
+
+  Future<void> _loadPinned() async {
+    final preferences = await SharedPreferences.getInstance();
+    final ids = preferences.getStringList('pi-pinned-sessions') ?? const [];
+    if (mounted) setState(() => _pinnedIds = ids.toSet());
+  }
+
+  Future<void> _togglePinned(String id) async {
+    final next = {..._pinnedIds};
+    if (!next.add(id)) next.remove(id);
+    setState(() => _pinnedIds = next);
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setStringList('pi-pinned-sessions', next.toList());
   }
 
   @override
@@ -94,7 +112,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     return parts.isNotEmpty ? parts.last : cwd;
   }
 
-  /// 项目分组（按 projectRoot ?? cwd），保持最近使用在前。
+  /// 项目分组（按 projectRoot ?? cwd），置顶会话在前，组间按最近使用排序。
   List<MapEntry<String, List<PiSession>>> _grouped() {
     final sessions = widget.controller.sessions.where((s) {
       if (_query.isEmpty) return true;
@@ -102,7 +120,11 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       return _titleOf(s).toLowerCase().contains(q) ||
           s.cwd.toLowerCase().contains(q);
     }).toList()
-      ..sort((a, b) => b.modified.compareTo(a.modified));
+      ..sort((a, b) {
+        final pa = _pinnedIds.contains(a.id) ? 0 : 1;
+        final pb = _pinnedIds.contains(b.id) ? 0 : 1;
+        return pa != pb ? pa - pb : b.modified.compareTo(a.modified);
+      });
     final map = <String, List<PiSession>>{};
     for (final s in sessions) {
       final key = s.projectRoot ?? s.cwd;
@@ -364,6 +386,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
 
   Widget _buildSessionCard(BuildContext context, PiSession s) {
     final scheme = Theme.of(context).colorScheme;
+    final pinned = _pinnedIds.contains(s.id);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
@@ -372,6 +395,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: () => _openSession(s),
+          onLongPress: () => _showSessionActions(context, s),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
@@ -404,15 +428,25 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _titleOf(s),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onSurface,
-                        ),
+                      Row(
+                        children: [
+                          if (pinned) ...[
+                            Icon(Icons.push_pin, size: 13, color: scheme.onSurfaceVariant),
+                            const SizedBox(width: 4),
+                          ],
+                          Expanded(
+                            child: Text(
+                              _titleOf(s),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w600,
+                                color: scheme.onSurface,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -428,6 +462,124 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         ),
       ),
     );
+  }
+
+  /// 长按会话卡片：重命名 / 置顶切换 / 删除。
+  Future<void> _showSessionActions(BuildContext context, PiSession s) async {
+    final scheme = Theme.of(context).colorScheme;
+    final pinned = _pinnedIds.contains(s.id);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                _titleOf(s),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(s.cwd, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline),
+              title: Text(context.tr('重命名')),
+              onTap: () => Navigator.of(sheetContext).pop('rename'),
+            ),
+            ListTile(
+              leading: Icon(pinned ? Icons.push_pin_outlined : Icons.push_pin),
+              title: Text(context.tr(pinned ? '取消置顶' : '置顶')),
+              onTap: () => Navigator.of(sheetContext).pop('pin'),
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: scheme.error),
+              title: Text(context.tr('删除'), style: TextStyle(color: scheme.error)),
+              onTap: () => Navigator.of(sheetContext).pop('delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'rename':
+        await _renameSession(context, s);
+      case 'pin':
+        await _togglePinned(s.id);
+      case 'delete':
+        await _deleteSession(context, s);
+    }
+  }
+
+  Future<void> _renameSession(BuildContext context, PiSession s) async {
+    final controller = TextEditingController(text: s.name ?? '');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.tr('重命名')),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 80,
+          decoration: InputDecoration(hintText: context.tr('请输入新名称')),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(context.tr('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: Text(context.tr('确定')),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.isEmpty || !mounted) return;
+    try {
+      await widget.controller.renameSession(s.id, name);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.tr('重命名失败'))),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteSession(BuildContext context, PiSession s) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.tr('删除')),
+        content: Text(context.tr('确定要删除这个会话吗？此操作不可撤销。')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(context.tr('取消')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(context.tr('删除')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.controller.deleteSession(s);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.tr('删除失败'))),
+        );
+      }
+    }
   }
 
   Widget _buildEmpty(BuildContext context) {

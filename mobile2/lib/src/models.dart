@@ -530,11 +530,13 @@ class ChatMessage {
     this.thinkingEntryId,
     this.thinkingBlockIndex,
     this.raw,
+    this.entryId,
   });
 
   factory ChatMessage.fromJson(
     Map<String, dynamic> json, {
     AppLanguage language = AppLanguage.zhHans,
+    String? entryId,
   }) {
     final role = json['role']?.toString() ?? 'custom';
     final errorMessage = json['errorMessage']?.toString();
@@ -556,6 +558,7 @@ class ChatMessage {
       thinkingEntryId: content.thinkingEntryId,
       thinkingBlockIndex: content.thinkingBlockIndex,
       raw: json,
+      entryId: entryId,
     );
   }
 
@@ -567,6 +570,9 @@ class ChatMessage {
   final List<PiToolCall> toolCalls;
   final String? toolName;
   final bool isError;
+
+  /// 对应会话文件的 entry id（与 context.entryIds 平行）；fork 分支点用。
+  final String? entryId;
 
   /// Local-only marker for messages enqueued while the agent is running
   /// (steer / follow-up). Renders with a ⏳ badge until the run settles and
@@ -588,6 +594,7 @@ class ChatMessage {
     String? thinkingEntryId,
     int? thinkingBlockIndex,
     bool? queued,
+    String? entryId,
   }) => ChatMessage(
     role: role,
     text: text ?? this.text,
@@ -601,6 +608,7 @@ class ChatMessage {
     thinkingEntryId: thinkingEntryId ?? this.thinkingEntryId,
     thinkingBlockIndex: thinkingBlockIndex ?? this.thinkingBlockIndex,
     raw: raw,
+    entryId: entryId ?? this.entryId,
   );
 }
 

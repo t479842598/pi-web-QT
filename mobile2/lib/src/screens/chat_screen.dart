@@ -20,6 +20,7 @@ import '../widgets/context_ring.dart';
 import '../widgets/copy_sheet.dart';
 import 'directory_picker.dart';
 import 'git_sheet.dart';
+import 'mcp_sheet.dart';
 import 'model_picker.dart';
 import 'providers_sheet.dart';
 import 'skills_sheet.dart';
@@ -125,6 +126,29 @@ class _ChatScreenState extends State<ChatScreen> {
     chat.addListener(_onChanged);
     _messageController.addListener(_onComposerChanged);
     _scrollController.addListener(_trackScrollPosition);
+    _restoreThinkingFormat();
+  }
+
+  /// 思考过程显示格式（全局偏好）：true=竖向串联（连续显示），false=横向折叠条目。
+  static bool thinkingVertical = false;
+
+  bool get _thinkingVertical => thinkingVertical;
+
+  /// 读取思考显示格式偏好（本地持久化）。
+  Future<void> _restoreThinkingFormat() async {
+    final preferences = await SharedPreferences.getInstance();
+    final vertical = preferences.getBool('pi-thinking-vertical') ?? false;
+    _ChatScreenState.thinkingVertical = vertical;
+    if (mounted) setState(() {});
+  }
+
+  /// 切换思考显示格式并持久化。
+  Future<void> _toggleThinkingFormat() async {
+    final next = !_thinkingVertical;
+    _ChatScreenState.thinkingVertical = next;
+    setState(() {});
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool('pi-thinking-vertical', next);
   }
 
   @override
@@ -949,6 +973,10 @@ class _ChatScreenState extends State<ChatScreen> {
             builder: (sheetContext) => ProvidersSheet(controller: chat),
           );
         },
+        onMcp: () {
+          Navigator.pop(context);
+          showMcpSheet(context, controller: chat);
+        },
         onSwitchServer: widget.onSwitchServer == null
             ? null
             : () => _showServerSwitcher(context),
@@ -1038,6 +1066,17 @@ class _ChatScreenState extends State<ChatScreen> {
           },
         ),
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: _RoundToolbarButton(
+              key: const Key('thinking-format-button'),
+              onPressed: _toggleThinkingFormat,
+              tooltip: context.tr('切换思考显示格式'),
+              icon: _thinkingVertical
+                  ? Icons.view_agenda_outlined
+                  : Icons.view_day_outlined,
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: _RoundToolbarButton(
@@ -1237,14 +1276,14 @@ class _ChatScreenState extends State<ChatScreen> {
       final message = messages[index];
       if (message.role != 'user') {
         result.add(
-          _MessageBubble(message: message, onLoadThinking: _loadThinking),
+          _MessageBubble(message: message, onLoadThinking: _loadThinking, onFork: _forkFrom),
         );
         index += 1;
         continue;
       }
 
       result.add(
-        _MessageBubble(message: message, onLoadThinking: _loadThinking),
+        _MessageBubble(message: message, onLoadThinking: _loadThinking, onFork: _forkFrom),
       );
       var end = index + 1;
       while (end < messages.length && messages[end].role != 'user') {
@@ -1281,6 +1320,7 @@ class _ChatScreenState extends State<ChatScreen> {
             _MessageBubble(
               message: messages[current],
               onLoadThinking: _loadThinking,
+              onFork: _forkFrom,
             ),
           );
         }
@@ -1299,6 +1339,7 @@ class _ChatScreenState extends State<ChatScreen> {
               message: process,
               inProcessGroup: true,
               onLoadThinking: _loadThinking,
+              onFork: _forkFrom,
             ),
           );
           processMessageCount += 1;
@@ -1312,6 +1353,7 @@ class _ChatScreenState extends State<ChatScreen> {
             message: answer.copyWith(text: ''),
             inProcessGroup: true,
             onLoadThinking: _loadThinking,
+            onFork: _forkFrom,
           ),
         );
         processMessageCount += 1;
@@ -1330,6 +1372,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _MessageBubble(
           message: answer.copyWith(thinking: '', processText: ''),
           onLoadThinking: _loadThinking,
+          onFork: _forkFrom,
         ),
       );
       for (var current = finalAnswer + 1; current < end; current++) {
@@ -1337,6 +1380,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _MessageBubble(
             message: messages[current],
             onLoadThinking: _loadThinking,
+            onFork: _forkFrom,
           ),
         );
       }
@@ -1408,6 +1452,36 @@ class _ChatScreenState extends State<ChatScreen> {
   String _errorTextForThinking(Object cause) {
     final text = cause.toString().replaceFirst('PiApiException: ', '');
     return context.tr('思考过程加载失败：{error}', {'error': text});
+  }
+
+  /// 从指定消息分叉（fork）：以该消息 entryId 创建新会话并跳转。
+  Future<void> _forkFrom(ChatMessage message) async {
+    final sessionId = chat.activeSessionId;
+    final entryId = message.entryId;
+    if (sessionId == null || entryId == null || entryId.isEmpty) return;
+    try {
+      final newId = await chat.api.forkSession(sessionId, entryId);
+      if (newId == null || !mounted) return;
+      // fork 后会话列表刷新，并跳转到新会话
+      await chat.refreshSessions();
+      final target = chat.sessions
+          .where((session) => session.id == newId)
+          .firstOrNull;
+      if (target != null && mounted) {
+        await chat.openSession(target);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.tr('已从该消息分叉出新会话'))),
+        );
+      }
+    } catch (cause) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_errorTextForThinking(cause))));
+      }
+    }
   }
 }
 
@@ -1667,6 +1741,7 @@ class _MessageBubble extends StatelessWidget {
     this.streaming = false,
     this.inProcessGroup = false,
     this.onLoadThinking,
+    this.onFork,
   });
   final ChatMessage message;
   final bool streaming;
@@ -1675,6 +1750,9 @@ class _MessageBubble extends StatelessWidget {
   /// Fetches deferred thinking for [message]. When null, thinking is only
   /// shown if already loaded.
   final Future<void> Function(ChatMessage message)? onLoadThinking;
+
+  /// Fork 回调：以本条消息为分支点创建新会话（网页端「分叉」）。
+  final Future<void> Function(ChatMessage message)? onFork;
 
   /// Caps bubble width so iPad landscape and wide windows keep readable lines.
   /// Width scales with the screen up to a fixed ceiling.
@@ -1704,12 +1782,8 @@ class _MessageBubble extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return GestureDetector(
-      onLongPress: message.text.isNotEmpty
-          ? () => showCopySheet(
-              context,
-              text: message.text,
-              title: user ? context.tr('复制消息') : context.tr('复制回复'),
-            )
+      onLongPress: (message.text.isNotEmpty || onFork != null)
+          ? () => _showMessageActions(context, user)
           : null,
       child: Align(
         alignment: user ? Alignment.centerRight : Alignment.centerLeft,
@@ -1825,6 +1899,7 @@ class _MessageBubble extends StatelessWidget {
                         _ThinkingSection(
                           thinking: message.thinking,
                           streaming: streaming,
+                          vertical: _ChatScreenState.thinkingVertical,
                         )
                       else if (message.thinkingEntryId != null &&
                           message.thinkingBlockIndex != null)
@@ -1927,6 +2002,42 @@ class _MessageBubble extends StatelessWidget {
       ),
     );
   }
+
+  /// 消息长按操作：复制 / 从这条消息分叉（fork）。
+  Future<void> _showMessageActions(BuildContext context, bool user) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (message.text.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.copy_all_outlined),
+                title: Text(context.tr('复制')),
+                onTap: () => Navigator.of(sheetContext).pop('copy'),
+              ),
+            if (onFork != null)
+              ListTile(
+                leading: const Icon(Icons.call_split),
+                title: Text(context.tr('从此消息分叉')),
+                onTap: () => Navigator.of(sheetContext).pop('fork'),
+              ),
+          ],
+        ),
+      ),
+    );
+    switch (action) {
+      case 'copy':
+        await showCopySheet(
+          context,
+          text: message.text,
+          title: user ? context.tr('复制消息') : context.tr('复制回复'),
+        );
+      case 'fork':
+        await onFork?.call(message);
+    }
+  }
 }
 
 class _ProcessDetailsGroup extends StatefulWidget {
@@ -2025,7 +2136,11 @@ class _LiveProcessPanel extends StatelessWidget {
           ],
           if (thinking.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
-            _ThinkingSection(thinking: thinking, streaming: true),
+            _ThinkingSection(
+              thinking: thinking,
+              streaming: true,
+              vertical: _ChatScreenState.thinkingVertical,
+            ),
           ],
           if (showStreamingText && streamingText.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -2332,12 +2447,68 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
 }
 
 class _ThinkingSection extends StatelessWidget {
-  const _ThinkingSection({required this.thinking, required this.streaming});
+  const _ThinkingSection({
+    required this.thinking,
+    required this.streaming,
+    this.vertical = false,
+  });
   final String thinking;
   final bool streaming;
 
+  /// true = 竖向串联（内容连续显示，不折叠）；false = 横向折叠条目。
+  final bool vertical;
+
   @override
   Widget build(BuildContext context) {
+    if (vertical) {
+      // 竖向串联：思考内容直接连续显示，无折叠。
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.psychology_outlined,
+                  size: 15,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  context.tr(streaming ? '正在思考…' : '思考过程'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: MarkdownBody(
+                data: thinking,
+                selectable: true,
+                styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
+                    .copyWith(
+                      p: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        height: 1.45,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerLow,
       borderRadius: BorderRadius.circular(12),
@@ -3528,6 +3699,7 @@ class _FunctionDrawer extends StatelessWidget {
     required this.onSkills,
     this.onGit,
     this.onProviders,
+    this.onMcp,
     this.onSwitchServer,
     this.themeSetName = '',
     this.onThemeSetChanged,
@@ -3547,6 +3719,7 @@ class _FunctionDrawer extends StatelessWidget {
   final VoidCallback onSkills;
   final VoidCallback? onGit;
   final VoidCallback? onProviders;
+  final VoidCallback? onMcp;
   final VoidCallback? onSwitchServer;
   final String themeSetName;
   final ValueChanged<String>? onThemeSetChanged;
@@ -3844,6 +4017,15 @@ class _FunctionDrawer extends StatelessWidget {
                                   trailing: const Icon(Icons.chevron_right),
                                   onTap: onProviders,
                                   enabled: onProviders != null,
+                                ),
+                                const Divider(indent: 56),
+                                ListTile(
+                                  leading: const Icon(Icons.terminal_outlined),
+                                  title: Text(context.tr('MCP 服务器')),
+                                  subtitle: Text(context.tr('管理 MCP 服务器配置')),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: onMcp,
+                                  enabled: onMcp != null,
                                 ),
                               ],
                             ),

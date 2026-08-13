@@ -597,6 +597,19 @@ class ChatController extends ChangeNotifier {
     _notify();
   }
 
+  /// 重命名会话（set_session_name 命令），成功后刷新会话列表。
+  Future<void> renameSession(String sessionId, String name) async {
+    await api.sendAgentCommand(sessionId, {
+      'type': 'set_session_name',
+      'name': name,
+    });
+    await refreshSessions();
+    selectedSession = sessions
+        .where((session) => session.id == sessionId)
+        .firstOrNull;
+    notifyListeners();
+  }
+
   Future<void> deleteSession(PiSession session) async {
     if (!deletingSessionIds.add(session.id)) return;
     notifyListeners();

@@ -118,15 +118,23 @@ class PiApi {
     final body = await _decode(response);
     final context = body['context'];
     final messages = context is Map ? context['messages'] : null;
-    final parsedMessages = (messages as List? ?? const [])
-        .whereType<Map>()
-        .map(
-          (value) => ChatMessage.fromJson(
-            Map<String, dynamic>.from(value),
-            language: language,
-          ),
-        )
-        .toList();
+    final entryIds = context is Map ? context['entryIds'] : null;
+    final parsedEntries = (messages as List? ?? const []).whereType<Map>();
+    final parsedMessages = <ChatMessage>[];
+    var entryIndex = 0;
+    for (final value in parsedEntries) {
+      final entryId = (entryIds as List? ?? const [])
+          .elementAtOrNull(entryIndex)
+          ?.toString();
+      entryIndex += 1;
+      parsedMessages.add(
+        ChatMessage.fromJson(
+          Map<String, dynamic>.from(value),
+          language: language,
+          entryId: entryId,
+        ),
+      );
+    }
     final modelJson = context is Map ? context['model'] : null;
     return SessionSnapshot(
       messages: parsedMessages,
@@ -163,6 +171,59 @@ class PiApi {
         .timeout(const Duration(seconds: 20));
     final body = await _decode(response);
     return GitStatus.fromJson(body);
+  }
+
+  /// 列出项目的 Git Worktree（GET /api/worktrees?cwd=）。
+  Future<Map<String, dynamic>> getWorktrees(String cwd) async {
+    final response = await _client
+        .get(_uri('/api/worktrees', {'cwd': cwd}), headers: _headers)
+        .timeout(const Duration(seconds: 20));
+    return await _decode(response);
+  }
+
+  /// 创建 Git Worktree（POST /api/worktrees，body {cwd, branch}）。
+  Future<Map<String, dynamic>> createWorktree(
+    String cwd,
+    String branch,
+  ) async {
+    return post('/api/worktrees', {'cwd': cwd, 'branch': branch});
+  }
+
+  /// 移除 Git Worktree（DELETE /api/worktrees?cwd=&path=）。
+  Future<void> removeWorktree(String cwd, String path) async {
+    final uri = _uri('/api/worktrees', {'cwd': cwd, 'path': path});
+    final response = await _client
+        .delete(uri, headers: _headers)
+        .timeout(const Duration(seconds: 20));
+    await _decode(response);
+  }
+
+  /// 读取 MCP 服务器配置（GET /api/mcp）。
+  Future<Map<String, dynamic>> getMcpServers() async {
+    final response = await _client
+        .get(_uri('/api/mcp'), headers: _headers)
+        .timeout(const Duration(seconds: 20));
+    return await _decode(response);
+  }
+
+  /// 全量替换 MCP 服务器配置（PUT /api/mcp，body {mcpServers}）。
+  Future<void> putMcpServers(Map<String, dynamic> mcpServers) async {
+    final response = await _client
+        .put(
+          _uri('/api/mcp'),
+          headers: {
+            ..._headers,
+            HttpHeaders.contentTypeHeader: 'application/json',
+          },
+          body: jsonEncode({'mcpServers': mcpServers}),
+        )
+        .timeout(const Duration(seconds: 20));
+    await _decode(response);
+  }
+
+  /// 重启 MCP 服务器（POST /api/mcp/restart）。
+  Future<void> restartMcp() async {
+    await post('/api/mcp/restart', {});
   }
 
   /// Single-file diff against HEAD (read-only). The server marks unsupported
@@ -652,6 +713,27 @@ class PiApi {
   Future<void> abort(String sessionId) async {
     await post('/api/agent/${Uri.encodeComponent(sessionId)}', {
       'type': 'abort',
+    });
+  }
+
+  /// Fork 一个会话：以指定消息 entryId 为分支点创建新会话，返回新会话 id。
+  Future<String?> forkSession(String sessionId, String entryId) async {
+    final data = await sendAgentCommand(sessionId, {
+      'type': 'fork',
+      'entryId': entryId,
+    });
+    if (data is Map) {
+      final id = data['newSessionId']?.toString();
+      if (id != null && id.isNotEmpty) return id;
+    }
+    return null;
+  }
+
+  /// 切换到会话的另一个分支（navigate_tree）。
+  Future<void> navigateTree(String sessionId, String targetId) async {
+    await sendAgentCommand(sessionId, {
+      'type': 'navigate_tree',
+      'targetId': targetId,
     });
   }
 
