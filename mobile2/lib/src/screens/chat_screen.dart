@@ -1241,15 +1241,30 @@ class _ChatScreenState extends State<ChatScreen> {
     while (index < messages.length) {
       final message = messages[index];
       if (message.role != 'user') {
-        result.add(
-          _MessageBubble(
-            message: message,
-            onLoadThinking: _loadThinking,
-            onFork: _forkFrom,
-            thinkingVertical: !widget.compactOutput,
-          ),
-        );
-        index += 1;
+        // 散落的非用户消息（无 user 前缀或 user 已被消费）：
+        // 收集连续的非 user 消息进过程组（横向小块），避免每行一个。
+        final orphanProcess = <ChatMessage>[];
+        var orphanToolCount = 0;
+        while (index < messages.length && messages[index].role != 'user') {
+          final m = messages[index];
+          if (_hasDisplayableContent(m)) {
+            orphanProcess.add(m);
+            orphanToolCount += m.toolCallCount;
+          }
+          index += 1;
+        }
+        if (orphanProcess.isNotEmpty) {
+          result.add(
+            _ProcessDetailsGroup(
+              processMessages: orphanProcess,
+              messageCount: orphanProcess.length,
+              toolCallCount: orphanToolCount,
+              defaultExpanded: true,
+              onLoadThinking: _loadThinking,
+              thinkingVertical: !widget.compactOutput,
+            ),
+          );
+        }
         continue;
       }
 
@@ -1291,12 +1306,23 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       }
       if (finalAnswer < 0) {
+        final noAnswerProcess = <ChatMessage>[];
+        var noAnswerToolCount = 0;
         for (var current = index + 1; current < end; current++) {
+          final m = messages[current];
+          if (_hasDisplayableContent(m)) {
+            noAnswerProcess.add(m);
+            noAnswerToolCount += m.toolCallCount;
+          }
+        }
+        if (noAnswerProcess.isNotEmpty) {
           result.add(
-            _MessageBubble(
-              message: messages[current],
+            _ProcessDetailsGroup(
+              processMessages: noAnswerProcess,
+              messageCount: noAnswerProcess.length,
+              toolCallCount: noAnswerToolCount,
+              defaultExpanded: true,
               onLoadThinking: _loadThinking,
-              onFork: _forkFrom,
               thinkingVertical: !widget.compactOutput,
             ),
           );
@@ -1322,6 +1348,15 @@ class _ChatScreenState extends State<ChatScreen> {
         processMessageCount += 1;
         toolCallCount += answer.toolCallCount;
       }
+      // finalAnswer 之后的残留过程消息（如多轮工具调用）：并入同一过程组
+      for (var current = finalAnswer + 1; current < end; current++) {
+        final m = messages[current];
+        if (_hasDisplayableContent(m)) {
+          processMessages.add(m);
+          processMessageCount += 1;
+          toolCallCount += m.toolCallCount;
+        }
+      }
       if (processMessages.isNotEmpty) {
         result.add(
           _ProcessDetailsGroup(
@@ -1343,16 +1378,6 @@ class _ChatScreenState extends State<ChatScreen> {
               thinkingVertical: !widget.compactOutput,
         ),
       );
-      for (var current = finalAnswer + 1; current < end; current++) {
-        result.add(
-          _MessageBubble(
-            message: messages[current],
-            onLoadThinking: _loadThinking,
-            onFork: _forkFrom,
-              thinkingVertical: !widget.compactOutput,
-          ),
-        );
-      }
       index = end;
     }
     final streaming = chat.streamingMessage;
@@ -2036,7 +2061,7 @@ class _ProcessDetailsGroup extends StatefulWidget {
   State<_ProcessDetailsGroup> createState() => _ProcessDetailsGroupState();
 }
 
-class _LiveProcessPanel extends StatelessWidget {
+class _LiveProcessPanel extends StatefulWidget {
   const _LiveProcessPanel({
     required this.phase,
     required this.toolSteps,
@@ -2061,8 +2086,29 @@ class _LiveProcessPanel extends StatelessWidget {
   final bool thinkingVertical;
 
   @override
+  State<_LiveProcessPanel> createState() => _LiveProcessPanelState();
+}
+
+class _LiveProcessPanelState extends State<_LiveProcessPanel> {
+  int _activeStep = 0;
+
+  @override
+  void didUpdateWidget(covariant _LiveProcessPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 新步骤到达时自动选中最后一个（对齐网页端 activeTab 跟随最新步骤）
+    if (oldWidget.toolSteps.length != widget.toolSteps.length &&
+        widget.toolSteps.isNotEmpty) {
+      _activeStep = widget.toolSteps.length - 1;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final toolSteps = widget.toolSteps;
+    final thinking = widget.thinking;
+    final streamingText = widget.streamingText;
+    final phase = widget.phase;
     final runningNames = toolSteps
         .where((step) => step.running)
         .map((step) => step.name)
@@ -2077,12 +2123,17 @@ class _LiveProcessPanel extends StatelessWidget {
       ),
       _ => <String>[
         context.tr('Pi 正在处理'),
-        if (messageCount > 0)
-          context.tr('{count} 个步骤', {'count': messageCount}),
-        if (toolCallCount > 0)
-          context.tr('{count} 个工具调用', {'count': toolCallCount}),
+        if (widget.messageCount > 0)
+          context.tr('{count} 个步骤', {'count': widget.messageCount}),
+        if (widget.toolCallCount > 0)
+          context.tr('{count} 个工具调用', {'count': widget.toolCallCount}),
       ].join(' · '),
     };
+    if (_activeStep >= toolSteps.length) {
+      _activeStep = toolSteps.length - 1;
+    }
+    final activeStep = toolSteps.isEmpty ? null : toolSteps[_activeStep];
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
@@ -2105,36 +2156,126 @@ class _LiveProcessPanel extends StatelessWidget {
               ),
             ],
           ),
+          // ── 工具步骤：横向小块排列（对齐网页端 process-tab）──
           if (toolSteps.isNotEmpty) ...[
             const SizedBox(height: 10),
-            for (final step in toolSteps)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: _ToolCallCard(
-                  name: step.name,
-                  arguments: step.arguments,
-                  running: step.running,
-                  isError: step.isError,
-                  resultText: step.resultText,
-                  duration: step.duration,
-                ),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (var index = 0; index < toolSteps.length; index++)
+                  _buildStepTab(context, toolSteps[index], index),
+              ],
+            ),
+            if (activeStep != null) ...[
+              const SizedBox(height: 8),
+              _ToolCallCard(
+                name: activeStep.name,
+                arguments: activeStep.arguments,
+                running: activeStep.running,
+                isError: activeStep.isError,
+                resultText: activeStep.resultText,
+                duration: activeStep.duration,
               ),
+            ],
           ],
           if (thinking.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
             _ThinkingSection(
               thinking: thinking,
               streaming: true,
-              vertical: thinkingVertical,
+              vertical: widget.thinkingVertical,
             ),
           ],
-          if (showStreamingText && streamingText.trim().isNotEmpty) ...[
+          if (widget.showStreamingText && streamingText.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
             _StreamingText(data: streamingText),
           ],
         ],
       ),
     );
+  }
+
+  /// 横向小块（网页端 process-tab）：active 高亮、错误红色、运行呼吸。
+  Widget _buildStepTab(BuildContext context, LiveToolStep step, int index) {
+    final cs = Theme.of(context).colorScheme;
+    final isActive = _activeStep == index;
+    final isError = step.isError;
+    final running = step.running;
+    return Material(
+      color: isError
+          ? cs.error.withValues(alpha: .08)
+          : isActive
+          ? cs.primary.withValues(alpha: .14)
+          : cs.onSurface.withValues(alpha: .05),
+      borderRadius: BorderRadius.circular(4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: () => setState(() => _activeStep = index),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _toolIconFor(step.name),
+                size: 11,
+                color: isError
+                    ? cs.error
+                    : isActive
+                    ? cs.primary
+                    : cs.onSurfaceVariant,
+              ),
+              const SizedBox(width: 3),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 110),
+                child: Text(
+                  step.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    height: 1.2,
+                    color: isError
+                        ? cs.error
+                        : isActive
+                        ? cs.primary
+                        : cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              if (running) ...[
+                const SizedBox(width: 3),
+                SizedBox.square(
+                  dimension: 8,
+                  child: CircularProgressIndicator(strokeWidth: 1.5),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _toolIconFor(String name) {
+    final n = name.toLowerCase();
+    if (n.contains('bash') || n.contains('shell') || n.contains('exec')) {
+      return Icons.terminal_rounded;
+    }
+    if (n.contains('read') || n.contains('grep') || n.contains('search')) {
+      return Icons.search_rounded;
+    }
+    if (n.contains('write') || n.contains('edit') || n.contains('patch')) {
+      return Icons.edit_rounded;
+    }
+    if (n.contains('web') || n.contains('fetch') || n.contains('http')) {
+      return Icons.public_rounded;
+    }
+    if (n.contains('file') || n.contains('ls')) {
+      return Icons.folder_outlined;
+    }
+    return Icons.handyman_outlined;
   }
 }
 
@@ -2406,8 +2547,14 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
   @override
   void initState() {
     super.initState();
-    _buildSteps();
     _loadDisplayMode();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // context.tr 依赖 InheritedWidget，只能在挂载后调用
+    _buildSteps();
   }
 
   @override
