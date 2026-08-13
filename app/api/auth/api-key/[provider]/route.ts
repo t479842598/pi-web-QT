@@ -1,6 +1,7 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { NextResponse } from "next/server";
 import { invalidateModelsCache } from "@/lib/models-cache";
+import { invalidateAvailableModelsCache } from "@/lib/model-scope";
 import { removeStoredCredentialIfType, storeProviderCredential } from "@/lib/provider-credential-store";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +53,11 @@ export async function POST(req: Request, { params }: Params) {
     // directly so a slow catalog cannot leave the save request hanging.
     await storeProviderCredential(provider, credential);
     invalidateModelsCache();
+    // The in-process ModelRuntime list is cached too (see model-scope.ts);
+    // both caches must drop together or a fresh install's empty model list
+    // stays cached for 60s and the model picker shows no models right after
+    // adding a provider.
+    invalidateAvailableModelsCache();
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
@@ -70,6 +76,7 @@ export async function DELETE(_req: Request, { params }: Params) {
       );
     }
     invalidateModelsCache();
+    invalidateAvailableModelsCache();
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

@@ -1,5 +1,6 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { invalidateModelsCache } from "@/lib/models-cache";
+import { invalidateAvailableModelsCache } from "@/lib/model-scope";
 import { removeStoredCredentialIfType } from "@/lib/provider-credential-store";
 
 export const dynamic = "force-dynamic";
@@ -19,5 +20,6 @@ export async function POST(
     return Response.json({ error: `${provider} is authenticated with an API key, not OAuth` }, { status: 409 });
   }
   invalidateModelsCache();
+  invalidateAvailableModelsCache();
   return Response.json({ ok: true });
 }
