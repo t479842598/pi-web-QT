@@ -24,6 +24,7 @@ interface PlanReviewDialogProps {
  */
 export function PlanReviewDialog({
   open,
+  planText,
   onExecute,
   onFeedback,
   onExit,
@@ -33,12 +34,14 @@ export function PlanReviewDialog({
   const { t } = useI18n();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [planExpanded, setPlanExpanded] = useState(true);
   const feedbackRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (!open) return;
     setFeedbackOpen(false);
     setFeedback("");
+    setPlanExpanded(true);
   }, [open]);
 
   useEffect(() => {
@@ -110,6 +113,41 @@ export function PlanReviewDialog({
           </div>
         </div>
       )}
+
+      {/* Finished plan — shown by default so the user can read it right here
+          (the plan-mode extension returns it as a tool result that can be
+          easy to miss in the collapsed tool card above). */}
+      {planText && planText.trim() ? (
+        <div style={{ padding: "0 14px 10px" }}>
+          <button
+            type="button"
+            onClick={() => setPlanExpanded((v) => !v)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              background: "none", border: "none", padding: "6px 0",
+              cursor: "pointer", color: "var(--text-muted)", fontSize: 11.5,
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            <span style={{ transform: planExpanded ? "rotate(90deg)" : "none", transition: "transform 0.12s" }}>›</span>
+            {planExpanded ? t("tasks.planReviewHidePlan") : t("tasks.planReviewShowPlan")}
+          </button>
+          {planExpanded && (
+            <div
+              style={{
+                maxHeight: 320, overflow: "auto",
+                background: "var(--bg)", border: "1px solid var(--border)",
+                borderRadius: 8, padding: "10px 12px",
+                fontSize: 12.5, lineHeight: 1.65, color: "var(--text)",
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {planText.trim()}
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {/* Three horizontal action buttons + close */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px" }}>

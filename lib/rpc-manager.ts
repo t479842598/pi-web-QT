@@ -20,6 +20,8 @@ import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-ty
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS } from "./custom-ui-terminal";
 import { recordErrorLog } from "./error-log";
+import { GoalEngine, GOAL_CONTINUE_INSTRUCTION, loadGoalState, saveGoalState, type GoalRuntimeState } from "./goal-engine";
+import { AsyncProcessManager } from "./async-bash";
 
 // ============================================================================
 // Types
@@ -43,6 +45,50 @@ type RunningSnapshot = {
 };
 
 type RunningListener = (snapshots: RunningSnapshot[]) => void;
+
+/** Goal state pushed to clients via SSE after every goal state change. */
+export type GoalStateChangedEvent = {
+  type: "goal_state_changed";
+  goalState: GoalRuntimeState;
+};
+
+/**
+ * Count tool calls across all assistant messages in the session entries.
+ * Used by the goal engine's no-progress detection (a turn with zero tool
+ * calls counts as stalled).
+ */
+function countToolCallsInEntries(entries: unknown[]): number {
+  let count = 0;
+  for (const entry of entries) {
+    const msg = (entry as { type?: string; message?: { role?: string; content?: unknown } })?.message;
+    if (!msg || msg.role !== "assistant") continue;
+    const content = msg.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block && typeof block === "object" && (block as { type?: string }).type === "toolCall") count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * Sum input/output/cache token usage across every assistant message in the
+ * session entries. Pi records per-message usage (each assistant message holds
+ * its own turn's consumption), so the running total is the correct baseline
+ * for computing per-turn deltas.
+ */
+function sumAssistantUsage(entries: unknown[]): number {
+  let total = 0;
+  for (const entry of entries) {
+    const msg = (entry as { type?: string; message?: { role?: string; usage?: unknown } })?.message;
+    if (!msg || msg.role !== "assistant") continue;
+    const usage = msg.usage as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined;
+    if (!usage) continue;
+    total += (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+  }
+  return total;
+}
+
 
 /** A session event broadcast to every connected client (cross-client sync). */
 export type SessionBusEvent = {
@@ -226,6 +272,14 @@ export class AgentSessionWrapper {
   private pendingApprovals = new Map<string, PendingApproval>();
   private approvalSeq = 0;
   private approvalHookInstalled = false;
+  /** Server-side goal engine (wish-style development). Persisted to a sidecar. */
+  private readonly goalEngine = new GoalEngine();
+  /** Tokens already accounted for by the goal engine (to compute per-turn delta). */
+  private goalTokensAccounted = 0;
+  /** Tool-call count already accounted for (to compute per-turn no-progress). */
+  private goalToolCallsAccounted = 0;
+  /** Set while a goal continuation follow_up is in flight to avoid double-drive. */
+  private goalContinuationInFlight = false;
 
   constructor(public readonly inner: AgentSessionLike, public readonly cwd: string) {
     // Existing conversations keep their own approval mode/policy (per-session
@@ -234,6 +288,12 @@ export class AgentSessionWrapper {
     const perSession = readModeSettings(inner.sessionId);
     this.approvalMode = perSession.toolApprovalMode;
     this.approvalPolicy = policyFromStrings(perSession.permissionRules);
+    if (inner.sessionFile) {
+      const restored = loadGoalState(inner.sessionFile);
+      if (restored.status !== "idle") {
+        this.goalEngine.hydrate(restored);
+      }
+    }
   }
 
   get sessionId(): string {
@@ -270,12 +330,32 @@ export class AgentSessionWrapper {
 
   start(): void {
     this.installApprovalHook();
+    this.goalEngine.setOnChanged((state) => {
+      if (this.sessionFile) saveGoalState(this.sessionFile, state);
+      this.emit({ type: "goal_state_changed", goalState: state } as AgentEvent);
+      broadcastSessionBusEvent("goal_state_changed", this.sessionId, {
+        type: "goal_state_changed",
+        goalState: state,
+      });
+    });
+    // Wrapper (re)created with a persisted running goal: kick the loop once so
+    // an idle agent resumes after a page refresh / wrapper rebuild instead of
+    // stalling forever (agent_settled only fires after a run).
+    if (this.goalEngine.isRunning()) {
+      this.scheduleGoalKick();
+    }
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       if (event.type === "agent_end" || event.type === "message_end" || event.type === "entry_appended" || event.type === "session_info_changed") {
         invalidateSessionListCache();
       }
       if (event.type === "agent_end" || event.type === "agent_settled" || event.type === "auto_compaction_end" || event.type === "compaction_end") {
         this.resetIdleTimer();
+      }
+      if (event.type === "agent_start") {
+        this.goalEngine.onAgentStart();
+      }
+      if (event.type === "agent_settled") {
+        this.handleGoalSettled();
       }
       if (event.type === "queue_update") {
         this.reconcileQueue(event.steering as string[] | undefined, event.followUp as string[] | undefined);
@@ -300,6 +380,91 @@ export class AgentSessionWrapper {
       return;
     }
     this.queueRecovery = loadQueue(this.sessionFile);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Goal mode (wish-style development) — server-side drive
+  // ---------------------------------------------------------------------------
+
+  getGoalState(): GoalRuntimeState {
+    return this.goalEngine.getState();
+  }
+
+  /**
+   * Called when the agent settles idle. Settles the current goal turn, then
+   * auto-continues when the goal is still running and within budget.
+   */
+  private handleGoalSettled(): void {
+    if (!this.goalEngine.isRunning()) {
+      this.goalEngine.disarmContinuation();
+      return;
+    }
+
+    // Settle the turn that just finished.
+    const lastText = this.inner.getLastAssistantText() ?? "";
+    let tokenDelta = 0;
+    let toolCallsThisTurn = 0;
+    try {
+      const entries = this.inner.sessionManager.getEntries();
+      const total = sumAssistantUsage(entries);
+      tokenDelta = Math.max(0, total - this.goalTokensAccounted);
+      this.goalTokensAccounted = total;
+      // Per-turn tool calls = delta since the last settlement (zero-call turns
+      // count as stalled; a single historical tool call must not mask it).
+      const totalCalls = countToolCallsInEntries(entries);
+      toolCallsThisTurn = Math.max(0, totalCalls - this.goalToolCallsAccounted);
+      this.goalToolCallsAccounted = totalCalls;
+    } catch {
+      // Settlement must never crash the wrapper event loop.
+    }
+
+    const { verdict } = this.goalEngine.settleTurn(lastText, tokenDelta, toolCallsThisTurn);
+    if (verdict.action !== "continue") {
+      this.goalEngine.disarmContinuation();
+      return;
+    }
+
+    this.scheduleGoalKick();
+  }
+
+  /**
+   * Drive one goal continuation when the agent is idle. Guards against double
+   * drives and queues a kick when the agent is mid-run (settled again later).
+   */
+  private scheduleGoalKick(): void {
+    if (!this.goalEngine.isRunning()) return;
+    if (this.goalContinuationInFlight) return;
+    if (this.goalEngine.isContinuationArmed()) {
+      this.goalEngine.disarmContinuation();
+      this.driveGoalContinuation();
+      return;
+    }
+    if (this.inner.isStreaming || this.promptRunning || this.inner.pendingMessageCount > 0) return;
+    this.driveGoalContinuation();
+  }
+
+  /** Fire one follow_up continuation for the active goal. */
+  private driveGoalContinuation(): void {
+    if (!this.goalEngine.isRunning() || this.goalContinuationInFlight) return;
+    this.goalContinuationInFlight = true;
+    void this.inner.followUp(GOAL_CONTINUE_INSTRUCTION)
+      .catch(() => {})
+      .finally(() => {
+        this.goalContinuationInFlight = false;
+      });
+  }
+
+  private handleGoalStartCommand(goalText: string, tokenBudget: number | null): GoalRuntimeState {
+    const state = this.goalEngine.start(goalText, tokenBudget);
+    this.goalTokensAccounted = 0;
+    this.goalToolCallsAccounted = 0;
+    return state;
+  }
+
+  private handleGoalStopCommand(): GoalRuntimeState {
+    this.goalEngine.stop();
+    this.goalTokensAccounted = 0;
+    return this.goalEngine.getState();
   }
 
   // ---------------------------------------------------------------------------
@@ -742,7 +907,68 @@ export class AgentSessionWrapper {
           thinkingLevel: this.inner.agent.state?.thinkingLevel ?? "off",
           extensionStatuses: this.getExtensionStatuses(),
           extensionWidgets: this.getExtensionWidgets(),
+          goalState: this.goalEngine.getState(),
         };
+      }
+
+      case "goal_start": {
+        const goalText = String(command.goalText ?? "").trim();
+        if (!goalText) throw new Error("goal_start requires a non-empty goalText");
+        const rawBudget = command.tokenBudget;
+        const tokenBudget = typeof rawBudget === "number" && Number.isFinite(rawBudget) && rawBudget > 0
+          ? Math.floor(rawBudget)
+          : null;
+        const state = this.handleGoalStartCommand(goalText, tokenBudget);
+        // Kick the loop immediately if the agent is idle (fresh goal).
+        this.scheduleGoalKick();
+        return { goalState: state };
+      }
+
+      case "goal_pause": {
+        // Drop any in-flight continuation so the paused goal does not consume
+        // an already-queued follow_up.
+        try {
+          this.inner.clearQueue();
+          this.queueMirror = [];
+          this.persistQueue();
+        } catch {
+          // Best-effort queue clear.
+        }
+        return { goalState: this.goalEngine.pause() };
+      }
+
+      case "goal_resume": {
+        const state = this.goalEngine.resume();
+        if (state.status === "running") {
+          this.goalEngine.armContinuation();
+          this.scheduleGoalKick();
+        }
+        return { goalState: state };
+      }
+
+      case "goal_stop": {
+        try {
+          this.inner.clearQueue();
+          this.queueMirror = [];
+          this.persistQueue();
+        } catch {
+          // Best-effort queue clear.
+        }
+        return { goalState: this.handleGoalStopCommand() };
+      }
+
+      case "goal_edit": {
+        const goalText = String(command.goalText ?? "").trim();
+        if (!goalText) throw new Error("goal_edit requires a non-empty goalText");
+        const state = this.goalEngine.edit(goalText);
+        if (state.status === "running") {
+          this.scheduleGoalKick();
+        }
+        return { goalState: state };
+      }
+
+      case "get_goal_state": {
+        return { goalState: this.goalEngine.getState() };
       }
 
       case "set_model": {
@@ -1143,6 +1369,10 @@ export class AgentSessionWrapper {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.inner.isBashRunning) this.inner.abortBash();
     this.unsubscribe?.();
+    // Persist the goal sidecar before tearing down.
+    if (this.sessionFile && this.goalEngine.hasActiveGoal()) {
+      saveGoalState(this.sessionFile, this.goalEngine.getState());
+    }
     for (const pending of this.pendingUiResponses.values()) pending.cancel();
     for (const id of Array.from(this.activeCustomUis.keys())) this.closeCustomUi(id, undefined);
     this.pendingUiResponses.clear();
@@ -1820,6 +2050,14 @@ export async function startRpcSession(
       agentDir,
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
+
+    // Async shell (long-command tracking): a per-session process manager plus
+    // `bash`/`bash_io` tools injected via customTools. `bash` overrides the
+    // SDK's built-in synchronous bash; short commands still return directly.
+    const { createAsyncBashTools } = await import("./async-bash");
+    const asyncBashManager = new AsyncProcessManager();
+    const asyncBashTools = createAsyncBashTools(asyncBashManager);
+
     const scope = await resolveVisibleModels(
       services.modelRuntime,
       services.settingsManager.getEnabledModels(),
@@ -1843,6 +2081,7 @@ export async function startRpcSession(
       ...(initial.thinkingLevel ? { thinkingLevel: initial.thinkingLevel } : {}),
       ...(initial.scopedModels.length > 0 ? { scopedModels: initial.scopedModels } : {}),
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
+      customTools: asyncBashTools,
     });
 
     // Record the web's own model-call traffic for every provider: success as
@@ -1889,6 +2128,8 @@ export async function startRpcSession(
     }
 
     const wrapper = new AgentSessionWrapper(inner, sessionCwd);
+    // Kill any background processes this session spawned when the wrapper dies.
+    const cleanupAsyncBash = asyncBashManager.cleanup.bind(asyncBashManager);
     // When all tools are disabled, clear the system prompt entirely.
     // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
     // keep this forced after extension resource discovery and reloads as well.
@@ -1902,7 +2143,10 @@ export async function startRpcSession(
     const realSessionFile = inner.sessionFile as string | undefined;
     if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
 
-    wrapper.onDestroy(() => registry.delete(realSessionId));
+    wrapper.onDestroy(() => {
+      cleanupAsyncBash();
+      registry.delete(realSessionId);
+    });
     registry.set(realSessionId, wrapper);
     wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });
 

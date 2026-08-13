@@ -32,6 +32,26 @@ import {
   type ToolApprovalMode,
 } from "@/lib/modes";
 
+/**
+ * Localize well-known plan-mode extension notifications. The
+ * `@cluski/pi-plan-mode` extension emits English-only `notify` messages via the
+ * UI context; when the UI language is Chinese we map them so the popup is not
+ * stuck in English while the rest of the interface is localized.
+ */
+function localizeExtensionNotice(message: string): string {
+  const isZh = typeof document !== "undefined"
+    && (document.documentElement.lang === "zh-CN" || document.documentElement.lang === "zh");
+  if (!isZh) return message;
+  const trimmed = message.trim();
+  if (trimmed.startsWith("Plan mode enabled")) return "已启用计划模式：只读分析与产出计划，不修改文件。";
+  if (trimmed.startsWith("Plan mode disabled")) return "已退出计划模式。";
+  if (trimmed.startsWith("No completed plan is available")) return "当前没有可用的已完成计划。";
+  if (trimmed.startsWith("Unable to send Plan-mode message")) {
+    return `无法发送计划模式消息：${trimmed.replace(/^Unable to send Plan-mode message:\s*/, "")}`;
+  }
+  return message;
+}
+
 export interface SessionData {
   sessionId: string;
   filePath: string;
@@ -98,6 +118,7 @@ type AgentStateResponse = {
   extensionWidgets?: ExtensionWidgetItem[];
   queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
   pendingRecovery?: PendingRecoveryItem[] | null;
+  goalState?: GoalRuntimeState;
 };
 
 function phaseFromServerState(state: AgentStateResponse | undefined): AgentPhase {
@@ -119,7 +140,7 @@ export interface ApprovalRequestItem {
   args: unknown;
 }
 
-export type GoalStatus = "idle" | "running" | "paused" | "blocked" | "complete";
+export type GoalStatus = "idle" | "running" | "paused" | "blocked" | "budget_limited" | "complete";
 
 export interface GoalRuntimeState {
   status: GoalStatus;
@@ -129,25 +150,20 @@ export interface GoalRuntimeState {
   noProgressTurns: number;
   noProgressLimit: number;
   tokensUsed: number;
+  /** Optional token budget; null = unbounded. */
+  tokenBudget?: number | null;
+  /** Accumulated wall-clock seconds across goal turns. */
+  timeUsedSeconds?: number;
   /** Unix-ms timestamp when the goal run started. */
   startedAt?: number;
+  /** Unix-ms timestamp of the last state change. */
+  updatedAt?: number;
 }
 
 /** Default turn quota for a goal run (mirrors Reasonix budgetClassSimple). */
 export const DEFAULT_GOAL_TURNS_LIMIT = 10;
 /** Pause after this many consecutive turns with no host-verifiable progress. */
 export const DEFAULT_GOAL_NO_PROGRESS_LIMIT = 4;
-
-/** Injected via followUp after every goal turn that is not done/blocked. */
-const GOAL_CONTINUE_INSTRUCTION =
-  `Continue pursuing the active goal. Do the next useful work, then report your disposition:\n` +
-  `- "continue" with the next concrete step;\n` +
-  `- "complete" only when fully done and verified;\n` +
-  `- "blocked" when only the user can unblock you.`;
-
-/** Assistant message markers that end or pause the goal loop. */
-const GOAL_COMPLETE_MARKERS = ["goal complete", "[goal: complete]", "goal is complete"];
-const GOAL_BLOCKED_MARKERS = ["goal blocked", "[goal: blocked]", "blocked:"];
 
 function normalizeQueuedMessages(q?: { steering?: string[]; followUp?: string[] } | null): QueuedMessages {
   return { steering: q?.steering ?? [], followUp: q?.followUp ?? [] };
@@ -704,13 +720,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     noProgressTurns: 0,
     noProgressLimit: DEFAULT_GOAL_NO_PROGRESS_LIMIT,
     tokensUsed: 0,
+    tokenBudget: null,
+    timeUsedSeconds: 0,
   });
   const goalStateRef = useRef(goalState);
   useEffect(() => {
     goalStateRef.current = goalState;
   }, [goalState]);
   const goalLoopRunningRef = useRef(false);
-  const goalLastAssistantTokensRef = useRef(0);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption>("auto");
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; errorMessage?: string } | null>(null);
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
@@ -1028,6 +1045,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
           if (liveState.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(liveState.queuedMessages));
           if (liveState.pendingRecovery !== undefined) setPendingRecovery(liveState.pendingRecovery ?? []);
+          if (liveState.goalState !== undefined) {
+            const goal = liveState.goalState as GoalRuntimeState | undefined;
+            if (goal) {
+              goalStateRef.current = goal;
+              setGoalState(goal);
+            }
+          }
         } else if (!agentState.running) {
           setQueuedMessages({ steering: [], followUp: [] });
         }
@@ -1332,7 +1356,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "notify": {
         addNotice({
           id: request.id,
-          message: request.message,
+          message: localizeExtensionNotice(request.message),
           type: request.notifyType ?? "info",
         });
         break;
@@ -1534,6 +1558,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (state.systemPrompt !== undefined) setSystemPrompt(state.systemPrompt ?? null);
         if (state.extensionStatuses !== undefined) setExtensionStatuses(state.extensionStatuses ?? []);
         if (state.extensionWidgets !== undefined) setExtensionWidgets(state.extensionWidgets ?? []);
+        if (state.goalState !== undefined) {
+          const goal = state.goalState as GoalRuntimeState | undefined;
+          if (goal) {
+            goalStateRef.current = goal;
+            setGoalState(goal);
+          }
+        }
       }
       await finishPromptWithoutStream(sid, runId);
     } catch {
@@ -1680,6 +1711,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               if (state?.extensionWidgets !== undefined) setExtensionWidgets(state.extensionWidgets ?? []);
               setQueuedMessages(normalizeQueuedMessages(state?.queuedMessages));
               setPendingRecovery(state?.pendingRecovery ?? []);
+              if (state?.goalState !== undefined) {
+                const goal = state.goalState as GoalRuntimeState | undefined;
+                if (goal) {
+                  goalStateRef.current = goal;
+                  setGoalState(goal);
+                }
+              }
             })
             .catch(() => {});
         }
@@ -1698,10 +1736,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           scheduleEventStreamClose(sid);
         }
         if (wasRunning) onAgentEnd?.();
-        // Goal auto-continue: when in goal mode, keep driving the loop after
-        // the run settles idle (the loop itself decides to stop/pause/continue).
-        if (collaborationModeRef.current === "goal" && goalStateRef.current.status === "running") {
-          void goalActionsRef.current?.drive();
+        // Goal auto-continue is now server-driven (AgentSessionWrapper listens
+        // for agent_settled and fires the next follow_up). Nothing to do here.
+        break;
+      }
+      case "goal_state_changed": {
+        // Authoritative goal state from the server (persisted, budget-aware).
+        const next = event.goalState as GoalRuntimeState | undefined;
+        if (next) {
+          goalStateRef.current = next;
+          setGoalState(next);
         }
         break;
       }
@@ -1893,6 +1937,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (state.systemPrompt !== undefined) setSystemPrompt(state.systemPrompt ?? null);
         if (state.extensionStatuses !== undefined) setExtensionStatuses(state.extensionStatuses ?? []);
         if (state.extensionWidgets !== undefined) setExtensionWidgets(state.extensionWidgets ?? []);
+        if (state.goalState !== undefined) {
+          const goal = state.goalState as GoalRuntimeState | undefined;
+          if (goal) {
+            goalStateRef.current = goal;
+            setGoalState(goal);
+          }
+        }
         const busy = Boolean(state.isStreaming || state.isPromptRunning || state.isBashRunning || state.isCompacting);
         if (busy) {
           agentRunningRef.current = true;
@@ -2084,6 +2135,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             ...(piImages?.length ? { images: piImages } : {}),
           });
           promoteNewSession(1, message);
+          // Server-side goal engine: register the goal so it auto-continues
+          // even if the page is closed/refreshed (wish-style development).
+          if (collaborationModeRef.current === "goal" && !isSlashCommandPrompt) {
+            void sendAgentCommand(sid, { type: "goal_start", goalText: trimmedMessage }).catch(() => {});
+          }
         }
       } else if (session) {
         sentSessionId = session.id;
@@ -2094,6 +2150,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           message: sentMessage,
           ...(piImages?.length ? { images: piImages } : {}),
         });
+        if (collaborationModeRef.current === "goal" && !isSlashCommandPrompt) {
+          void sendAgentCommand(session.id, { type: "goal_start", goalText: trimmedMessage }).catch(() => {});
+        }
       }
       if (isSlashCommandPrompt && sentSessionId) {
         void waitForPromptSettlement(sentSessionId, promptRunId);
@@ -2690,6 +2749,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // Remember the active preset so exiting plan mode can restore it.
       prePlanPresetRef.current = toolPreset === "plan" ? "default" : toolPreset;
       setPlanMode(true);
+      planModeRef.current = true;
+      injectedModeSignatureRef.current = { sessionKey: "", signature: "" };
       if (sid) {
         try {
           // Activate the extension's Plan mode (read-only tools + plan workflow).
@@ -2702,6 +2763,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     } else {
       setPlanMode(false);
+      planModeRef.current = false;
+      injectedModeSignatureRef.current = { sessionKey: "", signature: "" };
       if (sid) {
         try {
           // Exit the extension's Plan mode; it restores the previous toolset.
@@ -2710,11 +2773,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         } catch (e) {
           if (planModeGenRef.current !== gen) return;
           console.error("Failed to exit plan mode:", e);
-          // Fall back to restoring the preset toolset manually.
-          try {
-            const restore = prePlanPresetRef.current;
-            await sendAgentCommand(sid, { type: "set_tools", toolNames: getToolNamesForPreset(restore) });
-          } catch { /* ignore */ }
+        }
+        // The extension's /plan exit is fire-and-forget from the wrapper's
+        // perspective (send("prompt") always resolves with null, even when the
+        // slash command failed internally). Never leave the session locked in
+        // the read-only plan toolset: explicitly restore the full toolset
+        // regardless of whether /plan exit succeeded. withExtensionTools keeps
+        // all extension/package tools, so nothing is lost.
+        if (planModeGenRef.current !== gen) return; // superseded
+        try {
+          const restore = prePlanPresetRef.current;
+          await sendAgentCommand(sid, { type: "set_tools", toolNames: getToolNamesForPreset(restore) });
+        } catch (e) {
+          console.error("Failed to restore tools after plan exit:", e);
         }
       }
     }
@@ -2745,11 +2816,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleCollaborationModeChange = useCallback((mode: CollaborationMode) => {
     persistModeSettings({ ...modeSettingsRef.current, collaborationMode: normalizeCollaborationMode(mode) });
+    // Sync the ref immediately (not via the effect) so callers that send a
+    // prompt right after switching — e.g. plan execute/exit — see the new mode
+    // and do not inject the previous mode's instruction block.
+    collaborationModeRef.current = normalizeCollaborationMode(mode);
+    injectedModeSignatureRef.current = { sessionKey: "", signature: "" };
     if (mode !== "goal") {
-      // Leaving goal mode stops the auto-continue loop.
+      // Leaving goal mode stops the server-side auto-continue loop.
       goalTextRef.current = null;
       goalLoopRunningRef.current = false;
       setGoalState((prev) => (prev.status === "idle" ? prev : { ...prev, status: "idle", goalText: null }));
+      const sid = sessionIdRef.current;
+      if (sid) void sendAgentCommand(sid, { type: "goal_stop" }).catch(() => {});
     }
   }, [persistModeSettings]);
 
@@ -2815,107 +2893,61 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     goalTextRef.current = text;
   }, []);
 
-  // ── Goal loop ────────────────────────────────────────────────────────────
-  /** Start a goal run: persists the goal text and arms the auto-continue loop. */
+  // ── Goal loop (server-driven; wish-style development) ────────────────────
+  /** Start a goal run: server persists it and drives the auto-continue loop. */
   const handleGoalStart = useCallback((text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     goalTextRef.current = trimmed;
+    // Optimistic UI: the server echoes the authoritative state via
+    // goal_state_changed (and get_state on reload).
     setGoalState((prev) => ({
       ...prev,
       status: "running",
       goalText: trimmed,
       turnsUsed: 0,
       noProgressTurns: 0,
+      tokensUsed: 0,
       startedAt: Date.now(),
     }));
+    const sid = sessionIdRef.current;
+    if (sid) {
+      void sendAgentCommand(sid, { type: "goal_start", goalText: trimmed }).catch(() => {});
+    }
   }, []);
 
   const handleGoalPause = useCallback(() => {
     if (goalStateRef.current.status !== "running") return;
     setGoalState((prev) => ({ ...prev, status: "paused" }));
+    const sid = sessionIdRef.current;
+    if (sid) void sendAgentCommand(sid, { type: "goal_pause" }).catch(() => {});
   }, []);
 
   const handleGoalResume = useCallback(() => {
     const state = goalStateRef.current;
     if (state.status !== "paused" && state.status !== "blocked") return;
     setGoalState((prev) => ({ ...prev, status: "running" }));
-    // Resume: kick the loop with a continue instruction.
     const sid = sessionIdRef.current;
-    if (sid && !agentRunningRef.current) {
-      void sendAgentCommand(sid, { type: "follow_up", message: GOAL_CONTINUE_INSTRUCTION }).catch(() => {});
-    }
+    if (sid) void sendAgentCommand(sid, { type: "goal_resume" }).catch(() => {});
   }, []);
 
   const handleGoalStop = useCallback(() => {
     goalLoopRunningRef.current = false;
     goalTextRef.current = null;
     setGoalState((prev) => ({ ...prev, status: "idle", goalText: null, turnsUsed: 0, noProgressTurns: 0 }));
+    const sid = sessionIdRef.current;
+    if (sid) void sendAgentCommand(sid, { type: "goal_stop" }).catch(() => {});
   }, []);
 
-  /**
-   * Goal auto-continue: called when the agent settles idle. Inspects the last
-   * assistant message for complete/blocked markers, enforces the turn budget
-   * and no-progress stall detection, then either stops, pauses, or continues.
-   */
-  const driveGoalLoop = useCallback(async () => {
-    const state = goalStateRef.current;
-    if (state.status !== "running") return;
+  /** Edit the active goal objective; server re-activates terminal states. */
+  const handleGoalEdit = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setGoalState((prev) => ({ ...prev, goalText: trimmed }));
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (sid) void sendAgentCommand(sid, { type: "goal_edit", goalText: trimmed }).catch(() => {});
+  }, []);
 
-    // Find the latest assistant text + count host-verifiable progress
-    // (tool results) since the goal started.
-    let lastText = "";
-    let toolCallsSinceStart = 0;
-    for (const msg of messages) {
-      if (msg.role === "assistant") {
-        const text = typeof msg.content === "string"
-          ? msg.content
-          : (msg.content as Array<{ type?: string; text?: string }> | undefined)?.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n") ?? "";
-        if (text) lastText = text;
-        const toolCalls = (msg.content as Array<{ type?: string }> | undefined)?.filter((b) => b.type === "toolCall").length ?? 0;
-        toolCallsSinceStart += toolCalls;
-      }
-    }
-    const lower = lastText.toLowerCase();
-
-    // Completion marker → stop the loop.
-    if (GOAL_COMPLETE_MARKERS.some((m) => lower.includes(m))) {
-      setGoalState((prev) => ({ ...prev, status: "complete", turnsUsed: prev.turnsUsed + 1 }));
-      goalTextRef.current = null;
-      return;
-    }
-    // Blocked marker → pause and wait for the user.
-    if (GOAL_BLOCKED_MARKERS.some((m) => lower.includes(m))) {
-      setGoalState((prev) => ({ ...prev, status: "blocked", turnsUsed: prev.turnsUsed + 1 }));
-      return;
-    }
-
-    const turnsUsed = state.turnsUsed + 1;
-    // No-progress detection: a turn with zero tool calls is treated as stalled.
-    const noProgressTurns = toolCallsSinceStart === 0 ? state.noProgressTurns + 1 : 0;
-    if (noProgressTurns >= state.noProgressLimit) {
-      setGoalState((prev) => ({ ...prev, status: "blocked", turnsUsed, noProgressTurns }));
-      return;
-    }
-    // Turn budget exhausted → pause for the user to extend or stop.
-    if (turnsUsed >= state.turnsLimit) {
-      setGoalState((prev) => ({ ...prev, status: "paused", turnsUsed, noProgressTurns }));
-      return;
-    }
-
-    setGoalState((prev) => ({ ...prev, turnsUsed, noProgressTurns }));
-    // Continue the goal with the next-turn instruction.
-    await sendAgentCommand(sid, { type: "follow_up", message: GOAL_CONTINUE_INSTRUCTION }).catch(() => {});
-  }, [messages]);
-
-  const goalActionsRef = useRef<{
-    drive: () => Promise<void>;
-  } | null>(null);
-  useEffect(() => {
-    goalActionsRef.current = { drive: driveGoalLoop };
-  }, [driveGoalLoop]);
 
   // ── Subagent fleet monitor: push live status up + reset on session switch ──
   const subagentsKey = subagents.map((s) => `${s.id}:${s.status}:${s.completedAt ?? ""}`).join("|");
@@ -3193,7 +3225,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     approvalRequests,
     handleCollaborationModeChange, handleTokenModeChange, handleToolApprovalModeChange,
     handlePermissionRulesChange, resolveApproval, setActiveGoalText,
-    goalState, handleGoalStart, handleGoalPause, handleGoalResume, handleGoalStop,
+    goalState, handleGoalStart, handleGoalPause, handleGoalResume, handleGoalStop, handleGoalEdit,
     slashCommands, slashCommandsLoading, queuedMessages, pendingRecovery, recoveryIsImport,
     notices: noticeState.visible, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     agentPhase,

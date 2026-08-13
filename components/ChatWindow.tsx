@@ -3,7 +3,7 @@ import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, SubagentStatus, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
-import { getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
+import { getDisplayableAssistantBlocks, splitFinalAssistantBlocks, extractPlanText } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { collectProcessContentBlocks, splitAssistantContentBlocks } from "@/lib/process-content";
 import { MessageView } from "./MessageView";
@@ -188,7 +188,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     collaborationMode, tokenMode, toolApprovalMode,
     handleCollaborationModeChange, handleTokenModeChange, handleToolApprovalModeChange,
     approvalRequests, resolveApproval,
-    goalState, handleGoalStart, handleGoalPause, handleGoalResume, handleGoalStop,
+    goalState, handleGoalStart, handleGoalPause, handleGoalResume, handleGoalStop, handleGoalEdit,
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
@@ -263,11 +263,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     // Edge: plan mode + just went idle → show the review dialog once.
     if (wasPlanRunningRef.current) {
       wasPlanRunningRef.current = false;
-      const last = [...messages].reverse().find((m) => m.role === "assistant");
-      const text = last && typeof last.content === "string"
-        ? last.content
-        : last?.content?.filter((b) => b.type === "text").map((b) => b.text).join("\n") ?? null;
-      setPlanReviewText(text || null);
+      setPlanReviewText(extractPlanText(messages) ?? null);
       setPlanReviewOpen(true);
     }
   }, [agentRunning, planMode, messages]);
@@ -713,6 +709,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 onPause={handleGoalPause}
                 onResume={handleGoalResume}
                 onStop={handleGoalStop}
+                onEdit={handleGoalEdit}
               />
             )}
 
