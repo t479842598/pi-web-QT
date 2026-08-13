@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.3.0 — 2026-08-14（移动端正式版）
+
+### 新增
+- **输入框与加号按钮卡死修复** — 移动端 SSE 在网络切换/后台挂起时被「黑洞」会导致 `running` 永久卡 true、输入框与加号按钮同时失效；新增运行状态回查看门狗：运行中每 5s 探测 `GET /api/agent/[id]`，App 恢复前台立即 reconcile，错过的终态事件在秒级内自愈（不依赖 `prompt_done` 事件）。
+- **加号菜单重做** — 原单一图片入口改为五项菜单：计划（plan 协作模式）/ 目标（goal 模式）/ 上传文件 / 使用命令 / 引用对话。
+- **网页端主题系统接入** — 功能抽屉可切换全部服务器主题（gruvbox / nord / tokyo / solarized / onedark / dracula / catppuccin 及 OpenChamber 扩展集），App 配色随网页端 CSS 变量（明/暗双变体）；默认主题与网页端 teal 系对齐。
+- **goal 协作模式** — 设定目标后展示实时状态条（状态点 + 目标文本 + 用时 + 暂停/继续/停止），状态与网页端 GoalPanel 同源。
+- **运行中可发送（排队）** — 运行中点击发送=steer 干扰当前运行、长按=follow-up 排队到最后；排队消息带 ⏳ 徽标。
+- **@ 文件引用与 # 快捷片段** — 输入框 `@` 触发文件补全（`/api/file-index`）、`#` 触发片段补全（`/api/snippets`），行为与网页端一致。
+- **任意文件上传** — 图片并入附件管线（10 张/10MB）；文本类（≤512KB）内容注入输入框供继续编辑。
+- **思考级别切换** — 功能抽屉新增 thinking level（off…max），与网页端 `set_thinking_level` 同接口。
+- **项目备注（显示+编辑）** — 抽屉目录组显示网页端项目备注，可编辑同步到服务器。
+- **运行中项目/会话置顶** — 含运行中会话的项目与会话在抽屉中置顶并有进度标识。
+- **供应商管理** — 内置 API-Key 供应商列表、添加/更新/删除 Key，状态与网页端一致。
+- **移动端气泡对齐网页** — 用户气泡 `min(85%, 680px)` / padding 9×14 / radius 9 / 300px 内部滚动；助手全宽无背景。
+
+## v0.9.26 — 2026-08-14（正式版）
+
+### 修复
+- **计划模式退出与评审卡修复** — ① 退出计划模式不再依赖可能被吞掉的 `/plan exit` 异步命令：退出时显式恢复完整工具集（`set_tools`），即使扩展命令失败也不会把会话锁死在只读工具集（修复「UI 显示已退出但调用不了其他工具」）；② 模式切换（协作模式 / plan 开关）同步刷新内部 ref，避免切换后立即发送消息仍注入旧模式指令块；③ 计划评审卡（PlanReviewDialog）直接展示计划全文（默认展开，可收起）——此前计划只在 `plan_mode_complete` 工具结果里，容易在折叠的工具卡片中漏看；④ 本地化 plan-mode 扩展的英文通知（`Plan mode enabled/disabled` 等），中文界面下弹窗不再全英文。
+
+### 新增
+- **许愿式开发（goal 模式升级）** — goal 状态机与自动续跑迁到服务端 `AgentSessionWrapper`：目标持久化到 `<session>.jsonl.goal.json` sidecar，刷新/重开页面后目标与消耗统计完整恢复并自动续跑，离开后回来愿望达成；新增 token 预算（超限自动停）、时间统计、`goal_start/pause/resume/stop/edit` 服务端命令；GoalBanner 重构为 Codex 风格 GoalPanel（状态点 + statusLabel + 时长 + `已用token/预算` + 内联编辑 + 暂停/恢复/清除），状态经 `goal_state_changed` SSE 实时同步（参考 lyhue1991/pi-codex 与 lyhue1991/pi-web 的 GoalPanel）。
+- **长命令追踪（异步 bash）** — 注册 `bash`（覆盖内置）与 `bash_io` 工具：短命令直接返回，长命令超过阈值返回 `session_id` 而非阻塞等待；agent 通过 `bash_io` 每隔几分钟轮询增量输出、写 stdin 或 Ctrl-C 中断，像人一样决定继续等待或杀掉调整；后台进程带 head+tail 缓冲（上限 256KiB）、进程树清理、session 销毁兜底。
+
 ## v1.2.0 — 2026-08-13（移动端正式版）
 
 ### 变更
