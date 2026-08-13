@@ -32,26 +32,47 @@ fn build_url_no_password() {
 }
 
 #[test]
-fn build_url_injects_basic_auth_userinfo() {
+fn build_url_keeps_clean_no_userinfo() {
+    // 密码**不**进 URL（fetch 规范禁止子资源 URL 携带 userinfo），
+    // 由 on_web_resource_request 注入 Authorization 头。
     let s = server("http://127.0.0.1:30141", Some("secret123"), false);
     let u = window::build_url(&s);
-    assert!(u.starts_with("http://pi:secret123@127.0.0.1:30141"), "got {u}");
-}
-
-#[test]
-fn build_url_percent_encodes_password() {
-    // 密码含 @ 和 : 必须 percent-encode，否则 URL 解析歧义
-    let s = server("http://localhost:30141", Some("p@ss:w0rd"), false);
-    let u = window::build_url(&s);
-    assert!(u.contains("p%40ss%3Aw0rd"), "got {u}");
-    assert!(!u.contains("p@ss"), "password must be encoded, got {u}");
+    assert!(
+        u.starts_with("http://127.0.0.1:30141/"),
+        "userinfo 泄漏进 URL: {u}"
+    );
+    assert!(!u.contains("secret123"), "密码泄漏进 URL: {u}");
+    assert!(!u.contains("@"), "URL 不应包含 userinfo 分隔符: {u}");
 }
 
 #[test]
 fn build_url_https_keeps_scheme() {
     let s = server("https://pi.example.com", Some("pw"), false);
     let u = window::build_url(&s);
-    assert!(u.starts_with("https://pi:pw@pi.example.com"), "got {u}");
+    assert!(u.starts_with("https://pi.example.com/"), "got {u}");
+    assert!(!u.contains(":pw@"), "密码泄漏进 URL: {u}");
+}
+
+#[test]
+fn basic_auth_header_injects_credentials() {
+    // 含 @ 等特殊字符的密码经 base64 后写入 Authorization 头，不受 URL 编码限制
+    let s = server("http://127.0.0.1:30141", Some("p@ss:w0rd"), false);
+    let h = window::basic_auth_header(&s).expect("有密码应返回 header");
+    let v = h.to_str().unwrap();
+    assert!(v.starts_with("Basic "), "got {v}");
+    // base64("pi:p@ss:w0rd") 可解码回原文
+    let b64 = v.trim_start_matches("Basic ");
+    use base64::Engine;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .expect("base64 解码");
+    assert_eq!(String::from_utf8(decoded).unwrap(), "pi:p@ss:w0rd");
+}
+
+#[test]
+fn basic_auth_header_none_without_password() {
+    let s = server("http://127.0.0.1:30141", None, true);
+    assert!(window::basic_auth_header(&s).is_none());
 }
 
 #[test]

@@ -17,18 +17,25 @@ pub fn server_label(id: &str) -> String {
     format!("server-{id}")
 }
 
-/// 拼装带 Basic Auth userinfo 的 URL（url crate 自动 percent-encode 用户名密码）。
-/// 无密码时不带 userinfo；附加 ?piweb_connected=1 标识桌面壳环境（网页端据此显示设置入口）。
+/// 拼装服务器 URL：附加 ?piweb_connected=1 标识桌面壳环境（网页端据此显示设置入口）。
+/// 凭据**不**放入 URL（fetch 规范禁止子资源 URL 携带 userinfo，WebView 会拦截所有
+/// /api/* 请求），改为由 on_web_resource_request 在请求头注入 Authorization。
 pub fn build_url(server: &Server) -> String {
     let base = url::Url::parse(&server.base_url)
         .unwrap_or_else(|_| url::Url::parse("http://localhost").unwrap());
     let mut u = base;
-    if let Some(pw) = server.password() {
-        let _ = u.set_username(&server.username);
-        let _ = u.set_password(Some(&pw));
-    }
     u.query_pairs_mut().append_pair("piweb_connected", "1");
     u.to_string()
+}
+
+/// Basic Auth 请求头值（base64("pi:密码")），供 WebView 请求拦截注入。
+pub fn basic_auth_header(server: &Server) -> Option<tauri::http::HeaderValue> {
+    let pw = server.password()?;
+    let token = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        format!("{}:{}", server.username, pw).as_bytes(),
+    );
+    tauri::http::HeaderValue::from_str(&format!("Basic {token}")).ok()
 }
 
 /// 「服务器」子菜单：当前窗口切换服务器 + 连接管理入口。
@@ -104,6 +111,17 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
         .inner_size(1280.0, 820.0)
         .min_inner_size(800.0, 600.0)
         .center()
+        // 保存密码时，对发往该服务器的所有请求（首屏导航 + /api/* fetch + SSE）
+        // 注入 Basic Auth 头。URL 保持干净 —— 不带 userinfo，避免 fetch 规范
+        // 拦截子资源请求（"URL is not valid or contains user credentials"）。
+        .on_web_resource_request({
+            let auth_header_value: Option<tauri::http::HeaderValue> = basic_auth_header(server);
+            move |mut request, _response| {
+                if let Some(v) = auth_header_value.clone() {
+                    request.headers_mut().insert("authorization", v);
+                }
+            }
+        })
         // 网页端设置里的「切换服务器」走 piweb-switch:// 自定义导航：
         //   piweb-switch://manage -> 打开连接页
         //   piweb-switch://<id>   -> 当前窗口导航到该服务器
