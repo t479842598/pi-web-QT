@@ -1065,39 +1065,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(
-                  value: 'tabs',
-                  icon: Icon(Icons.view_week_outlined, size: 15),
-                  tooltip: '横向显示',
-                ),
-                ButtonSegment(
-                  value: 'timeline',
-                  icon: Icon(Icons.account_tree_outlined, size: 15),
-                  tooltip: '树形显示',
-                ),
-              ],
-              selected: {_processDisplayMode},
-              onSelectionChanged: (selection) =>
-                  _setProcessDisplayMode(selection.first),
-              showSelectedIcon: false,
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                padding: WidgetStatePropertyAll(
-                  const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-                ),
-                side: WidgetStatePropertyAll(
-                  BorderSide(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                ),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          ),
-          Padding(
             padding: const EdgeInsets.only(right: 12),
             child: _RoundToolbarButton(
               key: const Key('function-display-button'),
@@ -1204,6 +1171,42 @@ class _ChatScreenState extends State<ChatScreen> {
                   onStop: chat.stopGoal,
                 ),
 
+              if (chat.running)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _QuickChip(
+                                icon: Icons.arrow_forward_rounded,
+                                label: context.tr('继续'),
+                                onTap: () {
+                                  if (chat.running) {
+                                    chat.send('继续', queueMode: 'steer');
+                                  }
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              _QuickChip(
+                                icon: Icons.auto_awesome_rounded,
+                                label: context.tr('使用技能'),
+                                onTap: () => showSkillsSheet(
+                                  context,
+                                  controller: chat,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
               _Composer(
                 controller: _messageController,
                 running: chat.running,
@@ -1278,7 +1281,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ).colorScheme.onSurfaceVariant.withValues(alpha: .55),
       child: ListView.builder(
         controller: _scrollController,
-        padding: const EdgeInsets.fromLTRB(16, 14, 22, 24),
+        padding: const EdgeInsets.fromLTRB(16, 14, 28, 24),
         itemCount: items.length,
         itemBuilder: (context, index) => items[index],
       ),
@@ -1317,6 +1320,7 @@ class _ChatScreenState extends State<ChatScreen> {
               onLoadThinking: _loadThinking,
               thinkingVertical: !widget.compactOutput,
             displayMode: _processDisplayMode,
+            onDisplayModeChanged: _setProcessDisplayMode,
             ),
           );
         }
@@ -1380,6 +1384,7 @@ class _ChatScreenState extends State<ChatScreen> {
               onLoadThinking: _loadThinking,
               thinkingVertical: !widget.compactOutput,
             displayMode: _processDisplayMode,
+            onDisplayModeChanged: _setProcessDisplayMode,
             ),
           );
         }
@@ -1424,6 +1429,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onLoadThinking: _loadThinking,
             thinkingVertical: !widget.compactOutput,
             displayMode: _processDisplayMode,
+            onDisplayModeChanged: _setProcessDisplayMode,
           ),
         );
       }
@@ -2103,6 +2109,7 @@ class _ProcessDetailsGroup extends StatefulWidget {
     this.onLoadThinking,
     this.thinkingVertical = false,
     this.displayMode = 'tabs',
+    this.onDisplayModeChanged,
   });
 
   /// 中间过程消息（工具调用/思考/过程文本）。
@@ -2117,6 +2124,7 @@ class _ProcessDetailsGroup extends StatefulWidget {
 
   /// 显示模式（由聊天页顶部按钮全局控制）：'tabs' 横向块状 | 'timeline' 树形。
   final String displayMode;
+  final ValueChanged<String>? onDisplayModeChanged;
 
   @override
   State<_ProcessDetailsGroup> createState() => _ProcessDetailsGroupState();
@@ -2778,6 +2786,31 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
                   label: Text(details, style: const TextStyle(fontSize: 12)),
                 ),
               ),
+              // 显示模式切换：横向块状 / 树形（原位置，与网页端一致）
+              IconButton(
+                tooltip: context.tr(
+                  widget.displayMode == 'tabs'
+                      ? '切换为时间线视图'
+                      : '切换为块状视图',
+                ),
+                iconSize: 16,
+                visualDensity: VisualDensity.compact,
+                onPressed: () {
+                  widget.onDisplayModeChanged?.call(
+                    widget.displayMode == 'tabs' ? 'timeline' : 'tabs',
+                  );
+                  // 切换视图模式时自动展开（折叠状态下用户看不到切换效果）
+                  setState(() {
+                    _userToggled = true;
+                    _expanded = true;
+                  });
+                },
+                icon: Icon(
+                  widget.displayMode == 'tabs'
+                      ? Icons.account_tree_outlined
+                      : Icons.view_week_outlined,
+                ),
+              ),
             ],
           ),
           AnimatedSize(
@@ -3347,6 +3380,49 @@ class _SessionInfoBar extends StatelessWidget {
 
 /// MonkeyCode-style running status row above the composer: spinner + label +
 /// typing dots + live elapsed seconds.
+class _QuickChip extends StatelessWidget {
+  const _QuickChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainer,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: scheme.primary),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _GoalBanner extends StatelessWidget {
   const _GoalBanner({
     required this.status,
@@ -3680,6 +3756,8 @@ class _ComposerState extends State<_Composer> {
       dimension: 40,
       child: PopupMenuButton<String>(
       key: const Key('add-menu'),
+      // 菜单向上弹出，避免遮挡加号按钮（点击加号误触菜单项）
+      offset: const Offset(0, -130),
       onSelected: (value) {
         switch (value) {
           case 'plan':

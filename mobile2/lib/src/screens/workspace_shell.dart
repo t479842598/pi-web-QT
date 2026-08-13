@@ -203,16 +203,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   }
 
   Future<void> _newChat(String cwd) async {
-    try {
-      await widget.controller.newChat(cwd);
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.tr('无法新建会话'))),
-        );
-      }
-      return;
-    }
+    // 立即进入会话页：新建会话在 ChatScreen 内部异步完成
+    unawaited(widget.controller.newChat(cwd).catchError((_) {}));
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -301,7 +293,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                     : groups.isEmpty
                     ? _buildEmpty(context)
                     : ListView(
-                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                        padding: const EdgeInsets.fromLTRB(12, 4, 20, 24),
                         children: [
                           for (final group in groups) ..._buildGroup(context, group),
                         ],
