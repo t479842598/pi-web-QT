@@ -78,6 +78,10 @@ ref-repos
 /mobile/ios/Flutter/Generated.xcconfig
 /mobile/ios/Flutter/flutter_export_environment.sh
 
+# mobile APK/AAB build artifacts copied to the repo root for manual sharing
+/pi-mobile-*.apk
+/pi-mobile-*.aab
+
 # local tooling / scratch (not part of releases)
 .kunsdd/
 .tmp-*.py
