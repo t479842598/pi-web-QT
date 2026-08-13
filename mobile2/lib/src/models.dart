@@ -82,6 +82,9 @@ class PiSession {
     this.name,
     this.projectRoot,
     this.running = false,
+    this.pinned = false,
+    this.worktreeBranch,
+    this.parentSession,
   });
 
   factory PiSession.fromJson(
@@ -102,6 +105,9 @@ class PiSession {
       name: json['name']?.toString(),
       projectRoot: json['projectRoot']?.toString(),
       running: running,
+      pinned: json['pinned'] == true,
+      worktreeBranch: json['worktreeBranch']?.toString(),
+      parentSession: json['parentSession']?.toString(),
     );
   }
 
@@ -115,6 +121,15 @@ class PiSession {
   final String? projectRoot;
   final bool running;
 
+  /// 是否置顶（服务端持久化，与网页端一致）。
+  final bool pinned;
+
+  /// 所属 git worktree 分支（网页端会话条目的分支 chip）。
+  final String? worktreeBranch;
+
+  /// Fork 来源会话 id（存在即为 fork 出来的会话）。
+  final String? parentSession;
+
   /// Shallow copy; only [running] is intended to change after creation.
   PiSession copyWith({bool? running}) => PiSession(
     id: id,
@@ -126,6 +141,9 @@ class PiSession {
     name: name,
     projectRoot: projectRoot,
     running: running ?? this.running,
+    pinned: pinned,
+    worktreeBranch: worktreeBranch,
+    parentSession: parentSession,
   );
 
   String get title {

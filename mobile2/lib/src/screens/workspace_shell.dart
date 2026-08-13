@@ -50,18 +50,43 @@ class WorkspaceShell extends StatefulWidget {
   State<WorkspaceShell> createState() => _WorkspaceShellState();
 }
 
+
+
 class _WorkspaceShellState extends State<WorkspaceShell> {
   String _query = '';
   bool _loading = true;
   /// 置顶会话 id 集合（本地持久化）。
   Set<String> _pinnedIds = {};
+  /// 项目备注名称（网页端 project-aliases，按项目根路径映射）。
+  Map<String, String> _projectAliases = const {};
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onController);
     _loadPinned();
+    _loadAliases();
     _bootstrap();
+  }
+
+  Future<void> _loadAliases() async {
+    try {
+      final aliases = await widget.controller.api.getProjectAliases();
+      if (mounted) setState(() => _projectAliases = aliases);
+    } catch (_) {
+      // 备注加载失败不影响列表
+    }
+  }
+
+  /// 项目备注名称：优先别名，其次目录名。
+  String _aliasOf(String? projectRoot, String cwd) {
+    if (projectRoot != null && projectRoot.isNotEmpty) {
+      final alias = _projectAliases[projectRoot];
+      if (alias != null && alias.isNotEmpty) return alias;
+    }
+    final alias = _projectAliases[cwd];
+    if (alias != null && alias.isNotEmpty) return alias;
+    return _projectLabel(cwd);
   }
 
   Future<void> _loadPinned() async {
@@ -355,7 +380,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
           children: [
             Expanded(
               child: Text(
-                _projectLabel(group.key),
+                _aliasOf(group.key, group.key),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -381,52 +406,70 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   Widget _buildSessionCard(BuildContext context, PiSession s) {
     final scheme = Theme.of(context).colorScheme;
     final pinned = _pinnedIds.contains(s.id);
+    final alias = _aliasOf(s.projectRoot, s.cwd);
+    final branch = s.worktreeBranch;
+    final isFork = s.parentSession != null && s.parentSession!.isNotEmpty;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 6),
       child: Material(
         color: scheme.surfaceContainerHigh.withValues(alpha: .55),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           onTap: () => _openSession(s),
           onLongPress: () => _showSessionActions(context, s),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Container(
-                  width: 38,
-                  height: 38,
+                  width: 34,
+                  height: 34,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [widget.accent, widget.accent.withValues(alpha: .65)],
+                      colors: [
+                        widget.accent,
+                        widget.accent.withValues(alpha: .65),
+                      ],
                     ),
-                    borderRadius: BorderRadius.circular(11),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Center(
                     child: s.running
                         ? const SizedBox(
-                            width: 15,
-                            height: 15,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : Icon(
-                            s.messageCount > 0 ? Icons.forum_outlined : Icons.edit_outlined,
-                            size: 18,
+                            s.messageCount > 0
+                                ? Icons.forum_outlined
+                                : Icons.edit_outlined,
+                            size: 16,
                             color: Colors.white,
                           ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
+                      // Line 1: 标题 + 置顶标记
                       Row(
                         children: [
                           if (pinned) ...[
-                            Icon(Icons.push_pin, size: 13, color: scheme.onSurfaceVariant),
-                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.push_pin,
+                              size: 11,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 3),
                           ],
                           Expanded(
                             child: Text(
@@ -434,7 +477,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 14.5,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w600,
                                 color: scheme.onSurface,
                               ),
@@ -443,9 +486,87 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                         ],
                       ),
                       const SizedBox(height: 2),
-                      Text(
-                        _relativeTime(s.modified),
-                        style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+                      // Line 2: 备注名称 · 相对时间 · 消息数 · 分支 · fork
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              alias,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _relativeTime(s.modified),
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            context.tr('{count} 条消息', {
+                              'count': s.messageCount,
+                            }),
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          if (branch != null && branch.isNotEmpty) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: scheme.surfaceContainerHighest
+                                    .withValues(alpha: .7),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.alt_route_rounded,
+                                    size: 9,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 80,
+                                    ),
+                                    child: Text(
+                                      branch,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontFamily: 'monospace',
+                                        color: scheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          if (isFork) ...[
+                            const SizedBox(width: 6),
+                            Icon(
+                              Icons.call_split_rounded,
+                              size: 11,
+                              color: scheme.outline,
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),
