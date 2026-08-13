@@ -244,6 +244,11 @@ export function AppShell() {
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
   // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
   const suppressCwdBumpRef = useRef(false);
+  // Per-project last-open session memory: switching project tabs keeps each
+  // tab's open session and restores it when switching back, instead of
+  // landing on a blank new-session state.
+  const lastSessionByProjectRef = useRef(new Map<string, string>());
+  const [pendingRestore, setPendingRestore] = useState<{ projectRoot: string; sessionId: string } | null>(null);
 
   // Re-apply URL navigation when it changes after mount (SPA route between
   // projects: ?session=<a> -> ?cwd=<b> or another ?session=). Without this the
@@ -304,16 +309,36 @@ export function AppShell() {
     // the sidebar session list lose the current project until a refresh.
     if (!cwd) return;
     setActiveCwd(cwd);
-    if (suppressCwdBumpRef.current) {
+    // Consume the restore-echo suppression ONLY for the onCwdChange that a
+    // session restore produces (same project as the restored session). A real
+    // cross-project switch must never be swallowed by a stale flag (e.g. the
+    // flag set by a restore whose cwd echo never arrived because the sidebar
+    // cwd already matched — otherwise the switch would keep the old project's
+    // session and URL).
+    if (suppressCwdBumpRef.current && selectedSession && samePath(selectedSession.projectRoot ?? selectedSession.cwd, projectRoot ?? cwd)) {
       suppressCwdBumpRef.current = false;
+      if (selectedSession) {
+        const leaving = selectedSession.projectRoot ?? selectedSession.cwd;
+        if (leaving) lastSessionByProjectRef.current.set(leaving, selectedSession.id);
+      }
       return;
     }
+    suppressCwdBumpRef.current = false;
     // Worktrees of one repo share a project root. Moving the effective cwd
     // within the same project (e.g. switching worktree, or clicking a session
     // that lives in another worktree) must not close the open session.
     const newProject = projectRoot ?? cwd;
     if (selectedSession && samePath(selectedSession.projectRoot ?? selectedSession.cwd, newProject)) {
+      const current = selectedSession.projectRoot ?? selectedSession.cwd;
+      if (current) lastSessionByProjectRef.current.set(newProject, selectedSession.id);
       return;
+    }
+    // Remember the session that was open in the project we are leaving, so
+    // switching back to this tab restores it instead of a blank new-session
+    // state (project tabs are expected to keep their open session).
+    if (selectedSession) {
+      const leavingProject = selectedSession.projectRoot ?? selectedSession.cwd;
+      if (leavingProject) lastSessionByProjectRef.current.set(leavingProject, selectedSession.id);
     }
     // Close any session that belongs to a different project — it no longer
     // matches the selected project directory.
@@ -325,6 +350,12 @@ export function AppShell() {
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setActiveTopPanel(null);
+    // The previous URL pointed at a session of the old project — clear it so a
+    // reload cannot jump back across projects.
+    window.history.replaceState(null, "", "/");
+    // Restore the session this tab had open last time (if any).
+    const lastId = lastSessionByProjectRef.current.get(newProject);
+    setPendingRestore(lastId ? { projectRoot: newProject, sessionId: lastId } : null);
   }, [selectedSession]);
 
   // Update browser tab title when workspace changes
@@ -334,6 +365,7 @@ export function AppShell() {
   }, [activeCwd]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
+    if (!isRestore) setPendingRestore(null);
     if (!isRestore && selectedSession) {
       const sameProject = samePath(
         selectedSession.projectRoot ?? selectedSession.cwd,
@@ -344,6 +376,10 @@ export function AppShell() {
         return;
       }
     }
+    // Remember the session under its project root so a later project-tab
+    // switch can restore it.
+    const sessionProject = session.projectRoot ?? session.cwd;
+    if (sessionProject) lastSessionByProjectRef.current.set(sessionProject, session.id);
     setNewSessionCwd(null);
     setSelectedSession(session);
     setSessionKey((k) => k + 1);
@@ -365,7 +401,38 @@ export function AppShell() {
     }
   }, [isMobile, selectedSession]);
 
+  // Restore the remembered session of the project just switched to (runs after
+  // handleCwdChange cleared the selection). Cancelled by any explicit user
+  // navigation: a new session select / new session / further cwd change.
+  //
+  // The restore itself is synchronous with a minimal session record: ChatWindow
+  // loads the real content by id and the sidebar resolves the project root from
+  // its own session list, so no network round-trip can delay or cancel it.
+  // handleSelectSession is reached through a ref so a rebuild of that callback
+  // (it depends on selectedSession) can never interfere.
+  const handleSelectSessionRef = useRef<(session: SessionInfo, isRestore?: boolean) => void>(() => {});
+  useEffect(() => { handleSelectSessionRef.current = handleSelectSession; }, [handleSelectSession]);
+  useEffect(() => {
+    if (!pendingRestore) return;
+    const { projectRoot, sessionId } = pendingRestore;
+    handleSelectSessionRef.current({
+      path: "",
+      id: sessionId,
+      cwd: projectRoot,
+      created: "",
+      modified: "",
+      messageCount: 0,
+      firstMessage: "",
+      projectRoot,
+    }, true);
+    // handleCwdChange just cleared the address bar; point it back at the
+    // restored session so a reload stays in this project.
+    window.history.replaceState(null, "", `?session=${encodeURIComponent(sessionId)}`);
+    setPendingRestore(null);
+  }, [pendingRestore]);
+
   const handleNewSession = useCallback((_sessionId: string, cwd: string) => {
+    setPendingRestore(null);
     setSelectedSession(null);
     setNewSessionCwd(cwd);
     setSessionKey((k) => k + 1);
@@ -399,6 +466,9 @@ export function AppShell() {
   // Called by ChatWindow when a new session gets its real id from pi
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewSessionCwd(null);
+    setPendingRestore(null);
+    const sessionProject = session.projectRoot ?? session.cwd;
+    if (sessionProject) lastSessionByProjectRef.current.set(sessionProject, session.id);
     setSelectedSession(session);
     // Keep the effective workspace in sync with the session's project. Without
     // this, switching to a brand-new project (no sessions yet) and sending the
@@ -430,10 +500,16 @@ export function AppShell() {
     setRefreshKey((k) => k + 1);
     setSessionKey((k) => k + 1);
     setNewSessionCwd(null);
-    setSelectedSession((prev) => ({
-      ...(prev ?? { path: "", cwd: "", created: "", modified: "", messageCount: 0, firstMessage: "" }),
-      id: newSessionId,
-    }));
+    setPendingRestore(null);
+    setSelectedSession((prev) => {
+      const fork: SessionInfo = {
+        ...(prev ?? { path: "", cwd: "", created: "", modified: "", messageCount: 0, firstMessage: "" }),
+        id: newSessionId,
+      };
+      const forkProject = fork.projectRoot ?? fork.cwd;
+      if (forkProject) lastSessionByProjectRef.current.set(forkProject, newSessionId);
+      return fork;
+    });
     hydrateSelectedSession(newSessionId);
     window.history.replaceState(null, "", `?session=${encodeURIComponent(newSessionId)}`);
   }, [router, hydrateSelectedSession]);
