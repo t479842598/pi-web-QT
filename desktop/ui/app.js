@@ -54,11 +54,31 @@ function escapeHtml(s) {
 }
 
 async function connect(id) {
+  const srv = servers.find((s) => s.id === id);
+  // 未保存密码：不自动注入，引导用户到表单自己输入密码
+  if (srv && !srv.has_password) {
+    openFormFor(srv);
+    return;
+  }
   try {
     await invoke("connect_server", { id });
   } catch (e) {
     toast("连接失败: " + e, "err");
   }
+}
+
+/* 把服务器信息填进表单（连接前需要用户输入/确认密码时调用） */
+function openFormFor(srv) {
+  $("inp-name").value = srv.name || "";
+  $("inp-url").value = srv.base_url || "";
+  $("inp-pass").value = "";
+  $("form-hint").textContent = srv.has_password
+    ? "已保存密码，可直接连接；如需更换请重新输入。"
+    : "该服务器尚未保存密码，请输入本机/远程密码后连接。";
+  $("inp-pass").focus();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  // 记录待连接 id：表单提交时若 URL 未改动则走更新而非新增
+  $("form-server").dataset.pendingId = srv.id;
 }
 
 async function remove(id) {
@@ -106,21 +126,47 @@ async function probe() {
 async function startLocal() {
   const btn = $("btn-start-local");
   btn.disabled = true;
-  btn.textContent = "正在启动并等待就绪…";
+  btn.textContent = "正在启动本机 Pi Web…";
   try {
     const ok = await invoke("start_local");
-    if (ok) {
-      toast("本机 Pi Web 已启动并连接", "ok");
-      refresh();
+    if (!ok) {
+      toast("启动失败：未检测到 pi-web CLI", "err");
       probe();
-    } else {
-      toast("启动失败：未检测到 pi-web 或服务未就绪", "err");
-      probe();
+      return;
     }
+    // 轮询探测直到服务就绪（最多 30s），不阻塞任何线程
+    toast("已拉起 pi-web，等待就绪…", "ok");
+    const deadline = Date.now() + 30000;
+    let r = null;
+    while (Date.now() < deadline) {
+      await new Promise((res) => setTimeout(res, 800));
+      try {
+        r = await invoke("probe_local");
+      } catch (_) {}
+      if (r && r.local_alive) break;
+    }
+    if (!r || !r.local_alive) {
+      toast("等待超时：本机服务未就绪，请查看终端日志", "err");
+      probe();
+      return;
+    }
+    toast("本机 Pi Web 已就绪", "ok");
+    // 获取/创建本机条目：有密码直接连接；无密码填表单让用户输入
+    const local = await invoke("ensure_local_server");
+    if (local.has_password) {
+      await invoke("connect_server", { id: local.id });
+    } else {
+      openFormFor(local);
+      $("form-hint").textContent =
+        "本机服务已就绪，请输入本机 Pi Web 密码后连接（输入一次即保存，下次免输入）。";
+    }
+    refresh();
+    probe();
   } catch (e) {
     toast("启动失败: " + e, "err");
     probe();
   } finally {
+    btn.disabled = false;
     btn.textContent = "启动本机 Pi Web";
   }
 }
@@ -140,7 +186,13 @@ $("form-server").addEventListener("submit", async (e) => {
   submit.disabled = true;
   submit.textContent = "连接中…";
   try {
-    const srv = await invoke("save_server", { name, baseUrl: url, password: pass });
+    const srv = await invoke("save_server", {
+      name,
+      baseUrl: url,
+      password: pass,
+      id: $("form-server").dataset.pendingId || null,
+    });
+    delete $("form-server").dataset.pendingId;
     $("inp-name").value = "";
     $("inp-pass").value = "";
     toast("已保存，正在打开…", "ok");

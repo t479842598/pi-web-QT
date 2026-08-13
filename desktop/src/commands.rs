@@ -135,27 +135,12 @@ pub fn probe_local(state: State<AppState>) -> probe::ProbeResult {
     probe::probe(&cfg)
 }
 
-/// 拉起本机 pi-web 并等待就绪；成功后自动保存本地条目并打开窗口（桌面）。
+/// 拉起本机 pi-web 并立即返回（不阻塞等待就绪）；
+/// 就绪状态由前端轮询 probe_local 判断。成功后前端自行打开连接表单/服务器窗口。
 #[cfg(not(mobile))]
 #[tauri::command]
-pub fn start_local(app: AppHandle, state: State<AppState>) -> Result<bool, String> {
-    let ready = probe::start_and_wait_local();
-    if ready {
-        with_cfg(&app, |cfg, _app| {
-            let id = cfg.ensure_local().id.clone();
-            cfg.ensure_local().base_url = crate::config::DEFAULT_LOCAL_URL.to_string();
-            cfg.touch(&id);
-            Ok(())
-        })?;
-        let srv = {
-            let mut cfg = state.config.lock().unwrap();
-            cfg.ensure_local().clone()
-        };
-        let _ = window::open_server_window(&app, &srv);
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+pub fn start_local(_app: AppHandle, _state: State<AppState>) -> Result<bool, String> {
+    Ok(probe::spawn_local())
 }
 
 /// 移动端无本地 CLI。
@@ -163,6 +148,15 @@ pub fn start_local(app: AppHandle, state: State<AppState>) -> Result<bool, Strin
 #[tauri::command]
 pub fn start_local(_app: AppHandle, _state: State<AppState>) -> Result<bool, String> {
     Ok(false)
+}
+
+/// 确保本机默认服务器条目存在并返回其信息（不自动连接）。
+#[tauri::command]
+pub fn ensure_local_server(app: AppHandle) -> Result<ServerInfo, String> {
+    with_cfg(&app, |cfg, _app| {
+        let srv = cfg.ensure_local().clone();
+        Ok(ServerInfo::from(&srv))
+    })
 }
 
 /// 连接指定服务器：记录最近使用并打开/聚焦窗口（桌面）或导航主窗口（移动端）。

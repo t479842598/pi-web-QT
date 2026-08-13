@@ -69,7 +69,7 @@ pub fn build_window_menu(app: &AppHandle, cfg: &Config) -> tauri::Result<Menu<ta
 /// macOS 应用菜单：默认菜单 + 「服务器」子菜单（macOS 菜单栏项必须是顶级 submenu）。
 #[cfg(all(target_os = "macos", not(mobile)))]
 pub fn install_app_menu(app: &AppHandle, cfg: &Config) {
-    if let Ok(mut menu) = Menu::default(app) {
+    if let Ok(menu) = Menu::default(app) {
         if let Ok(sub) = build_servers_submenu(app, cfg) {
             let _ = menu.append_items(&[&sub]);
             let _ = app.set_menu(menu);

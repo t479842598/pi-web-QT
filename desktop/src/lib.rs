@@ -78,6 +78,7 @@ pub fn run() {
             commands::remove_server,
             commands::probe_local,
             commands::start_local,
+            commands::ensure_local_server,
             commands::connect_server,
             commands::open_connect,
             commands::set_local_auto_start,

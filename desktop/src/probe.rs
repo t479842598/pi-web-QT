@@ -1,16 +1,14 @@
 //! 本地 Pi Web 服务探测与 CLI 拉起。
 
 use std::path::PathBuf;
-use std::process::Command;
-use std::time::{Duration, Instant};
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use serde::Serialize;
 
 use crate::config::{Config, DEFAULT_LOCAL_URL};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
-const POLL_INTERVAL: Duration = Duration::from_millis(300);
-const POLL_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Serialize, Clone, Debug)]
 pub struct ProbeResult {
@@ -23,7 +21,7 @@ pub struct ProbeResult {
 
 /// 移动端无本地服务概念。
 #[cfg(mobile)]
-pub fn start_and_wait_local() -> bool {
+pub fn spawn_local() -> bool {
     false
 }
 
@@ -139,10 +137,11 @@ fn is_executable(p: &PathBuf) -> bool {
     p.is_file()
 }
 
-/// 拉起本机 pi-web CLI（--no-open 不弹浏览器），轮询健康端点直到就绪。
-/// 返回最终是否就绪（可能已在运行或拉起成功）。
+/// 拉起本机 pi-web CLI（--no-open 不弹浏览器）。
+/// 仅负责启动进程并立即返回（不等待就绪，避免阻塞主线程/命令线程）；
+/// 就绪探测由前端轮询 probe_local 完成。
 #[cfg(not(mobile))]
-pub fn start_and_wait_local() -> bool {
+pub fn spawn_local() -> bool {
     if alive(DEFAULT_LOCAL_URL) {
         return true;
     }
@@ -150,14 +149,14 @@ pub fn start_and_wait_local() -> bool {
         return false;
     };
     eprintln!("[desktop] 拉起 pi-web: {:?}", cli);
-    // 已存在同名进程则直接进入轮询
-    let _ = Command::new(&cli).arg("--no-open").spawn();
-    let deadline = Instant::now() + POLL_DEADLINE;
-    while Instant::now() < deadline {
-        if alive(DEFAULT_LOCAL_URL) {
-            return true;
-        }
-        std::thread::sleep(POLL_INTERVAL);
-    }
-    false
+    // 已存在同名进程则直接返回 true，由前端轮询确认
+    let spawned = Command::new(&cli)
+        .arg("--no-open")
+        // 重定向子进程输出，避免继承管道阻塞
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| true)
+        .unwrap_or(false);
+    spawned || alive(DEFAULT_LOCAL_URL)
 }
