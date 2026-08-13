@@ -1259,7 +1259,7 @@ class _ChatScreenState extends State<ChatScreen> {
               processMessages: orphanProcess,
               messageCount: orphanProcess.length,
               toolCallCount: orphanToolCount,
-              defaultExpanded: true,
+              defaultExpanded: !chat.running,
               onLoadThinking: _loadThinking,
               thinkingVertical: !widget.compactOutput,
             ),
@@ -1321,7 +1321,7 @@ class _ChatScreenState extends State<ChatScreen> {
               processMessages: noAnswerProcess,
               messageCount: noAnswerProcess.length,
               toolCallCount: noAnswerToolCount,
-              defaultExpanded: true,
+              defaultExpanded: !chat.running,
               onLoadThinking: _loadThinking,
               thinkingVertical: !widget.compactOutput,
             ),
@@ -1364,7 +1364,7 @@ class _ChatScreenState extends State<ChatScreen> {
             messageCount: processMessageCount,
             toolCallCount: toolCallCount,
             // 默认展开 tabs 块状步骤（对齐网页端 ProcessGroup 展开态）
-            defaultExpanded: true,
+            defaultExpanded: !chat.running,
             onLoadThinking: _loadThinking,
             thinkingVertical: !widget.compactOutput,
           ),
@@ -2539,6 +2539,7 @@ class _ProcessStep {
 
 class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
   late bool _expanded = widget.defaultExpanded;
+  bool _userToggled = false;
   String _displayMode = 'tabs'; // 'tabs' | 'timeline'（与网页端一致，默认 tabs）
   int _activeTab = 0;
   final Set<String> _openSteps = {};
@@ -2562,6 +2563,13 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.processMessages != widget.processMessages) {
       _buildSteps();
+      _activeTab = 0;
+    }
+    // 运行状态变化（defaultExpanded 由 !chat.running 驱动）：
+    // 仅在用户未手动展开/折叠时跟随默认值
+    if (oldWidget.defaultExpanded != widget.defaultExpanded &&
+        !_userToggled) {
+      _expanded = widget.defaultExpanded;
     }
   }
 
@@ -2574,7 +2582,11 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
   }
 
   Future<void> _setDisplayMode(String mode) async {
-    setState(() => _displayMode = mode);
+    setState(() {
+      _displayMode = mode;
+      // 切换视图模式时自动展开（折叠状态下用户看不到切换效果）
+      _expanded = true;
+    });
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString('pi-process-display-mode', mode);
   }
@@ -2710,7 +2722,10 @@ class _ProcessDetailsGroupState extends State<_ProcessDetailsGroup> {
             children: [
               Expanded(
                 child: TextButton.icon(
-                  onPressed: () => setState(() => _expanded = !_expanded),
+                  onPressed: () => setState(() {
+                    _userToggled = true;
+                    _expanded = !_expanded;
+                  }),
                   style: TextButton.styleFrom(
                     foregroundColor:
                         Theme.of(context).colorScheme.onSurfaceVariant,
