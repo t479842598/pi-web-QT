@@ -8,10 +8,8 @@ import 'localization.dart';
 import 'models.dart';
 import 'pi_api.dart';
 import 'profile_store.dart';
-import 'screens/chat_screen.dart';
-import 'screens/glass_dock_shell.dart';
 import 'screens/login_screen.dart';
-import 'screens/new_task_sheet.dart';
+import 'screens/workspace_shell.dart';
 
 class PiMobileApp extends StatefulWidget {
   const PiMobileApp({super.key});
@@ -331,60 +329,26 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
               loadProfiles: _savedProfiles,
               onDeleteProfile: _removeProfile,
             )
-          : GlassDockShell(
+          : WorkspaceShell(
               controller: _controller!,
               profile: _profile!,
-              onNew: _handleNewTask,
-              onOpenTask: _openTask,
+              onLogout: _logout,
+              onSwitchServer: _switchServer,
+              themeMode: _themeMode,
+              onThemeModeChanged: _setThemeMode,
+              compactOutput: _compactOutput,
+              onCompactOutputChanged: _setCompactOutput,
+              languagePreference: _languagePreference,
+              onLanguagePreferenceChanged: _setLanguagePreference,
+              themeSetName: _themeSetName,
+              onThemeSetChanged: _setThemeSet,
+              accent: _accent,
+              onAccentChanged: _setAccent,
             ),
     );
   }
 
   /// Central `+` button — opens the new-task bottom sheet.
-  Future<void> _handleNewTask() async {
-    final controller = _controller;
-    if (controller == null || !mounted) return;
-    await showNewTaskSheet(context, controller: controller);
-  }
-
-  /// Opens a task's conversation in the full chat screen.
-  Future<void> _openTask(PiTask task) async {
-    final controller = _controller;
-    if (controller == null || !mounted) return;
-    // Resolve the session from the task's conversationId; if it isn't loaded
-    // yet, fall back to opening the chat screen for a fresh conversation in
-    // the task's project.
-    final session = controller.sessions
-        .where((s) => s.id == task.conversationId)
-        .firstOrNull;
-    if (session != null) {
-      await controller.openSession(session);
-    } else {
-      await controller.newChat(task.projectRoot);
-    }
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ChatScreen(
-          controller: controller,
-          profile: _profile!,
-          onLogout: _logout,
-          onSwitchServer: _switchServer,
-          themeMode: _themeMode,
-          onThemeModeChanged: _setThemeMode,
-          compactOutput: _compactOutput,
-          onCompactOutputChanged: _setCompactOutput,
-          languagePreference: _languagePreference,
-          onLanguagePreferenceChanged: _setLanguagePreference,
-          themeSetName: _themeSetName,
-          onThemeSetChanged: _setThemeSet,
-          accent: _accent,
-          onAccentChanged: _setAccent,
-        ),
-      ),
-    );
-  }
-
   void _toggleTheme() {
     final brightness = _navigatorKey.currentContext == null
         ? WidgetsBinding.instance.platformDispatcher.platformBrightness
