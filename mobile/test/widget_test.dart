@@ -566,57 +566,62 @@ void main() {
     expect(find.text('对话已删除'), findsOneWidget);
   });
 
-  testWidgets('slash input shows built-in and skill commands in compact chip view', (tester) async {
-    final profile = ServerProfile(
-      baseUrl: 'https://example.test',
-      username: 'pi',
-      password: 'test-only',
-    );
-    final api = _SlashTestApi(profile);
-    final controller = ChatController(api)..draftCwd = '/mnt/code';
-    addTearDown(controller.dispose);
+  testWidgets(
+    'slash input shows built-in and skill commands in compact chip view',
+    (tester) async {
+      final profile = ServerProfile(
+        baseUrl: 'https://example.test',
+        username: 'pi',
+        password: 'test-only',
+      );
+      final api = _SlashTestApi(profile);
+      final controller = ChatController(api)..draftCwd = '/mnt/code';
+      addTearDown(controller.dispose);
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ChatScreen(
-          controller: controller,
-          profile: profile,
-          onLogout: () async {},
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ChatScreen(
+            controller: controller,
+            profile: profile,
+            onLogout: () async {},
+          ),
         ),
-      ),
-    );
-    await tester.enterText(find.byType(TextField).last, '/');
-    await tester.pumpAndSettle();
-    expect(api.createdSession, isTrue);
-    // Compact mode: chips visible, no group headers
-    expect(find.text('/compact'), findsOneWidget);
-    expect(
-      controller.slashCommands.any((item) => item.name == 'skill:review'),
-      isTrue,
-    );
+      );
+      await tester.enterText(find.byType(TextField).last, '/');
+      await tester.pumpAndSettle();
+      expect(api.createdSession, isTrue);
+      // Compact mode: chips visible, no group headers
+      expect(find.text('/compact'), findsOneWidget);
+      expect(
+        controller.slashCommands.any((item) => item.name == 'skill:review'),
+        isTrue,
+      );
 
-    await tester.enterText(find.byType(TextField).last, '/skill:r');
-    await tester.pump();
-    expect(find.text('/skill:review'), findsNothing);
-    expect(find.text('没有找到匹配命令'), findsOneWidget);
-    expect(find.text('/compact'), findsNothing);
+      await tester.enterText(find.byType(TextField).last, '/skill:r');
+      await tester.pump();
+      expect(find.text('/skill:review'), findsNothing);
+      expect(find.text('没有找到匹配命令'), findsOneWidget);
+      expect(find.text('/compact'), findsNothing);
 
-    await tester.enterText(find.byType(TextField).last, '/skill:b');
-    await tester.pump();
-    expect(find.text('/skill:build'), findsOneWidget);
-    expect(find.text('/skill:review'), findsNothing);
+      await tester.enterText(find.byType(TextField).last, '/skill:b');
+      await tester.pump();
+      expect(find.text('/skill:build'), findsOneWidget);
+      expect(find.text('/skill:review'), findsNothing);
 
-    await tester.tap(find.text('/skill:build'));
-    await tester.pump();
-    expect(find.byType(TextField).last, findsOneWidget);
-    expect(
-      tester.widget<TextField>(find.byType(TextField).last).controller!.text,
-      '/skill:build ',
-    );
-    expect(find.text('/skill:build'), findsNothing);
-  });
+      await tester.tap(find.text('/skill:build'));
+      await tester.pump();
+      expect(find.byType(TextField).last, findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).last).controller!.text,
+        '/skill:build ',
+      );
+      expect(find.text('/skill:build'), findsNothing);
+    },
+  );
 
-  testWidgets('slash command palette toggle between compact and list view', (tester) async {
+  testWidgets('slash command palette toggle between compact and list view', (
+    tester,
+  ) async {
     final profile = ServerProfile(
       baseUrl: 'https://example.test',
       username: 'pi',

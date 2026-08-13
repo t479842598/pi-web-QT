@@ -1795,10 +1795,7 @@ class _SlashCommandPalette extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
             const SizedBox(width: 7),
-            Text(
-              context.tr('正在加载资源…'),
-              style: ts.labelSmall,
-            ),
+            Text(context.tr('正在加载资源…'), style: ts.labelSmall),
             const SizedBox(width: 4),
           ],
           // ── view toggle ──
@@ -1808,9 +1805,7 @@ class _SlashCommandPalette extends StatelessWidget {
               compact ? Icons.view_list_rounded : Icons.grid_view_rounded,
               size: 18,
             ),
-            tooltip: compact
-                ? context.tr('展开列表')
-                : context.tr('紧凑视图'),
+            tooltip: compact ? context.tr('展开列表') : context.tr('紧凑视图'),
             onPressed: onToggleView,
           ),
         ],
@@ -1894,7 +1889,10 @@ class _SlashCommandPalette extends StatelessWidget {
             return InkWell(
               onTap: () => onSelected(cmd),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
