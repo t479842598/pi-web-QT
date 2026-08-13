@@ -33,6 +33,10 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>需要访问本地网络以连接局域网内的 Pi Web 服务器。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>需要访问相册以在对话中上传图片。</string>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -310,6 +310,309 @@ class PiApi {
     return body['data'];
   }
 
+  /// Raw GET returning a decoded map, or null on failure. Used for endpoints
+  /// that have no dedicated typed accessor (e.g. `/api/modes`).
+  Future<Map<String, dynamic>?> getRaw(Uri uri) async {
+    try {
+      final response = await _client
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode < 200 || response.statusCode >= 300) return null;
+      dynamic body;
+      try {
+        body = jsonDecode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        return null;
+      }
+      return body is Map ? Map<String, dynamic>.from(body) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Project display aliases (备注) keyed by directory path. Mirrors the web
+  /// client's `GET /api/project-aliases`.
+  Future<Map<String, String>> getProjectAliases() async {
+    try {
+      final response = await _client
+          .get(_uri('/api/project-aliases'), headers: _headers)
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const {};
+      }
+      dynamic body;
+      try {
+        body = jsonDecode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        return const {};
+      }
+      final aliases = body is Map ? body['aliases'] : null;
+      if (aliases is! Map) return const {};
+      return aliases.map(
+        (key, value) => MapEntry(key.toString(), value?.toString() ?? ''),
+      );
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Sets (non-empty) or removes (empty) the display alias for a directory.
+  /// Mirrors the web client's `PUT /api/project-aliases`.
+  Future<bool> setProjectAlias(String cwd, String alias) async {
+    try {
+      final response = await _client
+          .put(
+            _uri('/api/project-aliases'),
+            headers: {
+              ..._headers,
+              HttpHeaders.contentTypeHeader: 'application/json',
+            },
+            body: jsonEncode({'cwd': cwd, 'alias': alias.trim()}),
+          )
+          .timeout(const Duration(seconds: 12));
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Lists API-key-capable providers (auth status, never the raw key).
+  /// Mirrors the web client's `GET /api/auth/all-providers`.
+  Future<List<ProviderAuthStatus>> getApiKeyProviders() async {
+    try {
+      final response = await _client
+          .get(_uri('/api/auth/all-providers'), headers: _headers)
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const [];
+      }
+      dynamic body;
+      try {
+        body = jsonDecode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        return const [];
+      }
+      final providers = body is Map ? body['providers'] : null;
+      if (providers is! List) return const [];
+      return providers
+          .whereType<Map>()
+          .map(
+            (value) =>
+                ProviderAuthStatus.fromJson(Map<String, dynamic>.from(value)),
+          )
+          .where((provider) => provider.id.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Fetches auth status for a single provider (never the raw key).
+  Future<ProviderAuthStatus?> getProviderAuthStatus(String provider) async {
+    final providers = await getApiKeyProviders();
+    for (final item in providers) {
+      if (item.id == provider) return item;
+    }
+    return null;
+  }
+
+  /// Stores an API key for a provider.
+  Future<bool> setProviderApiKey(String provider, String apiKey) async {
+    try {
+      final response = await _client
+          .post(
+            _uri('/api/auth/api-key/${Uri.encodeComponent(provider)}'),
+            headers: {
+              ..._headers,
+              HttpHeaders.contentTypeHeader: 'application/json',
+            },
+            body: jsonEncode({'apiKey': apiKey}),
+          )
+          .timeout(const Duration(seconds: 30));
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Removes the stored API key for a provider.
+  Future<bool> deleteProviderApiKey(String provider) async {
+    try {
+      final response = await _client
+          .delete(
+            _uri('/api/auth/api-key/${Uri.encodeComponent(provider)}'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 15));
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Lists available theme sets (web client's `GET /api/themes`).
+  Future<List<ThemeSet>> getThemes() async {
+    try {
+      final response = await _client
+          .get(_uri('/api/themes'), headers: _headers)
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const [];
+      }
+      dynamic body;
+      try {
+        body = jsonDecode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        return const [];
+      }
+      final themeSets = body is Map ? body['themeSets'] : null;
+      if (themeSets is! List) return const [];
+      return themeSets
+          .whereType<Map>()
+          .map((value) => ThemeSet.fromJson(Map<String, dynamic>.from(value)))
+          .where((theme) => theme.name.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Resolves a theme variant's CSS variables (`GET /api/themes/[name]`).
+  /// Returns a map of CSS var name (without `--` prefix) → hex value.
+  Future<Map<String, String>?> getThemeVars(
+    String name, {
+    bool dark = true,
+  }) async {
+    try {
+      final uri = _uri('/api/themes/${Uri.encodeComponent(name)}', {
+        'mode': dark ? 'dark' : 'light',
+      });
+      final response = await _client
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode < 200 || response.statusCode >= 300) return null;
+      dynamic body;
+      try {
+        body = jsonDecode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        return null;
+      }
+      if (body is! Map) return null;
+      final cssVars = body['cssVars'];
+      if (cssVars is! Map) return null;
+      final result = <String, String>{};
+      cssVars.forEach((key, value) {
+        final clean = key.toString().replaceFirst('--', '');
+        final str = value?.toString() ?? '';
+        if (str.isNotEmpty && str.startsWith('#')) {
+          result[clean] = str;
+        }
+      });
+      return result;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// File index for `@` autocomplete (web client's `GET /api/file-index`).
+  /// Returns relative file paths plus a truncated flag.
+  Future<List<String>> getFileIndex(String cwd) async {
+    try {
+      final response = await _client
+          .get(_uri('/api/file-index', {'cwd': cwd}), headers: _headers)
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const [];
+      }
+      dynamic body;
+      try {
+        body = jsonDecode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        return const [];
+      }
+      final files = body is Map ? body['files'] : null;
+      if (files is! List) return const [];
+      return files
+          .map((value) => value?.toString() ?? '')
+          .where((path) => path.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Snippets (快捷输入) for `#` autocomplete (web client's `GET /api/snippets`).
+  Future<List<PiSnippet>> getSnippets() async {
+    try {
+      final response = await _client
+          .get(_uri('/api/snippets'), headers: _headers)
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const [];
+      }
+      dynamic body;
+      try {
+        body = jsonDecode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        return const [];
+      }
+      final snippets = body is Map ? body['snippets'] : null;
+      if (snippets is! List) return const [];
+      return snippets
+          .whereType<Map>()
+          .map((value) => PiSnippet.fromJson(Map<String, dynamic>.from(value)))
+          .where((snippet) => snippet.name.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Raw JSON PUT returning success/failure. Used for endpoints without a
+  /// dedicated typed accessor (e.g. `/api/modes`).
+  Future<bool> putJson(Uri uri, Map<String, dynamic> payload) async {
+    try {
+      final response = await _client
+          .put(
+            uri,
+            headers: {
+              ..._headers,
+              HttpHeaders.contentTypeHeader: 'application/json',
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 10));
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Lightweight state probe for a session. Returns the full `get_state`
+  /// payload when the RPC wrapper is alive, or `{running: false}` when it is
+  /// not. HTTP errors / timeouts are treated as "unknown" (returns null).
+  Future<Map<String, dynamic>?> getAgentState(String sessionId) async {
+    try {
+      final response = await _client
+          .get(
+            _uri('/api/agent/${Uri.encodeComponent(sessionId)}'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode < 200 || response.statusCode >= 300) return null;
+      dynamic body;
+      try {
+        body = jsonDecode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        return null;
+      }
+      if (body is! Map) return null;
+      return Map<String, dynamic>.from(body);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<List<PiSlashCommand>> getSlashCommands(String sessionId) async {
     final data = await sendAgentCommand(sessionId, {'type': 'get_commands'});
     final commands = data is Map ? data['commands'] : null;
@@ -326,12 +629,14 @@ class PiApi {
     String sessionId,
     String message, {
     List<PiImageAttachment> images = const [],
+    String? streamingBehavior,
   }) async {
     await post('/api/agent/${Uri.encodeComponent(sessionId)}', {
       'type': 'prompt',
       'message': message,
       if (images.isNotEmpty)
         'images': images.map((image) => image.toJson()).toList(),
+      'streamingBehavior': ?streamingBehavior,
     });
   }
 

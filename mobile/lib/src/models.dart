@@ -115,6 +115,19 @@ class PiSession {
   final String? projectRoot;
   final bool running;
 
+  /// Shallow copy; only [running] is intended to change after creation.
+  PiSession copyWith({bool? running}) => PiSession(
+    id: id,
+    cwd: cwd,
+    created: created,
+    modified: modified,
+    messageCount: messageCount,
+    firstMessage: firstMessage,
+    name: name,
+    projectRoot: projectRoot,
+    running: running ?? this.running,
+  );
+
   String get title {
     return titleFor(AppLanguage.zhHans);
   }
@@ -157,6 +170,82 @@ class ModelCatalog {
   const ModelCatalog({required this.models, this.defaultModel});
   final List<PiModel> models;
   final PiModel? defaultModel;
+}
+
+/// A snippet (快捷输入) from the web client's `GET /api/snippets`.
+class PiSnippet {
+  const PiSnippet({required this.name, required this.content});
+
+  factory PiSnippet.fromJson(Map<String, dynamic> json) => PiSnippet(
+    name: json['name']?.toString() ?? '',
+    content: json['content']?.toString() ?? '',
+  );
+
+  final String name;
+  final String content;
+}
+
+/// A theme set from the web client's `GET /api/themes`.
+class ThemeSet {
+  const ThemeSet({
+    required this.name,
+    required this.displayName,
+    required this.hasDark,
+    required this.hasLight,
+    required this.builtin,
+    this.accent,
+    this.accentLight,
+  });
+
+  factory ThemeSet.fromJson(Map<String, dynamic> json) => ThemeSet(
+    name: json['name']?.toString() ?? '',
+    displayName:
+        json['displayName']?.toString() ?? json['name']?.toString() ?? '',
+    hasDark: json['hasDark'] == true,
+    hasLight: json['hasLight'] == true,
+    builtin: json['builtin'] == true,
+    accent: json['accent']?.toString(),
+    accentLight: json['accentLight']?.toString(),
+  );
+
+  final String name;
+  final String displayName;
+  final bool hasDark;
+  final bool hasLight;
+  final bool builtin;
+  final String? accent;
+  final String? accentLight;
+}
+
+/// API-key provider auth status from the web client's
+/// `GET /api/auth/all-providers` / `GET /api/auth/api-key/[provider]`.
+class ProviderAuthStatus {
+  const ProviderAuthStatus({
+    required this.id,
+    required this.displayName,
+    required this.configured,
+    this.source,
+    this.modelCount = 0,
+    this.supportsOAuth = false,
+  });
+
+  factory ProviderAuthStatus.fromJson(Map<String, dynamic> json) =>
+      ProviderAuthStatus(
+        id: json['id']?.toString() ?? '',
+        displayName:
+            json['displayName']?.toString() ?? json['name']?.toString() ?? '',
+        configured: json['configured'] == true,
+        source: json['source']?.toString(),
+        modelCount: (json['modelCount'] as num?)?.toInt() ?? 0,
+        supportsOAuth: json['supportsOAuth'] == true,
+      );
+
+  final String id;
+  final String displayName;
+  final bool configured;
+  final String? source;
+  final int modelCount;
+  final bool supportsOAuth;
 }
 
 class PiSkill {
@@ -391,11 +480,7 @@ class PiImageAttachment {
 }
 
 class PiToolCall {
-  const PiToolCall({
-    required this.name,
-    this.toolCallId,
-    this.arguments,
-  });
+  const PiToolCall({required this.name, this.toolCallId, this.arguments});
 
   final String name;
   final String? toolCallId;
@@ -441,6 +526,7 @@ class ChatMessage {
     this.toolCalls = const [],
     this.toolName,
     this.isError = false,
+    this.queued = false,
     this.thinkingEntryId,
     this.thinkingBlockIndex,
     this.raw,
@@ -482,6 +568,11 @@ class ChatMessage {
   final String? toolName;
   final bool isError;
 
+  /// Local-only marker for messages enqueued while the agent is running
+  /// (steer / follow-up). Renders with a ⏳ badge until the run settles and
+  /// the real message history replaces the placeholder.
+  final bool queued;
+
   /// Lazily-loaded thinking: when the server defers historical thinking, the
   /// entry/block reference lets the client fetch it on demand via
   /// `/api/sessions/[id]/entries/[entryId]/thinking?blockIndex=N`.
@@ -496,6 +587,7 @@ class ChatMessage {
     List<PiToolCall>? toolCalls,
     String? thinkingEntryId,
     int? thinkingBlockIndex,
+    bool? queued,
   }) => ChatMessage(
     role: role,
     text: text ?? this.text,
@@ -505,6 +597,7 @@ class ChatMessage {
     toolCalls: toolCalls ?? this.toolCalls,
     toolName: toolName,
     isError: isError,
+    queued: queued ?? this.queued,
     thinkingEntryId: thinkingEntryId ?? this.thinkingEntryId,
     thinkingBlockIndex: thinkingBlockIndex ?? this.thinkingBlockIndex,
     raw: raw,

@@ -355,7 +355,7 @@ void main() {
     expect(tester.widget<RawScrollbar>(chatScrollbar).interactive, isTrue);
     expect(find.text('Model A'), findsOneWidget);
     expect(find.byTooltip('新建对话'), findsNothing);
-    expect(find.byKey(const Key('add-local-images')), findsOneWidget);
+    expect(find.byKey(const Key('add-menu')), findsOneWidget);
     expect(find.byKey(const Key('composer-single-line')), findsOneWidget);
     final composer = tester.widget<Container>(
       find.byKey(const Key('chat-composer')),
@@ -888,6 +888,13 @@ void main() {
     await tester.tap(find.text('简洁输出'));
     await tester.pump();
     expect(compactOutput, isFalse);
+    // The drawer is scrollable when it grows beyond the phone screen; drag
+    // it up to reveal the 语言 tile before tapping it.
+    await tester.drag(
+      find.byType(SingleChildScrollView).last,
+      const Offset(0, -200),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('语言'));
     await tester.pumpAndSettle();
     expect(find.text('日本語'), findsOneWidget);

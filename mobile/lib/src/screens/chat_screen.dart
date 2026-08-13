@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +17,7 @@ import '../profile_store.dart';
 import 'directory_picker.dart';
 import 'git_sheet.dart';
 import 'model_picker.dart';
+import 'providers_sheet.dart';
 import 'skills_sheet.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -30,6 +33,8 @@ class ChatScreen extends StatefulWidget {
     this.onCompactOutputChanged,
     this.languagePreference = AppLanguagePreference.system,
     this.onLanguagePreferenceChanged,
+    this.themeSetName = '',
+    this.onThemeSetChanged,
   });
 
   final ChatController controller;
@@ -42,6 +47,8 @@ class ChatScreen extends StatefulWidget {
   final ValueChanged<bool>? onCompactOutputChanged;
   final AppLanguagePreference languagePreference;
   final ValueChanged<AppLanguagePreference>? onLanguagePreferenceChanged;
+  final String themeSetName;
+  final ValueChanged<String>? onThemeSetChanged;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -59,6 +66,17 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _pickingImages = false;
   String? _visibleSessionId;
   final List<_PendingImage> _pendingImages = [];
+
+  // ── @ file reference & # snippet autocomplete ───────────────────────
+  String? _atQuery;
+  List<String> _atMatches = const [];
+  String? _hashQuery;
+  List<PiSnippet> _hashMatches = const [];
+  List<String> _fileIndex = const [];
+  List<PiSnippet> _snippets = const [];
+  bool _fileIndexLoading = false;
+  String? _fileIndexCwd;
+  bool _fileIndexLoaded = false;
 
   List<PiSlashCommand> get _builtinSlashCommands => <PiSlashCommand>[
     PiSlashCommand(
@@ -151,8 +169,53 @@ class _ChatScreenState extends State<ChatScreen> {
     return RegExp(r'\s').hasMatch(query) ? null : query.toLowerCase();
   }
 
+  /// Detects an `@` or `#` token immediately before the caret (same rules as
+  /// the web client: token must be at line start or preceded by whitespace).
+  /// Returns the token prefix char and query, or null when not in a token.
+  ({String prefix, String query})? _extractAutocompleteToken() {
+    final value = _messageController.text;
+    final pos = _messageController.selection.isValid
+        ? _messageController.selection.start
+        : value.length;
+    final before = value.substring(0, pos);
+    final atMatch = RegExp(r'(?:^|\s)@([^\s\n]*)$').firstMatch(before);
+    if (atMatch != null) {
+      return (prefix: '@', query: atMatch.group(1) ?? '');
+    }
+    final hashMatch = RegExp(r'(?:^|\s)#([^\s\n]*)$').firstMatch(before);
+    if (hashMatch != null) {
+      return (prefix: '#', query: hashMatch.group(1) ?? '');
+    }
+    return null;
+  }
+
   void _onComposerChanged() {
     if (!mounted) return;
+    final token = _extractAutocompleteToken();
+    if (token != null && token.prefix == '@') {
+      _slashCommandsRequested = false;
+      _hashQuery = null;
+      _hashMatches = const [];
+      _atQuery = token.query;
+      _filterAtMatches();
+      _ensureFileIndex();
+      setState(() {});
+      return;
+    }
+    if (token != null && token.prefix == '#') {
+      _slashCommandsRequested = false;
+      _atQuery = null;
+      _atMatches = const [];
+      _hashQuery = token.query;
+      _filterHashMatches();
+      _ensureSnippets();
+      setState(() {});
+      return;
+    }
+    _atQuery = null;
+    _atMatches = const [];
+    _hashQuery = null;
+    _hashMatches = const [];
     final query = _slashQuery;
     if (query == null) {
       _slashCommandsRequested = false;
@@ -164,6 +227,106 @@ class _ChatScreenState extends State<ChatScreen> {
       _slashCommandsRequested = true;
       chat.loadSlashCommands();
     }
+  }
+
+  void _filterAtMatches() {
+    final query = _atQuery?.toLowerCase() ?? '';
+    final all = _fileIndex;
+    if (query.isEmpty) {
+      // Cap the empty-query list: repos can hold thousands of files and the
+      // panel builds every row eagerly per keystroke.
+      _atMatches = all.take(60).toList();
+      return;
+    }
+    _atMatches = all
+        .where((path) => path.toLowerCase().contains(query))
+        .take(30)
+        .toList();
+  }
+
+  void _filterHashMatches() {
+    final query = _hashQuery?.toLowerCase() ?? '';
+    final all = _snippets;
+    if (query.isEmpty) {
+      _hashMatches = all;
+      return;
+    }
+    _hashMatches = all
+        .where((snippet) => snippet.name.toLowerCase().contains(query))
+        .take(30)
+        .toList();
+  }
+
+  Future<void> _ensureFileIndex() async {
+    final cwd = chat.draftCwd;
+    if (cwd == null || cwd.isEmpty) return;
+    if (_fileIndexCwd == cwd && _fileIndexLoaded) return;
+    if (_fileIndexLoading) return;
+    _fileIndexLoading = true;
+    final files = await chat.api.getFileIndex(cwd);
+    if (!mounted) return;
+    _fileIndexLoading = false;
+    _fileIndexCwd = cwd;
+    _fileIndex = files;
+    _fileIndexLoaded = true;
+    if (_atQuery != null) {
+      _filterAtMatches();
+      setState(() {});
+    }
+  }
+
+  Future<void> _ensureSnippets() async {
+    if (_snippets.isNotEmpty) return;
+    final snippets = await chat.api.getSnippets();
+    if (!mounted) return;
+    _snippets = snippets;
+    if (_hashQuery != null) {
+      _filterHashMatches();
+      setState(() {});
+    }
+  }
+
+  void _applyAtMatch(String path) {
+    final value = _messageController.text;
+    final pos = _messageController.selection.isValid
+        ? _messageController.selection.start
+        : value.length;
+    final before = value.substring(0, pos);
+    final after = value.substring(pos);
+    final match = RegExp(r'(?:^|\s)@([^\s\n]*)$').firstMatch(before);
+    final start = match == null
+        ? pos
+        : match.start + match.group(0)!.indexOf('@');
+    final insert = '@$path ';
+    final newValue = value.substring(0, start) + insert + after;
+    _messageController.value = TextEditingValue(
+      text: newValue,
+      selection: TextSelection.collapsed(offset: start + insert.length),
+    );
+    _atQuery = null;
+    _atMatches = const [];
+  }
+
+  void _applyHashMatch(PiSnippet snippet) {
+    final value = _messageController.text;
+    final pos = _messageController.selection.isValid
+        ? _messageController.selection.start
+        : value.length;
+    final before = value.substring(0, pos);
+    final after = value.substring(pos);
+    final match = RegExp(r'(?:^|\s)#([^\s\n]*)$').firstMatch(before);
+    final start = match == null
+        ? pos
+        : match.start + match.group(0)!.indexOf('#');
+    final newValue = value.substring(0, start) + snippet.content + after;
+    _messageController.value = TextEditingValue(
+      text: newValue,
+      selection: TextSelection.collapsed(
+        offset: start + snippet.content.length,
+      ),
+    );
+    _hashQuery = null;
+    _hashMatches = const [];
   }
 
   List<PiSlashCommand> get _filteredSlashCommands {
@@ -231,12 +394,105 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Future<void> _send() async {
-    final value = _messageController.text;
-    if ((value.trim().isEmpty && _pendingImages.isEmpty) || chat.running) {
+  /// 计划模式：切换 collaborationMode 为 plan（与网页端一致）。
+  Future<void> _setPlanMode() async {
+    if (chat.running) return;
+    final ok = await chat.setCollaborationMode('plan');
+    if (mounted && ok) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.tr('已切换到计划模式'))));
+    }
+  }
+
+  /// 目标模式：弹出目标输入框，启动 goal_start（与网页端 GoalBanner 流程一致）。
+  Future<void> _setGoalMode() async {
+    final controller = TextEditingController(text: chat.goalText ?? '');
+    final text = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(dialogContext.tr('设定目标')),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 5,
+          decoration: InputDecoration(hintText: dialogContext.tr('要达到什么目标？')),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(dialogContext.tr('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: Text(dialogContext.tr('开始')),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (text == null || !mounted) return;
+    final ok = await chat.startGoal(text);
+    if (mounted && ok) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(context.tr('目标已启动'))));
+    }
+  }
+
+  /// 使用命令：在输入框插入 "/" 并聚焦，唤起快捷命令面板。
+  void _useCommand() {
+    final current = _messageController.text;
+    final next = current.startsWith('/') ? current : '/$current';
+    _messageController.text = next;
+    _messageController.selection = TextSelection.collapsed(offset: next.length);
+  }
+
+  /// 引用对话：弹出会话选择器，把所选会话的内容摘要插入输入框。
+  Future<void> _referenceSession() async {
+    final sessions = chat.sessions;
+    if (sessions.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.tr('暂无可引用的对话'))));
+      }
       return;
     }
-    final builtin = _pendingImages.isEmpty
+    final selected = await showModalBottomSheet<PiSession>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => _SessionReferenceSheet(
+        sessions: sessions,
+        language: context.appLanguage,
+      ),
+    );
+    if (selected == null || !mounted) return;
+    final reference = await chat.buildSessionReference(selected);
+    if (reference == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.tr('引用内容加载失败'))));
+      }
+      return;
+    }
+    final current = _messageController.text;
+    final sep = current.isEmpty ? '' : '\n\n';
+    _messageController.text = '$current$sep$reference';
+    _messageController.selection = TextSelection.collapsed(
+      offset: _messageController.text.length,
+    );
+  }
+
+  Future<void> _send({String? queueMode}) async {
+    final value = _messageController.text;
+    if (value.trim().isEmpty && _pendingImages.isEmpty) return;
+    // While the agent is running, builtin slash commands that mutate session
+    // state are unsafe; enqueue them as a steer instead.
+    final builtin = _pendingImages.isEmpty && !chat.running
         ? await chat.executeBuiltinCommand(value)
         : const BuiltinCommandResult(handled: false);
     if (builtin.handled) {
@@ -283,7 +539,12 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageController.clear();
     final images = _pendingImages.map((image) => image.attachment).toList();
     setState(_pendingImages.clear);
-    await chat.send(value, images: images);
+    // When the agent is running, the message is enqueued (steer by default,
+    // followUp when the send key was long-pressed).
+    final effectiveMode = chat.running
+        ? (queueMode == 'followUp' ? 'followUp' : 'steer')
+        : null;
+    await chat.send(value, images: images, queueMode: effectiveMode);
   }
 
   Future<void> _pickImages() async {
@@ -344,6 +605,150 @@ class _ChatScreenState extends State<ChatScreen> {
     if (lower.endsWith('.webp')) return 'image/webp';
     if (lower.endsWith('.gif')) return 'image/gif';
     return 'image/jpeg';
+  }
+
+  static const _textFileExtensions = {
+    '.txt',
+    '.md',
+    '.markdown',
+    '.json',
+    '.yaml',
+    '.yml',
+    '.toml',
+    '.csv',
+    '.ts',
+    '.tsx',
+    '.js',
+    '.jsx',
+    '.dart',
+    '.py',
+    '.rb',
+    '.go',
+    '.rs',
+    '.java',
+    '.c',
+    '.h',
+    '.cpp',
+    '.hpp',
+    '.css',
+    '.scss',
+    '.html',
+    '.xml',
+    '.sh',
+    '.bash',
+    '.zsh',
+    '.sql',
+    '.log',
+    '.ini',
+    '.cfg',
+    '.env',
+  };
+
+  /// 任意文件上传：图片并入附件预览；文本类文件内容注入输入框；其他类型拒绝。
+  Future<void> _pickFiles() async {
+    if (_pickingImages || !mounted) return;
+    _pickingImages = true;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        withData: false,
+      );
+      if (!mounted || result == null || result.files.isEmpty) return;
+      var rejected = 0;
+      var imageCount = 0;
+      for (final file in result.files) {
+        final name = file.name;
+        final lower = name.toLowerCase();
+        final isImage = const {
+          '.png',
+          '.jpg',
+          '.jpeg',
+          '.gif',
+          '.webp',
+          '.heic',
+        }.any(lower.endsWith);
+        if (isImage) {
+          // Route images through the existing attachment pipeline (10 max).
+          if (_pendingImages.length >= 10 || imageCount >= 10) {
+            rejected += 1;
+            continue;
+          }
+          final path = file.path;
+          if (path == null) {
+            rejected += 1;
+            continue;
+          }
+          final bytes = await File(path).readAsBytes();
+          if (bytes.length > 10 * 1024 * 1024) {
+            rejected += 1;
+            continue;
+          }
+          setState(() {
+            _pendingImages.add(
+              _PendingImage(
+                bytes: bytes,
+                attachment: PiImageAttachment(
+                  data: base64Encode(bytes),
+                  mimeType: _mimeTypeFor(name),
+                ),
+              ),
+            );
+          });
+          imageCount += 1;
+          continue;
+        }
+        if (!_textFileExtensions.any(lower.endsWith)) {
+          rejected += 1;
+          continue;
+        }
+        final path = file.path;
+        if (path == null) {
+          rejected += 1;
+          continue;
+        }
+        final stat = await File(path).stat();
+        if (stat.size > 512 * 1024) {
+          rejected += 1;
+          continue;
+        }
+        String content;
+        try {
+          content = await File(path).readAsString();
+        } catch (_) {
+          rejected += 1;
+          continue;
+        }
+        if (content.length > 20000) {
+          content = '${content.substring(0, 20000)}\n…（已截断）';
+        }
+        final current = _messageController.text;
+        final sep = current.isEmpty ? '' : '\n\n';
+        final injected = '```\n$name 内容：\n$content\n```';
+        _messageController.text = '$current$sep$injected';
+        _messageController.selection = TextSelection.collapsed(
+          offset: _messageController.text.length,
+        );
+      }
+      if (rejected > 0 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.tr('{count} 个文件被跳过：仅支持文本文件（≤512KB）和图片（≤10MB）', {
+                'count': rejected,
+              }),
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.tr('无法读取所选文件'))));
+      }
+    } finally {
+      _pickingImages = false;
+    }
   }
 
   Future<void> _chooseNewChat() async {
@@ -470,6 +875,8 @@ class _ChatScreenState extends State<ChatScreen> {
         onCompactOutputChanged: widget.onCompactOutputChanged,
         languagePreference: widget.languagePreference,
         onLanguagePreferenceChanged: widget.onLanguagePreferenceChanged,
+        themeSetName: widget.themeSetName,
+        onThemeSetChanged: widget.onThemeSetChanged,
         onChooseDirectory: _chooseNewChat,
         onSkills: () {
           Navigator.pop(context);
@@ -478,6 +885,16 @@ class _ChatScreenState extends State<ChatScreen> {
         onGit: () {
           Navigator.pop(context);
           showGitSheet(context, controller: chat);
+        },
+        onProviders: () {
+          Navigator.pop(context);
+          showModalBottomSheet<void>(
+            context: context,
+            isScrollControlled: true,
+            useSafeArea: true,
+            backgroundColor: Colors.transparent,
+            builder: (sheetContext) => ProvidersSheet(controller: chat),
+          );
         },
         onSwitchServer: widget.onSwitchServer == null
             ? null
@@ -658,6 +1075,21 @@ class _ChatScreenState extends State<ChatScreen> {
                   ],
                 ),
               ),
+              if (chat.goalStatus != null &&
+                  chat.goalText != null &&
+                  const {
+                    'running',
+                    'paused',
+                    'blocked',
+                  }.contains(chat.goalStatus))
+                _GoalBanner(
+                  status: chat.goalStatus!,
+                  goalText: chat.goalText!,
+                  elapsedSeconds: chat.goalElapsedSeconds,
+                  onPause: chat.pauseGoal,
+                  onResume: chat.resumeGoal,
+                  onStop: chat.stopGoal,
+                ),
               _Composer(
                 controller: _messageController,
                 running: chat.running,
@@ -670,10 +1102,22 @@ class _ChatScreenState extends State<ChatScreen> {
                 pendingImages: _pendingImages,
                 onSlashCommand: _applySlashCommand,
                 onPickImages: _pickImages,
+                onPickFiles: _pickFiles,
                 onRemoveImage: (index) =>
                     setState(() => _pendingImages.removeAt(index)),
                 onSend: _send,
+                onSendFollowUp: () => _send(queueMode: 'followUp'),
                 onStop: chat.stop,
+                onPlanMode: _setPlanMode,
+                onGoalMode: _setGoalMode,
+                onUseCommand: _useCommand,
+                onReferenceSession: _referenceSession,
+                atQuery: _atQuery,
+                atMatches: _atMatches,
+                hashQuery: _hashQuery,
+                hashMatches: _hashMatches,
+                onApplyAt: _applyAtMatch,
+                onApplyHash: _applyHashMatch,
               ),
             ],
           );
@@ -846,9 +1290,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final streaming = chat.streamingMessage;
     final hasLiveWork =
         chat.running &&
-        (compactLiveTail ||
-            streaming != null ||
-            chat.liveToolSteps.isNotEmpty);
+        (compactLiveTail || streaming != null || chat.liveToolSteps.isNotEmpty);
     if (hasLiveWork) {
       if (streaming != null && _hasDisplayableContent(streaming)) {
         compactProcessMessages += 1;
@@ -1183,8 +1625,9 @@ class _MessageBubble extends StatelessWidget {
   /// Width scales with the screen up to a fixed ceiling.
   double _bubbleMaxWidth(BuildContext context, bool user) {
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final ratio = user ? .82 : .94;
-    final ceiling = user ? 760.0 : 840.0;
+    // Match the web client: user bubble min(85%, 680px), assistant full width.
+    final ratio = user ? .85 : 1.0;
+    final ceiling = user ? 680.0 : double.infinity;
     final scaled = screenWidth * ratio;
     return scaled > ceiling ? ceiling : scaled;
   }
@@ -1207,16 +1650,24 @@ class _MessageBubble extends StatelessWidget {
       child: Container(
         constraints: BoxConstraints(maxWidth: _bubbleMaxWidth(context, user)),
         margin: EdgeInsets.symmetric(vertical: inProcessGroup ? 3 : 6),
-        padding: EdgeInsets.symmetric(horizontal: user ? 16 : 8, vertical: 12),
+        // Web client: user bubble padding 9×14; tool cards keep a tighter pad.
+        padding: EdgeInsets.symmetric(
+          horizontal: user ? 14 : (tool ? 10 : 0),
+          vertical: user ? 9 : 12,
+        ),
         decoration: BoxDecoration(
           color: user
-              ? (Theme.of(context).brightness == Brightness.dark
-                    ? Theme.of(context).colorScheme.surfaceContainerHighest
-                    : const Color(0xffe8e8ed))
+              ? (Theme.of(context).extension<PiWebColors>()?.userBg ??
+                    (Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xff1e2a2b)
+                        : const Color(0xffeff6ff)))
               : tool
-              ? Theme.of(context).colorScheme.surface
+              ? (Theme.of(context).extension<PiWebColors>()?.toolBg ??
+                    (Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xff171c1c)
+                        : const Color(0xfff9fafb)))
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(user ? 9 : 18),
           border: tool
               ? Border.all(color: Theme.of(context).dividerColor)
               : null,
@@ -1228,83 +1679,134 @@ class _MessageBubble extends StatelessWidget {
                 message.processText.isEmpty &&
                 streaming
             ? const _TypingIndicator()
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (message.thinking.isNotEmpty)
-                    _ThinkingSection(
-                      thinking: message.thinking,
-                      streaming: streaming,
-                    )
-                  else if (message.thinkingEntryId != null &&
-                      message.thinkingBlockIndex != null)
-                    _DeferredThinkingButton(
-                      onLoad: () async {
-                        final callback = onLoadThinking;
-                        if (callback == null) return;
-                        await callback(message);
-                      },
-                    ),
-                  if ((message.thinking.isNotEmpty ||
-                          (message.thinkingEntryId != null &&
-                              message.thinkingBlockIndex != null)) &&
-                      (message.processText.isNotEmpty ||
-                          message.text.isNotEmpty ||
-                          message.toolCalls.isNotEmpty))
-                    const SizedBox(height: 8),
-                  if (message.toolCalls.isNotEmpty) ...[
-                    for (final toolCall in message.toolCalls)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: _ToolCallCard(
-                          name: toolCall.name,
-                          arguments: toolCall.arguments,
-                          running: false,
-                          isError: false,
-                          resultText: null,
-                          duration: null,
+            : ConstrainedBox(
+                // Web client caps the user bubble at 300px with internal scroll.
+                constraints: user
+                    ? const BoxConstraints(maxHeight: 300)
+                    : const BoxConstraints(),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (message.queued) ...[
+                        Align(
+                          alignment: user
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 5),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.primary.withValues(alpha: .12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.hourglass_top_rounded,
+                                  size: 12,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  context.tr('已排队，将在当前运行后处理'),
+                                  style: Theme.of(context).textTheme.labelSmall
+                                      ?.copyWith(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
-                    const SizedBox(height: 2),
-                  ],
-                  if (message.processText.isNotEmpty)
-                    MarkdownBody(
-                      data: message.processText,
-                      selectable: true,
-                      styleSheet:
-                          MarkdownStyleSheet.fromTheme(
-                            Theme.of(context),
-                          ).copyWith(
-                            p: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
+                        const SizedBox(height: 2),
+                      ],
+                      if (message.thinking.isNotEmpty)
+                        _ThinkingSection(
+                          thinking: message.thinking,
+                          streaming: streaming,
+                        )
+                      else if (message.thinkingEntryId != null &&
+                          message.thinkingBlockIndex != null)
+                        _DeferredThinkingButton(
+                          onLoad: () async {
+                            final callback = onLoadThinking;
+                            if (callback == null) return;
+                            await callback(message);
+                          },
+                        ),
+                      if ((message.thinking.isNotEmpty ||
+                              (message.thinkingEntryId != null &&
+                                  message.thinkingBlockIndex != null)) &&
+                          (message.processText.isNotEmpty ||
+                              message.text.isNotEmpty ||
+                              message.toolCalls.isNotEmpty))
+                        const SizedBox(height: 8),
+                      if (message.toolCalls.isNotEmpty) ...[
+                        for (final toolCall in message.toolCalls)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: _ToolCallCard(
+                              name: toolCall.name,
+                              arguments: toolCall.arguments,
+                              running: false,
+                              isError: false,
+                              resultText: null,
+                              duration: null,
                             ),
                           ),
-                    ),
-                  if (message.processText.isNotEmpty && message.text.isNotEmpty)
-                    const SizedBox(height: 8),
-                  if (message.text.isNotEmpty)
-                    MarkdownBody(
-                      data: message.text,
-                      selectable: true,
-                      styleSheet:
-                          MarkdownStyleSheet.fromTheme(
-                            Theme.of(context),
-                          ).copyWith(
-                            p: Theme.of(
-                              context,
-                            ).textTheme.bodyLarge?.copyWith(height: 1.7),
-                            codeblockDecoration: BoxDecoration(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            codeblockPadding: const EdgeInsets.all(12),
-                          ),
-                    ),
-                ],
+                        const SizedBox(height: 2),
+                      ],
+                      if (message.processText.isNotEmpty)
+                        MarkdownBody(
+                          data: message.processText,
+                          selectable: true,
+                          styleSheet:
+                              MarkdownStyleSheet.fromTheme(
+                                Theme.of(context),
+                              ).copyWith(
+                                p: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                              ),
+                        ),
+                      if (message.processText.isNotEmpty &&
+                          message.text.isNotEmpty)
+                        const SizedBox(height: 8),
+                      if (message.text.isNotEmpty)
+                        MarkdownBody(
+                          data: message.text,
+                          selectable: true,
+                          styleSheet:
+                              MarkdownStyleSheet.fromTheme(
+                                Theme.of(context),
+                              ).copyWith(
+                                p: Theme.of(
+                                  context,
+                                ).textTheme.bodyLarge?.copyWith(height: 1.7),
+                                codeblockDecoration: BoxDecoration(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                codeblockPadding: const EdgeInsets.all(12),
+                              ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
       ),
     );
@@ -1356,10 +1858,10 @@ class _LiveProcessPanel extends StatelessWidget {
     final phaseText = switch (phase) {
       'waiting_model' => context.tr('等待模型'),
       'running_command' => context.tr('运行命令'),
-      'running_tools' when runningNames.isNotEmpty =>
-        context.tr('正在运行工具: {names}', {
-          'names': runningNames.join(', '),
-        }),
+      'running_tools' when runningNames.isNotEmpty => context.tr(
+        '正在运行工具: {names}',
+        {'names': runningNames.join(', ')},
+      ),
       _ => <String>[
         context.tr('Pi 正在处理'),
         if (messageCount > 0)
@@ -1383,9 +1885,9 @@ class _LiveProcessPanel extends StatelessWidget {
               Expanded(
                 child: Text(
                   phaseText,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                 ),
               ),
             ],
@@ -1405,10 +1907,10 @@ class _LiveProcessPanel extends StatelessWidget {
                 ),
               ),
           ],
-          if (thinking.trim().isNotEmpty) ...[const SizedBox(height: 8), _ThinkingSection(
-            thinking: thinking,
-            streaming: true,
-          )],
+          if (thinking.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _ThinkingSection(thinking: thinking, streaming: true),
+          ],
           if (showStreamingText && streamingText.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
             _StreamingText(data: streamingText),
@@ -1492,7 +1994,12 @@ class _ToolCallCardState extends State<_ToolCallCard> {
                           ? Icons.error_rounded
                           : Icons.check_circle_rounded,
                       size: 15,
-                      color: widget.isError ? cs.error : const Color(0xff34c759),
+                      color: widget.isError
+                          ? cs.error
+                          : (Theme.of(
+                                  context,
+                                ).extension<PiWebColors>()?.green ??
+                                const Color(0xff34c759)),
                     ),
                   const SizedBox(width: 8),
                   Flexible(
@@ -1521,13 +2028,16 @@ class _ToolCallCardState extends State<_ToolCallCard> {
                       ),
                     ),
                   ],
-                  if (seconds != null) ...[const SizedBox(width: 8), Text(
-                    '${seconds}s',
-                    style: ts.bodySmall?.copyWith(
-                      color: cs.outline,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                  if (seconds != null) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      '${seconds}s',
+                      style: ts.bodySmall?.copyWith(
+                        color: cs.outline,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
-                  )],
+                  ],
                   const SizedBox(width: 4),
                   AnimatedRotation(
                     turns: _expanded ? .25 : 0,
@@ -1560,22 +2070,25 @@ class _ToolCallCardState extends State<_ToolCallCard> {
                           ),
                           const SizedBox(height: 4),
                           _MonoBlock(
-                            text: const JsonEncoder.withIndent('  ').convert(
-                              widget.arguments,
-                            ),
+                            text: const JsonEncoder.withIndent(
+                              '  ',
+                            ).convert(widget.arguments),
                           ),
                         ],
-                        if (widget.resultText != null) ...[const SizedBox(
-                          height: 8,
-                        ), Text(
-                          context.tr('结果'),
-                          style: ts.labelSmall?.copyWith(
-                            color: cs.onSurfaceVariant,
+                        if (widget.resultText != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            context.tr('结果'),
+                            style: ts.labelSmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
                           ),
-                        ), const SizedBox(height: 4), _MonoBlock(
-                          text: widget.resultText!,
-                          color: widget.isError ? cs.error : null,
-                        )],
+                          const SizedBox(height: 4),
+                          _MonoBlock(
+                            text: widget.resultText!,
+                            color: widget.isError ? cs.error : null,
+                          ),
+                        ],
                       ],
                     ),
                   )
@@ -1858,6 +2371,119 @@ class _TypingIndicator extends StatelessWidget {
   );
 }
 
+/// 目标协作模式状态条（精简版 GoalBanner）：状态点 + 目标文本 + 用时 + 暂停/继续/停止。
+class _GoalBanner extends StatelessWidget {
+  const _GoalBanner({
+    required this.status,
+    required this.goalText,
+    required this.elapsedSeconds,
+    required this.onPause,
+    required this.onResume,
+    required this.onStop,
+  });
+
+  final String status;
+  final String goalText;
+  final int elapsedSeconds;
+  final Future<void> Function() onPause;
+  final Future<void> Function() onResume;
+  final Future<void> Function() onStop;
+
+  String _statusLabel(BuildContext context) => switch (status) {
+    'running' => context.tr('运行中'),
+    'paused' => context.tr('已暂停'),
+    'blocked' => context.tr('受阻'),
+    _ => status,
+  };
+
+  Color _statusColor(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return switch (status) {
+      'paused' || 'blocked' => cs.error,
+      _ => cs.primary,
+    };
+  }
+
+  String _elapsedLabel() {
+    final minutes = elapsedSeconds ~/ 60;
+    final seconds = elapsedSeconds % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.primary.withValues(alpha: .25)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: _statusColor(context),
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _statusLabel(context),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  goalText,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  context.tr('已运行 {time}', {'time': _elapsedLabel()}),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (status == 'running')
+            IconButton(
+              tooltip: context.tr('暂停'),
+              icon: const Icon(Icons.pause_circle_outline, size: 20),
+              onPressed: onPause,
+            )
+          else if (status == 'paused' || status == 'blocked')
+            IconButton(
+              tooltip: context.tr('继续'),
+              icon: const Icon(Icons.play_circle_outline, size: 20),
+              onPressed: onResume,
+            ),
+          IconButton(
+            tooltip: context.tr('停止'),
+            icon: Icon(Icons.stop_circle_outlined, size: 20, color: cs.error),
+            onPressed: onStop,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _Composer extends StatefulWidget {
   const _Composer({
     required this.controller,
@@ -1871,9 +2497,21 @@ class _Composer extends StatefulWidget {
     required this.pendingImages,
     required this.onSlashCommand,
     required this.onPickImages,
+    this.onPickFiles,
     required this.onRemoveImage,
     required this.onSend,
+    this.onSendFollowUp,
     required this.onStop,
+    this.onPlanMode,
+    this.onGoalMode,
+    this.onUseCommand,
+    this.onReferenceSession,
+    this.atQuery,
+    this.atMatches = const [],
+    this.hashQuery,
+    this.hashMatches = const [],
+    this.onApplyAt,
+    this.onApplyHash,
   });
   final TextEditingController controller;
   final bool running;
@@ -1886,9 +2524,26 @@ class _Composer extends StatefulWidget {
   final List<_PendingImage> pendingImages;
   final ValueChanged<PiSlashCommand> onSlashCommand;
   final VoidCallback onPickImages;
+
+  /// 任意文件上传（图片 + 文本注入），加号菜单「上传文件」入口。
+  final VoidCallback? onPickFiles;
+  final VoidCallback? onPlanMode;
+  final VoidCallback? onGoalMode;
+  final VoidCallback? onUseCommand;
+  final VoidCallback? onReferenceSession;
   final ValueChanged<int> onRemoveImage;
   final VoidCallback onSend;
+
+  /// Long-press on the send key while running: queue as follow-up (behind the
+  /// current run) instead of steering.
+  final VoidCallback? onSendFollowUp;
   final VoidCallback onStop;
+  final String? atQuery;
+  final List<String> atMatches;
+  final String? hashQuery;
+  final List<PiSnippet> hashMatches;
+  final ValueChanged<String>? onApplyAt;
+  final ValueChanged<PiSnippet>? onApplyHash;
 
   @override
   State<_Composer> createState() => _ComposerState();
@@ -1914,9 +2569,21 @@ class _ComposerState extends State<_Composer> {
   List<_PendingImage> get pendingImages => widget.pendingImages;
   ValueChanged<PiSlashCommand> get onSlashCommand => widget.onSlashCommand;
   VoidCallback get onPickImages => widget.onPickImages;
+  VoidCallback? get onPickFiles => widget.onPickFiles;
   ValueChanged<int> get onRemoveImage => widget.onRemoveImage;
   VoidCallback get onSend => widget.onSend;
+  VoidCallback? get onSendFollowUp => widget.onSendFollowUp;
   VoidCallback get onStop => widget.onStop;
+  VoidCallback? get onPlanMode => widget.onPlanMode;
+  VoidCallback? get onGoalMode => widget.onGoalMode;
+  VoidCallback? get onUseCommand => widget.onUseCommand;
+  VoidCallback? get onReferenceSession => widget.onReferenceSession;
+  String? get atQuery => widget.atQuery;
+  List<String> get atMatches => widget.atMatches;
+  String? get hashQuery => widget.hashQuery;
+  List<PiSnippet> get hashMatches => widget.hashMatches;
+  ValueChanged<String>? get onApplyAt => widget.onApplyAt;
+  ValueChanged<PiSnippet>? get onApplyHash => widget.onApplyHash;
 
   @override
   Widget build(BuildContext context) {
@@ -1948,6 +2615,16 @@ class _ComposerState extends State<_Composer> {
                   onRemove: () => onRemoveImage(index),
                 ),
               ),
+            ),
+          if ((atQuery != null && atMatches.isNotEmpty) ||
+              (hashQuery != null && hashMatches.isNotEmpty))
+            _AutocompletePanel(
+              atQuery: atQuery,
+              atMatches: atMatches,
+              hashQuery: hashQuery,
+              hashMatches: hashMatches,
+              onApplyAt: onApplyAt,
+              onApplyHash: onApplyHash,
             ),
           Center(
             child: ConstrainedBox(
@@ -2024,30 +2701,127 @@ class _ComposerState extends State<_Composer> {
 
   Widget _addButton(BuildContext context) => SizedBox.square(
     dimension: 40,
-    child: IconButton(
-      key: const Key('add-local-images'),
-      onPressed: running ? null : onPickImages,
-      tooltip: context.tr('添加本地图片'),
+    child: PopupMenuButton<String>(
+      key: const Key('add-menu'),
+      onSelected: (value) {
+        switch (value) {
+          case 'plan':
+            onPlanMode?.call();
+            break;
+          case 'goal':
+            onGoalMode?.call();
+            break;
+          case 'upload':
+            if (onPickFiles != null) {
+              onPickFiles!();
+            } else {
+              onPickImages();
+            }
+            break;
+          case 'command':
+            onUseCommand?.call();
+            break;
+          case 'reference':
+            onReferenceSession?.call();
+            break;
+        }
+      },
+      // Always tappable: even mid-run the user may pick a command, reference
+      // a conversation, or queue an image for the next message.
+      tooltip: context.tr('添加'),
       icon: const Icon(Icons.add_rounded, size: 26),
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: 'plan',
+          child: Row(
+            children: [
+              const Icon(Icons.summarize_outlined, size: 20),
+              const SizedBox(width: 10),
+              Text(context.tr('计划')),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'goal',
+          child: Row(
+            children: [
+              const Icon(Icons.flag_outlined, size: 20),
+              const SizedBox(width: 10),
+              Text(context.tr('目标')),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'upload',
+          child: Row(
+            children: [
+              const Icon(Icons.upload_file_outlined, size: 20),
+              const SizedBox(width: 10),
+              Text(context.tr('上传文件')),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'command',
+          child: Row(
+            children: [
+              const Icon(Icons.terminal_rounded, size: 20),
+              const SizedBox(width: 10),
+              Text(context.tr('使用命令')),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'reference',
+          child: Row(
+            children: [
+              const Icon(Icons.chat_bubble_outline, size: 20),
+              const SizedBox(width: 10),
+              Text(context.tr('引用对话')),
+            ],
+          ),
+        ),
+      ],
     ),
   );
 
-  Widget _sendButton(BuildContext context) => SizedBox.square(
-    dimension: 38,
-    child: IconButton.filled(
-      onPressed: running ? onStop : onSend,
-      tooltip: context.tr(running ? '停止' : '发送'),
-      icon: AnimatedSwitcher(
-        duration: MediaQuery.disableAnimationsOf(context)
-            ? Duration.zero
-            : const Duration(milliseconds: 160),
-        child: Icon(
-          running ? Icons.stop_rounded : Icons.arrow_upward_rounded,
-          key: ValueKey(running),
+  Widget _sendButton(BuildContext context) {
+    // While running, the key is a stop button only when the composer is empty;
+    // with text/images it sends (steer) into the live run. Long-press queues
+    // the message as a follow-up instead of steering.
+    final hasContent =
+        controller.text.trim().isNotEmpty || pendingImages.isNotEmpty;
+    final canQueue = running && hasContent && onSendFollowUp != null;
+    return SizedBox.square(
+      dimension: 38,
+      child: IconButton.filled(
+        onPressed: running && !hasContent ? onStop : onSend,
+        onLongPress: canQueue
+            ? () {
+                onSendFollowUp!();
+              }
+            : null,
+        tooltip: context.tr(
+          running && !hasContent
+              ? '停止'
+              : canQueue
+              ? '发送（长按排队）'
+              : '发送',
+        ),
+        icon: AnimatedSwitcher(
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 160),
+          child: Icon(
+            running && !hasContent
+                ? Icons.stop_rounded
+                : Icons.arrow_upward_rounded,
+            key: ValueKey('$running-$hasContent'),
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _SlashCommandPalette extends StatelessWidget {
@@ -2292,6 +3066,83 @@ class _CommandBadge extends StatelessWidget {
   );
 }
 
+/// @ 文件引用 / # 快捷输入 自动补全面板。
+class _AutocompletePanel extends StatelessWidget {
+  const _AutocompletePanel({
+    required this.atQuery,
+    required this.atMatches,
+    required this.hashQuery,
+    required this.hashMatches,
+    this.onApplyAt,
+    this.onApplyHash,
+  });
+
+  final String? atQuery;
+  final List<String> atMatches;
+  final String? hashQuery;
+  final List<PiSnippet> hashMatches;
+  final ValueChanged<String>? onApplyAt;
+  final ValueChanged<PiSnippet>? onApplyHash;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final showingAt = atQuery != null && atMatches.isNotEmpty;
+    final items = <Widget>[];
+    if (showingAt) {
+      for (final path in atMatches) {
+        final name = path.split(RegExp(r'[/\\]')).last;
+        items.add(
+          ListTile(
+            dense: true,
+            minTileHeight: 40,
+            leading: const Icon(Icons.description_outlined, size: 18),
+            title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+            subtitle: Text(
+              path,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+            ),
+            onTap: () => onApplyAt?.call(path),
+          ),
+        );
+      }
+    } else {
+      for (final snippet in hashMatches) {
+        items.add(
+          ListTile(
+            dense: true,
+            minTileHeight: 40,
+            leading: const Icon(Icons.bolt_rounded, size: 18),
+            title: Text(
+              snippet.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            onTap: () => onApplyHash?.call(snippet),
+          ),
+        );
+      }
+    }
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * .3,
+      ),
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      decoration: const BoxDecoration(boxShadow: AppleShadows.floating),
+      child: AppleGlass(
+        borderRadius: BorderRadius.circular(AppleRadius.card),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          children: items,
+        ),
+      ),
+    );
+  }
+}
+
 class _FunctionDrawer extends StatelessWidget {
   const _FunctionDrawer({
     required this.controller,
@@ -2305,7 +3156,10 @@ class _FunctionDrawer extends StatelessWidget {
     required this.onChooseDirectory,
     required this.onSkills,
     this.onGit,
+    this.onProviders,
     this.onSwitchServer,
+    this.themeSetName = '',
+    this.onThemeSetChanged,
   });
 
   final ChatController controller;
@@ -2319,7 +3173,10 @@ class _FunctionDrawer extends StatelessWidget {
   final VoidCallback onChooseDirectory;
   final VoidCallback onSkills;
   final VoidCallback? onGit;
+  final VoidCallback? onProviders;
   final VoidCallback? onSwitchServer;
+  final String themeSetName;
+  final ValueChanged<String>? onThemeSetChanged;
 
   String _languageLabel(BuildContext context) => switch (languagePreference) {
     AppLanguagePreference.system => context.tr('跟随系统'),
@@ -2371,6 +3228,134 @@ class _FunctionDrawer extends StatelessWidget {
     }
   }
 
+  /// 思考级别选择器：off / low / medium / high / xhigh / max。
+  Future<void> _showThinkingLevelPicker(BuildContext context) async {
+    final current = controller.thinkingLevel;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Text(
+                sheetContext.tr('思考级别'),
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const Divider(height: 1),
+            for (final level in ChatController.thinkingLevels)
+              ListTile(
+                leading: Icon(
+                  current == level
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: current == level
+                      ? Theme.of(sheetContext).colorScheme.primary
+                      : null,
+                ),
+                title: Text(_thinkingLevelLabel(sheetContext, level)),
+                onTap: () => Navigator.pop(sheetContext, level),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (selected != null && selected != current) {
+      await controller.setThinkingLevel(selected);
+    }
+  }
+
+  String _thinkingLevelLabel(BuildContext context, String level) =>
+      switch (level) {
+        'off' => context.tr('关闭'),
+        'low' => context.tr('低'),
+        'medium' => context.tr('中'),
+        'high' => context.tr('高'),
+        'xhigh' => context.tr('极高'),
+        'max' => context.tr('最大'),
+        _ => level,
+      };
+
+  /// 主题选择器：拉取网页端主题集列表，选择后切换。
+  Future<void> _showThemePicker(BuildContext context) async {
+    final themes = await controller.api.getThemes();
+    if (!context.mounted) return;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Text(
+                sheetContext.tr('选择主题'),
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const Divider(height: 1),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.palette_outlined),
+                    title: Text(sheetContext.tr('默认')),
+                    trailing: themeSetName.isEmpty
+                        ? Icon(
+                            Icons.check_circle_rounded,
+                            color: Theme.of(sheetContext).colorScheme.primary,
+                          )
+                        : null,
+                    onTap: () => Navigator.pop(sheetContext, ''),
+                  ),
+                  for (final theme in themes)
+                    ListTile(
+                      leading: _themeSwatch(sheetContext, theme.accentLight),
+                      title: Text(theme.displayName),
+                      trailing: themeSetName == theme.name
+                          ? Icon(
+                              Icons.check_circle_rounded,
+                              color: Theme.of(sheetContext).colorScheme.primary,
+                            )
+                          : null,
+                      onTap: () => Navigator.pop(sheetContext, theme.name),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selected != null && selected != themeSetName) {
+      onThemeSetChanged?.call(selected);
+    }
+  }
+
+  /// 主题色块（使用主题的亮色 accent）。
+  Widget _themeSwatch(BuildContext context, String? hex) {
+    final color = colorFromHex(hex);
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        color: color ?? Theme.of(context).colorScheme.outlineVariant,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
@@ -2418,151 +3403,222 @@ class _FunctionDrawer extends StatelessWidget {
                     ],
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Material(
-                    color: Theme.of(context).colorScheme.surface,
-                    borderRadius: BorderRadius.circular(AppleRadius.panel),
-                    clipBehavior: Clip.antiAlias,
+                Expanded(
+                  child: SingleChildScrollView(
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        ListTile(
-                          leading: const Icon(Icons.folder_open_outlined),
-                          title: Text(context.tr('选择工作目录')),
-                          subtitle: Text(
-                            controller.draftCwd ?? context.tr('选择目录并开始新对话'),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Material(
+                            color: Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(
+                              AppleRadius.panel,
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: Column(
+                              children: [
+                                ListTile(
+                                  leading: const Icon(
+                                    Icons.folder_open_outlined,
+                                  ),
+                                  title: Text(context.tr('选择工作目录')),
+                                  subtitle: Text(
+                                    controller.draftCwd ??
+                                        context.tr('选择目录并开始新对话'),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: onChooseDirectory,
+                                ),
+                                const Divider(indent: 56),
+                                ListTile(
+                                  leading: const Icon(
+                                    Icons.auto_awesome_outlined,
+                                  ),
+                                  title: Text(context.tr('技能')),
+                                  subtitle: Text(
+                                    controller.loadingSkills
+                                        ? context.tr('正在读取已加载技能…')
+                                        : context.tr('{count} 个已加载技能', {
+                                            'count': controller.skills.length,
+                                          }),
+                                  ),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: onSkills,
+                                ),
+                                const Divider(indent: 56),
+                                ListTile(
+                                  leading: const Icon(Icons.commit_rounded),
+                                  title: Text(context.tr('Git 变更')),
+                                  subtitle: Text(
+                                    controller.draftCwd == null
+                                        ? context.tr('选择目录并开始新对话')
+                                        : context.tr('查看当前项目的变更'),
+                                  ),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: onGit,
+                                  enabled: onGit != null,
+                                ),
+                                const Divider(indent: 56),
+                                ListTile(
+                                  leading: const Icon(Icons.hub_outlined),
+                                  title: Text(context.tr('模型供应商')),
+                                  subtitle: Text(context.tr('配置 API Key 供应商')),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: onProviders,
+                                  enabled: onProviders != null,
+                                ),
+                              ],
+                            ),
                           ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: onChooseDirectory,
                         ),
-                        const Divider(indent: 56),
-                        ListTile(
-                          leading: const Icon(Icons.auto_awesome_outlined),
-                          title: Text(context.tr('技能')),
-                          subtitle: Text(
-                            controller.loadingSkills
-                                ? context.tr('正在读取已加载技能…')
-                                : context.tr('{count} 个已加载技能', {
-                                    'count': controller.skills.length,
-                                  }),
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: onSkills,
-                        ),
-                        const Divider(indent: 56),
-                        ListTile(
-                          leading: const Icon(Icons.commit_rounded),
-                          title: Text(context.tr('Git 变更')),
-                          subtitle: Text(
-                            controller.draftCwd == null
-                                ? context.tr('选择目录并开始新对话')
-                                : context.tr('查看当前项目的变更'),
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: onGit,
-                          enabled: onGit != null,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
-                  child: InkWell(
-                    onTap: onSwitchServer,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.dns_outlined,
-                          size: 16,
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                        const SizedBox(width: 7),
-                        Expanded(
-                          child: Text(
-                            server,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+                          child: InkWell(
+                            onTap: onSwitchServer,
+                            borderRadius: BorderRadius.circular(10),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.dns_outlined,
+                                  size: 16,
                                   color: Theme.of(context).colorScheme.outline,
                                 ),
-                          ),
-                        ),
-                        if (onSwitchServer != null) ...[
-                          const SizedBox(width: 6),
-                          Icon(
-                            Icons.swap_horiz_rounded,
-                            size: 16,
-                            color: Theme.of(context).colorScheme.outline,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Material(
-                    color: Theme.of(context).colorScheme.surface,
-                    borderRadius: BorderRadius.circular(AppleRadius.panel),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        SwitchListTile(
-                          value: dark,
-                          onChanged: onThemeModeChanged == null
-                              ? null
-                              : (enabled) => onThemeModeChanged!(
-                                  enabled ? ThemeMode.dark : ThemeMode.light,
+                                const SizedBox(width: 7),
+                                Expanded(
+                                  child: Text(
+                                    server,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.outline,
+                                        ),
+                                  ),
                                 ),
-                          secondary: Icon(
-                            dark
-                                ? Icons.dark_mode_outlined
-                                : Icons.light_mode_outlined,
+                                if (onSwitchServer != null) ...[
+                                  const SizedBox(width: 6),
+                                  Icon(
+                                    Icons.swap_horiz_rounded,
+                                    size: 16,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.outline,
+                                  ),
+                                ],
+                              ],
+                            ),
                           ),
-                          title: Text(context.tr(dark ? '深色模式' : '浅色模式')),
-                          subtitle: Text(context.tr('立即切换 App 的显示外观')),
                         ),
-                        const Divider(indent: 56),
-                        SwitchListTile(
-                          value: compactOutput,
-                          onChanged: onCompactOutputChanged,
-                          secondary: const Icon(Icons.compress_rounded),
-                          title: Text(context.tr('简洁输出')),
-                          subtitle: Text(context.tr('运行时隐藏中间过程，只显示最终答案')),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Material(
+                            color: Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(
+                              AppleRadius.panel,
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: Column(
+                              children: [
+                                SwitchListTile(
+                                  value: dark,
+                                  onChanged: onThemeModeChanged == null
+                                      ? null
+                                      : (enabled) => onThemeModeChanged!(
+                                          enabled
+                                              ? ThemeMode.dark
+                                              : ThemeMode.light,
+                                        ),
+                                  secondary: Icon(
+                                    dark
+                                        ? Icons.dark_mode_outlined
+                                        : Icons.light_mode_outlined,
+                                  ),
+                                  title: Text(
+                                    context.tr(dark ? '深色模式' : '浅色模式'),
+                                  ),
+                                  subtitle: Text(context.tr('立即切换 App 的显示外观')),
+                                ),
+                                const Divider(indent: 56),
+                                SwitchListTile(
+                                  value: compactOutput,
+                                  onChanged: onCompactOutputChanged,
+                                  secondary: const Icon(Icons.compress_rounded),
+                                  title: Text(context.tr('简洁输出')),
+                                  subtitle: Text(
+                                    context.tr('运行时隐藏中间过程，只显示最终答案'),
+                                  ),
+                                ),
+                                const Divider(indent: 56),
+                                ListTile(
+                                  leading: const Icon(
+                                    Icons.psychology_outlined,
+                                  ),
+                                  title: Text(context.tr('思考级别')),
+                                  subtitle: Text(
+                                    _thinkingLevelLabel(
+                                      context,
+                                      controller.thinkingLevel,
+                                    ),
+                                  ),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: () =>
+                                      _showThinkingLevelPicker(context),
+                                ),
+                                const Divider(indent: 56),
+                                ListTile(
+                                  leading: const Icon(Icons.language_rounded),
+                                  title: Text(context.tr('语言')),
+                                  subtitle: Text(_languageLabel(context)),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: onLanguagePreferenceChanged == null
+                                      ? null
+                                      : () => _showLanguagePicker(context),
+                                ),
+                                const Divider(indent: 56),
+                                ListTile(
+                                  leading: const Icon(Icons.palette_outlined),
+                                  title: Text(context.tr('主题')),
+                                  subtitle: Text(
+                                    themeSetName.isEmpty
+                                        ? context.tr('默认')
+                                        : themeSetName,
+                                  ),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: onThemeSetChanged == null
+                                      ? null
+                                      : () => _showThemePicker(context),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                        const Divider(indent: 56),
-                        ListTile(
-                          leading: const Icon(Icons.language_rounded),
-                          title: Text(context.tr('语言')),
-                          subtitle: Text(_languageLabel(context)),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: onLanguagePreferenceChanged == null
-                              ? null
-                              : () => _showLanguagePicker(context),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                          child: Text(
+                            compactOutput
+                                ? context.tr(
+                                    '中间消息不会绘制在聊天页，但当前服务仍会发送数据；服务端支持按需详情后才能进一步节省流量。',
+                                  )
+                                : context.tr('当前会实时显示思考、工具调用和中间消息。'),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-                  child: Text(
-                    compactOutput
-                        ? context.tr(
-                            '中间消息不会绘制在聊天页，但当前服务仍会发送数据；服务端支持按需详情后才能进一步节省流量。',
-                          )
-                        : context.tr('当前会实时显示思考、工具调用和中间消息。'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                const Spacer(),
                 Padding(
                   padding: const EdgeInsets.all(20),
                   child: Text(
@@ -2644,22 +3700,82 @@ class _SessionDrawerState extends State<_SessionDrawer> {
     return projects;
   }
 
+  /// 编辑项目备注（显示别名）。空字符串清除备注。
+  Future<void> _editProjectAlias(
+    BuildContext context,
+    String cwd,
+    String current,
+  ) async {
+    final controller = TextEditingController(text: current);
+    final alias = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(dialogContext.tr('项目备注')),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 40,
+          decoration: InputDecoration(
+            hintText: dialogContext.tr('输入备注名称（留空清除）'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(dialogContext.tr('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: Text(dialogContext.tr('保存')),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (alias == null || !mounted) return;
+    final ok = await widget.controller.setProjectAlias(cwd, alias);
+    if (ok || !mounted) return;
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(context.tr('备注保存失败，请稍后重试'))));
+  }
+
   @override
   Widget build(BuildContext context) {
     final grouped = <String, List<PiSession>>{};
     final query = _query;
     for (final session in widget.controller.sessions) {
+      final alias = widget.controller.projectAliases[session.cwd]?.trim();
       final matchesQuery =
           query.isEmpty ||
           session.cwd.toLowerCase().contains(query) ||
           session.titleFor(context.appLanguage).toLowerCase().contains(query) ||
-          session.id.toLowerCase().contains(query);
+          session.id.toLowerCase().contains(query) ||
+          (alias != null &&
+              alias.isNotEmpty &&
+              alias.toLowerCase().contains(query));
       if (matchesQuery) {
         grouped.putIfAbsent(session.cwd, () => []).add(session);
       }
     }
+    // Running sessions float to the top of their directory; directories with
+    // any running session are pinned above the rest (same as requested for
+    // the web client's "running projects on top").
+    for (final sessions in grouped.values) {
+      sessions.sort((a, b) {
+        if (a.running != b.running) return a.running ? -1 : 1;
+        return b.modified.compareTo(a.modified);
+      });
+    }
+    final controller = widget.controller;
     final directories = grouped.keys.toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      ..sort((a, b) {
+        final aRunning = controller.directoryHasRunning(a);
+        final bRunning = controller.directoryHasRunning(b);
+        if (aRunning != bRunning) return aRunning ? -1 : 1;
+        return a.toLowerCase().compareTo(b.toLowerCase());
+      });
     final pane = AppleGlass(
       borderRadius: widget.embedded
           ? BorderRadius.circular(0)
@@ -2728,12 +3844,15 @@ class _SessionDrawerState extends State<_SessionDrawer> {
                       separatorBuilder: (_, _) => const SizedBox(width: 6),
                       itemBuilder: (context, index) {
                         final cwd = _recentProjects[index];
-                        final name =
-                            cwd
-                                .split(RegExp(r'[/\\]'))
-                                .where((part) => part.isNotEmpty)
-                                .lastOrNull ??
-                            cwd;
+                        final alias = widget.controller.projectAliases[cwd]
+                            ?.trim();
+                        final name = (alias != null && alias.isNotEmpty)
+                            ? alias
+                            : (cwd
+                                      .split(RegExp(r'[/\\]'))
+                                      .where((part) => part.isNotEmpty)
+                                      .lastOrNull ??
+                                  cwd);
                         return ActionChip(
                           visualDensity: VisualDensity.compact,
                           avatar: const Icon(Icons.history, size: 15),
@@ -2782,6 +3901,12 @@ class _SessionDrawerState extends State<_SessionDrawer> {
                                   .split(RegExp(r'[/\\]'))
                                   .where((part) => part.isNotEmpty)
                                   .lastOrNull;
+                              final hasRunning = widget.controller
+                                  .directoryHasRunning(cwd);
+                              final alias = widget
+                                  .controller
+                                  .projectAliases[cwd]
+                                  ?.trim();
                               return ExpansionTile(
                                 key: PageStorageKey(cwd),
                                 initiallyExpanded: sessions.any(
@@ -2789,14 +3914,48 @@ class _SessionDrawerState extends State<_SessionDrawer> {
                                       session.id ==
                                       widget.controller.activeSessionId,
                                 ),
-                                leading: const Icon(Icons.folder_outlined),
-                                title: Text(
-                                  folderName ?? cwd,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                leading: hasRunning
+                                    ? const SizedBox.square(
+                                        dimension: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.folder_outlined),
+                                title: Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        (alias != null && alias.isNotEmpty)
+                                            ? alias
+                                            : (folderName ?? cwd),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    InkWell(
+                                      onTap: () => _editProjectAlias(
+                                        context,
+                                        cwd,
+                                        alias ?? '',
+                                      ),
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(3),
+                                        child: Icon(
+                                          Icons.edit_note_rounded,
+                                          size: 17,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 subtitle: Text(
                                   context.tr('{path} · {count} 个对话', {
@@ -3053,6 +4212,120 @@ class _ServerSwitcherSheetState extends State<ServerSwitcherSheet> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// 引用对话选择器：列出可选的会话，点选后返回选中的会话。
+class _SessionReferenceSheet extends StatefulWidget {
+  const _SessionReferenceSheet({
+    required this.sessions,
+    required this.language,
+  });
+
+  final List<PiSession> sessions;
+  final AppLanguage language;
+
+  @override
+  State<_SessionReferenceSheet> createState() => _SessionReferenceSheetState();
+}
+
+class _SessionReferenceSheetState extends State<_SessionReferenceSheet> {
+  String _query = '';
+
+  List<PiSession> get _filtered {
+    final q = _query.trim().toLowerCase();
+    final all = [...widget.sessions]
+      ..sort((a, b) => b.modified.compareTo(a.modified));
+    if (q.isEmpty) return all;
+    return all
+        .where(
+          (s) =>
+              s.titleFor(widget.language).toLowerCase().contains(q) ||
+              s.cwd.toLowerCase().contains(q),
+        )
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final items = _filtered;
+    return SafeArea(
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * .75,
+        ),
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+              child: Text(
+                context.tr('引用对话'),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: TextField(
+                onChanged: (value) => setState(() => _query = value),
+                decoration: InputDecoration(
+                  hintText: context.tr('搜索会话'),
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: items.isEmpty
+                  ? Center(
+                      child: Text(
+                        context.tr('没有找到匹配会话'),
+                        style: TextStyle(color: cs.onSurfaceVariant),
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: items.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final session = items[index];
+                        return ListTile(
+                          leading: session.running
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.chat_bubble_outline, size: 20),
+                          title: Text(
+                            session.titleFor(widget.language),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            session.cwd,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () => Navigator.pop(context, session),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -53,6 +53,10 @@ class ChatController extends ChangeNotifier {
   }
 
   final List<PiSession> sessions = [];
+
+  /// Project display aliases (备注) keyed by directory path.
+  final Map<String, String> projectAliases = {};
+  bool loadingProjectAliases = false;
   final List<ChatMessage> messages = [];
   final List<PiModel> models = [];
   final List<PiSkill> skills = [];
@@ -75,7 +79,114 @@ class ChatController extends ChangeNotifier {
   bool compacting = false;
   String? error;
   String? status;
+
+  // ── Goal collaboration mode (mirrors the web client's GoalBanner) ────
+  String? goalStatus; // idle | running | paused | blocked | complete
+  String? goalText;
+  int goalElapsedSeconds = 0;
   String? skillsError;
+
+  // ── Reconcile watchdog ──────────────────────────────────────────────
+  Timer? _reconcileTimer;
+  DateTime? _lastEventAt;
+  int _reconcileConsecutiveFailures = 0;
+  bool _reconciling = false;
+  bool _snapshotInFlight = false;
+
+  /// Called by the app when it resumes from background (WidgetsBindingObserver
+  /// didChangeAppLifecycleState → resumed). Triggers an immediate reconcile
+  /// so stale `running` flags are corrected before the user can tap anything.
+  void onAppResumed() {
+    if (running && activeSessionId != null) {
+      _reconcileNow();
+    }
+  }
+
+  void _startReconcileTimer() {
+    _reconcileTimer?.cancel();
+    _reconcileTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _reconcileNow(),
+    );
+  }
+
+  void _stopReconcileTimer() {
+    _reconcileTimer?.cancel();
+    _reconcileTimer = null;
+    _reconcileConsecutiveFailures = 0;
+  }
+
+  /// Probe the server for the real agent state. If the server says streaming
+  /// is false (or the wrapper is gone), the run is over and we can safely
+  /// clear the `running` flag.
+  Future<void> _reconcileNow() async {
+    final id = activeSessionId;
+    if (id == null || !running || _reconciling) return;
+    _reconciling = true;
+    try {
+      final state = await api.getAgentState(id);
+      if (_disposed || activeSessionId != id || !running) return;
+      if (state == null) {
+        // Network failure — count consecutive failures but don't kill running
+        // yet (user may be on flaky mobile data).
+        _reconcileConsecutiveFailures += 1;
+        // After 12 consecutive failures (~60s at 5s interval) treat the run
+        // as dead: the server wrapper is gone or unreachable.
+        if (_reconcileConsecutiveFailures >= 12) {
+          running = false;
+          status = null;
+          streamingMessage = null;
+          agentPhase = null;
+          liveToolSteps.clear();
+          _stopReconcileTimer();
+          error ??= _tr('连接中断，运行状态已重置');
+          _notify();
+          unawaited(_refreshRunSnapshot());
+        }
+        return;
+      }
+      _reconcileConsecutiveFailures = 0;
+      // GET /api/agent/[id] returns { running, state: <get_state payload> };
+      // the streaming flags live under `state`. `running == false` means the
+      // server wrapper is gone (idle-reaped) — the run is definitely over.
+      final live = state['running'] == true;
+      final inner = state['state'] is Map
+          ? Map<String, dynamic>.from(state['state'] as Map)
+          : const <String, dynamic>{};
+      final isStreaming = inner['isStreaming'] == true;
+      final isPromptRunning = inner['isPromptRunning'] == true;
+      final isCompacting = inner['isCompacting'] == true;
+      syncGoalStateFromProbe(inner);
+      if (!live || (!isStreaming && !isPromptRunning && !isCompacting)) {
+        // Run actually finished (or the wrapper is gone) but we missed the
+        // terminal event.
+        running = false;
+        status = null;
+        streamingMessage = null;
+        agentPhase = null;
+        liveToolSteps.clear();
+        _stopReconcileTimer();
+        _notify();
+        unawaited(_refreshRunSnapshot());
+        return;
+      }
+      // The SSE stream can silently stall (mobile NAT black-holing) while the
+      // server keeps the run alive. If we have not heard a single event for a
+      // long stretch, fall back to a fresh snapshot refresh so the UI does not
+      // show a permanently spinning run. This must NOT call _finishRun (which
+      // stops the reconcile timer); use the snapshot-only refresh instead.
+      // Reset the marker so a long-running task only refreshes once per
+      // minute, not every tick.
+      final lastEvent = _lastEventAt;
+      if (lastEvent != null &&
+          DateTime.now().difference(lastEvent) > const Duration(seconds: 60)) {
+        _lastEventAt = DateTime.now();
+        unawaited(_refreshRunSnapshot());
+      }
+    } finally {
+      _reconciling = false;
+    }
+  }
 
   /// Live tool calls of the current run, in execution order. Cleared when the
   /// run settles. Drives the real-time working panel in the chat.
@@ -140,6 +251,8 @@ class ChatController extends ChangeNotifier {
         ..clear()
         ..addAll(loaded);
       draftCwd ??= knownCwds.firstOrNull;
+      // Refresh project aliases in the background; failures degrade silently.
+      unawaited(loadProjectAliases());
     } catch (cause) {
       error = _errorText(cause);
       rethrow;
@@ -147,6 +260,57 @@ class ChatController extends ChangeNotifier {
       loadingSessions = false;
       _notify();
     }
+  }
+
+  /// Loads project display aliases (备注) from the server.
+  Future<void> loadProjectAliases() async {
+    if (loadingProjectAliases) return;
+    loadingProjectAliases = true;
+    try {
+      final aliases = await api.getProjectAliases();
+      projectAliases
+        ..clear()
+        ..addAll(aliases);
+      _notify();
+    } catch (_) {
+      // Alias load failure is non-fatal; degrade to folder names.
+    } finally {
+      loadingProjectAliases = false;
+    }
+  }
+
+  /// Sets or clears the display alias (备注) for a directory.
+  Future<bool> setProjectAlias(String cwd, String alias) async {
+    final ok = await api.setProjectAlias(cwd, alias);
+    if (ok) {
+      final trimmed = alias.trim();
+      if (trimmed.isEmpty) {
+        projectAliases.remove(cwd);
+      } else {
+        projectAliases[cwd] = trimmed;
+      }
+      _notify();
+    }
+    return ok;
+  }
+
+  /// True when the directory contains at least one running session.
+  bool directoryHasRunning(String cwd) =>
+      sessions.any((session) => session.cwd == cwd && session.running);
+
+  /// Flips the `running` flag on the session matching [id] (when present in
+  /// the local list) so the drawer's running pin / spinner reflect an active
+  /// run without waiting for a server refresh.
+  void _markSessionRunning(String id, bool value) {
+    final index = sessions.indexWhere((session) => session.id == id);
+    if (index < 0) return;
+    if (sessions[index].running == value) return;
+    sessions[index] = sessions[index].copyWith(running: value);
+  }
+
+  void _markActiveSessionRunning(bool value) {
+    final id = activeSessionId;
+    if (id != null) _markSessionRunning(id, value);
   }
 
   Future<void> loadModels(String cwd, {PiModel? preferred}) async {
@@ -216,6 +380,7 @@ class ChatController extends ChangeNotifier {
 
   Future<void> openSession(PiSession session) async {
     await _closeEvents();
+    _stopReconcileTimer();
     if (activeSessionId != session.id) {
       slashCommands.clear();
       slashCommandsForSessionId = null;
@@ -232,7 +397,13 @@ class ChatController extends ChangeNotifier {
     error = null;
     status = null;
     messages.clear();
+    if (running) {
+      _lastEventAt = DateTime.now();
+      _startReconcileTimer();
+    }
     notifyListeners();
+    unawaited(loadCollaborationMode(sessionId: session.id));
+    unawaited(loadThinkingLevel());
     try {
       // Fetch the session, model catalog, and skills in parallel; the latter
       // two only need the cwd and do not depend on the message payload.
@@ -268,6 +439,7 @@ class ChatController extends ChangeNotifier {
 
   Future<void> newChat(String cwd, {PiModel? model}) async {
     await _closeEvents();
+    _stopReconcileTimer();
     selectedSession = null;
     activeSessionId = null;
     _ensureSessionInFlight = null;
@@ -281,6 +453,7 @@ class ChatController extends ChangeNotifier {
     status = null;
     slashCommands.clear();
     slashCommandsForSessionId = null;
+    collaborationMode = 'normal';
     await Future.wait([loadModels(cwd, preferred: model), loadSkills(cwd)]);
     _notify();
   }
@@ -322,12 +495,16 @@ class ChatController extends ChangeNotifier {
     }
   }
 
+  /// Sends a message. When the agent is already running, the message is
+  /// enqueued instead of rejected: [queueMode] 'steer' interrupts the current
+  /// run, 'followUp' queues behind it (same as the web client's attach queue).
   Future<void> send(
     String text, {
     List<PiImageAttachment> images = const [],
+    String? queueMode,
   }) async {
     final message = text.trim();
-    if ((message.isEmpty && images.isEmpty) || running) return;
+    if (message.isEmpty && images.isEmpty) return;
     if (message.length > 200000) {
       error = _tr('消息过长，请分段发送');
       notifyListeners();
@@ -340,17 +517,34 @@ class ChatController extends ChangeNotifier {
         : images.length == 1
         ? _tr('[图片]')
         : _tr('[图片 × {count}]', {'count': images.length});
-    messages.add(
-      ChatMessage(
-        role: 'user',
-        text: message.isEmpty
-            ? imageLabel
-            : imageLabel.isEmpty
-            ? message
-            : '$message\n\n$imageLabel',
-      ),
-    );
+    final queued = running && queueMode != null;
+    final textContent = message.isEmpty
+        ? imageLabel
+        : imageLabel.isEmpty
+        ? message
+        : '$message\n\n$imageLabel';
+    messages.add(ChatMessage(role: 'user', text: textContent, queued: queued));
+    if (queued) {
+      // Enqueue against the live run; the run itself is untouched.
+      try {
+        final sessionId = await _ensureSession();
+        await api.sendPrompt(
+          sessionId,
+          message,
+          images: images,
+          streamingBehavior: queueMode == 'followUp' ? 'followUp' : 'steer',
+        );
+      } catch (cause) {
+        messages.removeLast();
+        error = _errorText(cause);
+      }
+      _notify();
+      return;
+    }
     running = true;
+    _lastEventAt = DateTime.now();
+    _startReconcileTimer();
+    _markActiveSessionRunning(true);
     notifyListeners();
 
     try {
@@ -359,6 +553,7 @@ class ChatController extends ChangeNotifier {
       await api.sendPrompt(sessionId, message, images: images);
     } catch (cause) {
       running = false;
+      _stopReconcileTimer();
       error = _errorText(cause);
       _notify();
     }
@@ -437,6 +632,7 @@ class ChatController extends ChangeNotifier {
             compacting = false;
             running = false;
             status = null;
+            _stopReconcileTimer();
             notifyListeners();
           }
         case 'reload':
@@ -539,6 +735,205 @@ class ChatController extends ChangeNotifier {
     return sessionId;
   }
 
+  /// Current collaboration mode (normal / plan / goal). Mirrors the web
+  /// client's `/api/modes` per-session setting.
+  String collaborationMode = 'normal';
+
+  /// Current thinking level (off / low / medium / high / xhigh / max).
+  String thinkingLevel = 'off';
+
+  static const thinkingLevels = [
+    'off',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+    'max',
+  ];
+
+  /// Reads the current thinking level from the server state.
+  Future<void> loadThinkingLevel() async {
+    final id = activeSessionId;
+    if (id == null) return;
+    final state = await api.getAgentState(id);
+    if (_disposed || state == null) return;
+    // Ignore stale responses after a quick session switch.
+    if (id != activeSessionId) return;
+    final raw = state['state'] is Map
+        ? (state['state'] as Map)['thinkingLevel']
+        : null;
+    if (raw is String && raw.isNotEmpty) {
+      thinkingLevel = raw;
+      _notify();
+    }
+  }
+
+  /// Sets the thinking level for the active session.
+  Future<void> setThinkingLevel(String level) async {
+    if (!thinkingLevels.contains(level)) return;
+    final id = activeSessionId;
+    if (id == null) return;
+    try {
+      await api.sendAgentCommand(id, {
+        'type': 'set_thinking_level',
+        'level': level,
+      });
+      thinkingLevel = level;
+      _notify();
+    } catch (cause) {
+      error = _errorText(cause);
+      _notify();
+    }
+  }
+
+  Uri _modesUri({String? session}) => Uri.parse(api.profile.baseUrl).replace(
+    path:
+        '${Uri.parse(api.profile.baseUrl).path == '/' ? '' : Uri.parse(api.profile.baseUrl).path}/api/modes',
+    queryParameters: {'session': ?session},
+  );
+
+  /// Loads the current collaboration mode for a session (or the global
+  /// default when no session is active yet).
+  Future<void> loadCollaborationMode({String? sessionId}) async {
+    final session = sessionId ?? activeSessionId;
+    try {
+      // Reuse the api's HTTP client via a raw GET.
+      final response = await api.getRaw(_modesUri(session: session));
+      if (_disposed || response == null) return;
+      // Ignore stale responses after a quick session switch.
+      if (session != null && session != activeSessionId) return;
+      final raw = response['collaborationMode'];
+      if (raw is String && const {'normal', 'plan', 'goal'}.contains(raw)) {
+        collaborationMode = raw;
+        _notify();
+      }
+    } catch (_) {
+      // Mode load failure is non-fatal; defaults to normal.
+    }
+  }
+
+  /// Switches the collaboration mode (normal / plan / goal) for the active
+  /// session (or global default when no session is active). Returns false on
+  /// failure so callers can skip success toasts.
+  Future<bool> setCollaborationMode(String mode) async {
+    if (!const {'normal', 'plan', 'goal'}.contains(mode)) return false;
+    final session = activeSessionId;
+    try {
+      final uri = _modesUri(session: session);
+      final ok = await api.putJson(uri, {'collaborationMode': mode});
+      if (!ok) {
+        error = _tr('切换协作模式失败');
+        _notify();
+        return false;
+      }
+      collaborationMode = mode;
+      _notify();
+      return true;
+    } catch (cause) {
+      error = _errorText(cause);
+      _notify();
+      return false;
+    }
+  }
+
+  // ── Goal collaboration mode ─────────────────────────────────────────
+
+  /// Starts a goal run with the given text (creates a session first if the
+  /// user has not sent anything yet). Mirrors the web client's goal flow.
+  Future<bool> startGoal(String goalText) async {
+    final text = goalText.trim();
+    if (text.isEmpty) return false;
+    try {
+      final sessionId = await _ensureSession();
+      final data = await api.sendAgentCommand(sessionId, {
+        'type': 'goal_start',
+        'goalText': text,
+      });
+      final state = data is Map ? data['goalState'] : null;
+      if (state is Map) {
+        _applyGoalState(Map<String, dynamic>.from(state));
+      } else {
+        goalStatus = 'running';
+        goalText = text;
+      }
+      collaborationMode = 'goal';
+      _notify();
+      return true;
+    } catch (cause) {
+      error = _errorText(cause);
+      _notify();
+      return false;
+    }
+  }
+
+  Future<void> pauseGoal() => _sendGoalCommand('goal_pause');
+  Future<void> resumeGoal() => _sendGoalCommand('goal_resume');
+  Future<void> stopGoal() => _sendGoalCommand('goal_stop');
+
+  Future<void> _sendGoalCommand(String type) async {
+    final id = activeSessionId;
+    if (id == null) return;
+    try {
+      final data = await api.sendAgentCommand(id, {'type': type});
+      final state = data is Map ? data['goalState'] : null;
+      if (state is Map) {
+        _applyGoalState(Map<String, dynamic>.from(state));
+      }
+      _notify();
+    } catch (cause) {
+      error = _errorText(cause);
+      _notify();
+    }
+  }
+
+  void _applyGoalState(Map<String, dynamic> state) {
+    goalStatus = state['status']?.toString();
+    goalText = state['goalText']?.toString();
+    final elapsed = state['timeUsedSeconds'];
+    goalElapsedSeconds = elapsed is num ? elapsed.toInt() : 0;
+    if (goalStatus == 'idle' || goalStatus == 'complete') {
+      // Goal ended; keep the banner hidden after the run settles.
+      goalText = null;
+    }
+  }
+
+  /// Syncs goal state from a reconcile probe (get_state.goalState).
+  void syncGoalStateFromProbe(Map<String, dynamic>? state) {
+    if (state == null) return;
+    final goal = state['goalState'];
+    if (goal is Map) {
+      _applyGoalState(Map<String, dynamic>.from(goal));
+    }
+  }
+
+  /// Builds a compact text reference to a past conversation, suitable for
+  /// insertion into the composer. Includes the session title and the last few
+  /// message texts (bounded), so the model receives enough context.
+  Future<String?> buildSessionReference(PiSession session) async {
+    try {
+      final snapshot = await api.getSession(session.id);
+      final parts = <String>[];
+      final title = session.titleFor(_language);
+      parts.add('【引用对话：$title】');
+      var chars = 0;
+      for (final message in snapshot.messages.reversed) {
+        final text = message.text.trim();
+        if (text.isEmpty) continue;
+        final roleLabel = message.role == 'user' ? '用户' : '助手';
+        final line = '$roleLabel：$text';
+        parts.add(line);
+        chars += line.length;
+        if (chars >= 1600) break;
+      }
+      if (parts.length <= 1) {
+        return '【引用对话：$title】（对话内容为空）';
+      }
+      return parts.join('\n\n');
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> stop() async {
     final id = activeSessionId;
     if (id == null) return;
@@ -548,6 +943,7 @@ class ChatController extends ChangeNotifier {
         compacting = false;
         running = false;
         status = null;
+        _stopReconcileTimer();
         _notify();
       } else {
         await api.abort(id);
@@ -645,6 +1041,7 @@ class ChatController extends ChangeNotifier {
       _reconnectTimer = null;
       running = false;
       status = null;
+      _stopReconcileTimer();
       error ??= _tr('连接失败，请检查网络后重试');
       notifyListeners();
       return;
@@ -668,6 +1065,7 @@ class ChatController extends ChangeNotifier {
 
   void _handleEvent(Map<String, dynamic> event) {
     if (_disposed) return;
+    _lastEventAt = DateTime.now();
     final type = event['type']?.toString();
     if (type == 'connected') {
       if (!(_connected?.isCompleted ?? true)) _connected!.complete();
@@ -717,6 +1115,7 @@ class ChatController extends ChangeNotifier {
         streamingMessage = null;
         agentPhase = null;
         liveToolSteps.clear();
+        _markActiveSessionRunning(false);
         unawaited(_finishRun());
       case 'tool_execution_start':
         final name = event['toolName']?.toString() ?? _tr('工具');
@@ -724,7 +1123,8 @@ class ChatController extends ChangeNotifier {
         liveToolSteps.add(
           LiveToolStep(
             name: name,
-            toolCallId: event['toolCallId']?.toString() ??
+            toolCallId:
+                event['toolCallId']?.toString() ??
                 '${liveToolSteps.length}-$name',
             arguments: event['arguments'] is Map
                 ? Map<String, dynamic>.from(event['arguments'] as Map)
@@ -776,42 +1176,53 @@ class ChatController extends ChangeNotifier {
     return text == null || text.isEmpty ? null : text;
   }
 
+  /// Full run-settle path: stops the reconcile watchdog, then refreshes the
+  /// conversation snapshot. Called from prompt_done / agent_settled events.
   Future<void> _finishRun() async {
+    _stopReconcileTimer();
+    await _refreshRunSnapshot();
+  }
+
+  /// Refreshes the conversation + session list from the server. Deduplicated
+  /// so concurrent callers (prompt_done + agent_settled + reconcile) do not
+  /// fire overlapping requests or race on `messages`/`sessions`.
+  Future<void> _refreshRunSnapshot() async {
+    if (_snapshotInFlight) return;
     final id = activeSessionId;
-    if (id != null) {
-      try {
-        // Refresh the conversation and the session list in parallel; neither
-        // depends on the other.
-        final results = await Future.wait<Object?>([
-          api.getSession(id),
-          api.getSessions(),
-        ]);
-        // The user may have switched sessions or disposed the controller while
-        // these requests were in flight; never let a stale snapshot clobber
-        // the active conversation.
-        if (_disposed || id != activeSessionId) return;
-        final snapshot = results[0] as SessionSnapshot;
-        messages
-          ..clear()
-          ..addAll(snapshot.messages);
-        if (snapshot.model != null) selectedModel = snapshot.model;
-        final loaded = (results[1] as List<PiSession>);
-        loaded.sort((a, b) {
-          final byDirectory = a.cwd.toLowerCase().compareTo(
-            b.cwd.toLowerCase(),
-          );
-          return byDirectory != 0
-              ? byDirectory
-              : b.modified.compareTo(a.modified);
-        });
-        sessions
-          ..clear()
-          ..addAll(loaded);
-        selectedSession = sessions.where((item) => item.id == id).firstOrNull;
-      } catch (cause) {
-        if (_disposed) return;
-        error ??= _errorText(cause);
-      }
+    if (id == null) return;
+    _snapshotInFlight = true;
+    try {
+      // Refresh the conversation and the session list in parallel; neither
+      // depends on the other.
+      final results = await Future.wait<Object?>([
+        api.getSession(id),
+        api.getSessions(),
+      ]);
+      // The user may have switched sessions or disposed the controller while
+      // these requests were in flight; never let a stale snapshot clobber
+      // the active conversation.
+      if (_disposed || id != activeSessionId) return;
+      final snapshot = results[0] as SessionSnapshot;
+      messages
+        ..clear()
+        ..addAll(snapshot.messages);
+      if (snapshot.model != null) selectedModel = snapshot.model;
+      final loaded = (results[1] as List<PiSession>);
+      loaded.sort((a, b) {
+        final byDirectory = a.cwd.toLowerCase().compareTo(b.cwd.toLowerCase());
+        return byDirectory != 0
+            ? byDirectory
+            : b.modified.compareTo(a.modified);
+      });
+      sessions
+        ..clear()
+        ..addAll(loaded);
+      selectedSession = sessions.where((item) => item.id == id).firstOrNull;
+    } catch (cause) {
+      if (_disposed) return;
+      error ??= _errorText(cause);
+    } finally {
+      _snapshotInFlight = false;
     }
     if (!_disposed) notifyListeners();
   }
@@ -838,6 +1249,7 @@ class ChatController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _stopReconcileTimer();
     // Invalidate any in-flight event stream so late callbacks (onDone, timer
     // retries) are discarded instead of touching disposed state.
     _streamGeneration += 1;

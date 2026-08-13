@@ -28,6 +28,16 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
   bool _compactOutput = true;
   AppLanguagePreference _languagePreference = AppLanguagePreference.system;
 
+  /// Selected web theme set name ('' = built-in default). Persisted locally.
+  String _themeSetName = '';
+
+  /// Resolved CSS vars for the selected theme set (cached per mode).
+  Map<String, String> _themeVarsLight = const {};
+  Map<String, String> _themeVarsDark = const {};
+
+  /// Guards against stale async theme-var loads (quick theme A→B switching).
+  int _themeLoadGeneration = 0;
+
   AppLanguage get _language => resolveAppLanguage(
     _languagePreference,
     WidgetsBinding.instance.platformDispatcher.locales,
@@ -56,6 +66,7 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
         (value) => value.name == preferences.getString('pi-language'),
         orElse: () => AppLanguagePreference.system,
       );
+      _themeSetName = preferences.getString('pi-theme-set') ?? '';
     });
     // The controller may be created later (concurrent _restore); the restored
     // language is re-applied when the controller is handed over.
@@ -66,6 +77,30 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
     setState(() => _themeMode = mode);
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString('pi-theme-mode', mode.name);
+  }
+
+  /// Switches the web theme set ('' = built-in default). Resolves both
+  /// variants and caches the CSS vars so the light/dark themes update.
+  Future<void> _setThemeSet(String name) async {
+    final generation = ++_themeLoadGeneration;
+    setState(() {
+      _themeSetName = name;
+      _themeVarsLight = const {};
+      _themeVarsDark = const {};
+    });
+    final controller = _controller;
+    if (name.isNotEmpty && controller != null) {
+      final light = await controller.api.getThemeVars(name, dark: false);
+      final dark = await controller.api.getThemeVars(name, dark: true);
+      // A newer selection (or server switch) superseded this load — ignore.
+      if (!mounted || generation != _themeLoadGeneration) return;
+      setState(() {
+        _themeVarsLight = light ?? const {};
+        _themeVarsDark = dark ?? const {};
+      });
+    }
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('pi-theme-set', name);
   }
 
   Future<void> _setCompactOutput(bool enabled) async {
@@ -88,6 +123,14 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
     }
     setState(() {});
     _controller?.setLanguage(_language);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _controller?.onAppResumed();
+    }
   }
 
   Future<void> _restore() async {
@@ -114,6 +157,21 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
     // Apply the restored language preference to the fresh controller in case
     // _restoreDisplayPreferences completed before it was created.
     controller?.setLanguage(_language);
+    _loadThemeVars(controller);
+  }
+
+  /// Loads and caches the selected theme set's light/dark CSS vars.
+  Future<void> _loadThemeVars(ChatController? controller) async {
+    final name = _themeSetName;
+    if (name.isEmpty || controller == null) return;
+    final generation = ++_themeLoadGeneration;
+    final light = await controller.api.getThemeVars(name, dark: false);
+    final dark = await controller.api.getThemeVars(name, dark: true);
+    if (!mounted || generation != _themeLoadGeneration) return;
+    setState(() {
+      _themeVarsLight = light ?? const {};
+      _themeVarsDark = dark ?? const {};
+    });
   }
 
   Future<void> _login(ServerProfile profile) async {
@@ -135,6 +193,7 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
       _controller = controller;
     });
     controller.setLanguage(_language);
+    _loadThemeVars(controller);
   }
 
   /// Disconnects the current session only; the saved server list stays intact
@@ -172,6 +231,7 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
       _controller = controller;
     });
     controller.setLanguage(_language);
+    _loadThemeVars(controller);
   }
 
   String _errorTextForSwitch() =>
@@ -226,8 +286,12 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
         GlobalCupertinoLocalizations.delegate,
       ],
       themeMode: _themeMode,
-      theme: buildAppleTheme(Brightness.light),
-      darkTheme: buildAppleTheme(Brightness.dark),
+      theme: _themeVarsLight.isEmpty
+          ? buildAppleTheme(Brightness.light)
+          : buildThemeFromVars(_themeVarsLight, dark: false),
+      darkTheme: _themeVarsDark.isEmpty
+          ? buildAppleTheme(Brightness.dark)
+          : buildThemeFromVars(_themeVarsDark, dark: true),
       builder: (context, child) => AppLanguageScope(
         language: language,
         preference: _languagePreference,
@@ -262,6 +326,8 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
               onCompactOutputChanged: _setCompactOutput,
               languagePreference: _languagePreference,
               onLanguagePreferenceChanged: _setLanguagePreference,
+              themeSetName: _themeSetName,
+              onThemeSetChanged: _setThemeSet,
             ),
     );
   }
