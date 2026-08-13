@@ -1328,7 +1328,8 @@ class _ChatScreenState extends State<ChatScreen> {
             processMessages: processMessages,
             messageCount: processMessageCount,
             toolCallCount: toolCallCount,
-            defaultExpanded: !widget.compactOutput,
+            // 默认展开 tabs 块状步骤（对齐网页端 ProcessGroup 展开态）
+            defaultExpanded: true,
             onLoadThinking: _loadThinking,
             thinkingVertical: !widget.compactOutput,
           ),
@@ -4547,7 +4548,9 @@ class _FunctionDrawer extends StatelessWidget {
                                           width: 18,
                                           height: 18,
                                           decoration: BoxDecoration(
-                                            color: accent,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.primary,
                                             shape: BoxShape.circle,
                                           ),
                                         ),

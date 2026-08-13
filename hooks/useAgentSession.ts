@@ -993,7 +993,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       if (showLoading) setLoading(true);
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`);
+      // 超时兜底：服务端异常/大会话卡住时 15s 后结束 loading，避免“永远加载中”
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      let res: Response;
+      try {
+        res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`, {
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       if (res.status === 404) {
         if (showLoading) {
           setData(null);
@@ -1031,7 +1041,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (!includeState) return null;
 
       try {
-        const stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
+        const stateController = new AbortController();
+        const stateTimer = setTimeout(() => stateController.abort(), 10000);
+        let stateRes: Response;
+        try {
+          stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`, {
+            signal: stateController.signal,
+          });
+        } finally {
+          clearTimeout(stateTimer);
+        }
         if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
         const agentState = await stateRes.json() as { running: boolean; state?: AgentStateResponse };
         if (sessionIdRef.current !== sid) return null;

@@ -543,7 +543,9 @@ class ChatController extends ChangeNotifier {
       api.createDirectory(parentPath, name);
 
   Future<void> openSession(PiSession session) async {
-    await _closeEvents();
+    // 同步部分：立即切换会话状态（不再 await _closeEvents —— 旧 SSE 订阅
+    // cancel 可能挂起，导致会话“一直加载中”/输入框禁用）。
+    unawaited(_closeEvents());
     _stopReconcileTimer();
     if (activeSessionId != session.id) {
       slashCommands.clear();
@@ -603,7 +605,7 @@ class ChatController extends ChangeNotifier {
   }
 
   Future<void> newChat(String cwd, {PiModel? model}) async {
-    await _closeEvents();
+    unawaited(_closeEvents());
     _stopReconcileTimer();
     selectedSession = null;
     activeSessionId = null;

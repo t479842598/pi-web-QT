@@ -89,6 +89,15 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     return _projectLabel(cwd);
   }
 
+  /// 卡片底部路径：有备注时显示真实目录名（原来的名称），没备注显示完整路径。
+  String _pathLabel(String? projectRoot, String cwd) {
+    final root = projectRoot ?? cwd;
+    final hasAlias = _projectAliases[projectRoot]?.isNotEmpty == true ||
+        _projectAliases[cwd]?.isNotEmpty == true;
+    if (hasAlias) return _projectLabel(root);
+    return root;
+  }
+
   Future<void> _loadPinned() async {
     final preferences = await SharedPreferences.getInstance();
     final ids = preferences.getStringList('pi-pinned-sessions') ?? const [];
@@ -406,7 +415,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   Widget _buildSessionCard(BuildContext context, PiSession s) {
     final scheme = Theme.of(context).colorScheme;
     final pinned = _pinnedIds.contains(s.id);
-    final alias = _aliasOf(s.projectRoot, s.cwd);
+    final pathLabel = _pathLabel(s.projectRoot, s.cwd);
     final branch = s.worktreeBranch;
     final isFork = s.parentSession != null && s.parentSession!.isNotEmpty;
     return Padding(
@@ -429,8 +438,10 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
-                        widget.accent,
-                        widget.accent.withValues(alpha: .65),
+                        Theme.of(context).colorScheme.primary,
+                        Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: .65),
                       ],
                     ),
                     borderRadius: BorderRadius.circular(10),
@@ -491,7 +502,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                         children: [
                           Flexible(
                             child: Text(
-                              alias,
+                              pathLabel,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
