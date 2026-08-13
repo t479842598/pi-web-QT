@@ -1,0 +1,163 @@
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
+
+use crate::keyring;
+
+pub const DEFAULT_LOCAL_URL: &str = "http://127.0.0.1:30141";
+pub const DEFAULT_USERNAME: &str = "pi";
+const CONFIG_FILE: &str = "config.json";
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Server {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub username: String,
+    /// keyring 不可用时的明文降级（仅 Linux 无 Secret Service 等场景）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_inline: Option<String>,
+    #[serde(default)]
+    pub has_password: bool,
+    #[serde(default)]
+    pub last_used_at: Option<u64>,
+    /// 是否为自动发现的本地服务器条目（由启动路由自动 upsert）
+    #[serde(default)]
+    pub is_local: bool,
+}
+
+impl Server {
+    /// 取密码：优先 keyring，降级 inline。
+    pub fn password(&self) -> Option<String> {
+        if !self.has_password {
+            return None;
+        }
+        // inline 降级值优先（正常路径 set_password 成功后 inline 会被清空，
+        // 仅当 keyring 不可用或测试构造时存在）
+        if let Some(inline) = &self.password_inline {
+            return Some(inline.clone());
+        }
+        keyring::get(&self.id).ok().filter(|p| !p.is_empty())
+    }
+
+    /// 写入密码：keyring 成功则不落明文；失败降级 inline。
+    pub fn set_password(&mut self, password: &str) {
+        if password.is_empty() {
+            self.has_password = false;
+            self.password_inline = None;
+            let _ = keyring::delete(&self.id);
+            return;
+        }
+        self.has_password = true;
+        match keyring::set(&self.id, password) {
+            Ok(()) => self.password_inline = None,
+            Err(e) => {
+                eprintln!("[desktop] keyring 不可用，降级明文存储: {e}");
+                self.password_inline = Some(password.to_string());
+            }
+        }
+    }
+
+    pub fn clear_password(&mut self) {
+        self.has_password = false;
+        self.password_inline = None;
+        let _ = keyring::delete(&self.id);
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Config {
+    pub servers: Vec<Server>,
+    #[serde(default)]
+    pub last_server_id: Option<String>,
+    /// 本地无服务时是否允许自动拉起 pi-web CLI
+    #[serde(default = "default_true")]
+    pub local_auto_start: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Config {
+    pub fn path(app: &AppHandle) -> PathBuf {
+        app.path()
+            .app_config_dir()
+            .unwrap_or_else(|_| std::env::temp_dir())
+            .join(CONFIG_FILE)
+    }
+
+    pub fn load(app: &AppHandle) -> Config {
+        Self::load_from(&Self::path(app))
+    }
+
+    pub fn load_from(path: &PathBuf) -> Config {
+        match fs::read_to_string(path) {
+            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+            Err(_) => Config::default(),
+        }
+    }
+
+    pub fn save(&self, app: &AppHandle) -> Result<(), String> {
+        self.save_to(&Self::path(app))
+    }
+
+    pub fn save_to(&self, path: &PathBuf) -> Result<(), String> {
+        if let Some(dir) = path.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, &json).map_err(|e| e.to_string())?;
+        fs::rename(&tmp, path).map_err(|e| e.to_string())
+    }
+
+    pub fn find(&self, id: &str) -> Option<&Server> {
+        self.servers.iter().find(|s| s.id == id)
+    }
+
+    pub fn find_mut(&mut self, id: &str) -> Option<&mut Server> {
+        self.servers.iter_mut().find(|s| s.id == id)
+    }
+
+    /// 本地默认服务器条目（不存在则创建）。
+    pub fn ensure_local(&mut self) -> &mut Server {
+        if let Some(idx) = self.servers.iter().position(|s| s.is_local) {
+            return &mut self.servers[idx];
+        }
+        let srv = Server {
+            id: "local".to_string(),
+            name: "本机 Pi Web".to_string(),
+            base_url: DEFAULT_LOCAL_URL.to_string(),
+            username: DEFAULT_USERNAME.to_string(),
+            password_inline: None,
+            has_password: false,
+            last_used_at: None,
+            is_local: true,
+        };
+        self.servers.push(srv);
+        self.servers.last_mut().unwrap()
+    }
+
+    pub fn remove(&mut self, id: &str) {
+        self.servers.retain(|s| s.id != id);
+        if self.last_server_id.as_deref() == Some(id) {
+            self.last_server_id = None;
+        }
+    }
+
+    pub fn touch(&mut self, id: &str) {
+        self.last_server_id = Some(id.to_string());
+        if let Some(s) = self.find_mut(id) {
+            s.last_used_at = Some(now_ms());
+        }
+    }
+}
+
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}

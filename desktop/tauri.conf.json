@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Pi Web",
+  "version": "0.9.27",
+  "identifier": "com.piweb.desktop",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Pi Web 桌面端",
+    "longDescription": "Pi coding agent 的桌面工作台：自动连接本机或远程 Pi Web 服务，网页端/手机端数据天然同步。"
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/t479842598/pi-web-QT/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3RDZFOTFEMjhGOThCODYKUldTR2kva29IZW5XMTJ3RzJFcDcvVlY3SEZIYU1FRk5RMzlScWhWTnpUcUFTNFNmOTBPSzFEaW4K"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+[package]
+name = "pi-web-desktop"
+version = "0.9.26"
+description = "Pi Web 桌面端（Tauri 2 瘦壳）：自动连接本机或远程 Pi Web 服务"
+authors = ["pi-web"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "pi_web_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = { version = "2", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "2"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+dirs = "6"
+
+# keyring 仅桌面 + iOS（Android 无 Secret Service/Keychain，改用明文降级存储）
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+[features]
+default = []
+# 发布打包时启用（需 tauri.conf.json 配好 updater.pubkey，且 CI 注入 TAURI_SIGNING_PRIVATE_KEY）
+updater = ["dep:tauri-plugin-updater"]
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

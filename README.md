@@ -244,9 +244,13 @@ bin/pi-web.js   生产 Web 服务 CLI 入口
 docs/           部署说明、截图与功能文档
 ```
 
-## Web-only 说明
+## 桌面端与移动端
 
-本仓库不含 Electron 主进程、安装向导或桌面端打包依赖。请使用浏览器访问部署后的 Pi Web 服务。原生移动端（Android/iOS）打包见 [mobile-release workflow](./.github/workflows/mobile-release.yml)。
+- **桌面端（desktop/）**：Tauri 2 壳（macOS / Windows / Linux）。启动进入连接管理（填写 URL+密码 / 获取本机链接 / 一键启动本机 pi-web），主窗口菜单栏「服务器」来回切换，支持多窗口多服务器。详见 [`desktop/README.md`](./desktop/README.md)。
+- **移动端 mobile/（Flutter）**：已发布的客户端，Android / iOS，打包名 **pi-web**。
+- **移动端 mobile2/（Flutter 新版）**：基于 mobile/ 演进的新客户端，Android / iOS，打包名 **pi-web-new**。
+
+三端连接同一 Pi Web 实例时，会话/模型/MCP/插件/Skills/看板全部天然同步（数据集中在服务端 `~/.pi/agent/`）。版本号统一跟随网页端（`package.json`）：打 `v*` tag 触发 [`release-all.yml`](./.github/workflows/release-all.yml) 一次产出 mobile（pi-web-*）、mobile2（pi-web-new-*）、desktop 三平台全部安装包；本地可用 `node scripts/sync-version.mjs` 同步三端版本号。
 
 ## 许可证
 

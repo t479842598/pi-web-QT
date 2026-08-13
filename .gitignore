@@ -86,3 +86,16 @@ ref-repos
 .kunsdd/
 .tmp-*.py
 *.tgz
+
+# desktop (Tauri)
+/desktop/target/
+/desktop/gen/
+/desktop/.tauri/
+
+# updater signing keys (private — never commit)
+/desktop/.keys/
+
+# Tauri mobile artifacts
+/pi-web-new-*.apk
+/pi-web-new-*.ipa
+/desktop/node_modules/

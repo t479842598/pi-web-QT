@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pi Web — 连接管理</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">π</div>
+        <div>
+          <h1>Pi Web 桌面端</h1>
+          <p class="sub">连接本机或远程 Pi Web，多端数据自动同步</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="btn-update" class="ghost" title="检查更新">检查更新</button>
+        <button id="btn-quit" class="ghost danger" title="退出应用">退出</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- 本地状态 -->
+      <section class="card local-card">
+        <div class="card-head">
+          <h2>本机运行环境</h2>
+          <span id="local-badge" class="badge probing">检测中…</span>
+        </div>
+        <p id="local-desc" class="desc">正在探测本机 Pi Web 服务…</p>
+        <div class="local-actions">
+          <button id="btn-start-local" class="primary" disabled>
+            <span class="dot"></span>启动本机 Pi Web
+          </button>
+          <label class="switch-row" title="本机无服务时自动拉起 pi-web CLI">
+            <input type="checkbox" id="chk-auto" checked />
+            <span class="switch"></span>
+            <span>无服务时自动拉起</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- 添加服务器 -->
+      <section class="card">
+        <div class="card-head"><h2>添加 / 连接服务器</h2></div>
+        <form id="form-server" autocomplete="off">
+          <div class="field">
+            <label for="inp-name">名称（可选）</label>
+            <input id="inp-name" type="text" placeholder="例如：云端 / 办公网" />
+          </div>
+          <div class="field">
+            <label for="inp-url">服务器地址</label>
+            <div class="url-row">
+              <input id="inp-url" type="text" placeholder="http://127.0.0.1:30141 或 https://pi.example.com" required />
+              <button type="button" id="btn-get-local" class="ghost mini" title="自动探测本机运行的 Pi Web 服务并填入地址">获取本机链接</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="inp-pass">密码（可选，未设密码留空）</label>
+            <input id="inp-pass" type="password" placeholder="PI_WEB_PASSWORD" autocomplete="new-password" />
+          </div>
+          <div class="form-foot">
+            <span id="form-hint" class="hint"></span>
+            <button type="submit" class="primary">连接</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- 服务器列表 -->
+      <section class="card">
+        <div class="card-head"><h2>已保存的服务器</h2><span id="list-count" class="count"></span></div>
+        <ul id="server-list" class="server-list"></ul>
+        <p id="list-empty" class="empty">还没有保存的服务器</p>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span id="foot-version">Pi Web Desktop</span>
+      <span class="sep">·</span>
+      <span>密码存储在系统钥匙串，不落盘明文</span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

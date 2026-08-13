@@ -412,6 +412,24 @@ export function AppShell() {
   // (it depends on selectedSession) can never interfere.
   const handleSelectSessionRef = useRef<(session: SessionInfo, isRestore?: boolean) => void>(() => {});
   useEffect(() => { handleSelectSessionRef.current = handleSelectSession; }, [handleSelectSession]);
+
+  // Client-built transient SessionInfo (new session / fork / tab restore) lacks
+  // the server-computed projectRoot and/or name. Hydrate it from the session
+  // list so the title shows the real name and worktree switching works.
+  const hydrateSelectedSession = useCallback((sessionId: string) => {
+    void fetch("/api/sessions")
+      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
+      .then((d) => {
+        const full = d?.sessions.find((s) => s.id === sessionId);
+        if (!full) return;
+        setSelectedSession((prev) =>
+          // 补全：新建/恢复时的最小记录缺 projectRoot 或缺 name
+          prev && prev.id === sessionId && (!prev.projectRoot || !prev.name) ? full : prev
+        );
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!pendingRestore) return;
     const { projectRoot, sessionId } = pendingRestore;
@@ -425,11 +443,13 @@ export function AppShell() {
       firstMessage: "",
       projectRoot,
     }, true);
+    // 异步补全真实会话名（标题不应显示 id 片段）
+    hydrateSelectedSession(sessionId);
     // handleCwdChange just cleared the address bar; point it back at the
     // restored session so a reload stays in this project.
     window.history.replaceState(null, "", `?session=${encodeURIComponent(sessionId)}`);
     setPendingRestore(null);
-  }, [pendingRestore]);
+  }, [pendingRestore, hydrateSelectedSession]);
 
   const handleNewSession = useCallback((_sessionId: string, cwd: string) => {
     setPendingRestore(null);
@@ -447,21 +467,6 @@ export function AppShell() {
     onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd),
     activeCwd,
   });
-
-  // Client-built transient SessionInfo (new session / fork) lacks the
-  // server-computed projectRoot, which the same-project check in
-  // handleCwdChange relies on. Hydrate it from the session list so switching
-  // worktrees right after creating a session doesn't close the chat.
-  const hydrateSelectedSession = useCallback((sessionId: string) => {
-    void fetch("/api/sessions")
-      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
-      .then((d) => {
-        const full = d?.sessions.find((s) => s.id === sessionId);
-        if (!full) return;
-        setSelectedSession((prev) => (prev && prev.id === sessionId && !prev.projectRoot ? full : prev));
-      })
-      .catch(() => {});
-  }, []);
 
   // Called by ChatWindow when a new session gets its real id from pi
   const handleSessionCreated = useCallback((session: SessionInfo) => {
@@ -565,7 +570,10 @@ export function AppShell() {
   }, [fileTabs]);
 
   const sessionTitle = selectedSession
-    ? stripModeInstructionBlocks(selectedSession.name) || selectedSession.firstMessage.slice(0, 50) || selectedSession.id.slice(0, 12)
+    // 恢复的最小 SessionInfo 没有 name：回退到 ChatWindow 加载后回传的真实标题
+    ? stripModeInstructionBlocks(selectedSession.name || sessionStats?.sessionName) ||
+      selectedSession.firstMessage.slice(0, 50) ||
+      selectedSession.id.slice(0, 12)
     : (() => {
         // No session selected (fresh project / right after switching a tab):
         // show the current project's name in the title instead.

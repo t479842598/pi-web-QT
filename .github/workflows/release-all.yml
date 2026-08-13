@@ -1,0 +1,246 @@
+name: Release All (Web 版本三端打包)
+
+# 打 v* tag（如 v0.9.26）触发，一次产出：
+#   - mobile/  (Flutter)      → pi-web-*.apk/.aab/.ipa
+#   - mobile2/ (Flutter)      → pi-web-new-*.apk/.aab/.ipa
+#   - desktop/ (Tauri 桌面端) → 三平台安装包
+# 版本号统一跟随 web package.json（scripts/sync-version.mjs）。
+# Secrets（Android 签名，可选）：
+#   ANDROID_KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_PASSWORD / KEY_ALIAS
+#   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD（desktop updater）
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_CHANNEL: stable
+
+jobs:
+  # ============ 1. mobile/（Flutter 旧版，产物命名 pi-web） ============
+  flutter-android:
+    name: mobile Android (pi-web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version from tag
+        id: version
+        run: |
+          VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          sed -i "s/^version: .*/version: ${VER}+${GITHUB_RUN_NUMBER}/" pubspec.yaml
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "${{ runner.temp }}/release.jks"
+          cat > android/key.properties <<EOF
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=${{ runner.temp }}/release.jks
+          EOF
+      - run: flutter build apk --release
+      - run: flutter build appbundle --release
+      - name: Rename artifacts (pi-web)
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          mkdir -p ../../dist
+          cp build/app/outputs/flutter-apk/app-release.apk ../../dist/pi-web-${VER}.apk
+          cp build/app/outputs/bundle/release/app-release.aab ../../dist/pi-web-${VER}.aab
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/pi-web-*.apk
+            dist/pi-web-*.aab
+          fail_on_unmatched_files: false
+
+  flutter-ios:
+    name: mobile iOS (pi-web)
+    runs-on: macos-14
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version from tag
+        id: version
+        run: |
+          VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          sed -i.bak "s/^version: .*/version: ${VER}+${GITHUB_RUN_NUMBER}/" pubspec.yaml && rm -f pubspec.yaml.bak
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign
+      - name: Package unsigned IPA (pi-web)
+        run: |
+          mkdir -p ../../dist build/ios/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa && zip -qr "../../../../dist/pi-web-${{ steps.version.outputs.version }}.ipa" Payload
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/pi-web-*.ipa
+          fail_on_unmatched_files: false
+
+  # ============ 2. mobile2/（Flutter 新版，产物命名 pi-web-new） ============
+  flutter-mobile2-android:
+    name: mobile2 Android (pi-web-new)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version from tag
+        id: version
+        run: |
+          VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          sed -i "s/^version: .*/version: ${VER}+${GITHUB_RUN_NUMBER}/" pubspec.yaml
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "${{ runner.temp }}/release.jks"
+          cat > android/key.properties <<EOF
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=${{ runner.temp }}/release.jks
+          EOF
+      - run: flutter build apk --release
+      - run: flutter build appbundle --release
+      - name: Rename artifacts (pi-web-new)
+        run: |
+          VER="${{ steps.version.outputs.version }}"
+          mkdir -p ../../dist
+          cp build/app/outputs/flutter-apk/app-release.apk ../../dist/pi-web-new-${VER}.apk
+          cp build/app/outputs/bundle/release/app-release.aab ../../dist/pi-web-new-${VER}.aab
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/pi-web-new-*.apk
+            dist/pi-web-new-*.aab
+          fail_on_unmatched_files: false
+
+  flutter-mobile2-ios:
+    name: mobile2 iOS (pi-web-new)
+    runs-on: macos-14
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version from tag
+        id: version
+        run: |
+          VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          sed -i.bak "s/^version: .*/version: ${VER}+${GITHUB_RUN_NUMBER}/" pubspec.yaml && rm -f pubspec.yaml.bak
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign
+      - name: Package unsigned IPA (pi-web-new)
+        run: |
+          mkdir -p ../../dist build/ios/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa && zip -qr "../../../../dist/pi-web-new-${{ steps.version.outputs.version }}.ipa" Payload
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/pi-web-new-*.ipa
+          fail_on_unmatched_files: false
+
+  # ============ 3. desktop/（Tauri 桌面端） ============
+  tauri-desktop:
+    name: Desktop (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - platform: windows-latest
+            args: ""
+          - platform: ubuntu-22.04
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sync version (web -> desktop)
+        run: |
+          node scripts/sync-version.mjs
+          VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
+          node -e "const fs=require('fs');const p='desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p));c.version='${VER}';fs.writeFileSync(p,JSON.stringify(c,null,2))"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./desktop -> target"
+      - name: Linux 系统依赖
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Build + publish desktop
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: ./desktop
+          tagName: v__VERSION__
+          releaseName: "Pi Web v__VERSION__"
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }} --features updater

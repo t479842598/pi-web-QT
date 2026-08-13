@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Moon, PaintBrush, Sun, Monitor, ArrowSquareOut, Link } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme, type ThemeMode } from "@/hooks/useTheme";
@@ -131,7 +131,7 @@ function VariantDots({ hasDark, hasLight, darkColor, lightColor, t }: {
 // ── Main ────────────────────────────────────────────────────────────────────
 
 export function DisplayConfig() {
-  const { mode, resolvedMode, themeName, setMode, setTheme, previewTheme, clearPreview, borderDepth, setBorderDepth } = useTheme();
+  const { mode, resolvedMode, themeName, setMode, setTheme, previewTheme, clearPreview, isThemeCached, borderDepth, setBorderDepth } = useTheme();
   const { locale: language, setLocale: setLanguage, t } = useI18n();
   const [themeSets, setThemeSets] = useState<ThemeSetInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,16 +156,21 @@ export function DisplayConfig() {
     setTheme(name).finally(() => setApplying(null));
   }, [setTheme]);
 
-  /** Hover preview: apply without persisting. Fire-and-forget; the
-   *  last-leaving mouseleave restores via clearPreview. */
+  /** Hover preview: 防抖 160ms + 仅预览已缓存主题（未缓存需点击加载），
+   *  避免鼠标扫过列表时触发大量 fetch 与全量 CSS 变量重算导致卡顿。 */
+  const hoverTimer = useRef<number | null>(null);
   const handleThemeHover = useCallback((name: string | null) => {
     setHoveredTag(name);
-    if (name !== null) {
-      void previewTheme(name);
-    } else {
-      void clearPreview();
-    }
-  }, [previewTheme, clearPreview]);
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(() => {
+      hoverTimer.current = null;
+      if (name !== null) {
+        if (isThemeCached(name)) void previewTheme(name);
+      } else {
+        void clearPreview();
+      }
+    }, 160);
+  }, [previewTheme, clearPreview, isThemeCached]);
 
   const handleModeChange = useCallback((m: ThemeMode) => {
     setMode(m);

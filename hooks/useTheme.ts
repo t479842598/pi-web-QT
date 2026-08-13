@@ -293,6 +293,14 @@ async function applyModeAndTheme(
 
 type ToggleOrigin = { x: number; y: number };
 
+/** 桌面端 WKWebView 检测：无 Chrome/Edg/OPR/Version 标记的 AppleWebKit = WebView。
+ *  WebView 里 startViewTransition + clipPath 动画开销大，直接切换更流畅。 */
+const isWebKitWebView = (() => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /AppleWebKit/.test(ua) && !/Chrome|Edg|OPR|Version\//.test(ua);
+})();
+
 export function useTheme() {
   const mode = useSyncExternalStore(subscribe, getModeSnapshot, getServerSnapshot);
   const storedThemeName = useSyncExternalStore(subscribe, getThemeSnapshot, () => "");
@@ -418,6 +426,12 @@ export function useTheme() {
     notify();
   }, [resolvedMode]);
 
+  /** 主题是否已加载过（命中缓存）。hover 预览只对已缓存主题生效，
+   *  未缓存主题需点击加载，避免扫过列表时触发大量 fetch + 全量 CSS 变量重算。 */
+  const isThemeCached = useCallback((name: string) => {
+    return themeCache.has(`${name}::${resolvedMode}`);
+  }, [resolvedMode]);
+
   /** Cancel preview and re-apply the persisted theme. */
   const clearPreview = useCallback(async () => {
     const t = readThemeForMode();
@@ -442,7 +456,8 @@ export function useTheme() {
     const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const supportsVT = typeof document.startViewTransition === "function";
 
-    if (!supportsVT || reduceMotion) { apply(); return; }
+    // WKWebView（桌面端）里 view transition + clipPath 动画会卡，直接切换
+    if (!supportsVT || reduceMotion || isWebKitWebView) { apply(); return; }
 
     const x = origin?.x ?? window.innerWidth / 2;
     const y = origin?.y ?? window.innerHeight / 2;
@@ -476,6 +491,8 @@ export function useTheme() {
     clearPreview,
     toggleTheme,
     isDark,
+    /** 主题是否已缓存（hover 预览可用） */
+    isThemeCached,
     /** Border visibility depth (0 = invisible, 50 = theme default, 100 = max contrast). */
     borderDepth,
     /** Set border depth (0-100). */

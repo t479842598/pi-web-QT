@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.9.27 — 2026-08-13（桌面端 + 双移动端 + 三端打包）
+
+### 新增
+- **桌面端（desktop/）** — Tauri 2（Rust）壳 + WebView 加载 Pi Web：启动自动探测本机服务，在线直接进入工作台；本机装有 `pi-web` CLI 且未运行时后台自动拉起并轮询就绪后连接；支持 URL+密码（Basic Auth，用户名 `pi`）保存多台服务器、多窗口同时连接；密码存系统钥匙串（macOS Keychain / Windows Credential Manager / Linux Secret Service），配置不落明文；关闭窗口驻留托盘、托盘菜单切换/新开服务器窗口；自更新（tauri updater，发布 CI 启用）。桌面端与网页端/手机端连接同一 Pi Web 实例时数据天然同步。
+- **主窗口内来回切换服务器** — 主窗口菜单栏「服务器」菜单（macOS 挂应用菜单栏，Windows/Linux 挂窗口菜单）列出全部已保存服务器，点击把当前窗口直接导航到目标服务器（同步更新标题与最近使用记录），可与托盘「新开/聚焦窗口」配合使用。
+- **设置服务器 URL** — 启动不再自动连本地：无上次服务器时进入连接页，可弹窗填写 URL+密码，或点「获取本机链接」按钮自动探测本机运行的 Pi Web 地址填入，「启动本机 Pi Web」一键拉起 CLI。
+- **Tauri 三端（桌面 + Android + iOS 同栈）** — 用桌面端技术栈直接生成移动端（mobile2 = Tauri 移动端）：Android APK + iOS 自签 IPA，显示名 Pi Web New（包名 com.piweb.app）；Rust 代码 `cfg(mobile)` 适配（单窗口 navigate、无托盘/菜单/CLI）；Android 无钥匙串降级明文。Flutter 旧移动端保留（mobile/，打包名 pi-web）。- **两个移动端 + 一个桌面端** — `mobile/`（Flutter，打包名 **pi-web**，显示名 Pi Web）与 `mobile2/`（Flutter 新版，打包名 **pi-web-new**，显示名 Pi Web New，包名 `top.zknas.pi.pi_mobile_new` / iOS `com.pimobile.piMobileNew`）各自单独发布 Android + iOS；`desktop/`（Tauri）发布桌面端三平台。
+- **三端一块打包 CI** — `.github/workflows/release-all.yml`：打 `v*` tag 同时产出 mobile（pi-web-*）、mobile2（pi-web-new-*）的 APK/AAB/IPA，以及 Tauri 桌面三平台安装包；版本号统一跟随 web（`scripts/sync-version.mjs` 同步 desktop/tauri.conf.json 与 mobile、mobile2 的 pubspec.yaml，Flutter 取 x.y.z 主体）。
+
+### 修复
+- **桌面端切换主题卡顿** — ① 主题列表 hover 预览无防抖且每次触发 `/api/themes` fetch + 全量 CSS 变量重算：改为 160ms 防抖 + 仅预览已缓存主题（未缓存需点击加载），扫过列表不再卡；② 亮暗切换的 `startViewTransition` + clipPath 动画在 WKWebView 上开销大：WebKit WebView 环境直接切换、跳过动画。
+- **切换项目 tab 后会话标题显示 id 片段（编码乱码）** — 恢复会话用的是最小记录（无 name），标题回退到会话 id：现在标题回退链加入 ChatWindow 加载后回传的真实标题（sessionStats.sessionName），并在恢复时从会话列表异步补全真实会话名。
+
 ## v0.9.26-fix — 2026-08-13（修复版）
 
 ### 修复

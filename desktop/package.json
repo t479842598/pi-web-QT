@@ -1,0 +1,13 @@
+{
+  "name": "pi-web-desktop",
+  "version": "0.9.27",
+  "private": true,
+  "description": "Pi Web 桌面端/移动端（Tauri 2）",
+  "scripts": {
+    "tauri": "tauri",
+    "sync-version": "node ../scripts/sync-version.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

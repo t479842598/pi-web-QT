@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "connect-window",
+  "description": "连接页窗口：壳内静态页，可访问全部自定义命令与更新检查",
+  "windows": ["connect"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-close",
+    "core:window:allow-set-focus"
+  ]
+}
