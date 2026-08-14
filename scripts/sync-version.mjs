@@ -30,6 +30,15 @@ if (existsSync(confPath)) {
   console.log(`[sync-version] desktop/tauri.conf.json -> ${version}`);
 }
 
+// 1b. desktop/package.json（Tauri CLI 包的版本号，与 web 保持一致）
+const desktopPkgPath = join(root, "desktop", "package.json");
+if (existsSync(desktopPkgPath)) {
+  const pkg = JSON.parse(readFileSync(desktopPkgPath, "utf8"));
+  pkg.version = version;
+  writeFileSync(desktopPkgPath, JSON.stringify(pkg, null, 2) + "\n");
+  console.log(`[sync-version] desktop/package.json -> ${version}`);
+}
+
 // 2. mobile/pubspec.yaml + mobile2/pubspec.yaml（Flutter 版本号 x.y.z+<build>）
 for (const dir of ["mobile", "mobile2"]) {
   const pubspecPath = join(root, dir, "pubspec.yaml");
