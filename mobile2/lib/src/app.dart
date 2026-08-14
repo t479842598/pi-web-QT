@@ -328,7 +328,7 @@ class _PiMobileAppState extends State<PiMobileApp> with WidgetsBindingObserver {
     return MaterialApp(
       navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
-      title: 'Pi Mobile',
+      title: 'pi-web-qt',
       locale: language.locale,
       supportedLocales: AppLanguage.values.map((value) => value.locale),
       localizationsDelegates: const [

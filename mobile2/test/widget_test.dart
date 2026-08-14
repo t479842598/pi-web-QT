@@ -2,13 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pi_mobile/src/chat_controller.dart';
-import 'package:pi_mobile/src/localization.dart';
-import 'package:pi_mobile/src/models.dart';
-import 'package:pi_mobile/src/pi_api.dart';
-import 'package:pi_mobile/src/screens/chat_screen.dart';
-import 'package:pi_mobile/src/screens/directory_picker.dart';
-import 'package:pi_mobile/src/screens/login_screen.dart';
+import 'package:pi_web_qt/src/chat_controller.dart';
+import 'package:pi_web_qt/src/localization.dart';
+import 'package:pi_web_qt/src/models.dart';
+import 'package:pi_web_qt/src/pi_api.dart';
+import 'package:pi_web_qt/src/screens/chat_screen.dart';
+import 'package:pi_web_qt/src/screens/directory_picker.dart';
+import 'package:pi_web_qt/src/screens/login_screen.dart';
 
 void main() {
   test('resolves supported system languages and falls back to English', () {

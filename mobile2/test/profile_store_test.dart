@@ -1,10 +1,10 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pi_mobile/src/localization.dart';
-import 'package:pi_mobile/src/models.dart';
-import 'package:pi_mobile/src/profile_store.dart';
-import 'package:pi_mobile/src/screens/login_screen.dart';
+import 'package:pi_web_qt/src/localization.dart';
+import 'package:pi_web_qt/src/models.dart';
+import 'package:pi_web_qt/src/profile_store.dart';
+import 'package:pi_web_qt/src/screens/login_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// In-memory mock of the FlutterSecureStorage platform channel.

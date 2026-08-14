@@ -2,8 +2,7 @@
 /**
  * 版本号同步：读取 web 端 package.json 的 version，统一写入：
  *   - desktop/tauri.conf.json   （桌面端）
- *   - mobile/pubspec.yaml       （Flutter 旧版，pi-web）
- *   - mobile2/pubspec.yaml      （Flutter 新版，pi-web-new）
+ *   - mobile2/pubspec.yaml      （Flutter 移动端，pi-web-qt）
  * 用法：node scripts/sync-version.mjs
  * 发版流程：先 bump web 版本号，再跑本脚本，三端版本号即同步。
  */
@@ -39,8 +38,8 @@ if (existsSync(desktopPkgPath)) {
   console.log(`[sync-version] desktop/package.json -> ${version}`);
 }
 
-// 2. mobile/pubspec.yaml + mobile2/pubspec.yaml（Flutter 版本号 x.y.z+<build>）
-for (const dir of ["mobile", "mobile2"]) {
+// 2. mobile2/pubspec.yaml（Flutter 移动端版本号 x.y.z+<build>）
+for (const dir of ["mobile2"]) {
   const pubspecPath = join(root, dir, "pubspec.yaml");
   if (!existsSync(pubspecPath)) continue;
   let s = readFileSync(pubspecPath, "utf8");

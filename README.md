@@ -36,16 +36,18 @@
 
 ## 原生移动客户端
 
-本仓库同时包含 Android / iOS 原生客户端（Flutter），位于 [`mobile/`](./mobile/)，支持：
+本仓库同时包含 Android / iOS 原生客户端（Flutter），位于 [`mobile2/`](./mobile2/)，支持：
 
 - 连接自建 Pi Web（域名或 IP），可保存多台服务器并快速切换；
 - 按远端工作目录浏览会话，会话内搜索与最近项目快捷切换；
-- SSE 流式对话、按需加载思考过程、图片附件、模型与技能浏览；
-- 只读查看当前项目的 Git 变更与文件 diff；
+- SSE 流式对话、思考过程（横向块状）、工具调用卡片、图片附件；
+- 会话操作：重命名、置顶、删除、消息分叉（fork）；
+- 主题：网页端主题集同步 + 全局字体大小调节；
+- Git Worktree、MCP 服务器管理、模型供应商、技能；
 - 宽屏（iPad / 折叠屏）自动切换常驻双栏布局；
 - 简体中文 / 日本語 / English 三语界面。
 
-安装与自建打包说明见 [`mobile/README.md`](./mobile/README.md)。发布时通过 GitHub Actions 在 tag 上自动产出 Android APK/AAB 与 iOS 未签名 IPA，见 [mobile-release workflow](./.github/workflows/mobile-release.yml)。
+安装与自建打包说明见 [`mobile2/README.md`](./mobile2/README.md)。发布时通过 GitHub Actions 在 tag 上自动产出 Android APK/AAB 与 iOS 未签名 IPA。
 
 ## 快速开始
 
@@ -247,10 +249,9 @@ docs/           部署说明、截图与功能文档
 ## 桌面端与移动端
 
 - **桌面端（desktop/）**：Tauri 2 壳（macOS / Windows / Linux）。启动进入连接管理（填写 URL+密码 / 获取本机链接 / 一键启动本机 pi-web），主窗口菜单栏「服务器」来回切换，支持多窗口多服务器。详见 [`desktop/README.md`](./desktop/README.md)。
-- **移动端 mobile/（Flutter）**：已发布的客户端，Android / iOS，打包名 **pi-web**。
-- **移动端 mobile2/（Flutter 新版）**：基于 mobile/ 演进的新客户端，Android / iOS，打包名 **pi-web-new**。
+- **移动端 mobile2/（Flutter，pi-web-qt）**：唯一移动端客户端，Android / iOS，打包名 **pi-web-qt**。
 
-三端连接同一 Pi Web 实例时，会话/模型/MCP/插件/Skills/看板全部天然同步（数据集中在服务端 `~/.pi/agent/`）。版本号统一跟随网页端（`package.json`）：打 `v*` tag 触发 [`release-all.yml`](./.github/workflows/release-all.yml) 一次产出 mobile（pi-web-*）、mobile2（pi-web-new-*）、desktop 三平台全部安装包；本地可用 `node scripts/sync-version.mjs` 同步三端版本号。
+三端连接同一 Pi Web 实例时，会话/模型/MCP/插件/Skills/看板全部天然同步（数据集中在服务端 `~/.pi/agent/`）。版本号统一跟随网页端（`package.json`）：打 `v*` tag 触发 [`release-all.yml`](./.github/workflows/release-all.yml) 一次产出 mobile2（pi-web-qt-*）、desktop 三平台全部安装包；本地可用 `node scripts/sync-version.mjs` 同步两端版本号。
 
 ## 许可证
 
