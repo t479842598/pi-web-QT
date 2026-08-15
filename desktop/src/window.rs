@@ -17,9 +17,9 @@ pub fn server_label(id: &str) -> String {
     format!("server-{id}")
 }
 
-/// 拼装服务器 URL：附加 ?piweb_connected=1 标识桌面壳环境（网页端据此显示设置入口）。
-/// 凭据**不**放入 URL（fetch 规范禁止子资源 URL 携带 userinfo，WebView 会拦截所有
-/// /api/* 请求），改为由 on_web_resource_request 在请求头注入 Authorization。
+/// 拼装服务器直连 URL：附加 ?piweb_connected=1 标识桌面壳环境（网页端据此显示设置入口）。
+/// 凭据不放入 URL（fetch 规范禁止子资源 URL 携带 userinfo）。
+/// 带凭据的服务器请用 [`window_url`]（经本地代理注入 Basic Auth）。
 pub fn build_url(server: &Server) -> String {
     let base = url::Url::parse(&server.base_url)
         .unwrap_or_else(|_| url::Url::parse(crate::config::DEFAULT_LOCAL_URL).unwrap());
@@ -28,14 +28,24 @@ pub fn build_url(server: &Server) -> String {
     u.to_string()
 }
 
-/// Basic Auth 请求头值（base64("pi:密码")），供 WebView 请求拦截注入。
-pub fn basic_auth_header(server: &Server) -> Option<tauri::http::HeaderValue> {
-    let pw = server.password()?;
-    let token = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        format!("{}:{}", server.username, pw).as_bytes(),
-    );
-    tauri::http::HeaderValue::from_str(&format!("Basic {token}")).ok()
+/// 窗口实际加载的 URL：
+/// - 已保存密码 → 启动/复用该服务器的本地反向代理，返回 `http://127.0.0.1:<port>/…`。
+///   Tauri 的 on_web_resource_request 只拦截 tauri:// 资源、无法给外部 URL 注头
+///   （WebView2 对 401 弹系统凭据框、WKWebView 直接白屏），凭据注入必须由代理完成；
+///   代理每次转发时读取最新配置，改用户名/密码后已打开窗口立即生效。
+/// - 无密码 → 直连（无需注入）。
+pub fn window_url(app: &AppHandle, server: &Server) -> String {
+    if server.has_password {
+        match crate::proxy::ensure_proxy(app, &server.id) {
+            Ok(port) => {
+                return format!("http://127.0.0.1:{port}/?piweb_connected=1");
+            }
+            Err(e) => {
+                eprintln!("[desktop] 本地代理启动失败，回退直连: {e}");
+            }
+        }
+    }
+    build_url(server)
 }
 
 /// 服务器菜单项显示名。Windows 原生 Win32 菜单不支持彩色 emoji（渲染为方框），
@@ -106,13 +116,19 @@ pub fn install_app_menu(app: &AppHandle, cfg: &Config) {
 #[cfg(not(mobile))]
 pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<WebviewWindow> {
     let label = server_label(&server.id);
+    let url = window_url(app, server);
     if let Some(w) = app.get_webview_window(&label) {
+        // 已存在：重新导航到最新 URL（用户改过地址/密码后点「连接」，旧窗口
+        // 停留在旧内容或 401 页），并同步标题
+        if let Ok(u) = url::Url::parse(&url) {
+            let _ = w.navigate(u);
+        }
+        let _ = w.set_title(&server.name);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
         return Ok(w);
     }
-    let url = build_url(server);
     let url = url::Url::parse(&url)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     // 窗口菜单（macOS 用应用菜单栏，不挂窗口菜单）
@@ -129,24 +145,10 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
         .inner_size(1280.0, 820.0)
         .min_inner_size(800.0, 600.0)
         .center()
-        // 保存密码时，对发往该服务器的所有请求（首屏导航 + /api/* fetch + SSE）
-        // 注入 Basic Auth 头。URL 保持干净 —— 不带 userinfo，避免 fetch 规范
-        // 拦截子资源请求（"URL is not valid or contains user credentials"）。
-        // 注意：不在这里快照 header —— 每次请求从 AppState 读最新服务器配置，
-        // 用户在连接页改密码/名称后已打开的窗口立即生效，无需重建。
-        .on_web_resource_request({
-            let app_handle = app.clone();
-            let server_id = server.id.clone();
-            move |mut request, _response| {
-                let state = app_handle.state::<AppState>();
-                let cfg = state.config.lock().unwrap();
-                if let Some(srv) = cfg.find(&server_id) {
-                    if let Some(v) = basic_auth_header(srv) {
-                        request.headers_mut().insert("authorization", v);
-                    }
-                }
-            }
-        })
+        // 远程凭据注入由本地反向代理完成（见 window_url）：Tauri 的
+        // on_web_resource_request 只作用于 tauri:// 资源，无法拦截外部 http(s)，
+        // 早期"请求头注入"方案在两个平台都未生效过（WebView2 弹凭据框 /
+        // WKWebView 白屏）。URL 保持干净 —— 不带 userinfo。
         // 网页端设置里的「切换服务器」走 piweb-switch:// 自定义导航：
         //   piweb-switch://manage -> 打开连接页
         //   piweb-switch://<id>   -> 当前窗口导航到该服务器
@@ -162,11 +164,18 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
                         let state = app_handle.state::<AppState>();
                         let cfg = state.config.lock().unwrap().clone();
                         if let Some(srv) = cfg.find(rest) {
-                            let target = build_url(srv);
+                            let target = window_url(&app_handle, &srv);
                             if let Ok(u) = url::Url::parse(&target) {
                                 if let Some(w) = app_handle.get_webview_window(&label_owner) {
                                     let _ = w.navigate(u);
                                     let _ = w.set_title(&srv.name);
+                                    // 窗口已改指向新服务器：同步注册表（否则
+                                    // focus_existing/菜单按旧 id 重复建窗、标题错乱）
+                                    state
+                                        .server_windows
+                                        .lock()
+                                        .unwrap()
+                                        .insert(srv.id.clone(), label_owner.clone());
                                 }
                             }
                         }

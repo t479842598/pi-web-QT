@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod probe;
+mod proxy;
 mod window;
 
 #[cfg(test)]
@@ -15,6 +16,9 @@ use tauri::Manager;
 pub struct AppState {
     /// 服务器配置（加载后缓存，命令并发读写用锁保护）
     pub config: Mutex<config::Config>,
+    /// 带凭据服务器的本地反向代理注册表：server_id -> 本地端口
+    /// （WebView 经代理访问远程，由代理注入 Basic Auth；见 proxy.rs）
+    pub proxies: proxy::ProxyMap,
     /// 本机 pi-web 启动互斥（防止并发点击重复拉起）
     #[cfg(not(mobile))]
     pub starting_local: Mutex<bool>,
@@ -46,6 +50,7 @@ pub fn run() {
     // manage / setup / invoke_handler / on_window_event 均为 `mut self`（move），逐段绑定
     let builder = builder.manage(AppState {
         config: Mutex::new(config::Config::default()),
+        proxies: proxy::ProxyMap::default(),
         #[cfg(not(mobile))]
         starting_local: Mutex::new(false),
         server_windows: Mutex::new(HashMap::new()),
@@ -87,6 +92,7 @@ pub fn run() {
             commands::connect_server,
             commands::open_connect,
             commands::set_local_auto_start,
+            commands::get_local_auto_start,
             commands::quit_app,
         ])
         .on_window_event(|window, event| {
@@ -110,14 +116,18 @@ pub fn run() {
             let state = app.state::<AppState>();
             let cfg = state.config.lock().unwrap().clone();
             if let Some(srv) = cfg.find(sid) {
-                let url = window::build_url(srv);
+                let url = window::window_url(app, &srv);
                 if let Ok(url) = url::Url::parse(&url) {
                     // 导航目标：优先聚焦的 webview 窗口（菜单挂在窗口上，点击时
-                    // 该窗口通常处于聚焦状态）；找不到再退回注册表中任意服务器窗口。
+                    // 该窗口通常处于聚焦状态），排除连接页（否则会把连接页窗口
+                    // 顶成服务器页）；找不到再退回注册表中任意服务器窗口。
                     let target = app
                         .webview_windows()
                         .into_values()
-                        .find(|w| w.is_focused().unwrap_or(false))
+                        .find(|w| {
+                            w.label() != window::CONNECT_LABEL
+                                && w.is_focused().unwrap_or(false)
+                        })
                         .or_else(|| {
                             let reg = state.server_windows.lock().unwrap().clone();
                             reg.values()
@@ -126,6 +136,12 @@ pub fn run() {
                     if let Some(w) = target {
                         let _ = w.navigate(url);
                         let _ = w.set_title(&srv.name);
+                        // 同步注册表：该窗口现在展示 sid 服务器（否则重复建窗/聚焦错乱）
+                        app.state::<AppState>()
+                            .server_windows
+                            .lock()
+                            .unwrap()
+                            .insert(sid.to_string(), w.label().to_string());
                     }
                     // 记录最近使用
                     let mut cfg = state.config.lock().unwrap();

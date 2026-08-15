@@ -134,7 +134,20 @@ pub fn remove_server(app: AppHandle, id: String) -> Result<(), String> {
         }
         cfg.remove(&id);
         Ok(())
-    })
+    })?;
+    // 同步清理：关闭该服务器的窗口、移除本地代理注册（端口随进程存续，
+    // 但注册表条目会导致端口复用错误判断，且反复删增会泄漏条目）
+    #[cfg(not(mobile))]
+    {
+        let label = window::server_label(&id);
+        if let Some(w) = app.get_webview_window(&label) {
+            let _ = w.close();
+        }
+        let state = app.state::<AppState>();
+        state.server_windows.lock().unwrap().remove(&id);
+        state.proxies.lock().unwrap().remove(&id);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -151,11 +164,12 @@ pub async fn probe_local(state: State<'_, AppState>) -> Result<probe::ProbeResul
 #[cfg(not(mobile))]
 #[tauri::command]
 pub async fn start_local(state: State<'_, AppState>) -> Result<bool, String> {
-    // 互斥：启动窗口期内重复触发直接返回 false，避免双开进程抢端口
+    // 互斥：启动窗口期内重复触发直接返回 true（正在启动 = 前端继续轮询就绪即可，
+    // 避免被误报“未检测到 CLI”；双开进程仍被互斥拦住）
     {
         let mut starting = state.starting_local.lock().unwrap();
         if *starting {
-            return Ok(false);
+            return Ok(true);
         }
         *starting = true;
     }
@@ -219,6 +233,12 @@ pub fn set_local_auto_start(app: AppHandle, enabled: bool) -> Result<(), String>
         cfg.local_auto_start = enabled;
         Ok(())
     })
+}
+
+/// 连接页初始化「无服务时自动拉起」勾选框（否则永远显示 HTML 默认值）。
+#[tauri::command]
+pub fn get_local_auto_start(state: State<AppState>) -> bool {
+    state.config.lock().unwrap().local_auto_start
 }
 
 #[tauri::command]

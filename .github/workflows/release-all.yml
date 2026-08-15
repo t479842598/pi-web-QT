@@ -140,7 +140,8 @@ jobs:
           VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
           node -e "const fs=require('fs');const p='desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p));c.version='${VER}';fs.writeFileSync(p,JSON.stringify(c,null,2))"
           # Tauri 构建要求 Cargo.toml 与 tauri.conf.json 版本一致
-          sed -i "s/^version = .*/version = \"${VER}\"/" desktop/Cargo.toml
+          #（sed -i.bak：BSD/macOS sed 兼容写法，同 iOS job）
+          sed -i.bak "s/^version = .*/version = \"${VER}\"/" desktop/Cargo.toml && rm -f desktop/Cargo.toml.bak
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}

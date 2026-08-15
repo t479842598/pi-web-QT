@@ -20,6 +20,10 @@ async function refresh() {
   } catch (e) {
     toast("读取服务器失败: " + e, "err");
   }
+  // 「无服务时自动拉起」勾选框同步持久化值（HTML 默认值不代表用户设置）
+  try {
+    $("chk-auto").checked = await invoke("get_local_auto_start");
+  } catch (_) {}
 }
 
 function renderList() {
