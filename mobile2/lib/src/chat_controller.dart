@@ -67,6 +67,9 @@ class ChatController extends ChangeNotifier {
   PiSession? selectedSession;
   PiModel? selectedModel;
   String? activeSessionId;
+  /// openSession/newChat 的代际计数：快速切换会话时，晚到的旧请求结果
+  /// （getSession 乱序返回）不得覆盖新会话内容。
+  int _openGeneration = 0;
   String? draftCwd;
   ChatMessage? streamingMessage;
   bool loadingSessions = false;
@@ -610,6 +613,7 @@ class ChatController extends ChangeNotifier {
       api.createDirectory(parentPath, name);
 
   Future<void> openSession(PiSession session) async {
+    final openGen = ++_openGeneration;
     // 同步部分：立即切换会话状态（不再 await _closeEvents —— 旧 SSE 订阅
     // cancel 可能挂起，导致会话“一直加载中”/输入框禁用）。
     unawaited(_closeEvents());
@@ -651,6 +655,10 @@ class ChatController extends ChangeNotifier {
         loadModels(session.cwd),
         loadSkills(session.cwd),
       ]);
+      // 期间若有更新的 openSession/newChat，丢弃本次结果（防旧内容覆盖）
+      if (openGen != _openGeneration) {
+        return;
+      }
       final snapshot = results[0];
       if (snapshot is SessionSnapshot) {
         messages.addAll(snapshot.messages);
@@ -672,6 +680,7 @@ class ChatController extends ChangeNotifier {
   }
 
   Future<void> newChat(String cwd, {PiModel? model}) async {
+    _openGeneration += 1;
     unawaited(_closeEvents());
     _stopReconcileTimer();
     selectedSession = null;
@@ -688,6 +697,9 @@ class ChatController extends ChangeNotifier {
     slashCommands.clear();
     slashCommandsForSessionId = null;
     collaborationMode = 'normal';
+    // 同步状态已切换（消息已清空）：立即通知 UI 刷新，避免加载模型/技能
+    // 期间界面继续显示上一个会话的消息（“切换会话显示旧内容”）。
+    notifyListeners();
     await Future.wait([loadModels(cwd, preferred: model), loadSkills(cwd)]);
     _notify();
   }
