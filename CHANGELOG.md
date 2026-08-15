@@ -1,10 +1,22 @@
 # Changelog
 
-## Unreleased
+## v0.10.0 — 2026-08-15（移动端网页端风格化 + 桌面端远程认证修复 + 模型列表故障可见化）
+
+### 新增
+- **移动端首页/项目分层** — 首页为所有项目目录页（可折叠项目手风琴，含会话数与相对时间，空态可直接选目录新建）；点击项目进入后只显示该项目会话，按 置顶/今天/昨天/更早 手风琴分组（对齐网页端 SessionSidebar）。
+- **移动端侧边栏** — 抽屉内项目切换条（展开全部项目 + 「选择其他目录…」新增选择目录）；会话行显示相对时间与消息条数；长按会话行可生成标题/重命名；「回首页」按钮修复（抽屉打开时 PopScope 拦截 pop，改为先关抽屉再 pop）。
+- **移动端对话交互** — 运行中输入框可继续输入、回车即插队发送（steer），移除「继续」按钮；思考/处理过程默认折叠（展开限高+滚动）；实时工具卡片显示具体命令（bash 等参数多字段解析）。
+- **移动端状态显示** — 「工作中」+ 每秒 token 速率（流式估算，对齐网页端）；已消耗 token 输入/输出/总计替代步骤/工具计数；项目层不再显示处理中、运行状态只在会话卡片内展示。
+- **网页端模型列表故障可见化** — `/api/models` 加载失败返回错误（不再静默空列表）；ChatInput 显示失败原因 + 重试；新增自定义供应商向导对话框（支持从已有提供商导入）。
+- **桌面端自定义用户名** — 连接页新增用户名输入框（默认 pi），远程可配任意 Basic Auth 用户名。
 
 ### 修复
+- **桌面端远程连接认证失败（根因修复）** — 旧方案用 Tauri `on_web_resource_request` 注入 Basic Auth，但该 API 只作用于 tauri:// 协议资源、无法拦截外部 http(s) 请求，凭据从未真正到达远程服务器：Windows WebView2 对 401 弹系统凭据框（要求重输账号密码，只输密码则认证失败），macOS WKWebView 直接白屏。现改为壳内本地反向代理（hyper + reqwest 流式）：保存了密码的服务器经 `127.0.0.1:<port>` 访问，首屏/子资源/API/SSE 全部自动携带实时凭据，两平台行为一致；转发时重写 Host/Origin 以通过服务端 request-security 的同源/白名单校验，剔除 WWW-Authenticate（不再触发 WebView2 凭据弹框），上游重定向 Location 改写回代理地址（防绕过代理直连），代理仅响应打向 127.0.0.1 入口的请求，改用户名/密码后已开窗口立即生效；导航请求认证失败返回友好提示页而非白屏。
+- **桌面端代理/窗口生命周期加固**（二轮审查）— 已存在窗口点「连接」重新导航到最新 URL；删除服务器时关闭窗口并清理代理注册；菜单切换目标排除连接页；切换后同步窗口注册表（防重复建窗/标题错乱）；连接页「自动拉起」勾选框从持久化配置初始化；代理 accept 循环遇瞬时错误不再静默退出。
+- **发布 CI macOS 构建必挂** — `release-all.yml` 桌面 job 的 `sed -i`（GNU 写法）在 macOS BSD sed 下报错，两个 macos-latest job 会在 Sync version 步骤失败；改为 `sed -i.bak … && rm -f …bak`（与 iOS job 一致的 BSD 兼容写法）。
+- **「启动本机 pi-web」并发误报** — 启动互斥窗口期内重复触发返回 false 被前端误报「未检测到 pi-web CLI」；改为返回 true（正在启动，前端继续轮询就绪），双开进程仍被互斥拦住。更名过时测试 `config_roundtrip_…_when_keyring_ok`（keyring 已移除）。
 - **桌面端 Windows 适配** — ① 本机 pi-web CLI 探测在 Windows 上失效：npm 生成的启动器是 `pi-web.cmd`（无扩展名的 `pi-web` 是 sh 脚本，CreateProcess 无法执行），且 `npm prefix -g` 返回的 bin 目录就是 prefix 本身而非 `prefix/bin`；现按平台候选名（Windows `.cmd`/`.exe`）查找，并兼容 `%APPDATA%\npm`。
-② 拉起 CLI 不再闪出 cmd 黑框（GUI 应用无控制台，`CREATE_NO_WINDOW` 抑制）。③ Windows 原生菜单不支持彩色 emoji（渲染为方框），服务器菜单/托盘菜单改纯文本标记（macOS/Linux 保留 emoji）。④ 发布 CI 补上 `updater:default` capability 注入（README 声称已带但实际缺失，导致「检查更新」永远失败）。⑤ 版本同步补 `desktop/Cargo.toml`（Tauri 构建要求 `tauri.conf.json` 与 `Cargo.toml` 版本一致，此前脱节会导致构建失败），本地与 CI 均已同步。⑥ 探测/拉起命令改后台执行（`spawn_blocking`），连接页探测不再冻结 UI；`switch-` 菜单导航目标改用聚焦窗口；Basic Auth 头与窗口标题改为每次请求从配置实时读取（改密码/改名后已开窗口立即生效）。⑦ 探测逻辑加固：`is_local_host` 精确解析 host（不再误判 `127.0.0.1.evil.com`）、npm prefix 查询加 3s 超时、服务在线时跳过 CLI 查找、`spawn_local` 并发去重、启动时按「无服务自动拉起」开关后台拉起本机服务、菜单名转义 `&`。
+② 拉起 CLI 不再闪出 cmd 黑框（GUI 应用无控制台，`CREATE_NO_WINDOW` 抑制）。③ Windows 原生菜单不支持彩色 emoji（渲染为方框），服务器菜单/托盘菜单改纯文本标记（macOS/Linux 保留 emoji）。④ 发布 CI 补上 `updater:default` capability 注入（README 声称已带但实际缺失，导致「检查更新」永远失败）。⑤ 版本同步补 `desktop/Cargo.toml`（Tauri 构建要求 `tauri.conf.json` 与 `Cargo.toml` 版本一致，此前脱节会导致构建失败），本地与 CI 均已同步。⑥ 探测/拉起命令改后台执行（`spawn_blocking`），连接页探测不再冻结 UI；`switch-` 菜单导航目标改用聚焦窗口；Basic Auth 凭据注入改为本地反向代理实时读取配置（见上条根因修复）；窗口标题同步改名。⑦ 探测逻辑加固：`is_local_host` 精确解析 host（不再误判 `127.0.0.1.evil.com`）、npm prefix 查询加 3s 超时、服务在线时跳过 CLI 查找、`spawn_local` 并发去重、启动时按「无服务自动拉起」开关后台拉起本机服务、菜单名转义 `&`。
 - **桌面端支持自定义用户名** — 连接页新增「用户名」输入框（默认 `pi`），保存服务器时可选填任意 Basic Auth 用户名；此前用户名写死 `pi`，远程服务器（用户名非 pi）一律连不上。已保存服务器列表显示用户名，编辑时回填。
 
 ## v0.9.28 — 2026-08-13（发消息卡死修复 + 桌面端体验）
