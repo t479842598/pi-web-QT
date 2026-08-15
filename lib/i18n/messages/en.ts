@@ -723,6 +723,7 @@ export const enLocale = {
     "desktop.modelsCallFormat": "Call format",
     "desktop.modelsCallFormatHelp": "Choose one of the existing call formats",
     "desktop.modelsCustomCallFormat": "Custom call format",
+    "desktop.modelsCustomCallFormatHelp": "Custom endpoints use the OpenAI-compatible protocol (openai-completions) by default. Pick another format above if your API speaks a different protocol.",
     "desktop.modelsFullUrl": "Full URL",
     "desktop.modelsAddModelManual": "Add model",
     "desktop.modelsImportProvider": "Import from existing provider",

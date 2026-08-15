@@ -104,7 +104,7 @@ type RegisterBuiltinFlush = (providerId: string, flush: BuiltinFlush) => (() => 
 type BuiltinProviderChange = (provider: Record<string, unknown> | null) => void;
 type RegisterModelsFlush = (flush: BuiltinFlush) => (() => void) | void;
 
-const API_OPTIONS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const;
+const API_OPTIONS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai", "mistral-conversations"] as const;
 const CUSTOM_CALL_FORMAT = "__custom__";
 
 function useModelTranslation() {
@@ -1689,6 +1689,9 @@ function CustomProviderDialog({
               <option value={CUSTOM_CALL_FORMAT}>{t("desktop.modelsCustomCallFormat")}</option>
             </select>
             <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{t("desktop.modelsCallFormatHelp")}</span>
+            {apiSel === CUSTOM_CALL_FORMAT && (
+              <span style={{ fontSize: 10, color: "#d97706", lineHeight: 1.4 }}>{t("desktop.modelsCustomCallFormatHelp")}</span>
+            )}
           </div>
 
           {/* Import from existing provider */}

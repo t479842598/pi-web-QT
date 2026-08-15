@@ -723,6 +723,7 @@ export const zhCNLocale = {
     "desktop.modelsCallFormat": "调用格式",
     "desktop.modelsCallFormatHelp": "选择一种现有的调用格式",
     "desktop.modelsCustomCallFormat": "自定义调用格式",
+    "desktop.modelsCustomCallFormatHelp": "自定义端点默认按 OpenAI 兼容协议（openai-completions）请求；若你的接口是其它协议，请在上方格式下拉中改选。",
     "desktop.modelsFullUrl": "完整 URL",
     "desktop.modelsAddModelManual": "添加模型",
     "desktop.modelsImportProvider": "从已有提供商导入",

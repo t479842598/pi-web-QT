@@ -44,9 +44,12 @@ test("custom provider wizard supports format import, URL input and custom reques
   // Call format selection + import from existing providers.
   assert.match(dialogSource, /API_OPTIONS\.map/);
   assert.match(dialogSource, /existingProviders\.map/);
+  // mistral-conversations is a first-class call format.
+  assert.ok(source.includes("\"mistral-conversations\""), "mistral-conversations in API_OPTIONS");
   // Custom call format option reveals the full URL; section labeled 完整 URL.
   assert.match(dialogSource, /CUSTOM_CALL_FORMAT/);
   assert.match(dialogSource, /desktop\.modelsCustomCallFormat/);
+  assert.match(dialogSource, /desktop\.modelsCustomCallFormatHelp/);
   assert.match(dialogSource, /desktop\.modelsFullUrl/);
   // Click + to expand a full URL input, with http/https validation.
   assert.match(dialogSource, /onClick=\{\(\) => setUrlOpen\(true\)\}/);
