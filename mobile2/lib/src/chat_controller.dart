@@ -97,6 +97,15 @@ class ChatController extends ChangeNotifier {
   int? contextTokens;
   int? maxContextTokens;
   int? totalTokens;
+  /// 会话累计消耗 token（来自 get_session_stats 的 tokens 结构）。
+  int? tokenInput;
+  int? tokenOutput;
+  int? tokenTotal;
+  /// 流式每秒 token 速率（由输出文本长度估算，约 4 字符/token，对齐网页端）。
+  double? tokenRate;
+  int _rateLastChars = 0;
+  final List<({int at, int chars})> _rateWindow = [];
+  static const int _charsPerToken = 4;
   bool loadingStats = false;
 
   // ── Reconcile watchdog ──────────────────────────────────────────────
@@ -263,6 +272,16 @@ class ChatController extends ChangeNotifier {
     final maxNum = max is num ? max.toInt() : null;
     final totalNum = total is num ? total.toInt() : null;
     if (ctxNum == null && maxNum == null && totalNum == null) return null;
+    // 拆分输入/输出/总计（pi 的 stats.tokens 结构，对齐网页端）
+    final tokens = stats['tokens'];
+    if (tokens is Map) {
+      final inNum = tokens['input'];
+      final outNum = tokens['output'];
+      final totNum = tokens['total'];
+      tokenInput = inNum is num ? inNum.toInt() : null;
+      tokenOutput = outNum is num ? outNum.toInt() : null;
+      tokenTotal = totNum is num ? totNum.toInt() : null;
+    }
     return (ctxNum, maxNum, totalNum);
   }
 
@@ -472,6 +491,54 @@ class ChatController extends ChangeNotifier {
     sessions[index] = sessions[index].copyWith(running: value);
   }
 
+  /// Optimistically sets/clears the server-side pin for a session, then
+  /// persists it (PATCH /api/sessions/[id]). The optimistic flip reorders the
+  /// grouped session list immediately; a failure rolls back by reloading.
+  Future<void> setSessionPinned(String sessionId, bool pinned) async {
+    final index = sessions.indexWhere((session) => session.id == sessionId);
+    if (index >= 0 && sessions[index].pinned != pinned) {
+      sessions[index] = sessions[index].copyWith(pinned: pinned);
+      _notify();
+    }
+    try {
+      await api.setSessionPinned(sessionId, pinned);
+    } catch (_) {
+      // Roll back the optimistic flip and resync from the server.
+      try {
+        await refreshSessions();
+      } catch (_) {
+        // Server unreachable — keep the optimistic value; the next refresh
+        // reconciles.
+      }
+    }
+  }
+
+  /// 流式 token 速率估算：message_update 携带完整累积文本，统计字符增量
+  /// 并用 1s 滑动窗口换算 tok/s（对齐网页端 trackTokenRate）。
+  void _trackTokenRate(ChatMessage? message) {
+    final text = message?.text ?? '';
+    final chars = text.length + (message?.thinking.length ?? 0);
+    if (chars == _rateLastChars) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final delta = chars - _rateLastChars;
+    _rateLastChars = chars;
+    _rateWindow.removeWhere((e) => now - e.at > 1000);
+    _rateWindow.add((at: now, chars: delta));
+    if (_rateWindow.isEmpty) {
+      tokenRate = null;
+      return;
+    }
+    final span = now - _rateWindow.first.at;
+    final totalChars = _rateWindow.fold<int>(0, (sum, e) => sum + e.chars);
+    tokenRate = span > 0 ? totalChars / _charsPerToken / (span / 1000) : null;
+  }
+
+  void _resetTokenRate() {
+    _rateLastChars = 0;
+    _rateWindow.clear();
+    tokenRate = null;
+  }
+
   void _markActiveSessionRunning(bool value) {
     final id = activeSessionId;
     if (id != null) _markSessionRunning(id, value);
@@ -623,6 +690,12 @@ class ChatController extends ChangeNotifier {
     collaborationMode = 'normal';
     await Future.wait([loadModels(cwd, preferred: model), loadSkills(cwd)]);
     _notify();
+  }
+
+  /// 一键调用模型生成会话标题（对齐网页端 auto-name），成功后刷新列表。
+  Future<void> autoNameSession(String sessionId) async {
+    await api.autoNameSession(sessionId);
+    await refreshSessions();
   }
 
   /// 重命名会话（set_session_name 命令），成功后刷新会话列表。
@@ -1258,6 +1331,7 @@ class ChatController extends ChangeNotifier {
         running = true;
         agentPhase = 'waiting_model';
         liveToolSteps.clear();
+        _resetTokenRate();
       case 'message_start':
       case 'message_update':
         final value = event['message'];
@@ -1266,6 +1340,7 @@ class ChatController extends ChangeNotifier {
             Map<String, dynamic>.from(value),
             language: _language,
           );
+          _trackTokenRate(streamingMessage);
         }
         // 高频流式更新走节流，避免每 chunk 全页 rebuild
         _notifyStreaming();
@@ -1299,6 +1374,7 @@ class ChatController extends ChangeNotifier {
         streamingMessage = null;
         agentPhase = null;
         liveToolSteps.clear();
+        _resetTokenRate();
         _markActiveSessionRunning(false);
         unawaited(refreshSessionStats());
         unawaited(_finishRun());
@@ -1311,9 +1387,7 @@ class ChatController extends ChangeNotifier {
             toolCallId:
                 event['toolCallId']?.toString() ??
                 '${liveToolSteps.length}-$name',
-            arguments: event['arguments'] is Map
-                ? Map<String, dynamic>.from(event['arguments'] as Map)
-                : null,
+            arguments: _toolArgsFromEvent(event),
             startedAt: DateTime.now(),
           ),
         );
@@ -1340,6 +1414,37 @@ class ChatController extends ChangeNotifier {
         streamingMessage = ChatMessage(role: 'status', text: _tr('正在整理结果…'));
     }
     notifyListeners();
+  }
+
+  /// 从 `tool_execution_start` 事件中提取工具参数（兼容多种字段名/嵌套位置）：
+  /// pi 的事件 payload 里参数可能出现在 `arguments`/`args`/`input`，或嵌套在
+  /// `entry.data` 里；bash 等工具的命令内容（`command`）由此进入实时卡片预览。
+  Map<String, dynamic>? _toolArgsFromEvent(Map<String, dynamic> event) {
+    Map<String, dynamic>? fromMap(Object? value) {
+      if (value is Map) return Map<String, dynamic>.from(value);
+      return null;
+    }
+
+    for (final key in const ['arguments', 'args', 'input']) {
+      final direct = fromMap(event[key]);
+      if (direct != null) return direct;
+    }
+    final entry = event['entry'];
+    if (entry is Map) {
+      final data = entry['data'];
+      if (data is Map) {
+        for (final key in const ['arguments', 'args', 'input']) {
+          final nested = fromMap(data[key]);
+          if (nested != null) return nested;
+        }
+        final call = data['toolCall'];
+        if (call is Map) {
+          final nested = fromMap(call['arguments'] ?? call['args']);
+          if (nested != null) return nested;
+        }
+      }
+    }
+    return null;
   }
 
   /// Flattens a `tool_execution_end` result payload into displayable text.

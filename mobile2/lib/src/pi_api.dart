@@ -359,6 +359,33 @@ class PiApi {
     await _decode(response);
   }
 
+  /// Sets/clears the session pin on the server (PATCH /api/sessions/[id]
+  /// {pinned}) so mobile pins stay in sync with the web client's session list.
+  Future<void> setSessionPinned(String sessionId, bool pinned) async {
+    final response = await _client
+        .patch(
+          _uri('/api/sessions/${Uri.encodeComponent(sessionId)}'),
+          headers: {
+            ..._headers,
+            HttpHeaders.contentTypeHeader: 'application/json',
+          },
+          body: jsonEncode({'pinned': pinned}),
+        )
+        .timeout(const Duration(seconds: 20));
+    await _decode(response);
+  }
+
+  /// 一键调用模型为会话生成标题（POST /api/sessions/[id]/auto-name）。
+  Future<void> autoNameSession(String sessionId) async {
+    final response = await _client
+        .post(
+          _uri('/api/sessions/${Uri.encodeComponent(sessionId)}/auto-name'),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 60));
+    await _decode(response);
+  }
+
   Future<dynamic> sendAgentCommand(
     String sessionId,
     Map<String, dynamic> command, {

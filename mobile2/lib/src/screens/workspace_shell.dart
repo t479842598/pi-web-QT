@@ -7,11 +7,15 @@ import '../chat_controller.dart';
 import '../localization.dart';
 import '../models.dart';
 import 'chat_screen.dart';
+import 'directory_picker.dart';
 
 /// 网页端风格主壳（M1）：
-/// 顶部标题栏 + 会话列表主页（按项目分组、搜索、新建）。
+/// 顶部标题栏 + 项目下拉选择 + 会话列表主页（按 置顶/今天/昨天/更早 手风琴
+/// 分组，参考网页端 SessionSidebar 的 AccordionGroup 样式）。
 /// 点会话进入 [ChatScreen]（其内部自带会话抽屉，可在聊天中切换会话）。
 /// 视觉保留玻璃拟态：渐变背景 + 半透明圆角卡片。
+/// 会话行支持：置顶图标（点击即在置顶模块显示/隐藏）、任务面板模块颜色
+/// 标识（会话关联任务时按任务看板列颜色显示圆点）、消息数量。
 class WorkspaceShell extends StatefulWidget {
   const WorkspaceShell({
     super.key,
@@ -50,21 +54,42 @@ class WorkspaceShell extends StatefulWidget {
   State<WorkspaceShell> createState() => _WorkspaceShellState();
 }
 
+/// 手风琴分组 key：置顶 / 今天 / 昨天 / 更早（与网页端 GroupKey 对齐）。
+enum _GroupKey { pinned, today, yesterday, older }
 
+class _SessionGroup {
+  const _SessionGroup(this.key, this.title, this.sessions);
+
+  final _GroupKey key;
+  final String title;
+  final List<PiSession> sessions;
+}
 
 class _WorkspaceShellState extends State<WorkspaceShell> {
+  static const _pinnedStorageKey = 'pi-pinned-sessions';
+  static const _selectedProjectKey = 'pi-selected-project';
+
   String _query = '';
   bool _loading = true;
-  /// 置顶会话 id 集合（本地持久化）。
-  Set<String> _pinnedIds = {};
+  /// 本地置顶会话 id（兼容历史本地置顶 + 服务端置顶并集）。
+  Set<String> _localPinnedIds = {};
   /// 项目备注名称（网页端 project-aliases，按项目根路径映射）。
   Map<String, String> _projectAliases = const {};
+  /// 当前选中的项目（projectRoot 路径），持久化在本地。
+  String? _selectedProject;
+  /// true = 首页（所有项目目录页）；false = 选中项目的会话列表页。
+  bool _atHome = true;
+  /// 对话页抽屉点了「回首页」：pop 后据此回到首页（不依赖 pop 返回值）。
+  bool _homeRequested = false;
+  /// 首页项目列表折叠状态（默认展开）。
+  bool _homeExpanded = true;
+  /// 收起的手风琴分组（默认“更早”收起，与网页端一致）。
+  final Set<_GroupKey> _collapsedGroups = {_GroupKey.older};
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onController);
-    _loadPinned();
     _loadAliases();
     _bootstrap();
   }
@@ -100,16 +125,56 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
 
   Future<void> _loadPinned() async {
     final preferences = await SharedPreferences.getInstance();
-    final ids = preferences.getStringList('pi-pinned-sessions') ?? const [];
-    if (mounted) setState(() => _pinnedIds = ids.toSet());
+    final stored =
+        preferences.getStringList(_pinnedStorageKey) ?? const <String>[];
+    // 采纳服务端置顶（网页端置顶的会话在这里同样置顶）。
+    final serverPinned = widget.controller.sessions
+        .where((s) => s.pinned)
+        .map((s) => s.id)
+        .toSet();
+    final merged = <String>{...stored, ...serverPinned};
+    if (merged.length != stored.length) {
+      await preferences.setStringList(_pinnedStorageKey, merged.toList());
+    }
+    if (mounted) setState(() => _localPinnedIds = merged);
   }
 
-  Future<void> _togglePinned(String id) async {
-    final next = {..._pinnedIds};
-    if (!next.add(id)) next.remove(id);
-    setState(() => _pinnedIds = next);
+  /// 会话是否置顶：服务端 pinned 或本地历史置顶集合命中。
+  bool _isPinned(PiSession s) =>
+      s.pinned || _localPinnedIds.contains(s.id);
+
+  Future<void> _persistPinned() async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setStringList('pi-pinned-sessions', next.toList());
+    await preferences.setStringList(_pinnedStorageKey, _localPinnedIds.toList());
+  }
+
+  /// 置顶/取消置顶：本地集合立即翻转（置顶模块即时更新），随后乐观同步服务端。
+  Future<void> _togglePinned(PiSession s) async {
+    final next = !_isPinned(s);
+    final ids = {..._localPinnedIds};
+    if (next) {
+      ids.add(s.id);
+    } else {
+      ids.remove(s.id);
+    }
+    setState(() => _localPinnedIds = ids);
+    await _persistPinned();
+    await widget.controller.setSessionPinned(s.id, next).catchError((_) {});
+  }
+
+  Future<void> _persistProject() async {
+    final project = _selectedProject;
+    if (project == null || project.isEmpty) return;
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_selectedProjectKey, project);
+  }
+
+  Future<void> _loadProject() async {
+    final preferences = await SharedPreferences.getInstance();
+    final saved = preferences.getString(_selectedProjectKey);
+    if (saved != null && saved.isNotEmpty && mounted) {
+      setState(() => _selectedProject = saved);
+    }
   }
 
   @override
@@ -119,7 +184,36 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   }
 
   void _onController() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final roots = _projectRoots;
+    final selected = _selectedProject;
+    if (selected == null ||
+        (roots.isNotEmpty && !roots.contains(selected))) {
+      if (_atHome) {
+        _selectedProject = roots.isNotEmpty ? roots.first : null;
+      } else if (selected == null) {
+        // 项目页但选中项目丢失（全部会话被删）→ 回首页
+        _atHome = true;
+      } else if (roots.isNotEmpty) {
+        _selectedProject = roots.first;
+      }
+    }
+    setState(() {});
+  }
+
+  /// 点击首页项目卡片：进入该项目的会话列表页。
+  void _enterProject(String project) {
+    setState(() {
+      _selectedProject = project;
+      _atHome = false;
+      _query = ''; // 进入新项目不沿用上一个项目的搜索词
+    });
+    unawaited(_persistProject());
+  }
+
+  /// 回首页：返回所有项目目录页。
+  void _goHome() {
+    setState(() => _atHome = true);
   }
 
   Future<void> _bootstrap() async {
@@ -128,7 +222,21 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     } catch (_) {
       // 服务不可达时保持空列表，由错误提示兜底
     }
+    // 任务列表用于会话行的任务模块颜色标识（失败不影响列表）。
+    unawaited(widget.controller.refreshTasks().catchError((_) {}));
+    await _loadProject();
+    await _loadPinned();
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _refreshAll() async {
+    try {
+      await widget.controller.refreshSessions();
+    } catch (_) {
+      // 下拉刷新失败保持原列表
+    }
+    await _loadPinned();
+    await widget.controller.refreshTasks().catchError((_) {});
   }
 
   /// 会话标题：name 优先，其次首条消息，最后 id 前缀。
@@ -146,32 +254,129 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     return parts.isNotEmpty ? parts.last : cwd;
   }
 
-  /// 项目分组（按 projectRoot ?? cwd），置顶会话在前，组间按最近使用排序。
-  List<MapEntry<String, List<PiSession>>> _grouped() {
-    final sessions = widget.controller.sessions.where((s) {
-      if (_query.isEmpty) return true;
-      final q = _query.toLowerCase();
+  /// 全部项目（projectRoot ?? cwd 去重），按最近会话活动排序（与网页端
+  /// getRecentProjects 对齐）。
+  List<String> get _projectRoots {
+    final latest = <String, DateTime>{};
+    for (final s in widget.controller.sessions) {
+      final key = s.projectRoot?.isNotEmpty == true ? s.projectRoot! : s.cwd;
+      if (key.isEmpty) continue;
+      final prev = latest[key];
+      if (prev == null || s.modified.isAfter(prev)) latest[key] = s.modified;
+    }
+    final entries = latest.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return [for (final e in entries) e.key];
+  }
+
+  /// 某项目的全部会话（不应用搜索），按最近修改倒序。
+  List<PiSession> _projectSessions(String project) {
+    return widget.controller.sessions
+        .where(
+          (s) => (s.projectRoot?.isNotEmpty == true ? s.projectRoot! : s.cwd) == project,
+        )
+        .toList()
+      ..sort((a, b) => b.modified.compareTo(a.modified));
+  }
+
+  /// 本地时区 YYYY-MM-DD。
+  String _dayKey(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  /// 把某项目会话分成 置顶 / 今天 / 昨天 / 更早 四组。置顶会话在置顶组和其
+  /// 时间组同时显示（与网页端 buildSessionGroups 双显一致）。应用搜索过滤。
+  List<_SessionGroup> _timeGroups(String project, BuildContext context) {
+    final q = _query.trim().toLowerCase();
+    final sessions = _projectSessions(project).where((s) {
+      if (q.isEmpty) return true;
       return _titleOf(s).toLowerCase().contains(q) ||
           s.cwd.toLowerCase().contains(q);
-    }).toList()
-      ..sort((a, b) {
-        final pa = _pinnedIds.contains(a.id) ? 0 : 1;
-        final pb = _pinnedIds.contains(b.id) ? 0 : 1;
-        return pa != pb ? pa - pb : b.modified.compareTo(a.modified);
-      });
-    final map = <String, List<PiSession>>{};
+    }).toList();
+
+    final now = DateTime.now();
+    final todayKey = _dayKey(now);
+    final yesterdayKey = _dayKey(now.subtract(const Duration(days: 1)));
+
+    final buckets = <_GroupKey, List<PiSession>>{
+      _GroupKey.pinned: [],
+      _GroupKey.today: [],
+      _GroupKey.yesterday: [],
+      _GroupKey.older: [],
+    };
     for (final s in sessions) {
-      final key = s.projectRoot ?? s.cwd;
-      map.putIfAbsent(key, () => []).add(s);
+      if (_isPinned(s)) buckets[_GroupKey.pinned]!.add(s);
+      final key = _dayKey(s.modified);
+      if (key == todayKey) {
+        buckets[_GroupKey.today]!.add(s);
+      } else if (key == yesterdayKey) {
+        buckets[_GroupKey.yesterday]!.add(s);
+      } else {
+        buckets[_GroupKey.older]!.add(s);
+      }
     }
-    final entries = map.entries.toList()
-      ..sort((a, b) {
-        final ma = a.value.firstOrNull?.modified ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final mb = b.value.firstOrNull?.modified ?? DateTime.fromMillisecondsSinceEpoch(0);
-        return mb.compareTo(ma);
-      });
-    return entries;
+    final titles = {
+      _GroupKey.pinned: context.tr('置顶'),
+      _GroupKey.today: context.tr('今天'),
+      _GroupKey.yesterday: context.tr('昨天'),
+      _GroupKey.older: context.tr('更早'),
+    };
+    return [
+      for (final key in _GroupKey.values)
+        if (buckets[key]!.isNotEmpty)
+          _SessionGroup(key, titles[key]!, buckets[key]!),
+    ];
   }
+
+  /// 会话 id → 关联任务（一个会话最多关联一个任务，取优先级最高的那个）。
+  Map<String, PiTask> get _taskBySessionId {
+    final map = <String, PiTask>{};
+    for (final task in widget.controller.tasks) {
+      final id = task.conversationId;
+      if (id == null || id.isEmpty) continue;
+      final existing = map[id];
+      if (existing == null || _taskPriority(task) < _taskPriority(existing)) {
+        map[id] = task;
+      }
+    }
+    return map;
+  }
+
+  /// 任务优先级：进行中 > 需关注 > 待办 > 已完成（多个任务关联时取前者）。
+  static int _taskPriority(PiTask task) => switch (task.status) {
+    TaskStatus.preparing || TaskStatus.running => 0,
+    TaskStatus.awaitingInput ||
+    TaskStatus.review ||
+    TaskStatus.merging ||
+    TaskStatus.failed => 1,
+    TaskStatus.queued || TaskStatus.todo => 2,
+    TaskStatus.done || TaskStatus.canceled => 3,
+    TaskStatus.unknown => 4,
+  };
+
+  /// 任务模块颜色（与网页端任务看板 COLUMN_META 对齐）：
+  /// 待办→灰、进行中→主题色、需关注→琥珀、已完成→绿。
+  static Color _taskIndicatorColor(PiTask task, ColorScheme scheme) =>
+      switch (task.status) {
+        TaskStatus.preparing || TaskStatus.running => scheme.primary,
+        TaskStatus.awaitingInput ||
+        TaskStatus.review ||
+        TaskStatus.merging ||
+        TaskStatus.failed => const Color(0xfff59e0b),
+        TaskStatus.queued || TaskStatus.todo => scheme.onSurfaceVariant,
+        TaskStatus.done || TaskStatus.canceled => const Color(0xff10b981),
+        TaskStatus.unknown => scheme.outline,
+      };
+
+  String _taskLabel(BuildContext context, PiTask task) => switch (task.status) {
+    TaskStatus.preparing || TaskStatus.running => context.tr('进行中'),
+    TaskStatus.awaitingInput ||
+    TaskStatus.review ||
+    TaskStatus.merging ||
+    TaskStatus.failed => context.tr('需关注'),
+    TaskStatus.queued || TaskStatus.todo => context.tr('待办'),
+    TaskStatus.done || TaskStatus.canceled => context.tr('已完成'),
+    TaskStatus.unknown => context.tr('任务'),
+  };
 
   Future<void> _openSession(PiSession session) async {
     // 立即进入会话页：消息/模型/技能在 ChatScreen 内部异步加载（有 loading
@@ -179,7 +384,9 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     // （首屏多个网络请求串行时用户感觉“点不进去”）。
     unawaited(widget.controller.openSession(session).catchError((_) {}));
     if (!mounted) return;
-    await Navigator.of(context).push(
+    // 抽屉「回首页」：ChatScreen pop 前通过 onGoHome 置 _homeRequested，
+    // pop 完成后据此回到首页（不依赖 pop 返回值，时序可靠）。
+    await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => ChatScreen(
           controller: widget.controller,
@@ -196,17 +403,25 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
           onThemeSetChanged: widget.onThemeSetChanged,
           accent: widget.accent,
           onAccentChanged: widget.onAccentChanged,
+          onGoHome: () => _homeRequested = true,
         ),
       ),
     );
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    if (_homeRequested) {
+      _homeRequested = false;
+      _goHome();
+    }
   }
 
   Future<void> _newChat(String cwd) async {
     // 立即进入会话页：新建会话在 ChatScreen 内部异步完成
     unawaited(widget.controller.newChat(cwd).catchError((_) {}));
     if (!mounted) return;
-    await Navigator.of(context).push(
+    // 抽屉「回首页」：ChatScreen pop 前通过 onGoHome 置 _homeRequested，
+    // pop 完成后据此回到首页（不依赖 pop 返回值，时序可靠）。
+    await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => ChatScreen(
           controller: widget.controller,
@@ -223,10 +438,16 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
           onThemeSetChanged: widget.onThemeSetChanged,
           accent: widget.accent,
           onAccentChanged: widget.onAccentChanged,
+          onGoHome: () => _homeRequested = true,
         ),
       ),
     );
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    if (_homeRequested) {
+      _homeRequested = false;
+      _goHome();
+    }
   }
 
   void _toggleTheme() {
@@ -264,11 +485,194 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     );
   }
 
+  /// 首页项目卡片：别名 + 真实路径 + 会话数 + 相对时间。
+  /// 不显示任何“处理中”状态（项目层不展示运行态）。
+  Widget _buildProjectCard(BuildContext context, String project) {
+    final scheme = Theme.of(context).colorScheme;
+    final sessions = _projectSessions(project);
+    final latest = sessions.isEmpty ? null : sessions.first.modified;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Material(
+        color: scheme.surfaceContainerHigh.withValues(alpha: .55),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _enterProject(project),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.folder_rounded,
+                    size: 18,
+                    color: scheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _aliasOf(project, project),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        _pathLabel(project, project),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (latest != null)
+                  Text(
+                    _relativeTime(latest),
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${sessions.length}',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: scheme.outline,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 项目页头部：回首页 + 项目名/路径 + 新建会话。
+  Widget _buildProjectHeader(
+    BuildContext context,
+    ColorScheme scheme,
+    String? project,
+  ) {
+    final hasProject = project != null;
+    final alias = hasProject ? _aliasOf(project, project) : context.tr('选择项目');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 10, 12, 4),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: context.tr('回首页'),
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: _goHome,
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  alias,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                if (hasProject) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    project,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (hasProject)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+              iconSize: 18,
+              tooltip: context.tr('新建会话'),
+              icon: Icon(Icons.add_circle_outline_rounded, color: scheme.primary),
+              // 点加号先选目录（含目录选择器），再进入新会话，而非直接进对话页
+              onPressed: () async {
+                final selected = await showDirectoryPicker(
+                  context,
+                  controller: widget.controller,
+                  initialPath: project,
+                );
+                if (selected == null || selected.isEmpty || !mounted) return;
+                await _newChat(selected);
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final groups = _grouped();
+    // 首页：所有项目目录页。
+    if (_atHome) {
+      return _buildHomePage(context, scheme);
+    }
+    // 项目页：选中项目的会话列表（按置顶/今天/昨天/更早 分组）。
+    final roots = _projectRoots;
+    final project = (_selectedProject != null && roots.contains(_selectedProject))
+        ? _selectedProject
+        : (roots.isNotEmpty ? roots.first : null);
+    return _buildProjectPage(context, scheme, project);
+  }
 
+  /// 首页：项目目录页（全部项目，可折叠）。项目层级不显示“处理中”——
+  /// 运行状态只在单个会话卡片内展示。
+  Widget _buildHomePage(BuildContext context, ColorScheme scheme) {
+    final projects = _projectRoots;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Container(
@@ -286,17 +690,99 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
           child: Column(
             children: [
               _buildHeader(context, scheme),
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : projects.isEmpty
+                    ? _buildEmpty(context, scheme, false)
+                    : RefreshIndicator(
+                        onRefresh: _refreshAll,
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                          children: [
+                            _SessionAccordion(
+                              title: context.tr('项目'),
+                              count: projects.length,
+                              expanded: _homeExpanded,
+                              onToggle: () => setState(
+                                () => _homeExpanded = !_homeExpanded,
+                              ),
+                              children: [
+                                for (final p in projects)
+                                  _buildProjectCard(context, p),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 项目页：选中项目的会话列表（项目选择器退居幕后，顶部为回首页 + 项目名）。
+  Widget _buildProjectPage(
+    BuildContext context,
+    ColorScheme scheme,
+    String? project,
+  ) {
+    final groups = project == null ? const <_SessionGroup>[] : _timeGroups(project, context);
+    final taskMap = _taskBySessionId;
+    final searching = _query.trim().isNotEmpty;
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              scheme.surfaceContainerLowest,
+              scheme.surfaceContainerLow,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              _buildProjectHeader(context, scheme, project),
               _buildSearch(context),
               Expanded(
                 child: _loading
                     ? const Center(child: CircularProgressIndicator())
+                    : project == null
+                    ? _buildEmpty(context, scheme, searching)
                     : groups.isEmpty
-                    ? _buildEmpty(context)
-                    : ListView(
-                        padding: const EdgeInsets.fromLTRB(12, 4, 20, 24),
-                        children: [
-                          for (final group in groups) ..._buildGroup(context, group),
-                        ],
+                    ? _buildEmpty(context, scheme, searching)
+                    : RefreshIndicator(
+                        onRefresh: _refreshAll,
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                          children: [
+                            for (final group in groups)
+                              _SessionAccordion(
+                                title: group.title,
+                                count: group.sessions.length,
+                                // 搜索时强制展开所有分组（与网页端一致）。
+                                expanded: searching || !_collapsedGroups.contains(group.key),
+                                onToggle: () => setState(() {
+                                  if (!_collapsedGroups.add(group.key)) {
+                                    _collapsedGroups.remove(group.key);
+                                  }
+                                }),
+                                children: [
+                                  for (final s in group.sessions)
+                                    _buildSessionCard(context, s, taskMap[s.id]),
+                                ],
+                              ),
+                          ],
+                        ),
                       ),
               ),
             ],
@@ -372,54 +858,9 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     );
   }
 
-  List<Widget> _buildGroup(BuildContext context, MapEntry<String, List<PiSession>> group) {
+  Widget _buildSessionCard(BuildContext context, PiSession s, PiTask? task) {
     final scheme = Theme.of(context).colorScheme;
-    return [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(8, 16, 8, 6),
-        child: Row(
-          children: [
-            Icon(
-              Icons.folder_outlined,
-              size: 15,
-              color: scheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(6),
-                onTap: () => _newChat(group.key),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Text(
-                    _aliasOf(group.key, group.key),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              tooltip: context.tr('新建会话'),
-              icon: const Icon(Icons.add, size: 18),
-              onPressed: () => _newChat(group.key),
-            ),
-          ],
-        ),
-      ),
-      ...group.value.map((s) => _buildSessionCard(context, s)),
-    ];
-  }
-
-  Widget _buildSessionCard(BuildContext context, PiSession s) {
-    final scheme = Theme.of(context).colorScheme;
-    final pinned = _pinnedIds.contains(s.id);
+    final pinned = _isPinned(s);
     final pathLabel = _pathLabel(s.projectRoot, s.cwd);
     final branch = s.worktreeBranch;
     final isFork = s.parentSession != null && s.parentSession!.isNotEmpty;
@@ -476,17 +917,23 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Line 1: 标题 + 置顶标记
+                      // Line 1: 任务颜色标识 + 标题 + 置顶图标
                       Row(
                         children: [
-                          if (pinned) ...[
-                            Icon(
-                              Icons.push_pin,
-                              size: 11,
-                              color: scheme.onSurfaceVariant,
+                          if (task != null)
+                            Tooltip(
+                              message: '${context.tr('任务')} · '
+                                  '${_taskLabel(context, task)} — ${task.title}',
+                              child: Container(
+                                width: 8,
+                                height: 8,
+                                margin: const EdgeInsets.only(right: 5),
+                                decoration: BoxDecoration(
+                                  color: _taskIndicatorColor(task, scheme),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
                             ),
-                            const SizedBox(width: 3),
-                          ],
                           Expanded(
                             child: Text(
                               _titleOf(s),
@@ -498,6 +945,19 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                                 color: scheme.onSurface,
                               ),
                             ),
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+                            iconSize: 16,
+                            tooltip: pinned ? context.tr('取消置顶') : context.tr('置顶'),
+                            icon: Icon(
+                              pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                              color: pinned ? scheme.primary : scheme.onSurfaceVariant,
+                            ),
+                            onPressed: () => _togglePinned(s),
                           ),
                         ],
                       ),
@@ -598,7 +1058,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   /// 长按会话卡片：重命名 / 置顶切换 / 删除。
   Future<void> _showSessionActions(BuildContext context, PiSession s) async {
     final scheme = Theme.of(context).colorScheme;
-    final pinned = _pinnedIds.contains(s.id);
+    final pinned = _isPinned(s);
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (sheetContext) => SafeArea(
@@ -615,6 +1075,11 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
               subtitle: Text(s.cwd, maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
             const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_rounded),
+              title: Text(context.tr('生成标题')),
+              onTap: () => Navigator.of(sheetContext).pop('autoName'),
+            ),
             ListTile(
               leading: const Icon(Icons.drive_file_rename_outline),
               title: Text(context.tr('重命名')),
@@ -636,10 +1101,17 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     );
     if (!mounted || action == null) return;
     switch (action) {
+      case 'autoName':
+        await widget.controller.autoNameSession(s.id);
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(context.tr('标题已生成'))));
+        }
       case 'rename':
         await _renameSession(context, s);
       case 'pin':
-        await _togglePinned(s.id);
+        await _togglePinned(s);
       case 'delete':
         await _deleteSession(context, s);
     }
@@ -713,18 +1185,43 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     }
   }
 
-  Widget _buildEmpty(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+  Widget _buildEmpty(BuildContext context, ColorScheme scheme, bool searching) {
+    final noProject = _projectRoots.isEmpty;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.forum_outlined, size: 44, color: scheme.onSurfaceVariant),
+          Icon(
+            noProject ? Icons.folder_open_rounded : Icons.forum_outlined,
+            size: 44,
+            color: scheme.onSurfaceVariant,
+          ),
           const SizedBox(height: 12),
           Text(
-            _query.isEmpty ? context.tr('暂无会话') : context.tr('没有匹配的会话'),
+            noProject
+                ? context.tr('暂无项目')
+                : searching
+                ? context.tr('没有匹配的会话')
+                : context.tr('暂无会话'),
             style: TextStyle(fontSize: 14, color: scheme.onSurfaceVariant),
           ),
+          if (noProject) ...[
+            const SizedBox(height: 16),
+            // 无任何项目/会话时：新增入口（选择目录并开始对话）
+            FilledButton.icon(
+              key: const Key('empty-pick-project'),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: Text(context.tr('选择项目')),
+              onPressed: () async {
+                final selected = await showDirectoryPicker(
+                  context,
+                  controller: widget.controller,
+                );
+                if (selected == null || selected.isEmpty || !mounted) return;
+                await _newChat(selected);
+              },
+            ),
+          ],
         ],
       ),
     );
@@ -737,5 +1234,103 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     if (diff.inDays < 1) return '${diff.inHours} ${context.tr('小时前')}';
     if (diff.inDays < 30) return '${diff.inDays} ${context.tr('天前')}';
     return '${time.year}-${time.month.toString().padLeft(2, '0')}-${time.day.toString().padLeft(2, '0')}';
+  }
+}
+
+/// 手风琴分组卡片（参考网页端 SessionSidebar 的 AccordionGroup）：
+/// 圆角卡片 + 展开箭头（收起旋转）+ 大写小标题 + 数量徽章 + 右侧收起/展开提示。
+class _SessionAccordion extends StatelessWidget {
+  const _SessionAccordion({
+    required this.title,
+    required this.count,
+    required this.expanded,
+    required this.onToggle,
+    required this.children,
+  });
+
+  final String title;
+  final int count;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh.withValues(alpha: .5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: .35)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          InkWell(
+            onTap: onToggle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  AnimatedRotation(
+                    turns: expanded ? 0 : -0.25,
+                    duration: const Duration(milliseconds: 160),
+                    child: Icon(
+                      Icons.expand_more_rounded,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest.withValues(alpha: .8),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    expanded ? context.tr('收起') : context.tr('展开'),
+                    style: TextStyle(fontSize: 10, color: scheme.outline),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(6, 0, 6, 6),
+              child: Column(
+                children: [
+                  for (var i = 0; i < children.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 6),
+                    children[i],
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }

@@ -43,6 +43,7 @@ class ChatScreen extends StatefulWidget {
     this.onThemeSetChanged,
     this.accent = AppleColors.accent,
     this.onAccentChanged,
+    this.onGoHome,
   });
 
   final ChatController controller;
@@ -61,6 +62,9 @@ class ChatScreen extends StatefulWidget {
   /// User-selectable accent color (drives primary actions / bubble tints).
   final Color accent;
   final ValueChanged<Color>? onAccentChanged;
+
+  /// 抽屉「回首页」：pop 前由外层置标记（返回所有项目目录页）。
+  final VoidCallback? onGoHome;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -818,6 +822,19 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// 抽屉「回首页」：置外层标志后返回项目目录页。
+  /// 抽屉打开时 Scaffold 的 PopScope(canPop:false) 会拦截 Navigator.pop
+  /// （返回键先关抽屉的机制），因此必须先关抽屉解除拦截，下一帧再 pop。
+  void _returnHome() {
+    widget.onGoHome?.call();
+    _scaffoldKey.currentState?.closeDrawer();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    });
+  }
+
   Future<void> _startNewChat() async {
     FocusManager.instance.primaryFocus?.unfocus();
     final cwd = chat.draftCwd;
@@ -917,6 +934,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ? null
             : () => _showServerSwitcher(context),
         onSwitchProject: _switchProject,
+        onGoHome: _returnHome,
       ),
       endDrawerEnableOpenDragGesture: true,
       endDrawer: _FunctionDrawer(
@@ -999,14 +1017,14 @@ class _ChatScreenState extends State<ChatScreen> {
                       borderRadius: BorderRadius.circular(999),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 11,
+                          horizontal: 10,
+                          vertical: 8,
                         ),
                         child: Row(
                           children: [
                             if (chat.changingModel)
                               const SizedBox.square(
-                                dimension: 18,
+                                dimension: 15,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
                                 ),
@@ -1014,10 +1032,10 @@ class _ChatScreenState extends State<ChatScreen> {
                             else
                               Icon(
                                 Icons.auto_awesome_rounded,
-                                size: 19,
+                                size: 16,
                                 color: Theme.of(context).colorScheme.primary,
                               ),
-                            const SizedBox(width: 7),
+                            const SizedBox(width: 6),
                             Expanded(
                               child: FittedBox(
                                 fit: BoxFit.scaleDown,
@@ -1028,6 +1046,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   maxLines: 1,
                                   softWrap: false,
                                   style: const TextStyle(
+                                    fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -1161,16 +1180,8 @@ class _ChatScreenState extends State<ChatScreen> {
                           scrollDirection: Axis.horizontal,
                           child: Row(
                             children: [
-                              _QuickChip(
-                                icon: Icons.arrow_forward_rounded,
-                                label: context.tr('继续'),
-                                onTap: () {
-                                  if (chat.running) {
-                                    chat.send('继续', queueMode: 'steer');
-                                  }
-                                },
-                              ),
-                              const SizedBox(width: 8),
+                              // 「继续」按钮已移除：运行中输入框保持可输入，
+                              // 回车即插队发送（steer），无需“继续”入口。
                               _QuickChip(
                                 icon: Icons.auto_awesome_rounded,
                                 label: context.tr('使用技能'),
@@ -1235,6 +1246,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       ? null
                       : () => _showServerSwitcher(context),
                   onSwitchProject: _switchProject,
+                  onGoHome: _returnHome,
                 ),
               ),
               const VerticalDivider(width: 1, thickness: 1),
@@ -1280,6 +1292,8 @@ class _ChatScreenState extends State<ChatScreen> {
       if (message.role != 'user') {
         // 散落的非用户消息（无 user 前缀或 user 已被消费）：
         // 收集连续的非 user 消息进过程组（横向小块），避免每行一个。
+        // 单条时直接渲染气泡——纯思考+回答的思考以折叠条目显示（'思考过程'
+        // 标题直接可见，点击展开），而非藏进折叠的过程组。
         final orphanProcess = <ChatMessage>[];
         var orphanToolCount = 0;
         while (index < messages.length && messages[index].role != 'user') {
@@ -1290,13 +1304,24 @@ class _ChatScreenState extends State<ChatScreen> {
           }
           index += 1;
         }
+        if (orphanProcess.length == 1) {
+          result.add(
+            _MessageBubble(
+              message: orphanProcess.first,
+              onLoadThinking: _loadThinking,
+              onFork: _forkFrom,
+              thinkingVertical: !widget.compactOutput,
+            ),
+          );
+          continue;
+        }
         if (orphanProcess.isNotEmpty) {
           result.add(
             _ProcessDetailsGroup(
               processMessages: orphanProcess,
               messageCount: orphanProcess.length,
               toolCallCount: orphanToolCount,
-              defaultExpanded: !chat.running,
+              defaultExpanded: false,
               onLoadThinking: _loadThinking,
               thinkingVertical: !widget.compactOutput,
             ),
@@ -1358,7 +1383,7 @@ class _ChatScreenState extends State<ChatScreen> {
               processMessages: noAnswerProcess,
               messageCount: noAnswerProcess.length,
               toolCallCount: noAnswerToolCount,
-              defaultExpanded: !chat.running,
+              defaultExpanded: false,
               onLoadThinking: _loadThinking,
               thinkingVertical: !widget.compactOutput,
             ),
@@ -1380,7 +1405,11 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       }
       final answer = messages[finalAnswer];
-      if (answer.thinking.isNotEmpty || answer.processText.isNotEmpty) {
+      // 无工具过程消息时（纯思考+回答），思考留在气泡内显示为折叠条目
+      // （'思考过程' 标题直接可见，点击展开），不剥离进“处理详情”组。
+      final hasRealProcess = processMessages.isNotEmpty;
+      if (hasRealProcess &&
+          (answer.thinking.isNotEmpty || answer.processText.isNotEmpty)) {
         processMessages.add(answer.copyWith(text: ''));
         processMessageCount += 1;
         toolCallCount += answer.toolCallCount;
@@ -1401,7 +1430,7 @@ class _ChatScreenState extends State<ChatScreen> {
             messageCount: processMessageCount,
             toolCallCount: toolCallCount,
             // 默认展开 tabs 块状步骤（对齐网页端 ProcessGroup 展开态）
-            defaultExpanded: !chat.running,
+            defaultExpanded: false,
             onLoadThinking: _loadThinking,
             thinkingVertical: !widget.compactOutput,
           ),
@@ -1409,7 +1438,10 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       result.add(
         _MessageBubble(
-          message: answer.copyWith(thinking: '', processText: ''),
+          // 有真实过程组时思考已并入组内，气泡只留回答；否则思考留在气泡折叠显示
+          message: hasRealProcess
+              ? answer.copyWith(thinking: '', processText: '')
+              : answer,
           onLoadThinking: _loadThinking,
           onFork: _forkFrom,
               thinkingVertical: !widget.compactOutput,
@@ -1436,6 +1468,10 @@ class _ChatScreenState extends State<ChatScreen> {
           thinkingVertical: !widget.compactOutput,
           messageCount: compactProcessMessages,
           toolCallCount: compactToolCalls,
+          tokenInput: chat.tokenInput,
+          tokenOutput: chat.tokenOutput,
+          tokenTotal: chat.tokenTotal,
+          tokenRate: chat.tokenRate,
         ),
       );
     } else if (streaming != null) {
@@ -2016,9 +2052,11 @@ class _MessageBubble extends StatelessWidget {
                                 MarkdownStyleSheet.fromTheme(
                                   Theme.of(context),
                                 ).copyWith(
-                                  p: Theme.of(
-                                    context,
-                                  ).textTheme.bodyLarge?.copyWith(height: 1.7),
+                                  p: Theme.of(context).textTheme.bodyMedium
+                                      ?.copyWith(
+                                        fontSize: 15,
+                                        height: 1.65,
+                                      ),
                                   codeblockDecoration: BoxDecoration(
                                     color: Theme.of(
                                       context,
@@ -2107,6 +2145,10 @@ class _LiveProcessPanel extends StatefulWidget {
     required this.showStreamingText,
     required this.messageCount,
     required this.toolCallCount,
+    this.tokenInput,
+    this.tokenOutput,
+    this.tokenTotal,
+    this.tokenRate,
     this.thinkingVertical = false,
   });
 
@@ -2118,6 +2160,12 @@ class _LiveProcessPanel extends StatefulWidget {
   final bool showStreamingText;
   final int messageCount;
   final int toolCallCount;
+
+  /// 已消耗 token（输入/输出/总计）与流式每秒速率。
+  final int? tokenInput;
+  final int? tokenOutput;
+  final int? tokenTotal;
+  final double? tokenRate;
 
   /// 竖向显示形式下思考连续显示（网页端 ProcessNarrative）。
   final bool thinkingVertical;
@@ -2159,13 +2207,29 @@ class _LiveProcessPanelState extends State<_LiveProcessPanel> {
         {'names': runningNames.join(', ')},
       ),
       _ => <String>[
-        context.tr('Pi 正在处理'),
-        if (widget.messageCount > 0)
-          context.tr('{count} 个步骤', {'count': widget.messageCount}),
-        if (widget.toolCallCount > 0)
-          context.tr('{count} 个工具调用', {'count': widget.toolCallCount}),
+        context.tr('工作中'),
+        if (widget.tokenRate != null)
+          '${widget.tokenRate!.toStringAsFixed(1)} tok/s',
       ].join(' · '),
     };
+    // 已消耗 token（输入/输出/总计）；无数据时退回步骤/工具计数。
+    final tokenSummary = (widget.tokenInput != null ||
+            widget.tokenOutput != null ||
+            widget.tokenTotal != null)
+        ? <String>[
+            if (widget.tokenInput != null)
+              context.tr('输入 {n} token', {'n': widget.tokenInput}),
+            if (widget.tokenOutput != null)
+              context.tr('输出 {n} token', {'n': widget.tokenOutput}),
+            if (widget.tokenTotal != null)
+              context.tr('总计 {n} token', {'n': widget.tokenTotal}),
+          ].join(' · ')
+        : <String>[
+            if (widget.messageCount > 0)
+              context.tr('{count} 个步骤', {'count': widget.messageCount}),
+            if (widget.toolCallCount > 0)
+              context.tr('{count} 个工具调用', {'count': widget.toolCallCount}),
+          ].join(' · ');
     if (_activeStep >= toolSteps.length) {
       _activeStep = toolSteps.length - 1;
     }
@@ -2179,10 +2243,10 @@ class _LiveProcessPanelState extends State<_LiveProcessPanel> {
           Row(
             children: [
               const SizedBox.square(
-                dimension: 16,
+                dimension: 13,
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   phaseText,
@@ -2193,6 +2257,19 @@ class _LiveProcessPanelState extends State<_LiveProcessPanel> {
               ),
             ],
           ),
+          if (tokenSummary.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                tokenSummary,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(
+                  fontSize: 10.5,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ),
           // ── 工具步骤：横向小块排列（对齐网页端 process-tab）──
           if (toolSteps.isNotEmpty) ...[
             const SizedBox(height: 10),
@@ -2404,7 +2481,7 @@ class _ToolCallCardState extends State<_ToolCallCard> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontFamily: 'monospace',
-                        fontSize: 13,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: widget.isError ? cs.error : null,
                       ),
@@ -2914,55 +2991,28 @@ class _ThinkingSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (vertical) {
-      // 竖向串联：思考内容直接连续显示，无折叠。
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.psychology_outlined,
-                  size: 15,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  context.tr(streaming ? '正在思考…' : '思考过程'),
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: MarkdownBody(
-                data: thinking,
-                selectable: true,
-                styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
-                    .copyWith(
-                      p: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        height: 1.45,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-              ),
-            ),
-          ],
+    final thinkingBody = Align(
+      alignment: Alignment.centerLeft,
+      child: MarkdownBody(
+        data: thinking,
+        selectable: true,
+        styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+          p: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            height: 1.45,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
-      );
-    }
+      ),
+    );
+    // 统一折叠：无论 vertical 与否，思考都以可折叠条目呈现（展开后有内容）。
+    // vertical = 竖排连续样式；横向模式每步一行。展开内容限高 + 内部滚动，
+    // 避免超长思考把整屏撑成全部展开（网页端同样默认折叠）。
+    final expanded = ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 260),
+      child: SingleChildScrollView(
+        child: vertical ? thinkingBody : thinkingBody,
+      ),
+    );
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerLow,
       borderRadius: BorderRadius.circular(12),
@@ -2979,23 +3029,11 @@ class _ThinkingSection extends StatelessWidget {
           size: 20,
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
-        title: Text(context.tr(streaming ? '正在思考…' : '思考过程')),
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: MarkdownBody(
-              data: thinking,
-              selectable: true,
-              styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
-                  .copyWith(
-                    p: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      height: 1.45,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-            ),
-          ),
-        ],
+        title: Text(
+          context.tr(streaming ? '正在思考…' : '思考过程'),
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        children: [expanded],
       ),
     );
   }
@@ -3159,7 +3197,7 @@ class _SessionInfoBar extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: scheme.onSurface,
                 ),
@@ -3170,7 +3208,7 @@ class _SessionInfoBar extends StatelessWidget {
             const SizedBox(width: 8),
             ContextRing(
               percent: contextUsage,
-              size: 24,
+              size: 20,
             ),
           ],
           if (tokens != null && tokens > 0) ...[
@@ -3179,7 +3217,7 @@ class _SessionInfoBar extends StatelessWidget {
               _formatTokens(tokens),
               style: TextStyle(
                 fontFamily: 'monospace',
-                fontSize: 11,
+                fontSize: 10,
                 color: scheme.onSurfaceVariant,
               ),
             ),
@@ -3556,11 +3594,14 @@ class _ComposerState extends State<_Composer> {
         key: const Key('composer-text-field'),
         controller: controller,
         focusNode: _focusNode,
-        enabled: !running,
+        // 运行中保持可输入（不再禁用）：消息发出后可直接编排下一条，
+        // 回车即插队发送（_send 在 running 时自动走 steer）。
         minLines: 1,
         maxLines: 6,
         textCapitalization: TextCapitalization.sentences,
         keyboardType: TextInputType.multiline,
+        textInputAction: TextInputAction.send,
+        onSubmitted: (_) => onSend(),
         decoration: InputDecoration(
           hintText: context.tr('询问 Pi'),
           filled: false,
@@ -4604,6 +4645,7 @@ class _SessionDrawer extends StatefulWidget {
     required this.onLogout,
     this.onSwitchServer,
     this.onSwitchProject,
+    this.onGoHome,
     this.embedded = false,
   });
   final ChatController controller;
@@ -4612,6 +4654,9 @@ class _SessionDrawer extends StatefulWidget {
   final ValueChanged<PiSession> onDelete;
   final VoidCallback onLogout;
   final VoidCallback? onSwitchServer;
+
+  /// 抽屉「回首页」：返回所有项目目录页（嵌入式布局下也显示）。
+  final VoidCallback? onGoHome;
 
   /// Switches to a recent project directory (starts a fresh chat there).
   final ValueChanged<String>? onSwitchProject;
@@ -4628,6 +4673,8 @@ class _SessionDrawer extends StatefulWidget {
 class _SessionDrawerState extends State<_SessionDrawer> {
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
+  /// true = 抽屉内显示项目列表（切换项目 / 选择其他目录）。
+  bool _showProjectList = false;
 
   @override
   void dispose() {
@@ -4638,19 +4685,232 @@ class _SessionDrawerState extends State<_SessionDrawer> {
 
   String get _query => _searchController.text.trim().toLowerCase();
 
-  /// Most recently modified project directories (deduplicated, up to 5).
-  List<String> get _recentProjects {
-    final seen = <String>{};
-    final projects = <String>[];
-    final sessions = [...widget.controller.sessions]
-      ..sort((a, b) => b.modified.compareTo(a.modified));
-    for (final session in sessions) {
-      if (session.cwd.isEmpty || seen.contains(session.cwd)) continue;
-      seen.add(session.cwd);
-      projects.add(session.cwd);
-      if (projects.length >= 5) break;
+  /// 全部项目目录（projectRoot ?? cwd 去重，按最近活动排序；不限数量）。
+  List<String> get _allProjects {
+    final latest = <String, DateTime>{};
+    for (final s in widget.controller.sessions) {
+      final key = s.projectRoot?.isNotEmpty == true ? s.projectRoot! : s.cwd;
+      if (key.isEmpty) continue;
+      final prev = latest[key];
+      if (prev == null || s.modified.isAfter(prev)) latest[key] = s.modified;
     }
-    return projects;
+    final entries = latest.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return [for (final e in entries) e.key];
+  }
+
+  PiSession? get _activeSession {
+    final id = widget.controller.activeSessionId;
+    if (id == null) return null;
+    for (final s in widget.controller.sessions) {
+      if (s.id == id) return s;
+    }
+    return null;
+  }
+
+  /// 当前项目：正在对话的会话目录，其次草稿目录，最后最近项目。
+  String? get _currentProject {
+    final active = _activeSession;
+    if (active != null && active.cwd.isNotEmpty) return active.cwd;
+    final draft = widget.controller.draftCwd;
+    if (draft != null && draft.isNotEmpty) return draft;
+    return _allProjects.firstOrNull;
+  }
+
+  /// 项目显示名：优先备注别名，其次目录名。
+  String _projectDisplayName(String cwd) {
+    final alias = widget.controller.projectAliases[cwd]?.trim();
+    if (alias != null && alias.isNotEmpty) return alias;
+    final name = cwd
+        .split(RegExp(r'[/\\]'))
+        .where((part) => part.isNotEmpty)
+        .lastOrNull;
+    return (name != null && name.isNotEmpty) ? name : cwd;
+  }
+
+  /// 相对时间（“刚刚 / x 分钟前 / x 小时前 / x 天前”）。
+  String _relativeTime(DateTime time) {
+    final diff = DateTime.now().difference(time);
+    if (diff.inMinutes < 1) return context.tr('刚刚');
+    if (diff.inHours < 1) return '${diff.inMinutes} ${context.tr('分钟前')}';
+    if (diff.inDays < 1) return '${diff.inHours} ${context.tr('小时前')}';
+    if (diff.inDays < 30) return '${diff.inDays} ${context.tr('天前')}';
+    return DateFormat('yyyy-MM-dd').format(time.toLocal());
+  }
+
+  /// 抽屉内嵌项目列表（替代弹层）：列出全部项目（含会话数与当前标记），
+  /// 底部「选择其他目录…」= 新增选择项目（目录选择器，与网页端一致）。
+  Widget _buildProjectListPane(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final projects = _allProjects;
+    final current = _currentProject;
+    void switchTo(String cwd) {
+      _searchController.clear();
+      setState(() => _showProjectList = false);
+      widget.onSwitchProject?.call(cwd);
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+      children: [
+        if (projects.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text(
+                context.tr('暂无项目'),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        for (final cwd in projects)
+          ListTile(
+            dense: true,
+            leading: Icon(
+              Icons.folder_rounded,
+              size: 20,
+              color: cwd == current
+                  ? scheme.primary
+                  : scheme.onSurfaceVariant,
+            ),
+            title: Text(
+              _projectDisplayName(cwd),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: cwd == current
+                    ? FontWeight.w700
+                    : FontWeight.w500,
+                color: scheme.onSurface,
+              ),
+            ),
+            subtitle: Text(
+              cwd,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+            ),
+            trailing: cwd == current
+                ? Icon(Icons.check_circle_rounded, size: 18, color: scheme.primary)
+                : null,
+            onTap: () => switchTo(cwd),
+          ),
+        if (projects.isNotEmpty) const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          child: OutlinedButton.icon(
+            key: const Key('drawer-pick-other-directory'),
+            icon: Icon(Icons.create_new_folder_outlined, size: 18),
+            label: Text(context.tr('选择其他目录…')),
+            onPressed: widget.onSwitchProject == null
+                ? null
+                : () async {
+                    final selected = await showDirectoryPicker(
+                      context,
+                      controller: widget.controller,
+                      initialPath: current,
+                    );
+                    if (selected == null || selected.isEmpty) return;
+                    if (!mounted) return;
+                    switchTo(selected);
+                  },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 会话行长按菜单：生成标题 / 重命名。
+  Future<void> _showSessionRowMenu(BuildContext context, PiSession session) async {
+    final scheme = Theme.of(context).colorScheme;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: scheme.surfaceContainerLow,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                session.titleFor(context.appLanguage),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(session.cwd, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_rounded, size: 20),
+              title: Text(context.tr('生成标题')),
+              onTap: () => Navigator.of(sheetContext).pop('autoName'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline, size: 20),
+              title: Text(context.tr('重命名')),
+              onTap: () => Navigator.of(sheetContext).pop('rename'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'autoName':
+        try {
+          await widget.controller.autoNameSession(session.id);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(context.tr('标题已生成'))),
+            );
+          }
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(context.tr('标题生成失败，请稍后重试'))),
+            );
+          }
+        }
+      case 'rename':
+        final name = await _promptRename(context, session);
+        if (name != null && name.isNotEmpty && mounted) {
+          await widget.controller.renameSession(session.id, name);
+        }
+    }
+  }
+
+  /// 重命名对话框（返回新名称或 null）。
+  Future<String?> _promptRename(BuildContext context, PiSession session) {
+    final controller = TextEditingController(text: session.name ?? '');
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(dialogContext.tr('重命名')),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 80,
+          decoration: InputDecoration(
+            hintText: dialogContext.tr('请输入新名称'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(dialogContext.tr('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+            child: Text(dialogContext.tr('确定')),
+          ),
+        ],
+      ),
+    ).whenComplete(() => controller.dispose());
   }
 
   /// 编辑项目备注（显示别名）。空字符串清除备注。
@@ -4698,7 +4958,18 @@ class _SessionDrawerState extends State<_SessionDrawer> {
   Widget build(BuildContext context) {
     final grouped = <String, List<PiSession>>{};
     final query = _query;
+    // 只显示当前项目的会话（点进对话后仅当前项目；切换项目走顶部切换条）
+    final currentProject = _currentProject;
     for (final session in widget.controller.sessions) {
+      final key =
+          session.projectRoot?.isNotEmpty == true
+              ? session.projectRoot!
+              : session.cwd;
+      if (currentProject != null &&
+          currentProject.isNotEmpty &&
+          key != currentProject) {
+        continue;
+      }
       final alias = widget.controller.projectAliases[session.cwd]?.trim();
       final matchesQuery =
           query.isEmpty ||
@@ -4747,9 +5018,28 @@ class _SessionDrawerState extends State<_SessionDrawer> {
                     Expanded(
                       child: Text(
                         context.tr('对话'),
-                        style: Theme.of(context).textTheme.titleLarge,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontSize: 17,
+                        ),
                       ),
                     ),
+                    if (widget.onGoHome != null)
+                      TextButton.icon(
+                        key: const Key('drawer-home-button'),
+                        onPressed: widget.onGoHome,
+                        icon: const Icon(Icons.home_outlined, size: 16),
+                        label: Text(
+                          context.tr('回首页'),
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                        ),
+                      ),
                     if (!widget.embedded)
                       IconButton(
                         onPressed: () => Navigator.pop(context),
@@ -4759,7 +5049,63 @@ class _SessionDrawerState extends State<_SessionDrawer> {
                   ],
                 ),
               ),
-              Padding(
+              // 项目切换条：显示当前项目，点击弹出项目选择器（切换 / 新增选择目录）
+              if (widget.onSwitchProject != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Material(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHigh.withValues(alpha: .5),
+                    borderRadius: BorderRadius.circular(10),
+                    child: InkWell(
+                      key: const Key('drawer-project-switcher'),
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => setState(
+                        () => _showProjectList = !_showProjectList,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 9,
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.folder_rounded,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _projectDisplayName(
+                                  _currentProject ?? context.tr('选择项目'),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                ),
+                              ),
+                            ),
+                            Icon(
+                              _showProjectList
+                                  ? Icons.expand_less_rounded
+                                  : Icons.unfold_more_rounded,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              if (!_showProjectList)
+                Padding(
                 padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
                 child: TextField(
                   controller: _searchController,
@@ -4786,45 +5132,11 @@ class _SessionDrawerState extends State<_SessionDrawer> {
                   ),
                 ),
               ),
-              if (_recentProjects.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                  child: SizedBox(
-                    height: 34,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _recentProjects.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 6),
-                      itemBuilder: (context, index) {
-                        final cwd = _recentProjects[index];
-                        final alias = widget.controller.projectAliases[cwd]
-                            ?.trim();
-                        final name = (alias != null && alias.isNotEmpty)
-                            ? alias
-                            : (cwd
-                                      .split(RegExp(r'[/\\]'))
-                                      .where((part) => part.isNotEmpty)
-                                      .lastOrNull ??
-                                  cwd);
-                        return ActionChip(
-                          visualDensity: VisualDensity.compact,
-                          avatar: const Icon(Icons.history, size: 15),
-                          label: Text(name),
-                          onPressed: widget.onSwitchProject == null
-                              ? null
-                              : () {
-                                  _searchController.clear();
-                                  widget.onSwitchProject!(cwd);
-                                },
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ],
               const Divider(height: 1),
               Expanded(
-                child: RefreshIndicator(
+                child: _showProjectList
+                    ? _buildProjectListPane(context)
+                    : RefreshIndicator(
                   onRefresh: widget.controller.refreshSessions,
                   child:
                       widget.controller.loadingSessions &&
@@ -4854,8 +5166,6 @@ class _SessionDrawerState extends State<_SessionDrawer> {
                                   .split(RegExp(r'[/\\]'))
                                   .where((part) => part.isNotEmpty)
                                   .lastOrNull;
-                              final hasRunning = widget.controller
-                                  .directoryHasRunning(cwd);
                               final alias = widget
                                   .controller
                                   .projectAliases[cwd]
@@ -4867,14 +5177,8 @@ class _SessionDrawerState extends State<_SessionDrawer> {
                                       session.id ==
                                       widget.controller.activeSessionId,
                                 ),
-                                leading: hasRunning
-                                    ? const SizedBox.square(
-                                        dimension: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.folder_outlined),
+                                // 项目（目录）层不显示“处理中”，运行状态只在会话行内展示
+                                leading: const Icon(Icons.folder_outlined),
                                 title: Row(
                                   children: [
                                     Flexible(
@@ -4928,26 +5232,32 @@ class _SessionDrawerState extends State<_SessionDrawer> {
                                       left: 34,
                                       right: 10,
                                     ),
+                                    // 会话行保留“处理中”动画（项目层已不显示）
                                     leading: session.running
                                         ? const SizedBox.square(
-                                            dimension: 18,
+                                            dimension: 16,
                                             child: CircularProgressIndicator(
                                               strokeWidth: 2,
                                             ),
                                           )
                                         : const Icon(
                                             Icons.chat_bubble_outline,
-                                            size: 19,
+                                            size: 17,
                                           ),
+                                    onLongPress: () =>
+                                        _showSessionRowMenu(context, session),
                                     title: Text(
                                       session.titleFor(context.appLanguage),
-                                      maxLines: 2,
+                                      maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 14),
                                     ),
                                     subtitle: Text(
-                                      DateFormat(
-                                        'MM-dd HH:mm',
-                                      ).format(session.modified.toLocal()),
+                                      '${_relativeTime(session.modified)}'
+                                      ' · ${context.tr('{count} 条消息', {'count': session.messageCount})}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 11.5),
                                     ),
                                     trailing:
                                         widget.controller.deletingSessionIds

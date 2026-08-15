@@ -742,7 +742,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.textContaining('Pi 正在处理'), findsOneWidget);
+    expect(find.textContaining('工作中'), findsOneWidget);
     expect(find.text('不应实时展示的中间内容'), findsNothing);
     expect(find.text('尚未完成的流式结果'), findsNothing);
   });

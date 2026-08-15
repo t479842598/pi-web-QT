@@ -130,8 +130,9 @@ class PiSession {
   /// Fork 来源会话 id（存在即为 fork 出来的会话）。
   final String? parentSession;
 
-  /// Shallow copy; only [running] is intended to change after creation.
-  PiSession copyWith({bool? running}) => PiSession(
+  /// Shallow copy; only [running] / [pinned] are intended to change after
+  /// creation (pinned flips optimistically on the session list).
+  PiSession copyWith({bool? running, bool? pinned}) => PiSession(
     id: id,
     cwd: cwd,
     created: created,
@@ -141,7 +142,7 @@ class PiSession {
     name: name,
     projectRoot: projectRoot,
     running: running ?? this.running,
-    pinned: pinned,
+    pinned: pinned ?? this.pinned,
     worktreeBranch: worktreeBranch,
     parentSession: parentSession,
   );
