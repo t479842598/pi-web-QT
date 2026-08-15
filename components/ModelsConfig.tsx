@@ -105,6 +105,7 @@ type BuiltinProviderChange = (provider: Record<string, unknown> | null) => void;
 type RegisterModelsFlush = (flush: BuiltinFlush) => (() => void) | void;
 
 const API_OPTIONS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const;
+const CUSTOM_CALL_FORMAT = "__custom__";
 
 function useModelTranslation() {
   const { t } = useI18n();
@@ -239,10 +240,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Provider detail ───────────────────────────────────────────────────────────
 
-function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddModels }: {
+function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddModels, onAddModel }: {
   name: string; provider: ProviderEntry;
   onChange: (p: ProviderEntry) => void; onRename: (n: string) => void; onDelete: () => void;
   onAddModels: (models: DiscoveredModel[]) => void;
+  onAddModel: () => void;
 }) {
   const t = useModelTranslation();
   const [editingName, setEditingName] = useState(name);
@@ -370,19 +372,28 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
       </Field>
 
       <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-        {discoveryState.phase !== "success" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {discoveryState.phase !== "success" && (
+            <button
+              onClick={handleDiscoverModels}
+              disabled={!provider.baseUrl?.trim() || discoveryState.phase === "loading"}
+              style={{
+                height: 30, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 5,
+                background: "var(--bg-panel)", color: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "var(--text-dim)" : "var(--text-muted)",
+                cursor: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "not-allowed" : "pointer", fontSize: 11,
+              }}
+            >
+              {discoveryState.phase === "loading" ? t("desktop.modelsDiscoveryFetching") : t("desktop.modelsDiscoveryFetch")}
+            </button>
+          )}
           <button
-            onClick={handleDiscoverModels}
-            disabled={!provider.baseUrl?.trim() || discoveryState.phase === "loading"}
-            style={{
-              alignSelf: "flex-start", height: 30, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 5,
-              background: "var(--bg-panel)", color: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "var(--text-dim)" : "var(--text-muted)",
-              cursor: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "not-allowed" : "pointer", fontSize: 11,
-            }}
+            onClick={onAddModel}
+            title={t("desktop.modelsAddModelManual")}
+            style={{ height: 30, padding: "0 12px", border: "none", borderRadius: 5, background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
           >
-            {discoveryState.phase === "loading" ? t("desktop.modelsDiscoveryFetching") : t("desktop.modelsDiscoveryFetch")}
+            {t("desktop.modelsAddModelManual")}
           </button>
-        )}
+        </div>
 
         {discoveryState.phase === "error" && (
           <div style={{ padding: "7px 9px", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 5, color: "#ef4444", fontSize: 11, lineHeight: 1.4 }}>
@@ -1601,6 +1612,7 @@ function CustomProviderDialog({
   const t = useModelTranslation();
   const [name, setName] = useState("");
   const [api, setApi] = useState<string>(API_OPTIONS[0]);
+  const [apiSel, setApiSel] = useState<string>(API_OPTIONS[0]);
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [headers, setHeaders] = useState<Record<string, string> | undefined>(undefined);
@@ -1618,7 +1630,7 @@ function CustomProviderDialog({
     setImportValue(value);
     const entry = existingProviders.find((p) => p.name === value);
     if (!entry) return;
-    if (entry.provider.api) setApi(entry.provider.api);
+    if (entry.provider.api) { setApi(entry.provider.api); setApiSel(entry.provider.api); }
     setBaseUrl(entry.provider.baseUrl ?? "");
     setApiKey(entry.provider.apiKey ?? "");
     setHeaders(entry.provider.headers ? { ...entry.provider.headers } : undefined);
@@ -1663,7 +1675,19 @@ function CustomProviderDialog({
           {/* Call format — import & select */}
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <SectionTitle>{t("desktop.modelsCallFormat")}</SectionTitle>
-            <Select value={api} onChange={setApi} options={API_OPTIONS} required />
+            <select
+              value={apiSel}
+              onChange={(e) => {
+                const v = e.target.value;
+                setApiSel(v);
+                if (v === CUSTOM_CALL_FORMAT) { setUrlOpen(true); return; }
+                setApi(v);
+              }}
+              style={inputStyle}
+            >
+              {API_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+              <option value={CUSTOM_CALL_FORMAT}>{t("desktop.modelsCustomCallFormat")}</option>
+            </select>
             <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{t("desktop.modelsCallFormatHelp")}</span>
           </div>
 
@@ -1684,7 +1708,7 @@ function CustomProviderDialog({
 
           {/* URL — click + to input a full URL */}
           <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
-            <SectionTitle>{t("desktop.modelsBaseUrl")}</SectionTitle>
+            <SectionTitle>{t("desktop.modelsFullUrl")}</SectionTitle>
             {!urlOpen ? (
               <button onClick={() => setUrlOpen(true)}
                 style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 0", background: "none", border: "1px dashed var(--border)", borderRadius: 5, color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}
@@ -1703,6 +1727,13 @@ function CustomProviderDialog({
               </div>
             )}
             {baseUrl.trim() && !urlValid && <span style={{ fontSize: 10, color: "#ef4444" }}>{t("desktop.modelsUrlInvalid")}</span>}
+
+            <Field label={t("desktop.modelsApiKey")}>
+              <SecretTextInput value={apiKey} onChange={setApiKey} placeholder={t("desktop.modelsApiKeyPlaceholder")} mono />
+              <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
+                {t("desktop.modelsApiKeyHelp")}
+              </span>
+            </Field>
           </div>
 
           {/* Custom request — model ID + context length + output length */}
@@ -2079,6 +2110,7 @@ export function ModelsConfig({
           onRename={(n) => renameProvider(selection.name, n)}
           onDelete={() => deleteProvider(selection.name)}
           onAddModels={(models) => addDiscoveredModels(selection.name, models)}
+          onAddModel={() => { void addModel(selection.name); }}
         />
       );
     }

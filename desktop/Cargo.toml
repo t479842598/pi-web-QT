@@ -1,6 +1,6 @@
 [package]
 name = "pi-web-desktop"
-version = "0.10.0"
+version = "0.10.1"
 description = "Pi Web 桌面端（Tauri 2 瘦壳）：自动连接本机或远程 Pi Web 服务"
 authors = ["pi-web"]
 edition = "2021"

@@ -42,12 +42,35 @@ test("custom provider wizard supports format import, URL input and custom reques
   );
 
   // Call format selection + import from existing providers.
-  assert.match(dialogSource, /API_OPTIONS/);
+  assert.match(dialogSource, /API_OPTIONS\.map/);
   assert.match(dialogSource, /existingProviders\.map/);
+  // Custom call format option reveals the full URL; section labeled 完整 URL.
+  assert.match(dialogSource, /CUSTOM_CALL_FORMAT/);
+  assert.match(dialogSource, /desktop\.modelsCustomCallFormat/);
+  assert.match(dialogSource, /desktop\.modelsFullUrl/);
   // Click + to expand a full URL input, with http/https validation.
   assert.match(dialogSource, /onClick=\{\(\) => setUrlOpen\(true\)\}/);
   assert.ok(dialogSource.includes("/^https?:\\/\\//i"), "URL validation regex present");
+  // API key can be entered manually next to the URL.
+  assert.match(dialogSource, /SecretTextInput value=\{apiKey\}/);
+  assert.match(dialogSource, /desktop\.modelsApiKeyPlaceholder/);
+  assert.match(dialogSource, /desktop\.modelsApiKeyHelp/);
   // Custom request: model ID + context length + output length are persisted on submit.
   assert.match(dialogSource, /contextWindow: parseInt\(contextWindow, 10\)/);
   assert.match(dialogSource, /maxTokens: parseInt\(maxTokens, 10\)/);
+});
+
+test("provider detail has a manual add-model button next to import models", async () => {
+  const source = await readFile(new URL("./ModelsConfig.tsx", import.meta.url), "utf8");
+  const detailSource = source.slice(
+    source.indexOf("function ProviderDetail"),
+    source.indexOf("// ── ThinkingLevelMap editor"),
+  );
+
+  assert.match(detailSource, /onAddModel: \(\) => void/);
+  assert.match(detailSource, /onClick=\{onAddModel\}/);
+  assert.match(detailSource, /desktop\.modelsAddModelManual/);
+  // The detail is wired from the main component to the tree's addModel flow.
+  const mainSource = source.slice(source.indexOf("export function ModelsConfig"));
+  assert.match(mainSource, /onAddModel=\{\(\) => \{ void addModel\(selection\.name\); \}\}/);
 });
