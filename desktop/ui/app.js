@@ -36,6 +36,7 @@ function renderList() {
       <div class="srv-info">
         <div class="srv-name">${escapeHtml(s.name)} ${s.is_local ? '<span class="srv-tag">本机</span>' : ""} ${lock}</div>
         <div class="srv-url">${escapeHtml(s.base_url)}</div>
+        <div class="srv-user">用户名：${escapeHtml(s.username || "pi")}</div>
       </div>
       <div class="srv-actions">
         <button class="ghost mini act-open" data-id="${s.id}">连接</button>
@@ -71,11 +72,12 @@ async function connect(id) {
 function openFormFor(srv) {
   $("inp-name").value = srv.name || "";
   $("inp-url").value = srv.base_url || "";
+  $("inp-user").value = srv.username || "pi";
   $("inp-pass").value = "";
   $("form-hint").textContent = srv.has_password
     ? "已保存密码，可直接连接；如需更换请重新输入。"
-    : "该服务器尚未保存密码，请输入本机/远程密码后连接。";
-  $("inp-pass").focus();
+    : "该服务器尚未保存密码，请输入账号密码后连接。";
+  $("inp-user").focus();
   window.scrollTo({ top: 0, behavior: "smooth" });
   // 记录待连接 id：表单提交时若 URL 未改动则走更新而非新增
   $("form-server").dataset.pendingId = srv.id;
@@ -158,7 +160,7 @@ async function startLocal() {
     } else {
       openFormFor(local);
       $("form-hint").textContent =
-        "本机服务已就绪，请输入本机 Pi Web 密码后连接（输入一次即保存，下次免输入）。";
+        "本机服务已就绪，请输入本机 Pi Web 账号密码后连接（输入一次即保存，下次免输入）。";
     }
     refresh();
     probe();
@@ -177,6 +179,7 @@ $("form-server").addEventListener("submit", async (e) => {
   $("form-hint").textContent = "";
   const name = $("inp-name").value.trim();
   const url = $("inp-url").value.trim();
+  const username = $("inp-user").value.trim();
   const pass = $("inp-pass").value;
   if (!url) {
     $("form-hint").textContent = "请填写服务器地址";
@@ -189,11 +192,13 @@ $("form-server").addEventListener("submit", async (e) => {
     const srv = await invoke("save_server", {
       name,
       baseUrl: url,
+      username,
       password: pass,
       id: $("form-server").dataset.pendingId || null,
     });
     delete $("form-server").dataset.pendingId;
     $("inp-name").value = "";
+    $("inp-user").value = "pi";
     $("inp-pass").value = "";
     toast("已保存，正在打开…", "ok");
     refresh();

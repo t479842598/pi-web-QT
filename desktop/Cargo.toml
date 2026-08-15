@@ -1,6 +1,6 @@
 [package]
 name = "pi-web-desktop"
-version = "0.9.26"
+version = "0.9.32"
 description = "Pi Web 桌面端（Tauri 2 瘦壳）：自动连接本机或远程 Pi Web 服务"
 authors = ["pi-web"]
 edition = "2021"
@@ -21,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = "2"
 url = "2"
+wait-timeout = "0.2"
 uuid = { version = "1", features = ["v4"] }
 dirs = "6"
 base64 = "0.22"

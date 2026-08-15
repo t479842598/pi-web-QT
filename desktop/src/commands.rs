@@ -63,6 +63,7 @@ pub fn save_server(
     app: AppHandle,
     name: String,
     base_url: String,
+    username: String,
     password: String,
     id: Option<String>,
 ) -> Result<ServerInfo, String> {
@@ -70,6 +71,12 @@ pub fn save_server(
     if base_url.is_empty() {
         return Err("请填写服务器地址".into());
     }
+    // 用户名为空时回退默认 pi（本机服务/历史配置保持兼容）
+    let username = if username.trim().is_empty() {
+        crate::config::DEFAULT_USERNAME.to_string()
+    } else {
+        username.trim().to_string()
+    };
     with_cfg(&app, |cfg, _app| {
         let mut srv: Server;
         if let Some(pid) = &id {
@@ -82,6 +89,7 @@ pub fn save_server(
                 name.trim().to_string()
             };
             existing.base_url = base_url.clone();
+            existing.username = username.clone();
             if !password.is_empty() {
                 existing.set_password(&password);
             }
@@ -95,7 +103,7 @@ pub fn save_server(
                     name.trim().to_string()
                 },
                 base_url: base_url.clone(),
-                username: crate::config::DEFAULT_USERNAME.to_string(),
+                username: username.clone(),
                 password_inline: None,
                 has_password: false,
                 last_used_at: None,
@@ -130,17 +138,32 @@ pub fn remove_server(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn probe_local(state: State<AppState>) -> probe::ProbeResult {
-    let cfg = state.config.lock().unwrap();
-    probe::probe(&cfg)
+pub async fn probe_local(state: State<'_, AppState>) -> Result<probe::ProbeResult, String> {
+    // spawn_blocking：探测最长 ~6s，放后台线程避免冻结连接页 UI（窗口拖动/关闭/托盘响应）
+    let cfg = state.config.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || probe::probe(&cfg))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 拉起本机 pi-web 并立即返回（不阻塞等待就绪）；
 /// 就绪状态由前端轮询 probe_local 判断。成功后前端自行打开连接表单/服务器窗口。
 #[cfg(not(mobile))]
 #[tauri::command]
-pub fn start_local(_app: AppHandle, _state: State<AppState>) -> Result<bool, String> {
-    Ok(probe::spawn_local())
+pub async fn start_local(state: State<'_, AppState>) -> Result<bool, String> {
+    // 互斥：启动窗口期内重复触发直接返回 false，避免双开进程抢端口
+    {
+        let mut starting = state.starting_local.lock().unwrap();
+        if *starting {
+            return Ok(false);
+        }
+        *starting = true;
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || probe::spawn_local())
+        .await
+        .map_err(|e| e.to_string());
+    *state.starting_local.lock().unwrap() = false;
+    result
 }
 
 /// 移动端无本地 CLI。

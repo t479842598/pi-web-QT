@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### 修复
+- **桌面端 Windows 适配** — ① 本机 pi-web CLI 探测在 Windows 上失效：npm 生成的启动器是 `pi-web.cmd`（无扩展名的 `pi-web` 是 sh 脚本，CreateProcess 无法执行），且 `npm prefix -g` 返回的 bin 目录就是 prefix 本身而非 `prefix/bin`；现按平台候选名（Windows `.cmd`/`.exe`）查找，并兼容 `%APPDATA%\npm`。
+② 拉起 CLI 不再闪出 cmd 黑框（GUI 应用无控制台，`CREATE_NO_WINDOW` 抑制）。③ Windows 原生菜单不支持彩色 emoji（渲染为方框），服务器菜单/托盘菜单改纯文本标记（macOS/Linux 保留 emoji）。④ 发布 CI 补上 `updater:default` capability 注入（README 声称已带但实际缺失，导致「检查更新」永远失败）。⑤ 版本同步补 `desktop/Cargo.toml`（Tauri 构建要求 `tauri.conf.json` 与 `Cargo.toml` 版本一致，此前脱节会导致构建失败），本地与 CI 均已同步。⑥ 探测/拉起命令改后台执行（`spawn_blocking`），连接页探测不再冻结 UI；`switch-` 菜单导航目标改用聚焦窗口；Basic Auth 头与窗口标题改为每次请求从配置实时读取（改密码/改名后已开窗口立即生效）。⑦ 探测逻辑加固：`is_local_host` 精确解析 host（不再误判 `127.0.0.1.evil.com`）、npm prefix 查询加 3s 超时、服务在线时跳过 CLI 查找、`spawn_local` 并发去重、启动时按「无服务自动拉起」开关后台拉起本机服务、菜单名转义 `&`。
+- **桌面端支持自定义用户名** — 连接页新增「用户名」输入框（默认 `pi`），保存服务器时可选填任意 Basic Auth 用户名；此前用户名写死 `pi`，远程服务器（用户名非 pi）一律连不上。已保存服务器列表显示用户名，编辑时回填。
+
 ## v0.9.28 — 2026-08-13（发消息卡死修复 + 桌面端体验）
 
 ### 修复

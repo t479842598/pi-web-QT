@@ -138,3 +138,57 @@ fn is_local_host_detection() {
     assert!(probe::is_local_host("http://[::1]:30141"));
     assert!(!probe::is_local_host("https://pi.example.com"));
 }
+
+#[test]
+fn is_local_host_rejects_substring_spoofing() {
+    // 127.0.0.1.evil.com / localhost.evil.com 不应被误判为本机
+    assert!(!probe::is_local_host("http://127.0.0.1.evil.com"));
+    assert!(!probe::is_local_host("http://localhost.evil.com"));
+    assert!(!probe::is_local_host("http://127.0.0.1.evil.com:30141"));
+}
+
+/// 真实环境冒烟测试（默认忽略，手动跑：cargo test -- --ignored smoke）
+/// 验证 Windows 适配核心：find_cli 命中平台候选名、alive 探测、spawn_local 幂等。
+#[test]
+#[ignore = "依赖真实环境（本机 pi-web 服务 / npm 全局安装）"]
+fn smoke_real_environment() {
+    // 1. find_cli 能找到 pi-web（本机 npm 全局装有 pi-web.cmd）
+    let cli = probe::find_cli();
+    assert!(cli.is_some(), "find_cli 应找到 pi-web（Windows: pi-web.cmd）");
+    if let Some(c) = &cli {
+        eprintln!("[smoke] CLI: {:?}", c);
+    }
+    // 2. is_local_host 判定
+    assert!(probe::is_local_host("http://127.0.0.1:30141"));
+    assert!(!probe::is_local_host("http://127.0.0.1.evil.com"));
+    // 3. spawn_local：服务在线则直接 true；不在线则拉起后应尽快就绪（轮询判定）
+    let spawned = probe::spawn_local();
+    let alive = probe::alive(crate::config::DEFAULT_LOCAL_URL);
+    assert!(spawned, "spawn_local 应返回 true");
+    assert!(alive, "服务应在线（spawn_local 后）");
+    eprintln!("[smoke] spawn_local={spawned} alive={alive}");
+}
+
+#[test]
+fn find_in_dir_matches_platform_cli_name() {
+    // 临时目录里放一个平台对应的假 CLI 文件，验证 find_in_dir 能找到
+    let dir = std::env::temp_dir().join(format!("piweb-findcli-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    #[cfg(windows)]
+    let fname = "pi-web.cmd";
+    #[cfg(not(windows))]
+    let fname = "pi-web";
+    let fake = dir.join(fname);
+    std::fs::write(&fake, "echo hi").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755));
+    }
+    assert_eq!(
+        probe::find_in_dir(&dir).as_deref(),
+        Some(fake.as_path()),
+        "find_in_dir 应命中平台候选名 {fname}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

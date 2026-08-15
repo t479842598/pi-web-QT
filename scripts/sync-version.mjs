@@ -2,6 +2,7 @@
 /**
  * 版本号同步：读取 web 端 package.json 的 version，统一写入：
  *   - desktop/tauri.conf.json   （桌面端）
+ *   - desktop/Cargo.toml        （桌面端 Rust crate；Tauri 构建要求两处版本一致）
  *   - mobile2/pubspec.yaml      （Flutter 移动端，pi-web-qt）
  * 用法：node scripts/sync-version.mjs
  * 发版流程：先 bump web 版本号，再跑本脚本，三端版本号即同步。
@@ -36,6 +37,18 @@ if (existsSync(desktopPkgPath)) {
   pkg.version = version;
   writeFileSync(desktopPkgPath, JSON.stringify(pkg, null, 2) + "\n");
   console.log(`[sync-version] desktop/package.json -> ${version}`);
+}
+
+// 1c. desktop/Cargo.toml（Tauri 构建要求与 tauri.conf.json 版本一致）
+const cargoPath = join(root, "desktop", "Cargo.toml");
+if (existsSync(cargoPath)) {
+  let cargo = readFileSync(cargoPath, "utf8");
+  cargo = cargo.replace(
+    /^version\s*=\s*"[^"]+"/m,
+    `version = "${version}"`,
+  );
+  writeFileSync(cargoPath, cargo);
+  console.log(`[sync-version] desktop/Cargo.toml -> ${version}`);
 }
 
 // 2. mobile2/pubspec.yaml（Flutter 移动端版本号 x.y.z+<build>）

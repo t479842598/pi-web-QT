@@ -22,7 +22,7 @@ pub fn server_label(id: &str) -> String {
 /// /api/* 请求），改为由 on_web_resource_request 在请求头注入 Authorization。
 pub fn build_url(server: &Server) -> String {
     let base = url::Url::parse(&server.base_url)
-        .unwrap_or_else(|_| url::Url::parse("http://localhost").unwrap());
+        .unwrap_or_else(|_| url::Url::parse(crate::config::DEFAULT_LOCAL_URL).unwrap());
     let mut u = base;
     u.query_pairs_mut().append_pair("piweb_connected", "1");
     u.to_string()
@@ -38,6 +38,25 @@ pub fn basic_auth_header(server: &Server) -> Option<tauri::http::HeaderValue> {
     tauri::http::HeaderValue::from_str(&format!("Basic {token}")).ok()
 }
 
+/// 服务器菜单项显示名。Windows 原生 Win32 菜单不支持彩色 emoji（渲染为方框），
+/// 用纯文本标记替代；macOS/Linux 保留 emoji 图标。
+pub fn server_menu_label(s: &Server) -> String {
+    // 本地/远程标识由 base_url 派生（用户编辑 URL 后立即正确），不依赖持久化 is_local
+    let is_local = crate::probe::is_local_host(&s.base_url);
+    #[cfg(windows)]
+    {
+        // Win32 菜单中 & 是助记符前缀，需转义为 && 才能原样显示
+        let name = s.name.replace('&', "&&");
+        let tag = if is_local { "[本机] " } else { "[远程] " };
+        format!("{tag}{name}")
+    }
+    #[cfg(not(windows))]
+    {
+        let icon = if is_local { "🖥 " } else { "🌐 " };
+        format!("{icon}{}", s.name)
+    }
+}
+
 /// 「服务器」子菜单：当前窗口切换服务器 + 连接管理入口。
 #[cfg(not(mobile))]
 pub fn build_servers_submenu(
@@ -50,11 +69,10 @@ pub fn build_servers_submenu(
     let sep1 = PredefinedMenuItem::separator(app)?;
     let mut server_items: Vec<MenuItem<tauri::Wry>> = Vec::new();
     for s in &cfg.servers {
-        let icon = if s.is_local { "🖥 " } else { "🌐 " };
         server_items.push(MenuItem::with_id(
             app,
             format!("switch-{}", s.id),
-            format!("{icon}{}", s.name),
+            server_menu_label(s),
             true,
             None::<&str>,
         )?);
@@ -114,11 +132,18 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
         // 保存密码时，对发往该服务器的所有请求（首屏导航 + /api/* fetch + SSE）
         // 注入 Basic Auth 头。URL 保持干净 —— 不带 userinfo，避免 fetch 规范
         // 拦截子资源请求（"URL is not valid or contains user credentials"）。
+        // 注意：不在这里快照 header —— 每次请求从 AppState 读最新服务器配置，
+        // 用户在连接页改密码/名称后已打开的窗口立即生效，无需重建。
         .on_web_resource_request({
-            let auth_header_value: Option<tauri::http::HeaderValue> = basic_auth_header(server);
+            let app_handle = app.clone();
+            let server_id = server.id.clone();
             move |mut request, _response| {
-                if let Some(v) = auth_header_value.clone() {
-                    request.headers_mut().insert("authorization", v);
+                let state = app_handle.state::<AppState>();
+                let cfg = state.config.lock().unwrap();
+                if let Some(srv) = cfg.find(&server_id) {
+                    if let Some(v) = basic_auth_header(srv) {
+                        request.headers_mut().insert("authorization", v);
+                    }
                 }
             }
         })
@@ -213,11 +238,10 @@ fn build_menu(app: &AppHandle, cfg: &Config) -> tauri::Result<Menu<tauri::Wry>> 
     let sep1 = PredefinedMenuItem::separator(app)?;
     let mut server_items: Vec<MenuItem<tauri::Wry>> = Vec::new();
     for s in &cfg.servers {
-        let icon = if s.is_local { "🖥 " } else { "🌐 " };
         server_items.push(MenuItem::with_id(
             app,
             format!("server-{}", s.id),
-            format!("{icon}{}", s.name),
+            server_menu_label(s),
             true,
             None::<&str>,
         )?);
@@ -277,12 +301,15 @@ pub fn rebuild_tray(app: &AppHandle, cfg: &Config) {
         }
     }
     drop(tray_guard);
-    // 2. 所有服务器窗口的切换菜单（Windows/Linux）
+    // 2. 所有服务器窗口的切换菜单（Windows/Linux）+ 标题同步（改名后立即生效）
     let reg = state.server_windows.lock().unwrap().clone();
     if let Ok(menu) = build_window_menu(app, cfg) {
-        for label in reg.values() {
+        for (sid, label) in &reg {
             if let Some(w) = app.get_webview_window(label) {
                 let _ = w.set_menu(menu.clone());
+                if let Some(srv) = cfg.find(sid) {
+                    let _ = w.set_title(&srv.name);
+                }
             }
         }
     }
@@ -293,8 +320,16 @@ pub fn rebuild_tray(app: &AppHandle, cfg: &Config) {
 
 /// 启动路由（桌面）：总是进入连接页，由用户自己填写服务器地址。
 /// 不自动恢复上次服务器、不自动连本地、不自动使用本地密钥/密码。
+/// 仅当用户开启「无服务时自动拉起」（local_auto_start）时，后台尝试拉起本机
+/// pi-web CLI —— 拉起不等于连接，连接仍由用户在连接页确认。
 #[cfg(not(mobile))]
-pub fn route_startup(app: &AppHandle, _cfg: &Config) {
+pub fn route_startup(app: &AppHandle, cfg: &Config) {
+    if cfg.local_auto_start {
+        // 后台执行，不阻塞启动路由（探测 ~2s + 拉起；结果由连接页轮询 probe_local 呈现）
+        tauri::async_runtime::spawn(async move {
+            let _ = crate::probe::spawn_local();
+        });
+    }
     // 连接页：用户填写 URL（+密码）、点「获取本机链接」或「启动本机 pi-web」
     let _ = open_connect_window(app);
 }

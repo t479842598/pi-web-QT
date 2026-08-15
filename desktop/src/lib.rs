@@ -15,6 +15,9 @@ use tauri::Manager;
 pub struct AppState {
     /// 服务器配置（加载后缓存，命令并发读写用锁保护）
     pub config: Mutex<config::Config>,
+    /// 本机 pi-web 启动互斥（防止并发点击重复拉起）
+    #[cfg(not(mobile))]
+    pub starting_local: Mutex<bool>,
     /// 主窗口（服务器窗口）注册表：server_id -> window label
     pub server_windows: Mutex<HashMap<String, String>>,
     /// 托盘图标句柄（重建菜单时需要；移动端无托盘）
@@ -43,6 +46,8 @@ pub fn run() {
     // manage / setup / invoke_handler / on_window_event 均为 `mut self`（move），逐段绑定
     let builder = builder.manage(AppState {
         config: Mutex::new(config::Config::default()),
+        #[cfg(not(mobile))]
+        starting_local: Mutex::new(false),
         server_windows: Mutex::new(HashMap::new()),
         #[cfg(not(mobile))]
         tray: Mutex::new(None),
@@ -107,16 +112,17 @@ pub fn run() {
             if let Some(srv) = cfg.find(sid) {
                 let url = window::build_url(srv);
                 if let Ok(url) = url::Url::parse(&url) {
-                    // 导航目标：服务器窗口注册表中最近使用的一个（菜单挂在主窗口上，
-                    // 点击时该窗口通常是当前窗口）
-                    let target = {
-                        let reg = state.server_windows.lock().unwrap().clone();
-                        let mut labels: Vec<String> = reg.values().cloned().collect();
-                        labels.reverse();
-                        labels
-                            .into_iter()
-                            .find_map(|l| app.get_webview_window(&l))
-                    };
+                    // 导航目标：优先聚焦的 webview 窗口（菜单挂在窗口上，点击时
+                    // 该窗口通常处于聚焦状态）；找不到再退回注册表中任意服务器窗口。
+                    let target = app
+                        .webview_windows()
+                        .into_values()
+                        .find(|w| w.is_focused().unwrap_or(false))
+                        .or_else(|| {
+                            let reg = state.server_windows.lock().unwrap().clone();
+                            reg.values()
+                                .find_map(|l| app.get_webview_window(l))
+                        });
                     if let Some(w) = target {
                         let _ = w.navigate(url);
                         let _ = w.set_title(&srv.name);

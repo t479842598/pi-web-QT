@@ -6,11 +6,11 @@ Pi Web 桌面端：**Tauri 2（Rust）瘦壳 + WebView 加载 Pi Web**。壳只�
 
 ## 功能
 
-- **设置服务器 URL**：启动总是进入连接页（不自动连上次服务器、不自动使用本地密钥/密码），弹窗自己填写 URL+密码（用户名固定 `pi`，Basic Auth）；「获取本机链接」按钮检测到的本机地址也是由你填写确认；「启动本机 Pi Web」一键拉起 CLI。
+- **设置服务器 URL**：启动总是进入连接页（不自动连上次服务器、不自动使用本地密钥/密码），弹窗自己填写 URL+账号密码（用户名默认 `pi`，可改，Basic Auth）；「获取本机链接」按钮检测到的本机地址也是由你填写确认；「启动本机 Pi Web」一键拉起 CLI。
 - **本机服务检测**：连接页显示本机服务状态（401 带密码的服务也能正确识别）。
 - **主窗口内来回切换服务器**：主窗口菜单栏「服务器」菜单（macOS 在系统菜单栏）列出全部服务器，点击即把当前窗口导航到目标服务器，可来回切换；托盘菜单「连接管理…」打开设置，列表项新开/聚焦窗口。
 - **多服务器同时连接**：每台服务器一个独立窗口，托盘菜单随时切换/新开。
-- **密码安全存储**：系统钥匙串（macOS Keychain / Windows Credential Manager / Linux Secret Service），配置文件不落明文；Linux 无 Secret Service 时降级明文并告警。
+- **密码存储**：密码明文存本机配置文件（`config.json`，位于系统配置目录），避免弹钥匙串授权框；输入一次后免密连接。
 - **托盘常驻**：关闭窗口 = 隐藏到托盘，托盘菜单退出才真正退出。
 - **自更新**：tauri updater（发布 CI 启用 `updater` feature 时生效）。
 
@@ -36,7 +36,7 @@ cargo check --features updater   # 验证 updater 发布路径可编译
 桌面端版本号**跟随 web 端**（`package.json`）。发版前执行：
 
 ```bash
-node scripts/sync-version.mjs   # 读 package.json version → 写 desktop/tauri.conf.json
+node scripts/sync-version.mjs   # 读 package.json version → 同步 tauri.conf.json / Cargo.toml / 移动端
 ```
 
 ## 打包
@@ -48,14 +48,14 @@ cd desktop && npx tauri build --config bundle.windows.conf.json        # Windows
 cd desktop && npx tauri build --config bundle.linux.conf.json          # Linux deb/rpm/AppImage
 ```
 
-CI：`.github/workflows/desktop-release.yml`（tag `desktop-v*` 触发，tauri-action 三平台构建 + 签名产物）。
+CI：`.github/workflows/release-all.yml`（tag `v*` 触发，tauri-action 三平台构建 + 签名产物）。
 
 ### updater 发布密钥
 
 - 公钥已写入 `desktop/tauri.conf.json` 的 `plugins.updater.pubkey`（可提交）。
 - 私钥：`desktop/.keys/piweb-updater.key`（**已 gitignore，切勿提交**）+ 密码 `desktop/.keys/piweb-updater.key.pass`。
 - CI 需要仓库 Secrets：`TAURI_SIGNING_PRIVATE_KEY`（私钥内容）、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
-- 发布构建需 `--features updater`（workflow 已带）并给 capabilities 注入 `updater:default`（workflow 已带）。
+- 发布构建需 `--features updater` 并给 capabilities 注入 `updater:default`（`release-all.yml` 的「Inject updater capability」步骤在构建前自动注入；本地开发不启用该 feature）。
 
 ## 目录
 
@@ -64,9 +64,8 @@ desktop/
   src/
     main.rs      入口
     lib.rs       Builder / 启动路由 / 窗口关闭拦截
-    config.rs    服务器列表持久化（atomic 写）
-    keyring.rs   系统钥匙串密码存取
-    probe.rs     本地探测 + pi-web CLI 查找/拉起
+    config.rs    服务器列表持久化（atomic 写；密码明文存配置）
+    probe.rs     本地探测 + pi-web CLI 查找/拉起（Windows 兼容 .cmd shim / CREATE_NO_WINDOW）
     window.rs    连接页/主窗口/托盘/多窗口管理
     commands.rs  IPC 命令（连接页调用）
     tests.rs     核心逻辑单测
