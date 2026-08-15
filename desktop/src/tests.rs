@@ -15,6 +15,7 @@ fn server(base: &str, password: Option<&str>, is_local: bool) -> Server {
         has_password: false,
         last_used_at: None,
         is_local,
+        proxy_port: None,
     };
     if let Some(pw) = password {
         // 直接写 inline 降级值，绕开 keyring（测试环境不弹钥匙串授权框）
@@ -419,7 +420,7 @@ fn proxy_real_remote() {
         .call()
     {
         Ok(r) => r,
-        Err(ureq::Error::Status(code, r)) => {
+        Err(ureq::Error::Status(code, _r)) => {
             panic!("远程拒绝请求（HTTP {code}）—— 头重写或凭据注入有问题")
         }
         Err(e) => panic!("请求失败: {e}"),
@@ -546,4 +547,26 @@ fn proxy_sse_streaming_not_buffered() {
         "首块应在上游写完前到达（流式透传），first={first_at:?} upstream_done={:?}",
         upstream_done.saturating_duration_since(t_start)
     );
+}
+
+/// 固定端口优先绑定：空闲端口应被代理采用（保证 WebView origin 稳定）。
+#[test]
+fn proxy_fixed_port_used_when_available() {
+    // 临时占一个端口号拿到可用端口，释放后让代理绑定该固定端口
+    let tmp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = tmp.local_addr().unwrap().port();
+    drop(tmp);
+    let srv = server("http://127.0.0.1:1", Some("pw"), false);
+    let got = proxy::spawn_proxy_on(Some(port), move || Some(srv.clone())).unwrap();
+    assert_eq!(got, port, "空闲固定端口应被优先采用");
+}
+
+/// 固定端口被占用时回退随机端口（连接不阻断）。
+#[test]
+fn proxy_fixed_port_falls_back_when_taken() {
+    let holder = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = holder.local_addr().unwrap().port();
+    let srv = server("http://127.0.0.1:1", Some("pw"), false);
+    let got = proxy::spawn_proxy_on(Some(port), move || Some(srv.clone())).unwrap();
+    assert_ne!(got, port, "被占用的端口应回退随机");
 }

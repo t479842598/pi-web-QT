@@ -270,19 +270,41 @@ fn html_response(
 
 /// 启动一个代理实例，返回本地端口。
 /// `load_server` 在**每次请求**时调用以读取最新配置（URL/用户名/密码实时生效）。
+#[cfg(test)]
 pub(crate) fn spawn_proxy<F>(load_server: F) -> Result<u16, String>
+where
+    F: Fn() -> Option<Server> + Send + Sync + 'static,
+{
+    spawn_proxy_on(None, load_server)
+}
+
+/// 启动一个代理实例，返回实际绑定的本地端口。
+/// `preferred`：优先绑定该固定端口（保证 WebView origin 稳定，localStorage
+/// 偏好不因端口变化丢失）；端口被占用时自动回退随机端口。
+/// `load_server` 在**每次请求**时调用以读取最新配置。
+pub(crate) fn spawn_proxy_on<F>(preferred: Option<u16>, load_server: F) -> Result<u16, String>
 where
     F: Fn() -> Option<Server> + Send + Sync + 'static,
 {
     let (tx, rx) = std::sync::mpsc::channel::<Result<u16, String>>();
     let load: ServerLoader = Arc::new(load_server);
     tauri::async_runtime::spawn(async move {
-        let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
-            Ok(l) => l,
-            Err(e) => {
-                let _ = tx.send(Err(e.to_string()));
-                return;
+        // 先尝试固定端口；被占则随机（端口冲突只影响本次 origin，不阻断连接）
+        let mut listener = None;
+        if let Some(p) = preferred {
+            if let Ok(l) = tokio::net::TcpListener::bind(("127.0.0.1", p)).await {
+                listener = Some(l);
             }
+        }
+        let listener = match listener {
+            Some(l) => l,
+            None => match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+                Ok(l) => l,
+                Err(e) => {
+                    let _ = tx.send(Err(e.to_string()));
+                    return;
+                }
+            },
         };
         let port = listener
             .local_addr()
@@ -325,15 +347,19 @@ where
 }
 
 /// 确保指定服务器的本地代理在运行（复用已有端口），返回端口。
+/// 端口首次分配后写入配置持久化——后续启动/重连复用同一端口，
+/// 保证 WebView origin 稳定（主题/收藏模型/折叠状态等 localStorage 不丢）。
 pub fn ensure_proxy(app: &AppHandle, server_id: &str) -> Result<u16, String> {
     let state = app.state::<AppState>();
-    let mut proxies = state.proxies.lock().unwrap();
-    if let Some(&port) = proxies.get(server_id) {
-        return Ok(port);
+    {
+        let proxies = state.proxies.lock().unwrap();
+        if let Some(&port) = proxies.get(server_id) {
+            return Ok(port);
+        }
     }
     let id = server_id.to_string();
     let app_handle = app.clone();
-    let port = spawn_proxy(move || {
+    let load = move || {
         app_handle
             .state::<AppState>()
             .config
@@ -341,7 +367,32 @@ pub fn ensure_proxy(app: &AppHandle, server_id: &str) -> Result<u16, String> {
             .unwrap()
             .find(&id)
             .cloned()
-    })?;
-    proxies.insert(server_id.to_string(), port);
+    };
+    // 优先复用持久化的固定端口
+    let preferred = {
+        let cfg = state.config.lock().unwrap();
+        cfg.find(server_id).and_then(|s| s.proxy_port)
+    };
+    let port = spawn_proxy_on(preferred, load)?;
+    // 持久化实际端口（首启分配或回退端口时写回，保证下次复用）
+    let snapshot = {
+        let mut cfg = state.config.lock().unwrap();
+        let changed = cfg
+            .find_mut(server_id)
+            .map(|s| {
+                if s.proxy_port == Some(port) {
+                    false
+                } else {
+                    s.proxy_port = Some(port);
+                    true
+                }
+            })
+            .unwrap_or(false);
+        if changed { Some(cfg.clone()) } else { None }
+    };
+    if let Some(cfg) = snapshot {
+        let _ = cfg.save(app);
+    }
+    state.proxies.lock().unwrap().insert(server_id.to_string(), port);
     Ok(port)
 }

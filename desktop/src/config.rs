@@ -23,6 +23,10 @@ pub struct Server {
     /// 是否为自动发现的本地服务器条目（由启动路由自动 upsert）
     #[serde(default)]
     pub is_local: bool,
+    /// 该服务器本地代理的固定端口（持久化保证 WebView origin 稳定，
+    /// localStorage——主题/收藏模型/折叠状态——不会因端口变化而丢失）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_port: Option<u16>,
 }
 
 impl Server {
@@ -120,6 +124,7 @@ impl Config {
             has_password: false,
             last_used_at: None,
             is_local: true,
+            proxy_port: None,
         };
         self.servers.push(srv);
         self.servers.last_mut().unwrap()

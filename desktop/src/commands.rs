@@ -108,6 +108,7 @@ pub fn save_server(
                 has_password: false,
                 last_used_at: None,
                 is_local: false,
+                proxy_port: None,
             };
             if !password.is_empty() {
                 srv.set_password(&password);
