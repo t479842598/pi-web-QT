@@ -170,7 +170,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
   const {
     loading, error, messages, entryIds, streamState,
-    agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, toolPreset, thinkingLevel,
+    agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, modelsError, reloadModels, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, sessionStats, tokenRate,
     slashCommands, slashCommandsLoading, queuedMessages, pendingRecovery, recoveryIsImport,
@@ -483,6 +483,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       modelNames={modelNames}
       modelList={modelList}
       modelScopeWarnings={modelScopeWarnings}
+      modelsError={modelsError}
+      onRetryModels={() => reloadModels()}
       onModelChange={handleModelChange}
       compactResult={compactResult}
       toolPreset={toolPreset}

@@ -30,6 +30,7 @@ import { SortDescendingIcon } from "@phosphor-icons/react/SortDescending";
 import { TrashIcon } from "@phosphor-icons/react/Trash";
 
 import { CaretDownIcon } from "@phosphor-icons/react/CaretDown";
+import { WarningCircleIcon } from "@phosphor-icons/react/WarningCircle";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
 import { ChatCircleTextIcon } from "@phosphor-icons/react/ChatCircleText";
 import { CheckIcon } from "@phosphor-icons/react/Check";
@@ -71,6 +72,10 @@ interface Props {
   modelNames?: Record<string, string>;
   modelList?: { id: string; name: string; provider: string }[];
   modelScopeWarnings?: string[];
+  /** Non-null when the model list failed to load (server error) — the selector
+   *  is hidden while empty, so surface the failure instead. */
+  modelsError?: string | null;
+  onRetryModels?: () => void;
   onModelChange?: (provider: string, modelId: string) => void;
   compactResult?: CompactResultInfo | null;
   toolPreset?: "none" | "default" | "full" | "plan";
@@ -372,7 +377,7 @@ function QueuedMessageRow({ kind, text, label, index, total, onMove, onRecall, o
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, modelScopeWarnings, onModelChange,
+  onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, modelScopeWarnings, modelsError, onRetryModels, onModelChange,
   compactResult, toolPreset, onToolPresetChange, planMode = false, onPlanModeChange,
   collaborationMode = "normal", tokenMode = "full", toolApprovalMode = "auto",
   onCollaborationModeChange, onTokenModeChange, onToolApprovalModeChange,
@@ -3018,6 +3023,82 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     );
                   })()}
                 </div>
+            )}
+
+            {/* Model list failed to load — show the failure + retry instead of
+                silently hiding the selector (the root cause of "no model
+                selection" on broken installs). */}
+            {modelOptions.length === 0 && modelsError && (
+              <div
+                className="chat-input-toolbar-model"
+                title={`${t("desktop.modelsLoadFailed")}: ${modelsError}`}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  flex: isMobile ? "1 1 auto" : undefined,
+                  minWidth: 0,
+                  padding: "3px 7px",
+                  height: 24,
+                  background: "rgba(239,68,68,0.10)",
+                  border: "none",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  overflow: "hidden",
+                }}
+              >
+                <WarningCircleIcon size={14} color="#ef4444" weight="fill" style={{ flexShrink: 0 }} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, color: "#ef4444" }}>
+                  {t("desktop.modelsLoadFailed")}
+                </span>
+                {onRetryModels && (
+                  <button
+                    type="button"
+                    onClick={onRetryModels}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 4,
+                      flexShrink: 0,
+                      padding: "1px 6px",
+                      background: "rgba(239,68,68,0.14)",
+                      border: "none",
+                      borderRadius: 4,
+                      color: "#ef4444",
+                      cursor: "pointer",
+                      fontSize: 11, fontWeight: 600,
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.24)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.14)"; }}
+                  >
+                    {t("desktop.retry")}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* No models configured at all — guide the user instead of leaving
+                the toolbar empty and silent. */}
+            {modelOptions.length === 0 && !modelsError && (
+              <div
+                className="chat-input-toolbar-model"
+                title={t("desktop.noModelsConfigured")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  flex: isMobile ? "1 1 auto" : undefined,
+                  minWidth: 0,
+                  padding: "3px 7px",
+                  height: 24,
+                  background: "var(--bg-hover)",
+                  border: "none",
+                  borderRadius: 6,
+                  color: "var(--text-dim)",
+                  fontSize: 12,
+                  overflow: "hidden",
+                }}
+              >
+                <WarningCircleIcon size={14} color="var(--text-dim)" style={{ flexShrink: 0 }} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                  {t("desktop.noModelsConfigured")}
+                </span>
+              </div>
             )}
 
             {!isStreaming && (

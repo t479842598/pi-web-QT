@@ -569,6 +569,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [modelThinkingLevels, setModelThinkingLevels] = useState<Record<string, string[]>>({});
   const [modelThinkingLevelMaps, setModelThinkingLevelMaps] = useState<Record<string, Record<string, string | null>>>({});
   const [modelScopeWarnings, setModelScopeWarnings] = useState<string[]>([]);
+  const [modelsError, setModelsError] = useState<string | null>(null);
   const [newSessionModel, setNewSessionModel] = useState<SelectedModel | null>(null);
   const [newSessionDefaultModel, setNewSessionDefaultModel] = useState<SelectedModel | null>(null);
   const [toolPreset, setToolPreset] = useState<"none" | "default" | "full" | "plan">("full");
@@ -2390,12 +2391,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     else signal?.addEventListener("abort", forwardAbort, { once: true });
     try {
       const res = await fetch(modelsUrl, { signal: controller.signal });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        let message = `HTTP ${res.status}`;
+        try {
+          const errBody = (await res.json()) as { error?: string };
+          if (errBody?.error) message = errBody.error;
+        } catch {
+          // Response body is not JSON — keep the HTTP status message.
+        }
+        throw new Error(message);
+      }
       const d = await res.json() as ModelsResponse;
       // Fetch cancellation is the fast path; the generation/context guards are
       // still required because an already-resolved response may race a cwd or
       // session change and AbortController cannot undo that callback.
       if (generation !== modelLoadGenerationRef.current || requestContextKey !== modelContextKeyRef.current) return;
+      setModelsError(null);
       setModelNames(d.models);
       setModelThinkingLevels(d.thinkingLevels ?? {});
       setModelThinkingLevelMaps(d.thinkingLevelMaps ?? {});
@@ -2415,6 +2426,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setThinkingLevel((pinnedThinkingLevel as ThinkingLevelOption | undefined) ?? "auto");
         }
       }
+    } catch (e) {
+      // A superseded (aborted by a newer load) or unmounted load must not
+      // clobber the current state with a stale error.
+      if (controller.signal.aborted) return;
+      if (generation !== modelLoadGenerationRef.current || requestContextKey !== modelContextKeyRef.current) return;
+      setModelsError(e instanceof Error ? e.message : String(e));
     } finally {
       signal?.removeEventListener("abort", forwardAbort);
       if (modelLoadAbortRef.current === controller) modelLoadAbortRef.current = null;
@@ -3237,6 +3254,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return () => controller.abort();
   }, [loadModels, modelsRefreshKey]);
 
+  // Auto-retry a failed model list load when the tab regains focus or the
+  // network returns (e.g. after the pi-web server was restarted), so a
+  // transient failure does not permanently hide the model selector.
+  useEffect(() => {
+    if (!modelsError) return;
+    const retry = () => {
+      if (document.visibilityState === "visible") void loadModels();
+    };
+    document.addEventListener("visibilitychange", retry);
+    window.addEventListener("online", retry);
+    return () => {
+      document.removeEventListener("visibilitychange", retry);
+      window.removeEventListener("online", retry);
+    };
+  }, [modelsError, loadModels]);
+
   // Compact error auto-dismiss
   useEffect(() => {
     if (!compactError) return;
@@ -3276,7 +3309,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   return {
     // State
     data, loading, error, activeLeafId, messages, entryIds, streamState,
-    agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, newSessionModel, toolPreset, thinkingLevel,
+    agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, modelsError, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
     tokenRate,
@@ -3304,7 +3337,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleRecallQueue, resolveRecovery, exportQueueData, importQueueData, stageQueueImport,
     moveQueuedMessage, recallQueuedMessage, requeueAt, removeQueuedMessage,
     handleBuiltinSlashCommand,
-    handleToolPresetChange, handleThinkingLevelChange, handlePlanModeChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages,
+    handleToolPresetChange, handleThinkingLevelChange, handlePlanModeChange, loadTools, loadSlashCommands, reloadModels: loadModels, setActiveLeafId, setData, setMessages,
     dispatch, setAgentRunning, setForkingEntryId,
     handleLeafChange,
     // Subscriptions

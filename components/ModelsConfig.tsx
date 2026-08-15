@@ -137,8 +137,8 @@ const inputStyle = {
   boxSizing: "border-box" as const,
 };
 
-function TextInput({ value, onChange, placeholder, mono }: { value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean }) {
-  return <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+function TextInput({ value, onChange, placeholder, mono, inputRef }: { value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean; inputRef?: React.Ref<HTMLInputElement> }) {
+  return <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
     style={{ ...inputStyle, fontFamily: mono ? "var(--font-mono)" : "inherit" }} />;
 }
 
@@ -1578,6 +1578,166 @@ function AddProviderPicker({
   );
 }
 
+// ── Add custom provider dialog ────────────────────────────────────────────────
+
+interface CustomProviderSubmit {
+  name: string;
+  api: string;
+  baseUrl?: string;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  model?: { id: string; contextWindow?: number; maxTokens?: number };
+}
+
+function CustomProviderDialog({
+  existingProviders,
+  onCancel,
+  onSubmit,
+}: {
+  existingProviders: { name: string; provider: ProviderEntry }[];
+  onCancel: () => void;
+  onSubmit: (input: CustomProviderSubmit) => void;
+}) {
+  const t = useModelTranslation();
+  const [name, setName] = useState("");
+  const [api, setApi] = useState<string>(API_OPTIONS[0]);
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [headers, setHeaders] = useState<Record<string, string> | undefined>(undefined);
+  const [urlOpen, setUrlOpen] = useState(false);
+  const [modelId, setModelId] = useState("");
+  const [contextWindow, setContextWindow] = useState("");
+  const [maxTokens, setMaxTokens] = useState("");
+  const [importValue, setImportValue] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { setTimeout(() => nameInputRef.current?.focus(), 30); }, []);
+
+  const urlValid = !baseUrl.trim() || /^https?:\/\//i.test(baseUrl.trim());
+
+  const handleImport = (value: string) => {
+    setImportValue(value);
+    const entry = existingProviders.find((p) => p.name === value);
+    if (!entry) return;
+    if (entry.provider.api) setApi(entry.provider.api);
+    setBaseUrl(entry.provider.baseUrl ?? "");
+    setApiKey(entry.provider.apiKey ?? "");
+    setHeaders(entry.provider.headers ? { ...entry.provider.headers } : undefined);
+  };
+
+  const handleSubmit = () => {
+    const model = modelId.trim()
+      ? {
+          id: modelId.trim(),
+          ...(parseInt(contextWindow, 10) > 0 ? { contextWindow: parseInt(contextWindow, 10) } : {}),
+          ...(parseInt(maxTokens, 10) > 0 ? { maxTokens: parseInt(maxTokens, 10) } : {}),
+        }
+      : undefined;
+    onSubmit({
+      name: name.trim(),
+      api,
+      ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+      ...(headers ? { headers } : {}),
+      model,
+    });
+  };
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+    >
+      <div style={{ width: 480, maxWidth: "calc(100vw - 32px)", maxHeight: "min(82vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>{t("desktop.modelsAddCustomTitle")}</span>
+          <button onClick={onCancel} aria-label={t("desktop.modelsClose")} title={t("desktop.modelsClose")} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: 16, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+          <Field label={t("desktop.modelsProviderNameOptional")}>
+            <TextInput value={name} onChange={setName} placeholder="new-provider" mono inputRef={nameInputRef} />
+          </Field>
+
+          {/* Call format — import & select */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <SectionTitle>{t("desktop.modelsCallFormat")}</SectionTitle>
+            <Select value={api} onChange={setApi} options={API_OPTIONS} required />
+            <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{t("desktop.modelsCallFormatHelp")}</span>
+          </div>
+
+          {/* Import from existing provider */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <SectionTitle>{t("desktop.modelsImportProvider")}</SectionTitle>
+            <select value={importValue} onChange={(e) => handleImport(e.target.value)}
+              style={{ ...inputStyle, color: importValue ? "var(--text)" : "var(--text-dim)" }}>
+              <option value="">{t("desktop.modelsImportProviderPlaceholder")}</option>
+              {existingProviders.map((p) => (
+                <option key={p.name} value={p.name}>{p.name}{p.provider.api ? ` · ${p.provider.api}` : ""}</option>
+              ))}
+            </select>
+            {importValue && (
+              <span style={{ fontSize: 10, color: "#4ade80" }}>{t("desktop.modelsImported")}: {importValue}</span>
+            )}
+          </div>
+
+          {/* URL — click + to input a full URL */}
+          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+            <SectionTitle>{t("desktop.modelsBaseUrl")}</SectionTitle>
+            {!urlOpen ? (
+              <button onClick={() => setUrlOpen(true)}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 0", background: "none", border: "1px dashed var(--border)", borderRadius: 5, color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.color = "var(--accent)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--text-muted)"; }}
+              >
+                <PlusIcon size={12} />
+                {t("desktop.modelsAddUrl")}
+              </button>
+            ) : (
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <TextInput value={baseUrl} onChange={setBaseUrl} placeholder={t("desktop.modelsUrlPlaceholder")} mono />
+                <button onClick={() => { setUrlOpen(false); setBaseUrl(""); }}
+                  title={t("desktop.modelsRemove")}
+                  style={{ flexShrink: 0, width: 28, height: 28, background: "none", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-dim)", cursor: "pointer", fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+              </div>
+            )}
+            {baseUrl.trim() && !urlValid && <span style={{ fontSize: 10, color: "#ef4444" }}>{t("desktop.modelsUrlInvalid")}</span>}
+          </div>
+
+          {/* Custom request — model ID + context length + output length */}
+          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+            <SectionTitle>{t("desktop.modelsCustomRequest")}</SectionTitle>
+            <Field label={t("desktop.modelsRequestModelId")}>
+              <TextInput value={modelId} onChange={setModelId} placeholder="model-id" mono />
+              <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>{t("desktop.modelsRequestModelIdHelp")}</span>
+            </Field>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <Field label={t("desktop.modelsRequestContextLength")}>
+                <NumInput value={contextWindow} onChange={setContextWindow} placeholder="128000" />
+              </Field>
+              <Field label={t("desktop.modelsRequestOutputLength")}>
+                <NumInput value={maxTokens} onChange={setMaxTokens} placeholder="16384" />
+              </Field>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 16px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
+          <button onClick={onCancel} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>
+            {t("desktop.cancel")}
+          </button>
+          <button onClick={handleSubmit} disabled={!urlValid}
+            style={{ padding: "6px 16px", background: urlValid ? "var(--accent)" : "var(--bg-panel)", border: "none", borderRadius: 6, color: urlValid ? "#fff" : "var(--text-dim)", cursor: urlValid ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600 }}>
+            {t("desktop.modelsAdd")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ModelsConfig({
@@ -1604,6 +1764,7 @@ export function ModelsConfig({
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [apiKeyProviders, setApiKeyProviders] = useState<ApiKeyProvider[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const [providerListsReady, setProviderListsReady] = useState({ oauth: false, apiKey: false });
   const configRef = useRef<ModelsJson>({ providers: {} });
   const builtinFlushesRef = useRef<Map<string, BuiltinFlush>>(new Map());
@@ -1692,20 +1853,29 @@ export function ModelsConfig({
     refreshAuthenticationProviders();
   }, [refreshAuthenticationProviders]);
 
-  const addCustomProvider = useCallback(async () => {
+  const createCustomProvider = useCallback(async (input: CustomProviderSubmit) => {
     if (selectionBusyRef.current) return;
     selectionBusyRef.current = true;
     setSaveError(null);
     try {
       await flushBuiltinModels();
-      let finalName = "new-provider";
+      const baseName = input.name.trim() || "new-provider";
+      let finalName = baseName;
       let n = 1;
-      while (configRef.current.providers?.[finalName]) finalName = `new-provider-${n++}`;
+      while (configRef.current.providers?.[finalName]) finalName = `${baseName}-${n++}`;
+      const entry: ProviderEntry = {
+        api: input.api || "openai-completions",
+        ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
+        ...(input.apiKey ? { apiKey: input.apiKey } : {}),
+        ...(input.headers ? { headers: input.headers } : {}),
+        ...(input.model ? { models: [input.model] } : {}),
+      };
       updateConfigState((previous) => ({
         ...previous,
-        providers: { ...(previous.providers ?? {}), [finalName]: { api: "openai-completions" } },
+        providers: { ...(previous.providers ?? {}), [finalName]: entry },
       }));
       setSelection({ type: "provider", name: finalName });
+      setCustomDialogOpen(false);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -2122,8 +2292,15 @@ export function ModelsConfig({
         apiKeyProviders={visibleApiKeyProviders}
         onSelectOAuth={(id) => { void selectSelection({ type: "oauth", providerId: id }); }}
         onSelectApiKey={(id) => { void selectSelection({ type: "apikey", providerId: id }); }}
-        onAddCustom={addCustomProvider}
+        onAddCustom={() => { setPickerOpen(false); setCustomDialogOpen(true); }}
         onClose={() => setPickerOpen(false)}
+      />
+    )}
+    {customDialogOpen && (
+      <CustomProviderDialog
+        existingProviders={customProviders.map(([pName, pData]) => ({ name: pName, provider: pData }))}
+        onCancel={() => setCustomDialogOpen(false)}
+        onSubmit={(input) => { void createCustomProvider(input); }}
       />
     )}
     </>

@@ -72,15 +72,6 @@ async function loadModels(cwd: string): Promise<ModelsData> {
   };
 }
 
-const EMPTY_MODELS: ModelsData = {
-  models: {},
-  modelList: [],
-  defaultModel: null,
-  thinkingLevels: {},
-  thinkingLevelMaps: {},
-  thinkingLevelPins: {},
-};
-
 export async function GET(req: Request) {
   const requestedCwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
   const cwd = resolve(requestedCwd);
@@ -97,7 +88,13 @@ export async function GET(req: Request) {
 
   try {
     return Response.json(await loadModelsWithCache(cwd, () => loadModels(cwd)));
-  } catch {
-    return Response.json(EMPTY_MODELS);
+  } catch (e) {
+    // Never silently return an empty model list: an empty list hides the model
+    // selector entirely (ChatInput renders it only when model options exist),
+    // which surfaces as "no model selection" with no explanation. Report the
+    // failure so the client can show the error and offer a retry.
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[api/models] Failed to load models:", e);
+    return Response.json({ error: message }, { status: 500 });
   }
 }

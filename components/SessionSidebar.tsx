@@ -2905,6 +2905,7 @@ function SessionItem({
   const rowRef = useRef<HTMLDivElement>(null);
   const [titleModelPickerOpen, setTitleModelPickerOpen] = useState(false);
   const [titleModels, setTitleModels] = useState<Array<{ id: string; name?: string; provider?: string }>>([]);
+  const [titleModelError, setTitleModelError] = useState<string | null>(null);
   const [titleModelLoading, setTitleModelLoading] = useState(false);
   const [titleModelSaving, setTitleModelSaving] = useState(false);
   // Group models by provider, mirroring the composer's model picker layout.
@@ -2977,12 +2978,19 @@ function SessionItem({
   const openTitleModelPicker = useCallback(async () => {
     setTitleModelPickerOpen(true);
     setTitleModelLoading(true);
+    setTitleModelError(null);
     try {
       const response = await fetch(`/api/models?cwd=${encodeURIComponent(session.cwd || "")}`);
-      const body = (await response.json().catch(() => ({}))) as { modelList?: Array<{ id: string; name?: string; provider?: string }> };
+      const body = (await response.json().catch(() => ({}))) as { modelList?: Array<{ id: string; name?: string; provider?: string }>; error?: string };
+      if (!response.ok) {
+        setTitleModels([]);
+        setTitleModelError(body.error ?? `HTTP ${response.status}`);
+        return;
+      }
       setTitleModels(body.modelList ?? []);
     } catch {
       setTitleModels([]);
+      setTitleModelError("HTTP request failed");
     } finally {
       setTitleModelLoading(false);
     }
@@ -3466,6 +3474,10 @@ function SessionItem({
                   <div className="scroll-overlay" style={{ padding: "8px 6px", flex: 1 }}>
                     {titleModelLoading ? (
                       <div style={{ padding: "12px 8px", fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.loading")}</div>
+                    ) : titleModelError ? (
+                      <div style={{ padding: "12px 8px", fontSize: 12, color: "#ef4444" }}>
+                        {t("desktop.modelsLoadFailed")}: {titleModelError}
+                      </div>
                     ) : titleModels.length === 0 ? (
                       <div style={{ padding: "12px 8px", fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.noModels")}</div>
                     ) : (
