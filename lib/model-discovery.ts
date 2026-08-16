@@ -61,6 +61,7 @@ export function buildModelsListUrl(baseUrl: string, api: string): URL {
   if (!/\/models$/i.test(trimmedPath)) {
     let path = trimmedPath;
     if (api === "anthropic-messages" && !/\/v\d+(?:beta)?$/i.test(path)) path += "/v1";
+    if (api === "mistral-conversations" && !/\/v\d+(?:beta)?$/i.test(path)) path += "/v1";
     if (api === "google-generative-ai" && !/\/v\d+(?:beta)?$/i.test(path)) path += "/v1beta";
     url.pathname = `${path}/models`.replace(/\/+/g, "/");
   }
