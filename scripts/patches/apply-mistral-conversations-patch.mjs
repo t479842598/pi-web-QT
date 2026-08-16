@@ -25,6 +25,7 @@ for (const t of targets) {
   }
   execFileSync("node", [PATCH("patch-mistral-conversations.mjs"), t], { stdio: "inherit" });
   execFileSync("node", [PATCH("extend-mistral-tools.mjs"), t], { stdio: "inherit" });
+  execFileSync("node", [PATCH("fix-conversations-inputs.mjs"), t], { stdio: "inherit" });
   execFileSync("node", ["--check", t], { stdio: "inherit" });
   ok += 1;
   console.log("OK:", t, "\n");
