@@ -5,10 +5,10 @@ const { spawnSync } = require("child_process");
 
 /** Keep the V8 heap from ballooning during local runs. Next.js dev auto-sets
  *  --max-old-space-size to 50% of physical RAM (12GB on a 24GB machine)
- *  unless the user already capped it. A 4GB cap makes GC engage earlier and
+ *  unless the user already capped it. A 3GB cap makes GC engage earlier and
  *  bounds RSS growth for both dev and production start.
  */
-const MEMORY_LIMIT_MB = 4096;
+const MEMORY_LIMIT_MB = 3072;
 const SEMI_SPACE_MB = 128;
 
 /**

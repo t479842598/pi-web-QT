@@ -44,7 +44,7 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
       created: s.created instanceof Date ? s.created.toISOString() : String(s.created),
       modified: s.modified instanceof Date ? s.modified.toISOString() : String(s.modified),
       messageCount: s.messageCount,
-      firstMessage: stripModeInstructionBlocks(s.firstMessage || "(no messages)"),
+      firstMessage: stripModeInstructionBlocks(s.firstMessage || "(no messages)").slice(0, FIRST_MESSAGE_MAX_CHARS),
       parentSessionId: s.parentSessionPath ? pathToId.get(normalizePath(s.parentSessionPath)) : undefined,
       projectRoot: project?.projectRoot ?? s.cwd,
       pinned: pinSet.has(s.id),
@@ -101,11 +101,25 @@ declare global {
   var __piSessionListCache: { data: SessionInfo[]; ts: number } | undefined;
 }
 
-const SESSION_LIST_CACHE_TTL_MS = 5_000;
+const SESSION_LIST_CACHE_TTL_MS = 10_000;
+
+/** Upper bound on the firstMessage preview kept in the list cache snapshot. */
+const FIRST_MESSAGE_MAX_CHARS = 300;
+
+/** Coalescing window for invalidations: streaming emits session-info/message
+ *  events every few seconds; without debouncing each one forces a full
+ *  re-scan of every session file on the next list request. */
+const SESSION_LIST_INVALIDATE_DEBOUNCE_MS = 300;
+
+let invalidateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function invalidateSessionListCache(): void {
-  globalThis.__piSessionListGeneration = (globalThis.__piSessionListGeneration ?? 0) + 1;
-  globalThis.__piSessionListCache = undefined;
+  if (invalidateDebounceTimer) return;
+  invalidateDebounceTimer = setTimeout(() => {
+    invalidateDebounceTimer = null;
+    globalThis.__piSessionListGeneration = (globalThis.__piSessionListGeneration ?? 0) + 1;
+    globalThis.__piSessionListCache = undefined;
+  }, SESSION_LIST_INVALIDATE_DEBOUNCE_MS);
 }
 
 function getPathCache(): Map<string, string> {

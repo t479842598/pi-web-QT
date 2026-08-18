@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased（发送消息无响应修复）
+> 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
+
+## v0.10.3 — 2026-08-18（本地运行内存优化 + 发送消息无响应修复）
+
+### 优化
+- **本地运行内存占用全面优化** — ① **会话生命周期收敛**：SSE 最后一条订阅断开且会话空闲时 60s 宽限自动回收（`AgentSessionWrapper` 新增订阅计数/宽限回收/活动时间戳，重连或发送即取消）；会话注册表 LRU 上限 12 个，仅淘汰"空闲且无订阅"的最旧 wrapper；② **会话列表缓存失效去抖 300ms** + 缓存 TTL 5s→10s + `firstMessage` 截断 300 字符，流式期不再被事件风暴触发全量重扫；③ **语法高亮瘦身**：`react-syntax-highlighter` 全量 Prism(~180 语言)替换为共享 `PrismLight` 模块（按需注册 33 个常用语言+别名，`MarkdownBody`/`FileViewer` 共用），未注册语言自动回退纯文本，首屏 bundle 与解析内存同步下降；④ dev/start 堆上限 4GB→3GB（`with-memory-limit.js`），GC 更早介入。
+- 完整方案与实施状态见 `docs/local-memory-optimization.md`。
 
 ### 修复
 - **纯净环境下发送消息无响应/无报错/无网络请求（重要）** — 根因：`handleSend` 在发出任何请求前就把 `agentRunning` 置为 `true`，而新会话创建 `POST /api/agent/new` 无超时；服务端模型目录网络刷新（`getAvailable`/`ModelRuntime.create`）在纯净环境联网挂起时无限阻塞 → `agentRunning` 永久卡 `true` → 后续发送被静默守卫拦截（无响应、无报错、无网络请求）。修复：① 客户端 `ensureNewSession` 加 30s 硬超时，`sid` 为 null 时显式抛错（不再静默空跑）；② 服务端 `startRpcSession` 加 25s AbortSignal 超时并透传 `modelRuntimeSignal`/`signal`，真正取消底层网络请求（无孤儿会话）；③ 发送失败时移除乐观消息并回填输入框，用户可直接重发；④ 发送守卫命中时打印诊断日志。

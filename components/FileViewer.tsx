@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo, type MouseEvent } from "react";
 import { DownloadSimple } from "@phosphor-icons/react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { PrismLight as SyntaxHighlighter } from "@/lib/prism-languages";
 import ReactMarkdown from "react-markdown";
 import { useI18n } from "@/hooks/useI18n";
 import {

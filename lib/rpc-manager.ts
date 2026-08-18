@@ -245,6 +245,18 @@ function summarizeApprovalArgs(args: unknown): unknown {
 // Wraps AgentSession with the same interface the rest of the app expects
 // ============================================================================
 
+/** Grace period after the last event listener detaches before an idle session
+ *  is shut down. Covers the common local case of a closed tab: the per-session
+ *  SSE unsubscribes on disconnect, so an unwatched idle wrapper is reclaimed
+ *  instead of lingering until the (long) idle timeout. Reconnecting within the
+ *  window cancels the disposal. */
+const DISPOSE_GRACE_MS = 60_000;
+
+/** Safety net for the session registry: when more than this many wrappers are
+ *  alive, idle AND unwatched wrappers are evicted oldest-first. Sessions being
+ *  streamed (an SSE client subscribed) or actively running are never evicted. */
+const MAX_REGISTERED_SESSIONS = 12;
+
 export class AgentSessionWrapper {
   private listeners: EventListener[] = [];
   private pendingUiResponses = new Map<string, PendingUiResponse>();
@@ -260,6 +272,12 @@ export class AgentSessionWrapper {
   private forceEmptySystemPrompt = false;
   private unsubscribe: (() => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Number of live event listeners (per-session SSE + task engine). */
+  private subscriberCount = 0;
+  /** Pending disposal armed when the last listener detached while idle. */
+  private disposeGraceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Monotonic-ish activity marker used to evict oldest unwatched wrappers. */
+  private lastActivityAt = Date.now();
   private queueMirror: QueueEntry[] = [];
   private queueRecovery: QueueEntry[] = [];
   private pendingQueueHints: Record<QueueKind, QueueImage[][]> = { steer: [], followUp: [] };
@@ -796,6 +814,42 @@ export class AgentSessionWrapper {
     }, 30 * 60 * 1000);
   }
 
+  /** Any activity (send, new listener) cancels a pending idle disposal. */
+  private touch(): void {
+    this.lastActivityAt = Date.now();
+    this.cancelPendingDispose();
+  }
+
+  /** True while at least one event listener is attached (SSE / task engine). */
+  hasSubscribers(): boolean {
+    return this.subscriberCount > 0;
+  }
+
+  get activityTimestamp(): number {
+    return this.lastActivityAt;
+  }
+
+  private cancelPendingDispose(): void {
+    if (this.disposeGraceTimer) {
+      clearTimeout(this.disposeGraceTimer);
+      this.disposeGraceTimer = null;
+    }
+  }
+
+  /** After the last listener detaches: if the session is idle and unwatched,
+   *  shut it down after a short grace so a reconnect cancels the disposal. */
+  private scheduleDisposeIfIdle(): void {
+    this.cancelPendingDispose();
+    if (this.subscriberCount > 0 || this.isRunning() || !this._alive) return;
+    this.disposeGraceTimer = setTimeout(() => {
+      this.disposeGraceTimer = null;
+      if (this.subscriberCount > 0 || this.isRunning() || !this._alive) return;
+      void this.shutdown().catch((error) => {
+        console.error("[pi-web] failed to shut down unwatched session:", error instanceof Error ? error.message : error);
+      });
+    }, DISPOSE_GRACE_MS);
+  }
+
   private persistBashOnlySession(): void {
     const manager = this.inner.sessionManager;
     const sessionFile = manager.getSessionFile();
@@ -818,10 +872,16 @@ export class AgentSessionWrapper {
 
   onEvent(listener: EventListener): () => void {
     this.listeners.push(listener);
+    this.subscriberCount += 1;
+    // A new watcher cancels any pending idle disposal (e.g. an SSE reconnect
+    // inside the grace window after a tab reload).
+    this.cancelPendingDispose();
     for (const event of this.pendingUiRequests.values()) listener(event);
     return () => {
       const i = this.listeners.indexOf(listener);
       if (i !== -1) this.listeners.splice(i, 1);
+      if (this.subscriberCount > 0) this.subscriberCount -= 1;
+      this.scheduleDisposeIfIdle();
     };
   }
 
@@ -830,6 +890,7 @@ export class AgentSessionWrapper {
   }
 
   async send(command: Record<string, unknown>): Promise<unknown> {
+    this.touch();
     this.resetIdleTimer();
     const type = command.type as string;
     if (type === "prompt" || type === "steer" || type === "follow_up" || type === "requeue_at") {
@@ -1367,6 +1428,7 @@ export class AgentSessionWrapper {
     if (!this._alive) return;
     this._alive = false;
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.cancelPendingDispose();
     if (this.inner.isBashRunning) this.inner.abortBash();
     this.unsubscribe?.();
     // Persist the goal sidecar before tearing down.
@@ -1779,6 +1841,27 @@ function getLocks(): Map<string, Promise<{ session: AgentSessionWrapper; realSes
   return globalThis.__piStartLocks;
 }
 
+/** Evict idle AND unwatched wrappers (oldest activity first) when the registry
+ *  exceeds MAX_REGISTERED_SESSIONS. Streaming sessions (a listener attached)
+ *  and actively-running ones are never evicted. */
+function enforceRegistryCap(): void {
+  const registry = getRegistry();
+  if (registry.size <= MAX_REGISTERED_SESSIONS) return;
+  const evictable = Array.from(registry.entries())
+    .filter(([, session]) => session.isAlive() && !session.isRunning() && !session.hasSubscribers())
+    .sort((a, b) => a[1].activityTimestamp - b[1].activityTimestamp);
+  let excess = registry.size - MAX_REGISTERED_SESSIONS;
+  for (const [id, session] of evictable) {
+    if (excess <= 0) break;
+    if (!registry.has(id)) continue;
+    console.log(`[pi-web] evicting idle unwatched session ${id} (registry cap ${MAX_REGISTERED_SESSIONS})`);
+    void session.shutdown().catch((error) => {
+      console.error(`[pi-web] failed to evict session ${id}:`, error instanceof Error ? error.message : error);
+    });
+    excess -= 1;
+  }
+}
+
 function normalizeRpcCwd(cwd: string): string {
   const resolvedCwd = resolve(cwd);
   try {
@@ -2159,6 +2242,7 @@ export async function startRpcSession(
     });
     registry.set(realSessionId, wrapper);
     wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });
+    enforceRegistryCap();
 
     return { session: wrapper, realSessionId };
   })().finally(() => {

@@ -254,3 +254,13 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 
 ## 记忆
 - 记忆统一由 lrnev 管理，落在本项目 `.lrnev/memory/`：约定→`memory_save`，踩坑→`error_record`，技术决策→`adr_create`；任务开始前可 `memory_search` 检索。
+
+## 版本发布规范
+- 版本号格式 `0.x.y`：`x` 为功能/破坏性版本，`y` 为补丁/修复/小改进版本。
+- **`y`(最后一位)可以从 0 递增到 999**，不受三位数限制；到达 999 后下一次递增进位到 `x+1.0`。
+- 每个发布版本：
+  1. `npm version <新版本> --no-git-tag-version`（同步 package.json 与 package-lock.json）。
+  2. 更新 `CHANGELOG.md`（新版本条目，标题含版本号+日期+一句话主题）。
+  3. `npm run build` 后 `npm publish --access public` 发 NPM。
+  4. git commit + 打 annotated tag `v<新版本>` + push main 与 tag。
+  5. `gh release create` 建 GitHub Release（正文引用 CHANGELOG 对应条目）。

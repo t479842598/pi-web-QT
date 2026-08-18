@@ -3,7 +3,7 @@
 import { createContext, isValidElement, memo, useContext, useEffect, useMemo, useRef, useState, Children, type ElementType, type MouseEvent, type ReactNode } from "react";
 import { Check, Copy } from "@phosphor-icons/react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { PrismLight as SyntaxHighlighter } from "@/lib/prism-languages";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { copyText } from "@/lib/clipboard";
