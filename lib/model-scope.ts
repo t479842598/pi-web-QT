@@ -17,12 +17,17 @@ import { getEffectiveOverrides } from "./builtin-model-overrides";
 const AVAILABLE_MODELS_TTL_MS = 60_000;
 let availableModelsCache: { data: readonly Model<Api>[]; at: number } | null = null;
 
-async function getAvailableModels(modelRuntime: ModelRuntime): Promise<readonly Model<Api>[]> {
+async function getAvailableModels(
+  modelRuntime: ModelRuntime,
+  signal?: AbortSignal,
+): Promise<readonly Model<Api>[]> {
   const now = Date.now();
   if (availableModelsCache && now - availableModelsCache.at < AVAILABLE_MODELS_TTL_MS) {
     return availableModelsCache.data;
   }
-  const data = await modelRuntime.getAvailable();
+  // getAvailable() accepts AuthOperationOptions.signal so a caller can cancel
+  // a slow network model-catalog refresh (the known "发消息卡死" hang source).
+  const data = await modelRuntime.getAvailable(undefined, signal ? { signal } : undefined);
   availableModelsCache = { data, at: now };
   return data;
 }
@@ -67,7 +72,7 @@ function matchesModel(
 export async function resolveVisibleModels(
   modelRuntime: ModelRuntime,
   patterns: string[] | undefined,
-  options: { includeHidden?: boolean } = {},
+  options: { includeHidden?: boolean; signal?: AbortSignal } = {},
 ): Promise<ModelScopeResult> {
   const modelsJson = readModelsJson();
   const providers = (modelsJson.providers ?? {}) as Record<string, { models?: unknown }>;
@@ -87,13 +92,13 @@ export async function resolveVisibleModels(
   const warnings: string[] = [];
 
   if (cleanedPatterns.length === 0) {
-    visible = await getAvailableModels(modelRuntime);
+    visible = await getAvailableModels(modelRuntime, options.signal);
   } else {
     const result = await resolveModelScopeWithDiagnostics(cleanedPatterns, modelRuntime);
     scopedModels = result.scopedModels;
     visible = result.scopedModels.length > 0
       ? result.scopedModels.map((s) => s.model)
-      : await getAvailableModels(modelRuntime);
+      : await getAvailableModels(modelRuntime, options.signal);
     warnings.push(...result.diagnostics.map((d) => d.message));
     for (const scopedModel of scopedModels) {
       if (scopedModel.thinkingLevel) {

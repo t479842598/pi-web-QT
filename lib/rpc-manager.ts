@@ -1996,6 +1996,12 @@ function withModelCallLogging(
   return stream;
 }
 
+// 服务端会话创建硬超时。模型目录网络刷新（ModelRuntime.create 的 create-time
+// refresh 与 getAvailable 的 availability refresh）可能联网挂起；该超时通过
+// AbortSignal 真正取消底层请求（SDK 支持），避免 /api/agent/new 无限阻塞。
+// 略短于客户端 ensureNewSession 的 30s 超时，让客户端优先收到明确的 500 而非自己 abort。
+const START_SESSION_TIMEOUT_MS = 25_000;
+
 export async function startRpcSession(
   sessionId: string,
   sessionFile: string,
@@ -2021,6 +2027,8 @@ export async function startRpcSession(
   }
   const sessionCwd = sessionManager.getCwd();
   const finishStartingSession = trackStartingSession(sessionCwd);
+  const startController = new AbortController();
+  const startTimeout = setTimeout(() => startController.abort(), START_SESSION_TIMEOUT_MS);
   const starting = (async () => {
     // Some extensions access the SDK's global theme even outside the terminal UI.
     initTheme();
@@ -2048,6 +2056,7 @@ export async function startRpcSession(
     const services = await createAgentSessionServices({
       cwd: sessionCwd,
       agentDir,
+      modelRuntimeSignal: startController.signal,
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
 
@@ -2061,6 +2070,7 @@ export async function startRpcSession(
     const scope = await resolveVisibleModels(
       services.modelRuntime,
       services.settingsManager.getEnabledModels(),
+      { signal: startController.signal },
     );
     const defaultProvider = services.settingsManager.getDefaultProvider();
     const defaultModelId = services.settingsManager.getDefaultModel();
@@ -2152,6 +2162,7 @@ export async function startRpcSession(
 
     return { session: wrapper, realSessionId };
   })().finally(() => {
+    clearTimeout(startTimeout);
     locks.delete(sessionId);
     finishStartingSession();
   });

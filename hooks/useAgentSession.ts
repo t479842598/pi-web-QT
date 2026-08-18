@@ -9,6 +9,7 @@ import type {
   SessionInfo,
   SessionTreeNode,
   SubagentStatus,
+  UserMessage,
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
@@ -269,6 +270,12 @@ const AGENT_STATE_RECONCILE_MS = 15_000;
 // SSE route can emit `connected`. Five seconds is not enough for a cold
 // Turbopack route or a session with several extensions.
 const EVENT_STREAM_CONNECT_TIMEOUT_MS = 30_000;
+// New-session creation can stall on server-side model/provider discovery
+// (modelRuntime.getAvailable() may hit the network). Without a timeout the
+// `await ensureNewSession()` in handleSend hangs forever, leaving agentRunning
+// stuck true and silently blocking every subsequent send. Give it a hard cap
+// so the failure surfaces through handleSend's catch (error notice + reset).
+const ENSURE_NEW_SESSION_TIMEOUT_MS = 30_000;
 
 /** Injected ahead of every prompt while plan mode is active. Read-only
  *  analysis contract — the toolset (read/grep/find/ls) enforces it too. */
@@ -1152,17 +1159,34 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const selectedThinkingLevel = thinkingLevelOverrideRef.current;
       if (selectedModel) setPendingModel(selectedModel);
       const toolNames = getToolNamesForPreset(toolPreset);
-      const res = await fetch("/api/agent/new", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cwd: newSessionCwd,
-          type: "ensure_session",
-          toolNames,
-          ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
-          ...(selectedThinkingLevel ? { thinkingLevel: selectedThinkingLevel } : {}),
-        }),
-      });
+      // Hard timeout so a stalled server (model/provider discovery) cannot
+      // leave agentRunning stuck true and silently block all later sends.
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), ENSURE_NEW_SESSION_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch("/api/agent/new", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cwd: newSessionCwd,
+            type: "ensure_session",
+            toolNames,
+            ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
+            ...(selectedThinkingLevel ? { thinkingLevel: selectedThinkingLevel } : {}),
+          }),
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) {
+          throw new Error(
+            `Timed out creating a new session after ${ENSURE_NEW_SESSION_TIMEOUT_MS / 1000}s. The agent service may still be starting up — please try again.`,
+          );
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
       if (!res.ok) {
         const result = await res.json().catch(() => null) as { error?: string } | null;
         throw new Error(result?.error ?? `HTTP ${res.status}`);
@@ -2078,7 +2102,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return;
-    if (agentRunningRef.current || bashRunningRef.current) return;
+    if (agentRunningRef.current || bashRunningRef.current) {
+      // A stuck agentRunning (see reconcile/watchdog) would otherwise swallow
+      // sends silently. Log it so the dropped send is at least diagnosable.
+      console.warn(
+        "[pi-web] Send dropped: a previous run is still marked active",
+        { agentRunning: agentRunningRef.current, bashRunning: bashRunningRef.current, sessionId: sessionIdRef.current },
+      );
+      return;
+    }
     const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
     const promptRunId = promptRunIdRef.current + 1;
     cancelEventStreamGrace();
@@ -2192,6 +2224,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (collaborationModeRef.current === "goal" && !isSlashCommandPrompt) {
             void sendAgentCommand(sid, { type: "goal_start", goalText: trimmedMessage }).catch(() => {});
           }
+        } else {
+          // ensureNewSession() returned null without throwing (no cwd / stale
+          // isNew state). Surface it instead of silently no-op'ing with
+          // agentRunning stuck true, which would block every later send.
+          throw new Error("Unable to create a session for this message");
         }
       } else if (session) {
         sentSessionId = session.id;
@@ -2237,9 +2274,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         addNotice({ type: "error", message: e.message });
       } else {
-        // Non-SSE failures (server down, 500, network error) were previously
-        // silent: the message stayed in the list but nothing else happened.
-        // Surface them so the user knows the send did not go through.
+        // 消息未发出（会话创建超时/失败、null sid、非 SSE 网络错误）：移除
+        // 乐观消息并回填输入框，让用户可直接重发，避免列表里留一条"幽灵"消息。
+        const optimisticKey = optimisticUserMessageKeyRef.current;
+        if (optimisticKey) {
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            return last?.role === "user" && userMessageKey(last) === optimisticKey
+              ? prev.slice(0, -1)
+              : prev;
+          });
+        }
+        opts.chatInputRef?.current?.replaceMessage?.(userMsg as UserMessage);
         addNotice({ type: "error", message: `Failed to send message: ${e instanceof Error ? e.message : String(e)}` });
       }
       optimisticUserMessageKeyRef.current = null;

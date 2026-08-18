@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased（发送消息无响应修复）
+
+### 修复
+- **纯净环境下发送消息无响应/无报错/无网络请求（重要）** — 根因：`handleSend` 在发出任何请求前就把 `agentRunning` 置为 `true`，而新会话创建 `POST /api/agent/new` 无超时；服务端模型目录网络刷新（`getAvailable`/`ModelRuntime.create`）在纯净环境联网挂起时无限阻塞 → `agentRunning` 永久卡 `true` → 后续发送被静默守卫拦截（无响应、无报错、无网络请求）。修复：① 客户端 `ensureNewSession` 加 30s 硬超时，`sid` 为 null 时显式抛错（不再静默空跑）；② 服务端 `startRpcSession` 加 25s AbortSignal 超时并透传 `modelRuntimeSignal`/`signal`，真正取消底层网络请求（无孤儿会话）；③ 发送失败时移除乐观消息并回填输入框，用户可直接重发；④ 发送守卫命中时打印诊断日志。
+
 ## v0.10.2 — 2026-08-15（完整修复版：会话切换 + 桌面端偏好持久化）
 
 ### 修复
