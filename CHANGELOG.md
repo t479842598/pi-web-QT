@@ -2,6 +2,14 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## Unreleased（全局错误边界 + 三端版本号修复）
+
+### 新增
+- **全局错误边界 ErrorBoundary** — 捕获 React 组件渲染异常，不再整页白屏：`RootLayout` 以 `<ErrorBoundary>` 包裹 `{children}`，渲染出错时显示「应用加载失败」提示页（含错误堆栈摘要、「刷新页面」「清除缓存并刷新」两个按钮），适用于远程服务器数据异常或网络问题导致的界面崩溃。
+
+### 修复
+- **v0.10.3 三端版本号脱节（桌面构建隐患）** — v0.10.3 发布时仅更新了 web 端 `package.json`，漏改 `desktop/tauri.conf.json`、`desktop/Cargo.toml`、`desktop/package.json`、`mobile2/pubspec.yaml`（均停在 0.10.2）。Tauri 要求 `tauri.conf.json` 与 `Cargo.toml` 版本一致，脱节会导致桌面端构建失败。已通过 `scripts/sync-version.mjs` 统一同步为 0.10.3。
+
 ## v0.10.3 — 2026-08-18（本地运行内存优化 + 发送消息无响应修复）
 
 ### 优化
