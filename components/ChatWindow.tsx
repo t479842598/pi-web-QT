@@ -5,7 +5,7 @@ import type { AgentMessage, AssistantContentBlock, AssistantMessage, ExtensionUi
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { getDisplayableAssistantBlocks, splitFinalAssistantBlocks, extractPlanText } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
-import { collectProcessContentBlocks, splitAssistantContentBlocks } from "@/lib/process-content";
+import { collectProcessContentBlocks, splitAssistantContentBlocks, type ProcessContentBlock } from "@/lib/process-content";
 import { MessageView } from "./MessageView";
 import { PlanReviewDialog } from "./PlanReviewDialog";
 import { GoalBanner } from "./GoalBanner";
@@ -23,7 +23,7 @@ import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ArrowDownIcon } from "@phosphor-icons/react/ArrowDown";
 import type { Virtualizer } from "@tanstack/react-virtual";
 import { useAgentSession, CHAT_BOTTOM_SPACER_PX, BOTTOM_KEEP_OUT_PX, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
-import { stripModeInstructionBlocks } from "@/lib/modes";
+import { stripModeInstructionBlocks, type CollaborationMode } from "@/lib/modes";
 import { useAudio } from "@/hooks/useAudio";
 import { useDeepSeekBalance } from "@/hooks/useDeepSeekBalance";
 import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
@@ -124,6 +124,136 @@ function withAssistantBlocks(
   const next = { ...message, content };
   if (options.omitUsage) next.usage = undefined;
   return next;
+}
+
+// ─── History pipeline (memoized) ──────────────────────────────────────────
+// The render body below walks `messages` and, for every historical turn, runs
+// block splitting / process-block collection / written-file extraction. Those
+// are pure functions of (messages, entryIds, messageCwd), but they used to
+// run inside the JSX on EVERY render — including every streamed token (30fps
+// coalesced), recomputing all prior turns. Extracting that data into a memo
+// keyed on the stable inputs means streaming only recomputes the live tail.
+
+type HistoryRenderItem =
+  | { kind: "single"; idx: number }
+  | {
+      kind: "turn";
+      userIdx: number;
+      endIdx: number;
+      startsCompactionTurn: boolean;
+      finalAssistantIdx: number;
+      visibleProcessIndices: number[];
+      processBlocks: ProcessContentBlock[];
+      finalAnswerMessage: AssistantMessage | null;
+      writtenFiles: WrittenFile[] | undefined;
+    };
+
+interface HistoryPipeline {
+  toolResultsMap: Map<string, ToolResultMessage>;
+  lastUserIdx: number;
+  visibleRefIndexByMessage: Map<number, number>;
+  items: HistoryRenderItem[];
+}
+
+function buildHistoryPipeline(
+  messages: AgentMessage[],
+  entryIds: string[],
+  messageCwd: string | undefined,
+): HistoryPipeline {
+  const toolResultsMap = new Map<string, ToolResultMessage>();
+  for (const msg of messages) {
+    if (msg.role === "toolResult") {
+      toolResultsMap.set((msg as ToolResultMessage).toolCallId, msg as ToolResultMessage);
+    }
+  }
+
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") { lastUserIdx = i; break; }
+  }
+
+  const visibleRefIndexByMessage = new Map<number, number>();
+  let refIdx = 0;
+  messages.forEach((msg, idx) => {
+    if (msg.role === "user" || msg.role === "assistant") {
+      visibleRefIndexByMessage.set(idx, refIdx++);
+    }
+  });
+
+  const items: HistoryRenderItem[] = [];
+  for (let idx = 0; idx < messages.length;) {
+    const msg = messages[idx];
+    const startsCompactionTurn = isCompactionBoundary(msg);
+    // Non-turn-starting messages render as singles (mirrors the JSX loop).
+    if (msg.role !== "user" && !startsCompactionTurn) {
+      items.push({ kind: "single", idx });
+      idx += 1;
+      continue;
+    }
+
+    const userIdx = idx;
+    let endIdx = userIdx + 1;
+    while (endIdx < messages.length && messages[endIdx].role !== "user") endIdx += 1;
+
+    const finalAssistantIdx = findFinalAssistantIndex(messages, userIdx, endIdx);
+
+    if (finalAssistantIdx === -1) {
+      // No assistant answer in this turn — every message renders as a single.
+      items.push({ kind: "turn", userIdx, endIdx, startsCompactionTurn, finalAssistantIdx, visibleProcessIndices: [], processBlocks: [], finalAnswerMessage: null, writtenFiles: undefined });
+      idx = endIdx;
+      continue;
+    }
+
+    const processIndices: number[] = [];
+    for (let processIdx = userIdx + 1; processIdx < finalAssistantIdx; processIdx++) {
+      processIndices.push(processIdx);
+    }
+    const visibleProcessIndices = processIndices.filter((processIdx) => hasDisplayableProcessMessage(messages[processIdx]));
+    const finalAssistant = messages[finalAssistantIdx] as AssistantMessage;
+    const finalSplit = splitFinalAssistantBlocks(finalAssistant);
+    const finalProcessMessage = finalSplit.processBlocks.length > 0
+      ? withAssistantBlocks(finalAssistant, finalSplit.processBlocks, { omitUsage: true })
+      : null;
+    const finalAnswerMessage = finalSplit.answerBlocks.length > 0
+      ? withAssistantBlocks(finalAssistant, finalSplit.answerBlocks)
+      : null;
+
+    let processBlocks = collectProcessContentBlocks(messages, entryIds, visibleProcessIndices, toolResultsMap);
+    if (finalProcessMessage) {
+      processBlocks = processBlocks.concat(splitAssistantContentBlocks(finalAssistant, {
+        messageIndex: finalAssistantIdx,
+        entryId: entryIds[finalAssistantIdx],
+        toolResults: toolResultsMap,
+      }).processBlocks);
+    }
+
+    let writtenFiles: WrittenFile[] | undefined;
+    if (finalAnswerMessage) {
+      const turnContent: AssistantContentBlock[] = [];
+      for (let i = userIdx + 1; i <= finalAssistantIdx; i++) {
+        const m = messages[i];
+        if (m?.role === "assistant") {
+          for (const b of (m as AssistantMessage).content ?? []) turnContent.push(b);
+        }
+      }
+      writtenFiles = extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd);
+    }
+
+    items.push({
+      kind: "turn",
+      userIdx,
+      endIdx,
+      startsCompactionTurn,
+      finalAssistantIdx,
+      visibleProcessIndices,
+      processBlocks,
+      finalAnswerMessage,
+      writtenFiles,
+    });
+    idx = endIdx;
+  }
+
+  return { toolResultsMap, lastUserIdx, visibleRefIndexByMessage, items };
 }
 
 
@@ -464,6 +594,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !agentRunning;
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
 
+  // Memoize the per-turn data pipeline (block splits, process-block
+  // collection, written-file extraction) so streaming only recomputes the
+  // live tail instead of re-transforming every historical turn on each frame.
+  const historyPipeline = useMemo(
+    () => buildHistoryPipeline(messages, entryIds, messageCwd),
+    [messages, entryIds, messageCwd],
+  );
+
   const availableThinkingLevels = displayModelValue
     ? (modelThinkingLevels[`${displayModelValue.provider}:${displayModelValue.modelId}`] ?? null)
     : null;
@@ -471,6 +609,26 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const currentThinkingLevelMap = displayModelValue
     ? (modelThinkingLevelMaps[`${displayModelValue.provider}:${displayModelValue.modelId}`] ?? null)
     : null;
+
+  // Stable callbacks for ChatInput so `memo(ChatInput)` can skip re-renders
+  // during streaming (inline arrows would otherwise create a new identity each
+  // frame and defeat the memo).
+  const handleRetryModels = useCallback(() => { reloadModels(); }, [reloadModels]);
+  const handlePlanModeToggle = useCallback((enabled: boolean) => {
+    handlePlanModeChange(enabled);
+    if (enabled && collaborationMode !== "plan") handleCollaborationModeChange("plan");
+    else if (!enabled && collaborationMode === "plan") handleCollaborationModeChange("normal");
+  }, [handlePlanModeChange, handleCollaborationModeChange, collaborationMode]);
+  const handleCollaborationModeSelect = useCallback((mode: CollaborationMode) => {
+    // Sync the legacy plan toggle (read-only toolset) with the new
+    // collaboration mode so the two entry points stay consistent.
+    handleCollaborationModeChange(mode);
+    if (mode === "plan" && !planMode) {
+      void handlePlanModeChange(true);
+    } else if (mode !== "plan" && planMode) {
+      void handlePlanModeChange(false);
+    }
+  }, [handleCollaborationModeChange, handlePlanModeChange, planMode]);
 
   const chatInputElement = (
     <ChatInput
@@ -488,30 +646,17 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       modelList={modelList}
       modelScopeWarnings={modelScopeWarnings}
       modelsError={modelsError}
-      onRetryModels={() => reloadModels()}
+      onRetryModels={handleRetryModels}
       onModelChange={handleModelChange}
       compactResult={compactResult}
       toolPreset={toolPreset}
       onToolPresetChange={session || isNew ? handleToolPresetChange : undefined}
       planMode={planMode}
-      onPlanModeChange={(enabled) => {
-        handlePlanModeChange(enabled);
-        if (enabled && collaborationMode !== "plan") handleCollaborationModeChange("plan");
-        else if (!enabled && collaborationMode === "plan") handleCollaborationModeChange("normal");
-      }}
+      onPlanModeChange={handlePlanModeToggle}
       collaborationMode={collaborationMode}
       tokenMode={tokenMode}
       toolApprovalMode={toolApprovalMode}
-      onCollaborationModeChange={(mode) => {
-        // Sync the legacy plan toggle (read-only toolset) with the new
-        // collaboration mode so the two entry points stay consistent.
-        handleCollaborationModeChange(mode);
-        if (mode === "plan" && !planMode) {
-          void handlePlanModeChange(true);
-        } else if (mode !== "plan" && planMode) {
-          void handlePlanModeChange(false);
-        }
-      }}
+      onCollaborationModeChange={handleCollaborationModeSelect}
       onTokenModeChange={handleTokenModeChange}
       onToolApprovalModeChange={handleToolApprovalModeChange}
       goalState={goalState}
@@ -782,25 +927,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               <ExtensionWidgets widgets={aboveEditorWidgets} />
 
             {(() => {
-              const toolResultsMap = new Map<string, ToolResultMessage>();
-              for (const msg of messages) {
-                if (msg.role === "toolResult") {
-                  toolResultsMap.set((msg as ToolResultMessage).toolCallId, msg as ToolResultMessage);
-                }
-              }
-
-              let lastUserIdx = -1;
-              for (let i = messages.length - 1; i >= 0; i--) {
-                if (messages[i].role === "user") { lastUserIdx = i; break; }
-              }
-
-              const visibleRefIndexByMessage = new Map<number, number>();
-              let refIdx = 0;
-              messages.forEach((msg, idx) => {
-                if (msg.role === "user" || msg.role === "assistant") {
-                  visibleRefIndexByMessage.set(idx, refIdx++);
-                }
-              });
+              const { toolResultsMap, lastUserIdx, visibleRefIndexByMessage, items } = historyPipeline;
 
               const attachVisibleRef = (idx: number, refIndex: number) => (el: HTMLDivElement | null) => {
                 messageRefs.current[refIndex] = el;
@@ -883,25 +1010,13 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 rendered.push(node);
                 itemStartRefs.push(refIndex);
               };
-              for (let idx = 0; idx < messages.length;) {
-                const msg = messages[idx];
-                const startsCompactionTurn = isCompactionBoundary(msg);
-                // The SDK may trim the user prompt that triggered compaction from
-                // the rebuilt context. Treat the retained compaction entry as the
-                // turn boundary so its first following agent response still uses
-                // the ProcessGroup rendering path rather than the legacy message
-                // renderer.
-                if (msg.role !== "user" && !startsCompactionTurn) {
-                  pushRendered(renderMessage(idx), visibleRefIndexByMessage.get(idx));
-                  idx += 1;
+              for (const item of items) {
+                if (item.kind === "single") {
+                  pushRendered(renderMessage(item.idx), visibleRefIndexByMessage.get(item.idx));
                   continue;
                 }
 
-                const userIdx = idx;
-                let endIdx = userIdx + 1;
-                while (endIdx < messages.length && messages[endIdx].role !== "user") endIdx += 1;
-
-                const finalAssistantIdx = findFinalAssistantIndex(messages, userIdx, endIdx);
+                const { userIdx, endIdx, startsCompactionTurn, finalAssistantIdx } = item;
                 const isLiveTail = (agentRunning || streamState.isStreaming)
                   && endIdx === messages.length
                   && (userIdx === lastUserIdx || startsCompactionTurn);
@@ -980,7 +1095,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                       finalAssistantIdx >= 0 ? visibleRefIndexByMessage.get(finalAssistantIdx) : undefined,
                     );
                   }
-                  idx = endIdx;
                   continue;
                 }
 
@@ -988,34 +1102,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
                     pushRendered(renderMessage(renderIdx), visibleRefIndexByMessage.get(renderIdx));
                   }
-                  idx = endIdx;
                   continue;
                 }
 
                 pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx));
 
-                const processIndices: number[] = [];
-                for (let processIdx = userIdx + 1; processIdx < finalAssistantIdx; processIdx++) {
-                  processIndices.push(processIdx);
-                }
-                const visibleProcessIndices = processIndices.filter((processIdx) => hasDisplayableProcessMessage(messages[processIdx]));
-                const finalAssistant = messages[finalAssistantIdx] as AssistantMessage;
-                const finalSplit = splitFinalAssistantBlocks(finalAssistant);
-                const finalProcessMessage = finalSplit.processBlocks.length > 0
-                  ? withAssistantBlocks(finalAssistant, finalSplit.processBlocks, { omitUsage: true })
-                  : null;
-                const finalAnswerMessage = finalSplit.answerBlocks.length > 0
-                  ? withAssistantBlocks(finalAssistant, finalSplit.answerBlocks)
-                  : null;
-
-                let processBlocks = collectProcessContentBlocks(messages, entryIds, visibleProcessIndices, toolResultsMap);
-                if (finalProcessMessage) {
-                  processBlocks = processBlocks.concat(splitAssistantContentBlocks(finalAssistant, {
-                    messageIndex: finalAssistantIdx,
-                    entryId: entryIds[finalAssistantIdx],
-                    toolResults: toolResultsMap,
-                  }).processBlocks);
-                }
+                const { processBlocks, finalAnswerMessage, writtenFiles, visibleProcessIndices } = item;
                 if (processBlocks.length > 0) {
                   const processRefIdx = visibleProcessIndices
                     .map((processIdx) => visibleRefIndexByMessage.get(processIdx))
@@ -1041,24 +1133,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 }
 
                 if (finalAnswerMessage) {
-                  // Each tool call is stored as its own assistant entry, so the
-                  // final answer alone carries no record of what the turn wrote.
-                  // Gather the turn's assistant blocks and derive the file list
-                  // from the successful write/edit calls among them.
-                  const turnContent: AssistantContentBlock[] = [];
-                  for (let i = userIdx + 1; i <= finalAssistantIdx; i++) {
-                    const m = messages[i];
-                    if (m?.role === "assistant") {
-                      for (const b of (m as AssistantMessage).content ?? []) turnContent.push(b);
-                    }
-                  }
-                  const writtenFiles = extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd);
                   pushRendered(renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles }), visibleRefIndexByMessage.get(finalAssistantIdx));
                 }
                 for (let renderIdx = finalAssistantIdx + 1; renderIdx < endIdx; renderIdx++) {
                   pushRendered(renderMessage(renderIdx), visibleRefIndexByMessage.get(renderIdx));
                 }
-                idx = endIdx;
               }
               // After building all items, expose the per-message → item map to
               // the minimap adapter: each rendered item represents exactly one

@@ -39,16 +39,27 @@ function hashString(input: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
+const INTERN_CACHE_MAX = 2000;
+
 function makePart(
   text: string,
   tail: boolean,
   cache: Map<string, string> | undefined,
 ): MarkdownStreamPart {
   const id = hashString(text);
-  if (cache) {
+  if (cache && !tail) {
+    // Stable (non-tail) parts only: the tail's text changes on every streamed
+    // frame, so interning it would just accumulate garbage entries that are
+    // never reused. The cache is also bounded (evict oldest = approximate LRU
+    // via Map insertion order) so a very long session cannot grow it without
+    // bound.
     const cached = cache.get(id);
     if (cached !== undefined) return { id, text: cached, tail };
     cache.set(id, text);
+    if (cache.size > INTERN_CACHE_MAX) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
   }
   return { id, text, tail };
 }

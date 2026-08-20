@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, memo, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowClockwise, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, GitFork, Lightning, List, MagnifyingGlass, PencilSimple, Plug, Plus, PushPin, Sparkle, Stack, StackSimple, Trash, UploadSimple, X } from "@phosphor-icons/react";
 import type { SessionInfo } from "@/lib/types";
@@ -231,6 +231,18 @@ function AnimatedDropdown({ open, children, style }: { open: boolean; children: 
 interface SessionTreeNode {
   session: SessionInfo;
   children: SessionTreeNode[];
+}
+
+/**
+ * Set-equality for id sets. The running-session poll fires every 2.5s and
+ * rebuilds a Set each time; passing a new-but-identical Set to setState
+ * would re-render the entire session tree for nothing. Returning the
+ * previous reference when contents match lets React bail out.
+ */
+function sameIdSet(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
 }
 
 function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
@@ -631,7 +643,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       // This is only an initial fallback. The dedicated snapshot route owns
       // running state once it has responded, so a slow list reload stays stale.
       if (!runningSnapshotAuthoritativeRef.current) {
-        setRunningSessionIds(new Set(data.runningSessionIds ?? []));
+        setRunningSessionIds((prev) => {
+          const next = new Set(data.runningSessionIds ?? []);
+          return sameIdSet(prev, next) ? prev : next;
+        });
       }
       // Drop unread markers for sessions that no longer exist (e.g. deleted).
       const existingIds = new Set(data.sessions.map((s) => s.id));
@@ -707,7 +722,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         const data = await response.json() as { runningSessionIds?: string[]; sessions?: Array<{ id: string; running: boolean }> };
         if (!active || controller !== currentController) return;
         runningSnapshotAuthoritativeRef.current = true;
-        setRunningSessionIds(new Set((data.sessions ?? []).filter((session) => session.running).map((session) => session.id)));
+        setRunningSessionIds((prev) => {
+          const next = new Set((data.sessions ?? []).filter((session) => session.running).map((session) => session.id));
+          return sameIdSet(prev, next) ? prev : next;
+        });
       } catch (error) {
         if ((error as DOMException).name !== "AbortError") console.warn("Failed to poll running sessions", error);
       } finally {
@@ -746,7 +764,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           ? data.sessions.filter((session) => session.running).map((session) => session.id)
           : data.runningSessionIds ?? [];
         runningSnapshotAuthoritativeRef.current = true;
-        setRunningSessionIds(new Set(ids));
+        setRunningSessionIds((prev) => {
+          const next = new Set(ids);
+          return sameIdSet(prev, next) ? prev : next;
+        });
       } catch {
         // EventSource reconnects; a malformed frame must not alter state.
       }
@@ -2728,7 +2749,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   );
 }
 
-function SessionTreeItem({
+const SessionTreeItem = memo(function SessionTreeItem({
   node,
   selectedSessionId,
   runningSessionIds,
@@ -2751,6 +2772,11 @@ function SessionTreeItem({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const hasChildren = node.children.length > 0;
+  const isSelected = node.session.id === selectedSessionId;
+  // Stable per-item callbacks so memo(SessionItem) can skip unchanged rows.
+  const handleClick = useCallback(() => onSelectSession(node.session), [onSelectSession, node.session]);
+  const handleDeleted = useCallback((id: string) => onSessionDeleted?.(id), [onSessionDeleted]);
+  const handleToggleCollapse = useCallback(() => setCollapsed((v) => !v), []);
 
   return (
     <div>
@@ -2768,18 +2794,18 @@ function SessionTreeItem({
         )}
         <SessionItem
           session={node.session}
-          isSelected={node.session.id === selectedSessionId}
+          isSelected={isSelected}
           isRunning={runningSessionIds.has(node.session.id)}
           isUnread={unreadSessionIds.has(node.session.id)}
-          onClick={() => onSelectSession(node.session)}
+          onClick={handleClick}
           onRenamed={onRenamed}
-          onDeleted={(id) => onSessionDeleted?.(id)}
+          onDeleted={handleDeleted}
           selectedSessionId={selectedSessionId}
-          selectedSessionStats={selectedSessionStats}
+          selectedSessionStats={isSelected ? selectedSessionStats : null}
           depth={depth}
           hasChildren={hasChildren}
           collapsed={collapsed}
-          onToggleCollapse={() => setCollapsed((v) => !v)}
+          onToggleCollapse={handleToggleCollapse}
         />
       </div>
       {hasChildren && !collapsed && (
@@ -2802,7 +2828,7 @@ function SessionTreeItem({
       )}
     </div>
   );
-}
+});
 
 function RunningSessionIndicator() {
   const { t } = useI18n();
@@ -2869,7 +2895,7 @@ function UnreadSessionIndicator() {
   );
 }
 
-function SessionItem({
+const SessionItem = memo(function SessionItem({
   session,
   isSelected,
   isRunning,
@@ -3533,7 +3559,7 @@ function SessionItem({
       )}
     </div>
   );
-}
+});
 
 /**
  * Accordion group card for the grouped session view. Header toggles expansion
