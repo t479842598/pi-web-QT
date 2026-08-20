@@ -153,7 +153,13 @@ jobs:
         shell: bash
         env:
           NODE_DIST: ${{ matrix.node_dist }}
+          # 规避 Next 16 在 Windows 上扫描用户主目录 junction（%USERPROFILE%\Local
+          # Settings\Microsoft\WindowsApps 的 EACCES + 目录环），与本地构建同一处理：
+          # 把 HOME/USERPROFILE 指向空目录，让 nft 只追踪该目录。
+          HOME: "${{ runner.temp }}/piweb-fakehome"
+          USERPROFILE: "${{ runner.temp }}/piweb-fakehome"
         run: |
+          mkdir -p "${{ runner.temp }}/piweb-fakehome"
           NATIVE_DIST="$(node -p 'const p = process.platform === "win32" ? "win" : process.platform; p + "-" + process.arch')"
           if [ "$NATIVE_DIST" != "$NODE_DIST" ]; then
             NODE_VERSION="$(node -p 'process.versions.node')"
@@ -193,6 +199,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # beforeBuildCommand 会再次跑 bundle:backend，同样需要主目录沙箱（Windows）
+          HOME: "${{ runner.temp }}/piweb-fakehome"
+          USERPROFILE: "${{ runner.temp }}/piweb-fakehome"
         with:
           projectPath: ./desktop
           tagName: v__VERSION__
