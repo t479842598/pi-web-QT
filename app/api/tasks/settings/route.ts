@@ -3,6 +3,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { getAllowedFileRoots, isFilePathAllowed } from "@/lib/file-access";
 import { getProjectTrustStatus } from "@/lib/project-trust";
+import { isWindowsAbsolutePath } from "@/lib/paths";
 import {
   deleteSettingsRow,
   loadEffectiveSettings,
@@ -42,7 +43,7 @@ export async function PUT(req: Request) {
   }
   try {
     const body = (await req.json()) as { projectRoot?: unknown; settings?: unknown };
-    if (typeof body.projectRoot !== "string" || !body.projectRoot.startsWith("/")) {
+    if (typeof body.projectRoot !== "string" || !(body.projectRoot.startsWith("/") || isWindowsAbsolutePath(body.projectRoot))) {
       return NextResponse.json({ error: "projectRoot is required" }, { status: 400 });
     }
     // These settings can register shell commands (initCommand/preflightCommand)

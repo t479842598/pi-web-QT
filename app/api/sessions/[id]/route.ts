@@ -261,9 +261,12 @@ export async function DELETE(
         const preview = readSessionHeader(childPath);
         if (!preview || preview.parentSession !== filePath) continue;
         // Stop the child's wrapper FIRST: rewriting the file underneath a
-        // live session races its appendFileSync and loses tail messages.
+        // live session races its appendFileSync and loses tail messages. The
+        // shutdown can reject when the extension runner errors — never let
+        // that skip the reparent rewrite (the child would keep pointing at a
+        // deleted file and become an orphan).
         if (typeof preview.id === "string" && preview.id) {
-          await getRpcSession(preview.id)?.shutdown();
+          await getRpcSession(preview.id)?.shutdown().catch(() => undefined);
         }
         // Re-read after shutdown so late appends are included in the rewrite.
         const content = readFileSync(childPath, "utf8");

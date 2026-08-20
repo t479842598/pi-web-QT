@@ -98,6 +98,8 @@ PI_WEB_NO_OPEN=1 pi-web         # 后台服务不自动打开浏览器
 
 设置 `PI_WEB_PASSWORD` 后，所有网页接口和 API 端点都需要 HTTP Basic Auth 认证，用户名为 `pi`。不设或留空则禁用认证。
 
+> 当监听地址超出本机（如默认的 `0.0.0.0`）而未设置 `PI_WEB_PASSWORD` 时，`pi-web` 会**拒绝启动**——裸奔在局域网意味着网内任何设备都能读取会话并执行 agent 命令。可信内网确需免密时，设置 `PI_WEB_ALLOW_INSECURE_LAN=1` 显式豁免（风险自负）。
+
 > Basic Auth 不加密传输中的密码。请勿将纯 HTTP 直接暴露到公网，通过可信反向代理启用 HTTPS 或使用可信 VPN 进行远程访问。
 
 ### 从源码运行
@@ -215,6 +217,7 @@ node bin/pi-web.js -H 127.0.0.1 -p 30141 --no-open
 | 变量 | 用途 |
 | --- | --- |
 | `PI_WEB_PASSWORD` | 启用 Basic Auth；用户名固定为 `pi`。 |
+| `PI_WEB_ALLOW_INSECURE_LAN=1` | 非环回监听且未设密码时，豁免启动拒绝（仅限可信内网）。 |
 | `PI_WEB_ALLOWED_HOSTS` | 以逗号分隔的外部允许域名，例如 `piweb.example.com`。 |
 | `PI_CODING_AGENT_DIR` | 指向另一套 Pi 数据目录；默认使用 `~/.pi/agent`。 |
 | `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` | 为服务端模型/API 请求设置代理。 |

@@ -1113,6 +1113,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     onSelectSession(s);
   }, [onSelectSession]);
 
+  // Stable delete handler shared by the tree and grouped views — an inline
+  // arrow would change identity every render and defeat memo(SessionTreeItem).
+  const handleSessionDeleted = useCallback((id: string) => {
+    onSessionDeleted?.(id);
+    loadSessions();
+  }, [onSessionDeleted, loadSessions]);
+
   /**
    * Optimistic pin/unpin: flip the local row immediately so the grouped view
    * reorders without waiting for the server round-trip, then persist in the
@@ -1202,10 +1209,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     ? recentProjects.filter((p) => p.toLowerCase().includes(projectFilter.trim().toLowerCase()))
     : recentProjects;
 
-  // Sessions of every worktree in the selected project are shown together
-  const filteredSessions = selectedProject
-    ? allSessions.filter((s) => (s.projectRoot ?? s.cwd) === selectedProject)
-    : allSessions;
+  // Sessions of every worktree in the selected project are shown together.
+  // Memoized: the session-tree memo downstream keys on these identities — an
+  // inline filter would rebuild the tree on every render and defeat it.
+  const filteredSessions = useMemo(
+    () => selectedProject
+      ? allSessions.filter((s) => (s.projectRoot ?? s.cwd) === selectedProject)
+      : allSessions,
+    [allSessions, selectedProject],
+  );
 
   // 批量生成当前项目所有会话的标题（并发池并行，单条失败跳过）
   const [batchNaming, setBatchNaming] = useState(false);
@@ -2550,10 +2562,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   onSelectSession={handleSelectSessionFromList}
                   onRenamed={loadSessions}
                   selectedSessionStats={selectedSessionStats}
-                  onSessionDeleted={(id) => {
-                    onSessionDeleted?.(id);
-                    loadSessions();
-                  }}
+                  onSessionDeleted={handleSessionDeleted}
                   depth={0}
                 />
               ))}
@@ -2584,10 +2593,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     allSessions={allSessions}
                     onPinChange={handlePinChange}
                     onRenamed={loadSessions}
-                    onSessionDeleted={(id) => {
-                      onSessionDeleted?.(id);
-                      loadSessions();
-                    }}
+                    onSessionDeleted={handleSessionDeleted}
                   />
                 );
               })}

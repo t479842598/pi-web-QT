@@ -2166,8 +2166,16 @@ export async function startRpcSession(
   if (existing) {
     // A wrapper that is mid-shutdown (idle dispose / fork) must not be
     // reused: SSE subscribers would attach to a session about to be
-    // destroyed. Wait it out, then rebuild from the on-disk file.
-    await existing.whenShutdown();
+    // destroyed. Wait it out, then rebuild from the on-disk file. Bounded:
+    // a stuck extension shutdown hook must not hang this cold start (and
+    // every later one, since this await happens before the start lock).
+    const pending = existing.whenShutdown();
+    if (pending) {
+      await Promise.race([
+        pending,
+        new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+      ]);
+    }
   }
 
   const inflight = locks.get(sessionId);
