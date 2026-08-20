@@ -15,6 +15,22 @@ export interface DeepSeekBalanceData {
 const REFRESH_DEBOUNCE_MS = 2000;
 
 /**
+ * Field-level equality for balance payloads. The refresh callback must stay
+ * referentially stable (its identity drives ChatWindow's refresh effect), so
+ * it reads state through a ref and only calls setBalance when the data
+ * actually changed — otherwise each fetch produces a new object identity and
+ * retriggers the effect in an infinite fetch loop.
+ */
+export function sameDeepSeekBalance(a: DeepSeekBalanceData, b: DeepSeekBalanceData): boolean {
+  return a.available === b.available
+    && a.reason === b.reason
+    && a.currency === b.currency
+    && a.totalBalance === b.totalBalance
+    && a.grantedBalance === b.grantedBalance
+    && a.toppedUpBalance === b.toppedUpBalance;
+}
+
+/**
  * Fetch + state for the DeepSeek official wallet balance.
  *
  * - `refresh()`: immediate fetch. Success (available:true) replaces state;
@@ -58,14 +74,7 @@ export function useDeepSeekBalance() {
         // would change this callback's identity and retrigger the caller's
         // refresh effect — an infinite fetch loop (see ChatWindow mount effect).
         const prev = balanceRef.current;
-        const unchanged = prev !== null
-          && prev.available === data.available
-          && prev.reason === data.reason
-          && prev.currency === data.currency
-          && prev.totalBalance === data.totalBalance
-          && prev.grantedBalance === data.grantedBalance
-          && prev.toppedUpBalance === data.toppedUpBalance;
-        if (!unchanged) {
+        if (prev === null || !sameDeepSeekBalance(prev, data)) {
           balanceRef.current = data;
           setBalance(data);
         }

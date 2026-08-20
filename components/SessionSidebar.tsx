@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, mem
 import { createPortal } from "react-dom";
 import { ArrowClockwise, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, GitFork, Lightning, List, MagnifyingGlass, PencilSimple, Plug, Plus, PushPin, Sparkle, Stack, StackSimple, Trash, UploadSimple, X } from "@phosphor-icons/react";
 import type { SessionInfo } from "@/lib/types";
+import { sameIdSet } from "@/lib/id-set";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -231,18 +232,6 @@ function AnimatedDropdown({ open, children, style }: { open: boolean; children: 
 interface SessionTreeNode {
   session: SessionInfo;
   children: SessionTreeNode[];
-}
-
-/**
- * Set-equality for id sets. The running-session poll fires every 2.5s and
- * rebuilds a Set each time; passing a new-but-identical Set to setState
- * would re-render the entire session tree for nothing. Returning the
- * previous reference when contents match lets React bail out.
- */
-function sameIdSet(a: Set<string>, b: Set<string>): boolean {
-  if (a.size !== b.size) return false;
-  for (const id of a) if (!b.has(id)) return false;
-  return true;
 }
 
 function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {

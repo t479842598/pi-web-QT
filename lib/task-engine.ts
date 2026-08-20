@@ -635,7 +635,8 @@ function cleanupRun(run: LiveRun): void {
 // the on-disk store and the merge message is user-supplied — string-building
 // a shell command lets `$(...)`/backticks execute even inside JSON-quoted
 // double quotes. Array-arg spawn removes the entire injection class.
-function runGitIn(cwd: string, args: string[]): Promise<void> {
+// Exported (prefixed) for unit tests.
+export function runGitIn(cwd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, { cwd, stdio: "ignore" });
     child.on("error", reject);
@@ -646,7 +647,7 @@ function runGitIn(cwd: string, args: string[]): Promise<void> {
   });
 }
 
-function runGitCapture(cwd: string, args: string[]): Promise<{ code: number | null; output: string }> {
+export function runGitCapture(cwd: string, args: string[]): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve) => {
     const child = spawn("git", args, { cwd });
     let output = "";
