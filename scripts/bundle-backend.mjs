@@ -51,6 +51,11 @@ console.log("[bundle-backend] next build --webpack …");
 try {
   const env = { ...process.env };
   delete env.TURBOPACK; // 强制 webpack（与 npm run build 的 env -u TURBOPACK 一致）
+  // 构建期必须丢掉运行时遗留的 __NEXT_PRIVATE_STANDALONE_CONFIG：standalone
+  // server.js 会把 nextConfig 序列化进该变量（函数成员被 JSON 丢弃，如
+  // generateBuildId），若宿主环境带此变量再跑 next build，Next 会直接采用
+  // 这份旧配置 → “TypeError: generate is not a function” 全平台构建异常。
+  delete env.__NEXT_PRIVATE_STANDALONE_CONFIG;
   execFileSync(process.execPath, [nextBin, "build", "--webpack"], {
     cwd: root,
     stdio: "inherit",

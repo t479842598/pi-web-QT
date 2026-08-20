@@ -10,6 +10,10 @@
 ### 其他
 - `lib/rpc-manager.ts`：`persistBashOnlySession()` 泛化为 public `persistSessionFileIfMissing()`（幂等：文件已存在则跳过；bash-only 会话同样安全）。
 
+### 构建（随本次 0.10.5 发布补齐 CI 打包修复）
+- **桌面端 Release All 全平台 1 秒失败修复（重要）** — tauri build 步骤的假 HOME 沙箱（`HOME=runner.temp/piweb-fakehome`，原本用于规避 Windows nft 扫用户主目录 EACCES）会让 rustup 找不到默认 toolchain（rustup 默认读 `$HOME/.rustup/settings.toml`），`cargo metadata` 立即失败，macOS/Windows/Ubuntu 四个矩阵全挂。修复：`release-all.yml` 在 rust-toolchain 后把真实 `RUSTUP_HOME`/`CARGO_HOME` 固化到 `GITHUB_ENV`（假 HOME 沙箱继续服务于 beforeBuildCommand 的 next build）。
+- **本地 bundle-backend 偶发 `TypeError: generate is not a function` 修复** — standalone `server.js` 会把 nextConfig 序列化进 `__NEXT_PRIVATE_STANDALONE_CONFIG`（函数成员如 generateBuildId 被 JSON 丢弃），若宿主环境带此变量再跑 next build，Next 会直接采用这份旧配置导致构建异常；`bundle-backend.mjs` 构建前显式删除该环境变量。
+
 ## v0.10.4 — 2026-08-20（桌面端开箱即用：内置后端 + 可信域名 + 启动连接页）
 
 ### 新增
