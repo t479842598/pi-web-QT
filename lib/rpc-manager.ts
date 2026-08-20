@@ -326,6 +326,16 @@ export class AgentSessionWrapper {
     return this._alive;
   }
 
+  /** True once shutdown has been initiated (destroy may still be pending). */
+  isShuttingDown(): boolean {
+    return this.shutdownPromise !== null;
+  }
+
+  /** Resolves when the in-progress shutdown completes (null otherwise). */
+  whenShutdown(): Promise<void> | null {
+    return this.shutdownPromise;
+  }
+
   isRunning(): boolean {
     return this._alive && (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning);
   }
@@ -891,7 +901,19 @@ export class AgentSessionWrapper {
     const content = [header, ...manager.getEntries()]
       .map((entry) => JSON.stringify(entry))
       .join("\n") + "\n";
-    writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
+    try {
+      writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      // The SDK's own first flush can create the file between our existsSync
+      // check and this write — keep its version instead of failing the whole
+      // session start on a harmless race.
+      if ((error as NodeJS.ErrnoException).code === "EEXIST" || existsSync(sessionFile)) {
+        (manager as unknown as { flushed: boolean }).flushed = true;
+        cacheSessionPath(this.inner.sessionId, sessionFile);
+        return;
+      }
+      throw error;
+    }
 
     // Mark this SDK manager as flushed after writing its own entries so the
     // first user/assistant message appends instead of trying to create the
@@ -920,6 +942,10 @@ export class AgentSessionWrapper {
   }
 
   async send(command: Record<string, unknown>): Promise<unknown> {
+    // The POST route's isAlive() check is not atomic with this call — fork
+    // and idle-dispose can destroy the wrapper in between. Fail loudly
+    // instead of issuing commands against a disposed AgentSession.
+    if (!this._alive) throw new Error("Session is shutting down");
     this.touch();
     this.resetIdleTimer();
     const type = command.type as string;
@@ -2126,7 +2152,13 @@ export async function startRpcSession(
   const locks = getLocks();
 
   const existing = registry.get(sessionId);
-  if (existing?.isAlive()) return { session: existing, realSessionId: sessionId };
+  if (existing?.isAlive() && !existing.isShuttingDown()) return { session: existing, realSessionId: sessionId };
+  if (existing) {
+    // A wrapper that is mid-shutdown (idle dispose / fork) must not be
+    // reused: SSE subscribers would attach to a session about to be
+    // destroyed. Wait it out, then rebuild from the on-disk file.
+    await existing.whenShutdown();
+  }
 
   const inflight = locks.get(sessionId);
   if (inflight) return inflight;
@@ -2206,6 +2238,10 @@ export async function startRpcSession(
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
       customTools: asyncBashTools,
     });
+    // Kill any background processes this session spawned when the wrapper dies.
+    const cleanupAsyncBash = asyncBashManager.cleanup.bind(asyncBashManager);
+
+    try {
 
     // Record the web's own model-call traffic for every provider: success as
     // info, failures as error with a status code when inferable. Wrapping the
@@ -2251,8 +2287,6 @@ export async function startRpcSession(
     }
 
     const wrapper = new AgentSessionWrapper(inner, sessionCwd);
-    // Kill any background processes this session spawned when the wrapper dies.
-    const cleanupAsyncBash = asyncBashManager.cleanup.bind(asyncBashManager);
     // When all tools are disabled, clear the system prompt entirely.
     // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
     // keep this forced after extension resource discovery and reloads as well.
@@ -2283,6 +2317,14 @@ export async function startRpcSession(
     enforceRegistryCap();
 
     return { session: wrapper, realSessionId };
+    } catch (error) {
+      // The wrapper was never registered, so nothing else will ever dispose
+      // it — clean up the half-started session and its bash processes here or
+      // they leak for the lifetime of the server process.
+      try { inner.dispose(); } catch { /* best effort */ }
+      try { cleanupAsyncBash(); } catch { /* best effort */ }
+      throw error;
+    }
   })().finally(() => {
     clearTimeout(startTimeout);
     locks.delete(sessionId);

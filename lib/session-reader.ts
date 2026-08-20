@@ -4,7 +4,7 @@ import {
   buildSessionContext as piBuildSessionContext,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { closeSync, openSync, readSync } from "fs";
+import { closeSync, openSync, readSync, statSync } from "fs";
 import { normalize as normalizePath } from "path";
 import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
@@ -229,8 +229,64 @@ export function readSessionHeader(filePath: string): SessionHeader | null {
 }
 
 export function getSessionEntries(filePath: string): SessionEntry[] {
-  const entries = SessionManager.open(filePath).getEntries();
+  const entries = openSessionCached(filePath).getEntries();
   return entries as unknown as SessionEntry[];
+}
+
+// ─── Cached read-only SessionManager ────────────────────────────────────────
+// SessionManager.open() eagerly re-reads and JSON.parses the whole jsonl on
+// every call. Read-only routes (session detail, context/branch navigation,
+// usage) repeat that cost on every request, blocking the event loop for large
+// files. Cache the manager keyed by (path, mtimeMs, size): session files are
+// append-only, so an mtime/size change reliably invalidates. Small LRU keeps
+// memory bounded. NEVER use this for paths that mutate the session (wrapper
+// startup, appendSessionInfo, reparenting) — use SessionManager.open directly
+// and call invalidateOpenSessionCache after the write.
+interface CachedSessionManager {
+  mtimeMs: number;
+  size: number;
+  sm: SessionManager;
+}
+
+const SESSION_MANAGER_CACHE_MAX = 6;
+
+declare global {
+  var __piSessionManagerCache: Map<string, CachedSessionManager> | undefined;
+}
+
+export function openSessionCached(filePath: string): SessionManager {
+  const cache = (globalThis.__piSessionManagerCache ??= new Map());
+  let mtimeMs = 0;
+  let size = 0;
+  try {
+    const st = statSync(filePath);
+    mtimeMs = st.mtimeMs;
+    size = st.size;
+  } catch {
+    cache.delete(filePath);
+    return SessionManager.open(filePath); // surface the normal open error
+  }
+  const hit = cache.get(filePath);
+  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) {
+    cache.delete(filePath);
+    cache.set(filePath, hit); // refresh recency
+    return hit.sm;
+  }
+  const sm = SessionManager.open(filePath);
+  cache.set(filePath, { mtimeMs, size, sm });
+  while (cache.size > SESSION_MANAGER_CACHE_MAX) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+  return sm;
+}
+
+export function invalidateOpenSessionCache(filePath?: string): void {
+  const cache = globalThis.__piSessionManagerCache;
+  if (!cache) return;
+  if (filePath) cache.delete(filePath);
+  else cache.clear();
 }
 
 export function buildSessionContext(

@@ -170,7 +170,11 @@ export function ensureTaskEngine(): boolean {
   setEngineState(state);
   void bootReconcile();
   state.reconcileTimer = setInterval(() => {
-    void reconcile();
+    // reconcile() can reject on corrupt task files (readDirSync/JSON.parse);
+    // an unhandled rejection from a timer crashes the whole server process.
+    void reconcile().catch((error) => {
+      console.error("[tasks] periodic reconcile failed:", error instanceof Error ? error.message : error);
+    });
   }, 30_000);
   return true;
 }

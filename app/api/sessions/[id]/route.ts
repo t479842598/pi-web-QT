@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { randomUUID } from "crypto";
 import { join } from "path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
@@ -7,7 +8,10 @@ import {
   resolveSessionIdByPath,
   invalidateSessionPathCache,
   invalidateSessionListCache,
+  invalidateOpenSessionCache,
   buildSessionContext,
+  listAllSessions,
+  openSessionCached,
   readSessionHeader,
 } from "@/lib/session-reader";
 import { getRpcSession, broadcastSessionBusEvent } from "@/lib/rpc-manager";
@@ -126,7 +130,7 @@ export async function GET(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const sm = SessionManager.open(filePath);
+    const sm = openSessionCached(filePath);
     const entries = sm.getEntries() as never;
     const leafId = sm.getLeafId();
     const tree = projectTreeForResponse(sm.getTree());
@@ -193,6 +197,8 @@ export async function PATCH(
       }
       const sm = SessionManager.open(filePath);
       sm.appendSessionInfo(name.trim());
+      // The cached read-only manager for this path is now stale.
+      invalidateOpenSessionCache(filePath);
     }
     if (typeof pinned === "boolean") {
       await mutateSettingsJson((settings) => {
@@ -229,30 +235,60 @@ export async function DELETE(
     // Read only the bounded header before deleting.
     const parentSessionPath = readSessionHeader(filePath)?.parentSession;
 
-    // Re-attach all direct children to this session's parent (cascade re-parent)
-    // Scan sibling files in the same directory
+    // Re-attach all direct children to this session's parent (cascade
+    // re-parent). Two discovery sources: same-directory siblings (cheap,
+    // catches fresh forks) and the cached session list (catches forks into
+    // other project directories).
+    const childPaths = new Set<string>();
     const dir = filePath.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
     try {
       const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl") && join(dir, f) !== filePath);
       for (const file of files) {
         const childPath = join(dir, file);
         try {
-          const content = readFileSync(childPath, "utf8");
-          // Strip CR to handle Windows CRLF line endings in .jsonl files.
-          const lines = content.split("\n").map(l => l.replace(/\r$/, ""));
-          const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
-          if (header.type === "session" && header.parentSession === filePath) {
-            // Rewrite header with new parentSession
-            header.parentSession = parentSessionPath;
-            lines[0] = JSON.stringify(header);
-            writeFileSync(childPath, lines.join("\n"));
-          }
+          if (readSessionHeader(childPath)?.parentSession === filePath) childPaths.add(childPath);
         } catch { /* skip malformed */ }
       }
     } catch { /* skip if dir unreadable */ }
+    try {
+      for (const session of await listAllSessions()) {
+        if (session.parentSessionId === id && session.path !== filePath) childPaths.add(session.path);
+      }
+    } catch { /* list unavailable — same-dir scan still ran */ }
+
+    for (const childPath of childPaths) {
+      try {
+        const preview = readSessionHeader(childPath);
+        if (!preview || preview.parentSession !== filePath) continue;
+        // Stop the child's wrapper FIRST: rewriting the file underneath a
+        // live session races its appendFileSync and loses tail messages.
+        if (typeof preview.id === "string" && preview.id) {
+          await getRpcSession(preview.id)?.shutdown();
+        }
+        // Re-read after shutdown so late appends are included in the rewrite.
+        const content = readFileSync(childPath, "utf8");
+        // Strip CR to handle Windows CRLF line endings in .jsonl files.
+        const lines = content.split("\n").map((l) => l.replace(/\r$/, ""));
+        const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
+        if (header.type !== "session" || header.parentSession !== filePath) continue;
+        header.parentSession = parentSessionPath;
+        lines[0] = JSON.stringify(header);
+        // Atomic tmp+rename: a crash mid-write must not truncate a session.
+        const tmpPath = `${childPath}.tmp-${process.pid}-${randomUUID()}`;
+        try {
+          writeFileSync(tmpPath, lines.join("\n"));
+          renameSync(tmpPath, childPath);
+        } catch (error) {
+          try { unlinkSync(tmpPath); } catch { /* already gone */ }
+          throw error;
+        }
+        invalidateOpenSessionCache(childPath);
+      } catch { /* skip malformed / unreadable child */ }
+    }
 
     await getRpcSession(id)?.shutdown();
     unlinkSync(filePath);
+    invalidateOpenSessionCache(filePath);
     invalidateSessionPathCache(id);
     invalidateSessionListCache();
     return NextResponse.json({ ok: true });

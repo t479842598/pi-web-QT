@@ -114,6 +114,32 @@ async function getUploadDirectory(segments: string[]): Promise<
   return { directory: realDirectory };
 }
 
+/**
+ * Symlink containment for GET-side access. The string-prefix allow-list is
+ * not enough: a symlink inside an allowed root can point anywhere. Resolve
+ * the target and the roots (mirroring the upload path) and require the real
+ * target to stay inside a real root. Session-referenced files outside roots
+ * are exempt — their authorization is the exact-path session reference.
+ */
+function isRealpathContained(filePath: string, allowedRoots: Set<string> | string[]): boolean {
+  let realPath: string;
+  try {
+    realPath = fs.realpathSync(filePath);
+  } catch {
+    // Broken symlink / missing file — the caller's statSync turns this into a 404.
+    return true;
+  }
+  const realRoots = new Set<string>();
+  for (const root of allowedRoots) {
+    try {
+      realRoots.add(fs.realpathSync(root));
+    } catch {
+      // Ignore stale roots that no longer exist.
+    }
+  }
+  return isFilePathAllowed(realPath, realRoots);
+}
+
 function parseUploadFileNames(value: unknown): string[] | null {
   if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) return null;
   return value;
@@ -432,6 +458,9 @@ export async function GET(
       type !== "list" &&
       await isFilePathReferencedBySession(filePath, sessionId);
     if (!allowedByRoot && !allowedBySessionReference) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    if (allowedByRoot && !isRealpathContained(filePath, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
