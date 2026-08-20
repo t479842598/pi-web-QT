@@ -2261,80 +2261,80 @@ export async function startRpcSession(
 
     try {
 
-    // Record the web's own model-call traffic for every provider: success as
-    // info, failures as error with a status code when inferable. Wrapping the
-    // stream function (AgentSession's public factory exposes no per-provider
-    // hook, but the Agent stream function is intentionally mutable) keeps the
-    // log view focused on web model calls + pi-web runtime logs.
-    const agent = (inner as unknown as { agent: { streamFunction: StreamFn } }).agent;
-    const baseStream = agent.streamFunction;
-    agent.streamFunction = (model, context, options) => {
-      const raw = baseStream(model, context, options);
-      return raw instanceof Promise
-        ? raw.then((stream) => withModelCallLogging(stream, {
-          provider: model.provider,
-          modelId: model.id,
-          sessionId,
-        }))
-        : withModelCallLogging(raw, {
-          provider: model.provider,
-          modelId: model.id,
-          sessionId,
-        });
-    };
+      // Record the web's own model-call traffic for every provider: success as
+      // info, failures as error with a status code when inferable. Wrapping the
+      // stream function (AgentSession's public factory exposes no per-provider
+      // hook, but the Agent stream function is intentionally mutable) keeps the
+      // log view focused on web model calls + pi-web runtime logs.
+      const agent = (inner as unknown as { agent: { streamFunction: StreamFn } }).agent;
+      const baseStream = agent.streamFunction;
+      agent.streamFunction = (model, context, options) => {
+        const raw = baseStream(model, context, options);
+        return raw instanceof Promise
+          ? raw.then((stream) => withModelCallLogging(stream, {
+            provider: model.provider,
+            modelId: model.id,
+            sessionId,
+          }))
+          : withModelCallLogging(raw, {
+            provider: model.provider,
+            modelId: model.id,
+            sessionId,
+          });
+      };
 
-    const persistedPreferences = await persistExplicitStartupPreferences(
-      services.settingsManager,
-      {
-        ...(initialModel ? { model: initialModel } : {}),
-        ...(thinkingLevel ? { thinkingLevel } : {}),
-      },
-      {
-        ...(inner.model ? { model: { provider: inner.model.provider, modelId: inner.model.id } } : {}),
-        thinkingLevel: inner.agent.state?.thinkingLevel as ThinkingLevel ?? "off",
-        supportsThinking: inner.supportsThinking(),
-      },
-    );
-    if (persistedPreferences.modelDefaultChanged) invalidateModelsCache();
+      const persistedPreferences = await persistExplicitStartupPreferences(
+        services.settingsManager,
+        {
+          ...(initialModel ? { model: initialModel } : {}),
+          ...(thinkingLevel ? { thinkingLevel } : {}),
+        },
+        {
+          ...(inner.model ? { model: { provider: inner.model.provider, modelId: inner.model.id } } : {}),
+          thinkingLevel: inner.agent.state?.thinkingLevel as ThinkingLevel ?? "off",
+          supportsThinking: inner.supportsThinking(),
+        },
+      );
+      if (persistedPreferences.modelDefaultChanged) invalidateModelsCache();
 
-    // If specific tool names were requested (non-empty), set the active tools to the
-    // requested builtin coding tools PLUS all extension/package tools, so installed
-    // extensions stay usable in pi-web just like in the `pi` CLI.
-    if (toolNames && toolNames.length > 0) {
-      inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
-    }
+      // If specific tool names were requested (non-empty), set the active tools to the
+      // requested builtin coding tools PLUS all extension/package tools, so installed
+      // extensions stay usable in pi-web just like in the `pi` CLI.
+      if (toolNames && toolNames.length > 0) {
+        inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
+      }
 
-    const wrapper = new AgentSessionWrapper(inner, sessionCwd);
-    // When all tools are disabled, clear the system prompt entirely.
-    // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
-    // keep this forced after extension resource discovery and reloads as well.
-    if (toolNames?.length === 0) {
-      wrapper.setForceEmptySystemPrompt(true);
-    }
-    wrapper.start();
-    wrapper.loadQueueRecovery();
+      const wrapper = new AgentSessionWrapper(inner, sessionCwd);
+      // When all tools are disabled, clear the system prompt entirely.
+      // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
+      // keep this forced after extension resource discovery and reloads as well.
+      if (toolNames?.length === 0) {
+        wrapper.setForceEmptySystemPrompt(true);
+      }
+      wrapper.start();
+      wrapper.loadQueueRecovery();
 
-    const realSessionId = inner.sessionId as string;
-    const realSessionFile = inner.sessionFile as string | undefined;
-    if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
+      const realSessionId = inner.sessionId as string;
+      const realSessionFile = inner.sessionFile as string | undefined;
+      if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
 
-    // A brand-new session (no pre-existing file) must be persisted right away:
-    // the SDK defers its first flush until an assistant message exists, so
-    // without this the sidebar (/api/sessions -> SessionManager.listAll, which
-    // scans files on disk) would not show the session until the first response
-    // arrives. Persist now so the list refresh triggered by onSessionCreated
-    // already finds the file (idempotent for opened sessions).
-    wrapper.persistSessionFileIfMissing();
+      // A brand-new session (no pre-existing file) must be persisted right away:
+      // the SDK defers its first flush until an assistant message exists, so
+      // without this the sidebar (/api/sessions -> SessionManager.listAll, which
+      // scans files on disk) would not show the session until the first response
+      // arrives. Persist now so the list refresh triggered by onSessionCreated
+      // already finds the file (idempotent for opened sessions).
+      wrapper.persistSessionFileIfMissing();
 
-    wrapper.onDestroy(() => {
-      cleanupAsyncBash();
-      registry.delete(realSessionId);
-    });
-    registry.set(realSessionId, wrapper);
-    wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });
-    enforceRegistryCap();
+      wrapper.onDestroy(() => {
+        cleanupAsyncBash();
+        registry.delete(realSessionId);
+      });
+      registry.set(realSessionId, wrapper);
+      wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });
+      enforceRegistryCap();
 
-    return { session: wrapper, realSessionId };
+      return { session: wrapper, realSessionId };
     } catch (error) {
       // The wrapper was never registered, so nothing else will ever dispose
       // it — clean up the half-started session and its bash processes here or
