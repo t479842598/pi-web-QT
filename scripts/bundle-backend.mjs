@@ -89,17 +89,56 @@ cpSync(standalone, outBackend, {
 // 用 fs.readFileSync 加载的非 JS 资源（如 pi-coding-agent 的
 // dist/modes/interactive/theme/dark.json），导致内置后端发消息时报 ENOENT。
 // 直接整包覆盖 standalone 里被 nft 精简过的副本，确保资源齐全。
-for (const pkg of [
+// 注意：某些包（如 pi-agent-core）在 npm 安装时可能被提升到嵌套 node_modules
+// 而非顶层，必须用 require.resolve 解析真实路径，否则 lstat 直接 ENOENT 崩溃。
+const piPkgNames = [
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-ai",
   "@earendil-works/pi-tui",
-]) {
-  const src = join(root, "node_modules", ...pkg.split("/"));
+];
+/** 解析 pi 包真实根目录。兼容三种布局：
+ *  1) 顶层 node_modules（pi-tui 等）
+ *  2) exports 字段屏蔽 package.json 子路径（用主入口反推根目录）
+ *  3) npm 嵌套提升：pi-agent-core 等被提升到 pi-coding-agent 的 node_modules 下
+ *     （从 pi-coding-agent 的 require 上下文解析，与运行时一致）
+ */
+function resolvePiPkgRoot(pkg) {
+  const tryPaths = [
+    () => dirname(require.resolve(`${pkg}/package.json`)),
+    () => dirname(require.resolve(pkg)),
+    () => {
+      const ctx = createRequire(
+        join(root, "node_modules", "@earendil-works", "pi-coding-agent", "package.json"),
+      );
+      return dirname(ctx.resolve(`${pkg}/package.json`));
+    },
+    () => {
+      const ctx = createRequire(
+        join(root, "node_modules", "@earendil-works", "pi-coding-agent", "package.json"),
+      );
+      return dirname(ctx.resolve(pkg));
+    },
+  ];
+  for (const resolveFn of tryPaths) {
+    try {
+      const p = resolveFn();
+      if (p) return p;
+    } catch {
+      // 该解析策略不适用，尝试下一个
+    }
+  }
+  return join(root, "node_modules", ...pkg.split("/"));
+}
+for (const pkg of piPkgNames) {
+  const src = resolvePiPkgRoot(pkg);
   const dst = join(outBackend, "node_modules", ...pkg.split("/"));
   if (existsSync(src)) {
     rmSync(dst, { recursive: true, force: true });
     cpSync(src, dst, { recursive: true });
+    console.log(`[bundle-backend] 覆盖完整包内容: ${pkg} <- ${src}`);
+  } else {
+    console.warn(`[bundle-backend] 跳过未找到的包: ${pkg}`);
   }
 }
 
