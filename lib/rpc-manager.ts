@@ -772,14 +772,20 @@ export class AgentSessionWrapper {
   private async waitForExtensionsBound(): Promise<void> {
     const promise = this.extensionBindingPromise;
     if (promise) {
-      const timeout = new Promise<never>((_, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error("Extension binding timed out; continuing without waiting")),
-          AgentSessionWrapper.EXTENSION_BIND_TIMEOUT_MS,
-        );
-        promise.finally(() => clearTimeout(timer));
-      });
-      await Promise.race([promise, timeout]);
+      try {
+        const timeout = new Promise<never>((_, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error("Extension binding timed out; continuing without waiting")),
+            AgentSessionWrapper.EXTENSION_BIND_TIMEOUT_MS,
+          );
+          promise.finally(() => clearTimeout(timer));
+        });
+        await Promise.race([promise, timeout]);
+      } catch {
+        // 绑定失败/超时（如 MCP server 未启动或未连接）不阻塞发送：放行让消息照常发出。
+        // 若这里 throw，`await Promise.race` 会在 promise 已 reject 时立即抛错，
+        // 导致 send() 失败且此后每次发送都失败——违背「绑定失败放行」的设计意图。
+      }
     }
     if (this.extensionBindingError) {
       // 绑定失败不阻塞发送：记录但放行，避免一次扩展错误让整个会话无法发消息

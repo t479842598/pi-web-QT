@@ -13,6 +13,9 @@ try {
 } catch { /* package not found, use default */ }
 
 const nextConfig: NextConfig = {
+  // M1 内置打包：产出 .next/standalone（自包含 server.js + 最小 node_modules），
+  // 桌面壳随包拉起 node <standalone/server.js>，免本机 npm/CLI。
+  output: "standalone",
   allowedDevOrigins,
   devIndicators: false,
   // proxy.ts clones the request body for /api/*; the Next.js default of

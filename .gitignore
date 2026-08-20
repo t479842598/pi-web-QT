@@ -87,6 +87,10 @@ ref-repos
 .tmp-*.py
 *.tgz
 
+# WorkBuddy workspace memory / local session data (never commit)
+.workbuddy/
+.dsh-file-claim/
+
 # desktop (Tauri)
 /desktop/target/
 /desktop/gen/

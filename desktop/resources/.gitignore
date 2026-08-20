@@ -1,0 +1,11 @@
+# 构建脚本 scripts/bundle-backend.mjs 生成的打包产物，不提交；仅保留占位文件。
+# `*` 已忽略一切，下列仅放行占位文件；.env*（含 standalone 拷贝进来的仓库 .env）也被忽略。
+*
+!.gitignore
+!backend/
+!node/
+!backend/.gitkeep
+!node/.gitkeep
+# 显式兜底：任何 .env* 一律忽略（防明文 PI_WEB_PASSWORD 入库）
+**/.env
+**/.env.*

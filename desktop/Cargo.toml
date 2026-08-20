@@ -1,6 +1,6 @@
 [package]
 name = "pi-web-desktop"
-version = "0.10.3"
+version = "0.10.4"
 description = "Pi Web 桌面端（Tauri 2 瘦壳）：自动连接本机或远程 Pi Web 服务"
 authors = ["pi-web"]
 edition = "2021"
@@ -26,12 +26,15 @@ futures-util = "0.3"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "system-proxy"] }
 tokio = { version = "1", features = ["net"] }
 wait-timeout = "0.2"
 uuid = { version = "1", features = ["v4"] }
 dirs = "6"
 base64 = "0.22"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tiny_http = "0.12"

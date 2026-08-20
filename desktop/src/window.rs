@@ -282,7 +282,12 @@ pub fn build_tray(app: &AppHandle, cfg: &Config) -> tauri::Result<tauri::tray::T
                 "open-connect" => {
                     let _ = open_connect_window(app);
                 }
-                "quit" => app.exit(0),
+                "quit" => {
+                    // 先同步杀掉壳拉起的本机后端子进程再退出，避免孤儿 node 残留 30141
+                    #[cfg(not(mobile))]
+                    crate::probe::kill_local_child(app);
+                    app.exit(0);
+                }
                 _ => {
                     if let Some(server_id) = id.strip_prefix("server-") {
                         let state = app.state::<AppState>();
@@ -327,19 +332,11 @@ pub fn rebuild_tray(app: &AppHandle, cfg: &Config) {
     install_app_menu(app, cfg);
 }
 
-/// 启动路由（桌面）：总是进入连接页，由用户自己填写服务器地址。
-/// 不自动恢复上次服务器、不自动连本地、不自动使用本地密钥/密码。
-/// 仅当用户开启「无服务时自动拉起」（local_auto_start）时，后台尝试拉起本机
-/// pi-web CLI —— 拉起不等于连接，连接仍由用户在连接页确认。
+/// 启动路由（桌面）：启动即打开连接设置页。连接页里用户可选远程连接，
+/// 或选择本地已保存信息——点击本地条目「连接」会自动拉起内置后端并连接
+/// （该拉起逻辑由 `commands::start_local` 承担，连接页 `startLocal()` 触发）。
 #[cfg(not(mobile))]
-pub fn route_startup(app: &AppHandle, cfg: &Config) {
-    if cfg.local_auto_start {
-        // 后台执行，不阻塞启动路由（探测 ~2s + 拉起；结果由连接页轮询 probe_local 呈现）
-        tauri::async_runtime::spawn(async move {
-            let _ = crate::probe::spawn_local();
-        });
-    }
-    // 连接页：用户填写 URL（+密码）、点「获取本机链接」或「启动本机 pi-web」
+pub fn route_startup(app: &AppHandle, _cfg: &Config) {
     let _ = open_connect_window(app);
 }
 

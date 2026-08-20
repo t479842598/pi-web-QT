@@ -151,10 +151,49 @@ const RESP_DROP: [&str; 5] = [
 
 type ServerLoader = Arc<dyn Fn() -> Option<Server> + Send + Sync>;
 
+/// 确保系统代理的 no_proxy 排除本机环回地址（在构建 client 前调用一次）。
+///
+/// 背景：reqwest 0.12 的 `system-proxy`（`matcher::Matcher::from_system()`）
+/// **不会**自动绕过 loopback——macOS 侧完全忽略系统代理的"例外/绕过"列表，
+/// Windows 侧仅当未设置 NO_PROXY 环境变量时才读取注册表 ProxyOverride；二者
+/// 都不保证 localhost/127.0.0.1 直连。而 `ClientBuilder::no_proxy()` 是"清空
+/// 所有代理并关闭系统代理"，不是"加排除项"，不能直接用来追加 no_proxy。
+///
+/// `from_system()` 会读取 `NO_PROXY`/`no_proxy` 环境变量作为绕过列表，因此这里
+/// 在构建 client 前把 loopback 合并进 `NO_PROXY`：环回地址直连（本地后端转发
+/// 不被 PAC/代理劫持），远程域名仍走系统代理（`from_system()` 继续读 env /
+/// Windows 注册表 / macOS 动态存储的 http(s) 代理）。
+fn ensure_loopback_no_proxy() {
+    const LOOPBACK: &str = "localhost,127.0.0.1,::1";
+    let existing = std::env::var("NO_PROXY")
+        .or_else(|_| std::env::var("no_proxy"))
+        .unwrap_or_default();
+    // 已有值则追加（幂等去重：避免重复条目与污染既有配置）；空值则直接设为环回列表
+    let has_loopback = existing
+        .split(',')
+        .map(str::trim)
+        .any(|e| e.eq_ignore_ascii_case("localhost") || e == "127.0.0.1" || e == "::1");
+    let merged = if existing.trim().is_empty() {
+        LOOPBACK.to_string()
+    } else if has_loopback {
+        existing
+    } else {
+        format!("{existing},{LOOPBACK}")
+    };
+    std::env::set_var("NO_PROXY", merged);
+}
+
 /// 共享 HTTP 客户端（连接池复用；SSE 长连接不设读超时）。
 fn client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(|| {
+        // 注意：reqwest 0.12 起系统代理由 `system-proxy` feature 自动启用
+        // （ClientBuilder::new() 默认 auto_sys_proxy=true，build() 时自动注入
+        //   matcher::Matcher::from_system()），无需（也没有）Proxy::system() 可调用。
+        // 远程域名经 clash-verge 等系统代理（Cloudflare 隧道）才能解析/连通，
+        // 直连会 DNS 失败 → 502；此处与浏览器一致地走系统代理。
+        // 构建前先写入 NO_PROXY 环回绕过，保证本地后端转发不被系统代理劫持。
+        ensure_loopback_no_proxy();
         reqwest::ClientBuilder::new()
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
@@ -227,8 +266,11 @@ async fn handle_request(
 
     let status = resp.status();
     if status == reqwest::StatusCode::UNAUTHORIZED && is_navigation(&incoming) {
+        // WebView2(Chromium) 对 401 即使剔除了 www-authenticate，仍可能显示内置错误页
+        // ERR_INVALID_AUTH_CREDENTIALS 而非本页 HTML → 白屏。导航请求改返回 200 + 同样的
+        // 友好 HTML；子资源/API 请求的 401 保持原样透传，不破坏前端鉴权处理。
         return html_response(
-            401,
+            200,
             "认证失败：用户名或密码不正确。<br>请回到连接页更新该服务器的用户名/密码后重试。",
         );
     }

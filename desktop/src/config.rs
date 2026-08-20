@@ -20,13 +20,16 @@ pub struct Server {
     pub has_password: bool,
     #[serde(default)]
     pub last_used_at: Option<u64>,
-    /// 是否为自动发现的本地服务器条目（由启动路由自动 upsert）
+    /// 是否为本地默认服务器条目（连接页 ensure_local_server 创建）
     #[serde(default)]
     pub is_local: bool,
     /// 该服务器本地代理的固定端口（持久化保证 WebView origin 稳定，
     /// localStorage——主题/收藏模型/折叠状态——不会因端口变化而丢失）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_port: Option<u16>,
+    /// 可信域名（Cloudflare 隧道等外部访问时后端放行的 Host；拉起时注入 PI_WEB_ALLOWED_HOSTS）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_domain: Option<String>,
 }
 
 impl Server {
@@ -60,13 +63,6 @@ pub struct Config {
     pub servers: Vec<Server>,
     #[serde(default)]
     pub last_server_id: Option<String>,
-    /// 本地无服务时是否允许自动拉起 pi-web CLI
-    #[serde(default = "default_true")]
-    pub local_auto_start: bool,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 impl Config {
@@ -110,6 +106,27 @@ impl Config {
         self.servers.iter_mut().find(|s| s.id == id)
     }
 
+    /// 本地默认服务器是否已设置密码（首次启动引导判断）。
+    pub fn local_has_password(&self) -> bool {
+        self.servers.iter().any(|s| s.is_local && s.has_password)
+    }
+
+    /// 本地默认服务器的密码（拉起本机 pi-web 时注入 PI_WEB_PASSWORD 用）。
+    pub fn local_password(&self) -> Option<String> {
+        self.servers
+            .iter()
+            .find(|s| s.is_local)
+            .and_then(Server::password)
+    }
+
+    /// 本地默认服务器的可信域名（拉起本机 pi-web 时注入 PI_WEB_ALLOWED_HOSTS 用）。
+    pub fn local_trusted_domain(&self) -> Option<String> {
+        self.servers
+            .iter()
+            .find(|s| s.is_local)
+            .and_then(|s| s.trusted_domain.clone())
+    }
+
     /// 本地默认服务器条目（不存在则创建）。
     pub fn ensure_local(&mut self) -> &mut Server {
         if let Some(idx) = self.servers.iter().position(|s| s.is_local) {
@@ -125,6 +142,7 @@ impl Config {
             last_used_at: None,
             is_local: true,
             proxy_port: None,
+            trusted_domain: None,
         };
         self.servers.push(srv);
         self.servers.last_mut().unwrap()

@@ -2,13 +2,26 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
-## Unreleased（全局错误边界 + 三端版本号修复）
+## v0.10.4 — 2026-08-20（桌面端开箱即用：内置后端 + 可信域名 + 启动连接页）
 
 ### 新增
 - **全局错误边界 ErrorBoundary** — 捕获 React 组件渲染异常，不再整页白屏：`RootLayout` 以 `<ErrorBoundary>` 包裹 `{children}`，渲染出错时显示「应用加载失败」提示页（含错误堆栈摘要、「刷新页面」「清除缓存并刷新」两个按钮），适用于远程服务器数据异常或网络问题导致的界面崩溃。
+- **桌面端内置后端，双击即用（M1）** — Next.js `output:'standalone'` + 随包内置 Node 官方二进制（Tauri sidecar），`probe.rs` 优先拉起内置 `node server.js`（绑 `0.0.0.0:30141`，注入密码 + 内存上限），不再依赖本机 npm/CLI；`scripts/bundle-backend.mjs`（`npm run bundle:backend`）装配 standalone + `public`，构建期排除 `.env*` 防密码泄漏，undici 补丁构建期固化；CI（`release-all.yml`）接入 `bundle:backend` + 按 `node_dist` 矩阵下载匹配架构 Node（`PI_WEB_NODE_BIN`）。
+- **连接页新增「可信域名」配置** — 本机连接卡片可填写可信域名（如 `piweb.274747.xyz`），保存后作为 `PI_WEB_ALLOWED_HOSTS` 注入内置后端，Cloudflare 隧道等外部域名访问可过后端 Host 校验（此前返回 403 `Untrusted API request`）。
+- **启动直接进入连接设置页** — 桌面端启动即打开连接设置页，可选择远程服务器连接，或点击本地条目一键拉起内置本地环境（无密码先引导设置）。
 
 ### 修复
-- **v0.10.3 三端版本号脱节（桌面构建隐患）** — v0.10.3 发布时仅更新了 web 端 `package.json`，漏改 `desktop/tauri.conf.json`、`desktop/Cargo.toml`、`desktop/package.json`、`mobile2/pubspec.yaml`（均停在 0.10.2）。Tauri 要求 `tauri.conf.json` 与 `Cargo.toml` 版本一致，脱节会导致桌面端构建失败。已通过 `scripts/sync-version.mjs` 统一同步为 0.10.3。
+- **发送消息在 MCP 未启动/未连接时不再失败** — `AgentSessionWrapper.waitForExtensionsBound` 在扩展绑定（MCP 作为扩展加载）失败或超时时直接抛错，导致 `send("prompt")` 失败且此后每次发送都失败；现改为失败/超时放行，消息照常发出。
+- **桌面端远程服务器 502（系统代理）** — 反向代理的 reqwest 默认不读系统代理，Cloudflare 隧道域名直连 DNS 失败；现加 `system-proxy` feature + loopback `no_proxy` 绕过，与浏览器行为一致。
+- **发消息 `dark.json` ENOENT** — standalone 追踪（`@vercel/nft`）漏掉 pi-* 包运行时 `fs.readFileSync` 加载的 JSON 主题资源；打包时整包补齐 4 个 `@earendil-works/pi-*` 包。
+- **关闭重开后不自动拉起/残留进程占端口** — 退出清理（`RunEvent::Exit`/托盘退出）改用 `kill_child_tree` 杀整个进程组（Unix `kill(-pgid)` / Windows `taskkill /T /F`），孤儿 node 不再占用 30141。
+- **Windows 兼容修复** — 导航 401 错误页改 200（避免 WebView2 内置错误页白屏）、`taskkill` 加 `CREATE_NO_WINDOW` 抑制黑框、内置后端绑 `0.0.0.0` 恢复远程/隧道访问。
+- **发送消息与排队插入时实时显示等待态** — SSE 连接初始 `state_sync`（空闲快照）不再冲掉乐观等待相位；排队插入（steer/followUp）补位 `waiting_model`。
+- **v0.10.3 三端版本号脱节（桌面构建隐患）** — 已通过 `scripts/sync-version.mjs` 统一同步（本次发布进一步同步至 0.10.4）。
+
+### 其他
+- 桌面端启动路由重构为「启动即连接页」，移除已失效的「无服务时自动拉起」开关（`local_auto_start`）。
+- 技术选型方案详见 `docs/desktop-runtime-selection.md`。
 
 ## v0.10.3 — 2026-08-18（本地运行内存优化 + 发送消息无响应修复）
 

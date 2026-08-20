@@ -1,6 +1,6 @@
 {
   "name": "@qt4798/pi-web",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "description": "Web workspace for the pi coding agent",
   "homepage": "https://github.com/t479842598/pi-web-QT#readme",
   "repository": {
@@ -22,6 +22,7 @@
     ".next",
     "!.next/cache",
     "!.next/dev",
+    "!.next/standalone",
     "!.next/**/*.js.map",
     "lib/theme",
     "public",
@@ -32,6 +33,7 @@
     "dev": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next dev -H 127.0.0.1 -p 0 --turbopack",
     "dev:lan": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next dev -H 0.0.0.0 -p 0 --turbopack",
     "build": "env -u TURBOPACK next build --webpack",
+    "bundle:backend": "node scripts/bundle-backend.mjs",
     "start": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next start -H 127.0.0.1 -p 0",
     "start:lan": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next start -H 0.0.0.0 -p 0",
     "lint": "eslint .",

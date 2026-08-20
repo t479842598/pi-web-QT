@@ -86,6 +86,11 @@ main { display: flex; flex-direction: column; gap: 14px; flex: 1; }
 .badge.probing { color: var(--muted); border-color: rgba(255,255,255,0.12); }
 .badge.online { color: var(--ok); background: rgba(61,220,132,0.12); border-color: rgba(61,220,132,0.3); }
 .badge.offline { color: var(--warn); background: rgba(245,183,89,0.1); border-color: rgba(245,183,89,0.3); }
+.badge.warn { color: var(--warn); background: rgba(245,183,89,0.1); border-color: rgba(245,183,89,0.3); }
+
+/* ---------- 首次启动 · 设置密码 ---------- */
+.setup-card { border-color: rgba(108, 140, 255, 0.42); box-shadow: 0 10px 38px rgba(108, 140, 255, 0.16); }
+.setup-card .form-foot { margin-top: 4px; }
 
 button {
   font-family: var(--font); font-size: 13px;
@@ -110,6 +115,14 @@ button:disabled { opacity: 0.45; cursor: default; }
 .local-actions { display: flex; align-items: center; gap: 16px; margin-top: 14px; flex-wrap: wrap; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; margin-right: 7px; box-shadow: 0 0 8px var(--ok); }
 .local-actions button:disabled .dot { background: var(--dim); box-shadow: none; }
+
+/* ---------- 可信域名 ---------- */
+.local-domain-field {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.local-domain-field .url-row button { flex: none; white-space: nowrap; }
 
 /* ---------- switch ---------- */
 .switch-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); cursor: pointer; }

@@ -118,12 +118,16 @@ jobs:
         include:
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
+            node_dist: darwin-arm64
           - platform: macos-latest
             args: "--target x86_64-apple-darwin"
+            node_dist: darwin-x64
           - platform: windows-latest
             args: ""
+            node_dist: win-x64
           - platform: ubuntu-22.04
             args: ""
+            node_dist: linux-x64
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -142,6 +146,32 @@ jobs:
           # Tauri 构建要求 Cargo.toml 与 tauri.conf.json 版本一致
           #（sed -i.bak：BSD/macOS sed 兼容写法，同 iOS job）
           sed -i.bak "s/^version = .*/version = \"${VER}\"/" desktop/Cargo.toml && rm -f desktop/Cargo.toml.bak
+      - name: Install root npm deps (for next build)
+        shell: bash
+        run: npm ci
+      - name: Bundle backend (match target arch)
+        shell: bash
+        env:
+          NODE_DIST: ${{ matrix.node_dist }}
+        run: |
+          NATIVE_DIST="$(node -p 'const p = process.platform === "win32" ? "win" : process.platform; p + "-" + process.arch')"
+          if [ "$NATIVE_DIST" != "$NODE_DIST" ]; then
+            NODE_VERSION="$(node -p 'process.versions.node')"
+            BASE="node-v${NODE_VERSION}-${NODE_DIST}"
+            echo "[bundle] node arch mismatch (native=$NATIVE_DIST target=$NODE_DIST), downloading $BASE"
+            curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/${BASE}.tar.gz" -o node.tar.gz
+            tar -xzf node.tar.gz
+            if [ -x "${BASE}/bin/node" ]; then
+              NODE_BIN="$(pwd)/${BASE}/bin/node"
+            else
+              NODE_BIN="$(pwd)/${BASE}/node.exe"
+            fi
+            export PI_WEB_NODE_BIN="$NODE_BIN"
+            echo "PI_WEB_NODE_BIN=$NODE_BIN" >> "$GITHUB_ENV"
+          else
+            echo "[bundle] reuse native node ($NATIVE_DIST)"
+          fi
+          npm run bundle:backend
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}

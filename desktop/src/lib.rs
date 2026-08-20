@@ -22,6 +22,9 @@ pub struct AppState {
     /// 本机 pi-web 启动互斥（防止并发点击重复拉起）
     #[cfg(not(mobile))]
     pub starting_local: Mutex<bool>,
+    /// 壳拉起的本机后端子进程句柄（改密时 kill+重启；退出时清理，避免残留 30141）
+    #[cfg(not(mobile))]
+    pub local_child: Mutex<Option<std::process::Child>>,
     /// 主窗口（服务器窗口）注册表：server_id -> window label
     pub server_windows: Mutex<HashMap<String, String>>,
     /// 托盘图标句柄（重建菜单时需要；移动端无托盘）
@@ -53,6 +56,8 @@ pub fn run() {
         proxies: proxy::ProxyMap::default(),
         #[cfg(not(mobile))]
         starting_local: Mutex::new(false),
+        #[cfg(not(mobile))]
+        local_child: Mutex::new(None),
         server_windows: Mutex::new(HashMap::new()),
         #[cfg(not(mobile))]
         tray: Mutex::new(None),
@@ -77,7 +82,7 @@ pub fn run() {
             #[cfg(all(target_os = "macos", not(mobile)))]
             window::install_app_menu(handle, &cfg);
 
-            // 4. 启动路由：桌面（上次服务器 > 本地检测/拉起 > 连接页）| 移动端（连接页）
+            // 4. 启动路由：桌面（连接设置页）| 移动端（连接页）
             window::route_startup(handle, &cfg);
 
             Ok(())
@@ -89,10 +94,10 @@ pub fn run() {
             commands::probe_local,
             commands::start_local,
             commands::ensure_local_server,
+            commands::set_local_password,
+            commands::set_local_domain,
             commands::connect_server,
             commands::open_connect,
-            commands::set_local_auto_start,
-            commands::get_local_auto_start,
             commands::quit_app,
         ])
         .on_window_event(|window, event| {
@@ -152,7 +157,17 @@ pub fn run() {
         }
     });
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        // 退出前杀掉壳拉起的本机后端子进程，避免残留 0.0.0.0:30141 占用。
+        // 这是兜底：显式退出路径（quit_app 命令 / 托盘「退出」）已在调用 app.exit(0)
+        // 前同步清理；此处覆盖其余经事件循环退出的场景。
+        if let tauri::RunEvent::Exit = event {
+            #[cfg(not(mobile))]
+            crate::probe::kill_local_child(app_handle);
+        }
+    });
 }

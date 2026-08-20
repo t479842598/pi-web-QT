@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pi Web · 系统架构与设计文档</title>
+<style>
+  :root {
+    --bg: #121417;
+    --bg-2: #1a1d21;
+    --bg-3: #20242a;
+    --border: #2c3138;
+    --text: #e6e8ea;
+    --text-dim: #9aa0a6;
+    --text-faint: #6b7177;
+    --accent: #7F77DD;
+    --accent-2: #378ADD;
+    --accent-3: #1D9E75;
+    --warn: #BA7517;
+    --danger: #D85A30;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 28px 96px; }
+  header.page { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 32px; }
+  h1 { font-size: 30px; font-weight: 600; margin: 0 0 8px; letter-spacing: -0.3px; }
+  .subtitle { color: var(--text-dim); font-size: 15px; }
+  nav.toc {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 28px 0 40px;
+  }
+  nav.toc h4 { margin: 0 0 10px; font-size: 13px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+  nav.toc a { color: var(--accent-2); text-decoration: none; display: block; padding: 3px 0; font-size: 14px; }
+  nav.toc a:hover { color: var(--text); }
+  h2 { font-size: 22px; font-weight: 600; margin: 48px 0 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+  h2:first-of-type { border-top: none; }
+  h3 { font-size: 17px; font-weight: 600; margin: 28px 0 10px; color: var(--text); }
+  p { margin: 10px 0; color: var(--text); }
+  code { font-family: var(--mono); font-size: 13px; background: var(--bg-3); padding: 2px 6px; border-radius: 5px; color: #cdd6e0; }
+  .dim { color: var(--text-dim); }
+  .muted { color: var(--text-faint); }
+  .fig { background: var(--bg-2); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin: 24px 0; }
+  .fig svg { width: 100%; height: auto; display: block; }
+  .fig-cap { color: var(--text-faint); font-size: 13px; margin-top: 12px; text-align: center; }
+  table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--text-dim); font-weight: 600; background: var(--bg-3); }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 6px; font-family: var(--mono); }
+  .tag.layer { background: rgba(127,119,221,0.15); color: #b9b3ee; }
+  .tag.api { background: rgba(55,138,221,0.15); color: #8fc0f0; }
+  .tag.core { background: rgba(29,158,117,0.15); color: #6fd6ac; }
+  .tag.fs { background: rgba(120,120,120,0.18); color: #c4c4c4; }
+  .callout { border-left: 3px solid var(--accent-3); background: rgba(29,158,117,0.07); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--warn); background: rgba(186,117,23,0.08); }
+  .callout.danger { border-left-color: var(--danger); background: rgba(216,90,48,0.08); }
+  .callout b { color: var(--text); }
+  ul.tight { margin: 8px 0; }
+  ul.tight li { margin: 4px 0; }
+  .mono-path { font-family: var(--mono); font-size: 13px; color: #b9c2cc; }
+  footer.page { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--text-faint); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <h1>Pi Web · 系统架构与设计文档</h1>
+    <div class="subtitle">基于 <code>AGENTS.md</code> 与核心源码（<code>lib/rpc-manager.ts</code> 等）梳理的分层架构、核心模块与数据流说明。</div>
+  </header>
+
+  <nav class="toc">
+    <h4>目录</h4>
+    <a href="#overview">1. 项目概述</a>
+    <a href="#architecture">2. 系统架构（分层总览）</a>
+    <a href="#modules">3. 核心模块详解</a>
+    <a href="#dataflow">4. 数据流分析</a>
+    <a href="#traps">5. 关键设计决策与陷阱</a>
+    <a href="#files">6. 文件组织</a>
+    <a href="#constraints">7. 开发约束</a>
+  </nav>
+
+  <section id="overview">
+    <h2>1. 项目概述</h2>
+    <p>Pi Web 是一个 <b>Next.js（App Router）+ React</b> 构建的本地优先（local-first）AI 编码代理前端。它本身<b>不运行大模型推理</b>，而是通过本地子进程托管 <code>@earendil-works/pi-coding-agent</code> SDK，把浏览器 UI 与进程内的 Agent 会话桥接起来。</p>
+    <p>核心特征：</p>
+    <ul class="tight dim">
+      <li><b>会话浏览是只读的</b>：读取 <code>~/.pi/agent/sessions/*.jsonl</code> 不创建任何 AgentSession。</li>
+      <li><b>发送消息才会激活会话</b>：<code>startRpcSession()</code> 在进程内创建一个 AgentSession 并常驻于全局注册表。</li>
+      <li><b>事件通过 SSE 回流</b>：Agent 产生的流式事件经 SSE 推送回浏览器，再由 <code>useAgentSession</code> 做消息合并与分支协调。</li>
+      <li><b>文件系统是单一事实来源</b>：<code>.jsonl</code> 文件可整体重写，<code>parentSession</code> 仅为展示元数据。</li>
+    </ul>
+  </section>
+
+  <section id="architecture">
+    <h2>2. 系统架构（分层总览）</h2>
+    <p>系统自上而下分为四层，层间通过 HTTP（请求）与 SSE（事件）双向流动：</p>
+    <div class="fig">
+      <svg viewBox="0 0 680 680" width="100%" role="img">
+        <title>Pi Web system architecture</title>
+        <desc>Four-layer stack: Browser React UI, Next.js API routes, in-process AgentSession, and filesystem session store, with request and SSE event flow.</desc>
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </marker>
+        </defs>
+        <rect x="24" y="24" width="632" height="116" rx="16" fill="#26215C" stroke="#534AB7" stroke-width="0.5"/>
+        <text x="44" y="46" style="font-size:14px;font-weight:500;fill:#CECBF6;">Browser · React UI</text>
+        <g>
+          <rect x="44" y="66" width="140" height="54" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+          <text x="114" y="86" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#CECBF6;">AppShell</text>
+          <text x="114" y="104" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#AFA9EC;">layout + tabs</text>
+        </g>
+        <g>
+          <rect x="194" y="66" width="140" height="54" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+          <text x="264" y="86" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#CECBF6;">ChatWindow</text>
+          <text x="264" y="104" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#AFA9EC;">compose + SSE</text>
+        </g>
+        <g>
+          <rect x="344" y="66" width="140" height="54" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+          <text x="414" y="86" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#CECBF6;">SessionSidebar</text>
+          <text x="414" y="104" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#AFA9EC;">tree + files</text>
+        </g>
+        <g>
+          <rect x="494" y="66" width="140" height="54" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+          <text x="564" y="86" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#CECBF6;">FileViewer</text>
+          <text x="564" y="104" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#AFA9EC;">file content</text>
+        </g>
+        <rect x="24" y="168" width="632" height="150" rx="16" fill="#042C53" stroke="#185FA5" stroke-width="0.5"/>
+        <text x="44" y="190" style="font-size:14px;font-weight:500;fill:#B5D4F4;">Next.js Server · API Routes</text>
+        <g>
+          <rect x="44" y="204" width="290" height="46" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+          <text x="189" y="221" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#B5D4F4;">POST /api/agent/[id]</text>
+          <text x="189" y="237" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#85B7EB;">command · startRpcSession</text>
+        </g>
+        <g>
+          <rect x="346" y="204" width="290" height="46" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+          <text x="491" y="221" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#B5D4F4;">GET /api/sessions[/id]</text>
+          <text x="491" y="237" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#85B7EB;">read-only browse</text>
+        </g>
+        <g>
+          <rect x="44" y="262" width="290" height="46" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+          <text x="189" y="279" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#B5D4F4;">/api/auth/*</text>
+          <text x="189" y="295" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#85B7EB;">OAuth + API keys</text>
+        </g>
+        <g>
+          <rect x="346" y="262" width="290" height="46" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+          <text x="491" y="279" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#B5D4F4;">/api/models*</text>
+          <text x="491" y="295" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#85B7EB;">catalog + config</text>
+        </g>
+        <rect x="24" y="346" width="632" height="140" rx="16" fill="#04342C" stroke="#0F6E56" stroke-width="0.5"/>
+        <text x="44" y="368" style="font-size:14px;font-weight:500;fill:#9FE1CB;">In-process AgentSession</text>
+        <g>
+          <rect x="44" y="386" width="190" height="52" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+          <text x="139" y="405" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#9FE1CB;">AgentSessionWrapper</text>
+          <text x="139" y="423" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#5DCAA5;">per-session registry</text>
+        </g>
+        <g>
+          <rect x="246" y="386" width="190" height="52" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+          <text x="341" y="405" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#9FE1CB;">Session Bus</text>
+          <text x="341" y="423" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#5DCAA5;">cross-client SSE</text>
+        </g>
+        <g>
+          <rect x="448" y="386" width="180" height="52" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+          <text x="538" y="405" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#9FE1CB;">Goal Engine</text>
+          <text x="538" y="423" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#5DCAA5;">autonomous loop</text>
+        </g>
+        <text x="44" y="462" style="font-size:12px;fill:#5DCAA5;">globalThis.__piSessions (survives hot-reload) · idle timeout 10min</text>
+        <rect x="24" y="514" width="632" height="140" rx="16" fill="#2C2C2A" stroke="#5F5E5A" stroke-width="0.5"/>
+        <text x="44" y="536" style="font-size:14px;font-weight:500;fill:#D3D1C7;">Filesystem · ~/.pi/agent/</text>
+        <g>
+          <rect x="44" y="554" width="400" height="54" rx="8" fill="#444441" stroke="#B4B2A9" stroke-width="0.5"/>
+          <text x="244" y="574" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#D3D1C7;">sessions/*.jsonl</text>
+          <text x="244" y="592" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#B4B2A9;">chat + tool calls + branches</text>
+        </g>
+        <g>
+          <rect x="456" y="554" width="180" height="54" rx="8" fill="#444441" stroke="#B4B2A9" stroke-width="0.5"/>
+          <text x="546" y="574" text-anchor="middle" dominant-baseline="central" style="font-size:14px;font-weight:500;fill:#D3D1C7;">settings/models.json</text>
+          <text x="546" y="592" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:#B4B2A9;">config</text>
+        </g>
+        <text x="44" y="636" style="font-size:12px;fill:#B4B2A9;">single source of truth · file-rewrite safe</text>
+        <line x1="130" y1="140" x2="130" y2="166" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar)"/>
+        <text x="100" y="156" style="font-size:11px;fill:#B4B2A9;">request</text>
+        <line x1="320" y1="166" x2="320" y2="140" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar)"/>
+        <text x="296" y="156" style="font-size:11px;fill:#B4B2A9;">SSE</text>
+        <line x1="189" y1="318" x2="189" y2="344" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar)"/>
+        <text x="158" y="334" style="font-size:11px;fill:#B4B2A9;">command</text>
+        <line x1="420" y1="346" x2="420" y2="320" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar)"/>
+        <text x="396" y="334" style="font-size:11px;fill:#B4B2A9;">events</text>
+        <line x1="189" y1="486" x2="189" y2="512" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar)"/>
+        <text x="158" y="502" style="font-size:11px;fill:#B4B2A9;">read/write</text>
+      </svg>
+      <div class="fig-cap">图 1 · 四层架构与双向数据流（HTTP 请求向下，SSE 事件向上）</div>
+    </div>
+  </section>
+
+  <section id="modules">
+    <h2>3. 核心模块详解</h2>
+
+    <h3><span class="tag layer">Browser</span> 3.1 浏览器层 <span class="mono-path">components/ · hooks/</span></h3>
+    <p>纯前端 React 应用，不持有会话状态，所有数据来自 Server。</p>
+    <table>
+      <tr><th>文件 / 目录</th><th>职责</th></tr>
+      <tr><td><code>AppShell.tsx</code></td><td>整体布局、URL 状态、Tab 管理（Chat + 文件标签页）。</td></tr>
+      <tr><td><code>ChatWindow.tsx</code></td><td>消息组合 + 完成音效封装，挂载 SSE 连接。</td></tr>
+      <tr><td><code>MessageView.tsx</code></td><td>渲染单条消息（user / assistant / toolCall / toolResult）。</td></tr>
+      <tr><td><code>SessionSidebar.tsx</code></td><td>会话树 + FileExplorer，展示 fork 子节点。</td></tr>
+      <tr><td><code>BranchNavigator.tsx</code></td><td>会话内分支（navigate_tree）切换。</td></tr>
+      <tr><td><code>useAgentSession.ts</code></td><td>消息 + 流式 + SSE + fork/navigate + 分支协调核心 hook。</td></tr>
+      <tr><td><code>MarkdownBody.tsx</code></td><td>Markdown 渲染。</td></tr>
+    </table>
+
+    <h3><span class="tag api">Server</span> 3.2 Next.js API 层 <span class="mono-path">app/api/</span></h3>
+    <p>路由层只做转发与编排，真正的执行发生在进程内的 AgentSession。</p>
+    <table>
+      <tr><th>路由</th><th>方法 / 作用</th></tr>
+      <tr><td><code>agent/[id]/route.ts</code></td><td>GET 状态 / POST 任意命令（<code>send</code>、<code>fork</code> 等）。</td></tr>
+      <tr><td><code>agent/[id]/events/route.ts</code></td><td>GET SSE 流，把 Agent 事件推回浏览器。</td></tr>
+      <tr><td><code>agent/new/route.ts</code></td><td>POST <code>{cwd, message, toolNames, provider, modelId}</code> 创建会话。</td></tr>
+      <tr><td><code>agent/running/route.ts</code></td><td>GET 当前运行中的会话 id 快照；<code>running/events</code> 为运行 id 的 SSE 流。</td></tr>
+      <tr><td><code>sessions/route.ts</code> · <code>sessions/[id]</code></td><td>GET 列表 / GET·PATCH·DELETE 单条；<code>context</code> 取某 leaf 的上下文。</td></tr>
+      <tr><td><code>sessions/[id]/export</code></td><td>GET 导出 HTML。</td></tr>
+      <tr><td><code>auth/* · models* · skills* · plugins*</code></td><td>OAuth/API-key、模型目录与配置、技能安装与开关、插件管理。</td></tr>
+    </table>
+
+    <h3><span class="tag core">Core</span> 3.3 AgentSession 层 <span class="mono-path">lib/rpc-manager.ts</span></h3>
+    <p>这是整个系统的枢纽。关键事实：</p>
+    <ul class="tight dim">
+      <li>每个 session id 对应一个 <code>AgentSessionWrapper</code>，键存于 <code>globalThis.__piSessions</code>。<code>globalThis</code> 能跨 Next.js 热重载存活，普通 module 级 Map 不行。</li>
+      <li>并发的 <code>startRpcSession()</code> 调用共享同一个 start Promise（<code>globalThis.__piStartLocks</code>），避免重复创建。</li>
+      <li>空闲超时 10 分钟自动销毁。</li>
+      <li><b>fork 必须立即销毁 wrapper</b>：<code>AgentSession.fork()</code> 会就地改写 wrapper 内部状态为<b>新</b>会话 id；若不立即 <code>destroy()</code>，后续请求会拿到已被 fork 的状态，导致 parent 链损坏。修复方式为 <code>send("fork")</code> 捕获 newSessionId 后先 <code>this.destroy()</code> 再返回。</li>
+    </ul>
+
+    <h3><span class="tag fs">Storage</span> 3.4 数据与持久化层 <span class="mono-path">~/.pi/agent/</span></h3>
+    <ul class="tight dim">
+      <li><code>sessions/*.jsonl</code>：聊天 + 工具调用 + 分支的唯一事实来源。</li>
+      <li>文件可整体重写（pi 自身迁移时也是如此），<code>parentSession</code> 仅是展示元数据，不影响内容。</li>
+      <li>删除会话级联重挂子节点（reparent）时也直接写文件。</li>
+      <li><code>settings.json</code> 提供 <code>defaultModel</code>；<code>models.json</code> 描述模型与 provider。</li>
+    </ul>
+  </section>
+
+  <section id="dataflow">
+    <h2>4. 数据流分析</h2>
+    <p>以"用户在浏览器发送一条消息"为例，端到端生命周期如下：</p>
+    <div class="fig">
+      <svg viewBox="0 0 680 620" width="100%" role="img">
+        <title>Request and event data flow</title>
+        <desc>Lifecycle of a prompt: browser send, server routing, AgentSession execution, filesystem persistence, and SSE event streaming back, plus idle cleanup and fork.</desc>
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </marker>
+        </defs>
+        <line x1="70" y1="78" x2="70" y2="540" stroke="#534AB7" stroke-width="0.5" stroke-dasharray="3 4"/>
+        <line x1="185" y1="78" x2="185" y2="540" stroke="#185FA5" stroke-width="0.5" stroke-dasharray="3 4"/>
+        <line x1="300" y1="78" x2="300" y2="540" stroke="#0F6E56" stroke-width="0.5" stroke-dasharray="3 4"/>
+        <line x1="415" y1="78" x2="415" y2="540" stroke="#3B6D11" stroke-width="0.5" stroke-dasharray="3 4"/>
+        <line x1="560" y1="78" x2="560" y2="540" stroke="#5F5E5A" stroke-width="0.5" stroke-dasharray="3 4"/>
+        <rect x="20" y="44" width="100" height="32" rx="8" fill="#3C3489" stroke="#AFA9EC" stroke-width="0.5"/>
+        <text x="70" y="64" text-anchor="middle" dominant-baseline="central" style="font-size:13px;font-weight:500;fill:#CECBF6;">Browser</text>
+        <rect x="135" y="44" width="100" height="32" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+        <text x="185" y="64" text-anchor="middle" dominant-baseline="central" style="font-size:13px;font-weight:500;fill:#B5D4F4;">API route</text>
+        <rect x="250" y="44" width="100" height="32" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+        <text x="300" y="64" text-anchor="middle" dominant-baseline="central" style="font-size:13px;font-weight:500;fill:#9FE1CB;">Wrapper</text>
+        <rect x="365" y="44" width="100" height="32" rx="8" fill="#27500A" stroke="#97C459" stroke-width="0.5"/>
+        <text x="415" y="64" text-anchor="middle" dominant-baseline="central" style="font-size:13px;font-weight:500;fill:#C0DD97;">Agent</text>
+        <rect x="510" y="44" width="100" height="32" rx="8" fill="#444441" stroke="#B4B2A9" stroke-width="0.5"/>
+        <text x="560" y="64" text-anchor="middle" dominant-baseline="central" style="font-size:13px;font-weight:500;fill:#D3D1C7;">Filesystem</text>
+        <line x1="70" y1="120" x2="185" y2="120" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="95" y="112" style="font-size:11px;fill:#B4B2A9;">1 POST send</text>
+        <line x1="185" y1="120" x2="185" y2="160" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="192" y="152" style="font-size:11px;fill:#B4B2A9;">2 startRpcSession?</text>
+        <line x1="185" y1="170" x2="300" y2="200" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="210" y="180" style="font-size:11px;fill:#B4B2A9;">3 send(cmd)</text>
+        <line x1="300" y1="210" x2="415" y2="240" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="325" y="220" style="font-size:11px;fill:#B4B2A9;">4 inner.prompt()</text>
+        <line x1="415" y1="240" x2="415" y2="280" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="422" y="272" style="font-size:11px;fill:#B4B2A9;">5 tool loop</text>
+        <line x1="415" y1="290" x2="560" y2="320" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="455" y="300" style="font-size:11px;fill:#B4B2A9;">6 append jsonl</text>
+        <line x1="415" y1="330" x2="300" y2="360" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="335" y="340" style="font-size:11px;fill:#B4B2A9;">7 onEvent()</text>
+        <line x1="300" y1="370" x2="185" y2="400" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="210" y="380" style="font-size:11px;fill:#B4B2A9;">8 emit SSE</text>
+        <line x1="185" y1="410" x2="70" y2="440" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="95" y="420" style="font-size:11px;fill:#B4B2A9;">9 SSE data</text>
+        <line x1="70" y1="440" x2="70" y2="480" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="77" y="472" style="font-size:11px;fill:#B4B2A9;">10 render</text>
+        <line x1="415" y1="410" x2="560" y2="450" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="455" y="420" style="font-size:11px;fill:#B4B2A9;">finalize</text>
+        <line x1="300" y1="370" x2="300" y2="510" stroke="#B4B2A9" stroke-width="1.5" marker-end="url(#ar2)"/>
+        <text x="307" y="500" style="font-size:11px;fill:#B4B2A9;">idle 10m → destroy()</text>
+        <rect x="430" y="500" width="220" height="34" rx="8" fill="none" stroke="#BA7517" stroke-width="0.5" stroke-dasharray="4 4"/>
+        <text x="540" y="519" text-anchor="middle" dominant-baseline="central" style="font-size:11px;fill:#EF9F27;">Session Bus → fans out to all SSE clients</text>
+        <rect x="20" y="500" width="240" height="34" rx="8" fill="none" stroke="#993C1D" stroke-width="0.5" stroke-dasharray="4 4"/>
+        <text x="140" y="519" text-anchor="middle" dominant-baseline="central" style="font-size:11px;fill:#F0997B;">Fork: send('fork') → new id → destroy()</text>
+      </svg>
+      <div class="fig-cap">图 2 · 单次 prompt 的完整数据流与生命周期</div>
+    </div>
+    <div class="callout">
+      <b>两种"分支"不要混淆：</b><br/>
+      • <b>Fork</b>（用户消息上的 Fork 按钮）：创建新的独立 <code>.jsonl</code> 文件，在侧边树中作为子节点显示（通过 header 的 <code>parentSession</code> 字段）。<br/>
+      • <b>会话内分支</b>（Continue 按钮 / BranchNavigator）：在同一文件内调用 <code>navigate_tree</code>，多条记录共享同一 <code>parentId</code>；切换时走 <code>/api/sessions/[id]/context?leafId=</code>。
+    </div>
+  </section>
+
+  <section id="traps">
+    <h2>5. 关键设计决策与陷阱</h2>
+    <table>
+      <tr><th>主题</th><th>决策 / 陷阱</th><th>处理</th></tr>
+      <tr>
+        <td>注册表存活</td>
+        <td>Next.js 热重载会重置 module 级变量，导致会话丢失。</td>
+        <td>会话存 <code>globalThis.__piSessions</code>。</td>
+      </tr>
+      <tr>
+        <td>Fork 状态污染</td>
+        <td><code>fork()</code> 就地改写 wrapper 内部状态为<b>新</b> id。</td>
+        <td><code>send("fork")</code> 捕获 newId 后立刻 <code>destroy()</code>；下次请求按原 id 重新加载干净会话。</td>
+      </tr>
+      <tr>
+        <td>工具字段归一化</td>
+        <td>pi 存为 <code>{id, name, arguments}</code>，而 <code>ToolCallContent</code> 用 <code>{toolCallId, toolName, input}</code>。</td>
+        <td><code>normalizeToolCalls()</code> 在文件加载和流式处理两处调用。</td>
+      </tr>
+      <tr>
+        <td>新会话工具预设</td>
+        <td>工具名在创建时通过 <code>toolNames[]</code> 传入；已有会话挂载时由 <code>get_tools → getPresetFromTools()</code> 推断。</td>
+        <td>完全禁用工具时，rpc-manager 传入空许可列表并在启动/重载/资源发现后强制 <code>systemPrompt = ""</code>。</td>
+      </tr>
+      <tr>
+        <td>默认模型</td>
+        <td>新会话默认模型来自 <code>~/.pi/agent/settings.json</code>。</td>
+        <td><code>GET /api/models</code> 返回 <code>defaultModel</code>，<code>ChatWindow</code> 挂载时预选。</td>
+      </tr>
+      <tr>
+        <td>会话文件可重写</td>
+        <td><code>parentSession</code> 仅为展示元数据，不影响内容。</td>
+        <td>级联重挂子节点时可直接 <code>writeFileSync</code> 整文件。</td>
+      </tr>
+    </table>
+
+    <div class="callout danger">
+      <b>不要做的事：</b>开发期<b>禁止运行 <code>next build</code></b>——它会污染 <code>.next/</code> 并破坏 <code>npm run dev</code>。启动用 <code>npm run dev</code>（随机端口），类型检查用 <code>node_modules/.bin/tsc --noEmit</code>，Lint 用 <code>npm run lint</code>。
+    </div>
+  </section>
+
+  <section id="files">
+    <h2>6. 文件组织</h2>
+    <p class="dim">顶层入口与目录（详见仓库 <code>AGENTS.md</code> 的 File Map）：</p>
+    <table>
+      <tr><th>路径</th><th>内容</th></tr>
+      <tr><td><code>app/api/</code></td><td>所有路由（agent、sessions、auth、models、skills、plugins、files、worktrees、mcp…）。</td></tr>
+      <tr><td><code>lib/</code></td><td>核心逻辑：<code>rpc-manager.ts</code>（会话枢纽）、<code>session-reader.ts</code>（只读读取 + 路径缓存）、<code>agent-client.ts</code>（类型化 fetch）、<code>normalize.ts</code>、<code>worktree.ts</code>、<code>model-scope.ts</code> 等。</td></tr>
+      <tr><td><code>components/</code></td><td>React 视图层（66 个 tsx）。</td></tr>
+      <tr><td><code>hooks/</code></td><td>React 状态与副作用（useAgentSession、useAudio、useTheme 等）。</td></tr>
+      <tr><td><code>contexts/</code></td><td>全局 React context。</td></tr>
+      <tr><td><code>docs/</code></td><td>项目文档（含本文件）。</td></tr>
+    </table>
+  </section>
+
+  <section id="constraints">
+    <h2>7. 开发约束</h2>
+    <ul class="tight dim">
+      <li>进入仓库先读 <code>AGENTS.md</code>。</li>
+      <li>所有项目用 lrnev 管理，并配置好对应 MCP 与项目记忆（见仓库约定）。</li>
+      <li>进入仓库按运行目录自动 <code>lrnev init</code>（若 <code>.lrnev</code> 尚未初始化）。</li>
+      <li>按用户明确指示执行，不自动选任务、不排程、不自行决定下一任务；多任务按顺序完成「实现 → 验证 → 日志追加」闭环。</li>
+      <li>只做当前 <code>scope</code> 内改动；跨 <code>scope</code> 须用户明确要求并在汇报中说明。</li>
+    </ul>
+  </section>
+
+  <footer class="page">
+    文档由架构梳理自动生成 · 信息来源：<code>AGENTS.md</code>、<code>lib/rpc-manager.ts</code> 等核心源码 · 当前仓库为本地测试用，<code>local repo is test-only</code>。
+  </footer>
+
+</div>
+</body>
+</html>

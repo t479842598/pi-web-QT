@@ -16,6 +16,7 @@ fn server(base: &str, password: Option<&str>, is_local: bool) -> Server {
         last_used_at: None,
         is_local,
         proxy_port: None,
+        trusted_domain: None,
     };
     if let Some(pw) = password {
         // 直接写 inline 降级值，绕开 keyring（测试环境不弹钥匙串授权框）
@@ -230,7 +231,8 @@ fn proxy_end_to_end_forwards_with_auth() {
     assert_eq!(origin, format!("http://127.0.0.1:{upstream_port}"));
 }
 
-/// 401 导航请求返回友好 HTML（非导航/API 请求透传 401）。
+/// 导航 401 → 200 + 友好 HTML（WebView2 避免 ERR_INVALID_AUTH_CREDENTIALS 白屏）；
+/// 非导航/API 请求的 401 原样透传。
 #[test]
 fn proxy_401_navigation_returns_html() {
     use std::io::Read as _;
@@ -247,7 +249,7 @@ fn proxy_401_navigation_returns_html() {
     let srv = server(&format!("http://127.0.0.1:{upstream_port}"), Some("bad"), false);
     let port = proxy::spawn_proxy(move || Some(srv.clone())).unwrap();
 
-    // 导航请求（sec-fetch-mode: navigate）→ 友好 HTML（ureq 对 401 返回 Err(Status)）
+    // 导航请求（sec-fetch-mode: navigate）→ 200 + 友好 HTML（避免 WebView2 内置错误页）
     let resp = match ureq::get(&format!("http://127.0.0.1:{port}/"))
         .set("sec-fetch-mode", "navigate")
         .set("Accept", "text/html")
@@ -257,7 +259,7 @@ fn proxy_401_navigation_returns_html() {
         Err(ureq::Error::Status(_, r)) => r,
         Err(e) => panic!("请求失败: {e}"),
     };
-    assert_eq!(resp.status(), 401);
+    assert_eq!(resp.status(), 200);
     assert!(
         resp.header("content-type")
             .unwrap_or("")
@@ -365,12 +367,10 @@ fn smoke_real_environment() {
     // 2. is_local_host 判定
     assert!(probe::is_local_host("http://127.0.0.1:30141"));
     assert!(!probe::is_local_host("http://127.0.0.1.evil.com"));
-    // 3. spawn_local：服务在线则直接 true；不在线则拉起后应尽快就绪（轮询判定）
-    let spawned = probe::spawn_local();
+    // 3. spawn_local 签名已改为 (app, password) -> Option<Child>，需真实 AppHandle，
+    //    无法在纯单元测试中构造；后端拉起/就绪探测由打包冒烟/手动验证覆盖。
     let alive = probe::alive(crate::config::DEFAULT_LOCAL_URL);
-    assert!(spawned, "spawn_local 应返回 true");
-    assert!(alive, "服务应在线（spawn_local 后）");
-    eprintln!("[smoke] spawn_local={spawned} alive={alive}");
+    eprintln!("[smoke] alive={alive}");
 }
 
 #[test]

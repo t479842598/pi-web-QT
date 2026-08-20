@@ -1617,7 +1617,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // Mirror the server snapshot before deciding whether to settle. This is
       // the convergence path after a lost SSE terminal event.
       setIsCompacting(state?.isCompacting ?? false);
-      setAgentPhase(phaseFromServerState(state));
+      // Same guard as state_sync: while a prompt is pending, the periodic
+      // reconcile may observe a transient idle snapshot and wipe the
+      // optimistic phase before the server reports the run as active.
+      if (!rpcPromptPendingRef.current) {
+        setAgentPhase(phaseFromServerState(state));
+      }
       setQueuedMessages(normalizeQueuedMessages(state?.queuedMessages));
       setPendingRecovery(state?.pendingRecovery ?? []);
       const busy = data.running && state
@@ -1752,7 +1757,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // extension work, or agent_settled. Keep the SSE stream alive; the
         // grace window owns eventual connection teardown.
         if (!agentRunningRef.current) break;
-        setAgentPhase(null);
+        // A queued steer/follow-up drains straight into the next run right
+        // after this event. Keep the waiting indicator alive across the
+        // agent_end → agent_start gap instead of flashing a bare frame.
+        const hasQueuedContinuation = queuedMessages.steering.length > 0 || queuedMessages.followUp.length > 0;
+        setAgentPhase(hasQueuedContinuation ? { kind: "waiting_model" } : null);
         setRetryInfo(null);
         dispatch({ type: "end" });
         // Preserve the desktop-only terminal provider-error notification while
@@ -2000,7 +2009,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const state = event.state as AgentStateResponse | undefined;
         if (!state) break;
         setIsCompacting(state.isCompacting ?? false);
-        setAgentPhase(phaseFromServerState(state));
+        // The SSE route pushes a state_sync on connect BEFORE the prompt RPC is
+        // sent, so that snapshot is still idle (phase:null). While a prompt is
+        // pending, never let that idle snapshot clobber the optimistic
+        // waiting_model/running_command phase set by handleSend.
+        if (!rpcPromptPendingRef.current) {
+          setAgentPhase(phaseFromServerState(state));
+        }
         setQueuedMessages(normalizeQueuedMessages(state.queuedMessages));
         setPendingRecovery(state.pendingRecovery ?? []);
         if (state.contextUsage !== undefined) setContextUsage(state.contextUsage ?? null);
@@ -2061,6 +2076,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     loadSession,
     notifyPromptStage,
     onAgentEnd,
+    queuedMessages,
     scheduleEventStreamClose,
     scheduleStreamingScroll,
     settleUiStage,
@@ -2575,6 +2591,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const sid = sessionIdRef.current;
     if (!sid) return;
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
+    // Optimistically surface the waiting state so a queued steer shows the
+    // indicator immediately. We deliberately do NOT dispatch "start" here —
+    // that would reset the live streaming message being rendered.
+    agentRunningRef.current = true;
+    setAgentRunning(true);
+    setAgentPhase((prev) => prev ?? { kind: "waiting_model" });
     try {
       await sendAgentCommand(sid, {
         type: "steer",
@@ -2594,6 +2616,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const sid = sessionIdRef.current;
     if (!sid) return;
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
+    // Optimistically surface the waiting state so the queued prompt shows the
+    // indicator immediately. No dispatch("start") — that would reset the live
+    // streaming message being rendered.
+    agentRunningRef.current = true;
+    setAgentRunning(true);
+    setAgentPhase((prev) => prev ?? { kind: "waiting_model" });
     try {
       await sendAgentCommand(sid, {
         type: "prompt",
@@ -2610,6 +2638,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const sid = sessionIdRef.current;
     if (!sid) return;
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
+    // Optimistically surface the waiting state so a queued follow-up shows the
+    // indicator immediately. No dispatch("start") — that would reset the live
+    // streaming message being rendered.
+    agentRunningRef.current = true;
+    setAgentRunning(true);
+    setAgentPhase((prev) => prev ?? { kind: "waiting_model" });
     try {
       await sendAgentCommand(sid, {
         type: "follow_up",

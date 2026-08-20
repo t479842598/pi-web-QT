@@ -23,6 +23,28 @@
     </header>
 
     <main>
+      <!-- 首次启动 · 设置本机密码（本地未设置密码时显示；设置后隐藏） -->
+      <section class="card setup-card" id="setup-card" hidden>
+        <div class="card-head">
+          <h2 id="setup-title">首次启动 · 设置本机密码</h2>
+          <span class="badge warn">需设置</span>
+        </div>
+        <p class="desc">本机 Pi Web 服务默认对局域网开放，需设置访问密码保护。设置后将自动启动并连接本机服务，此后每次启动免密连接。</p>
+        <div class="field">
+          <label for="inp-setup-pass">设置密码（至少 6 位）</label>
+          <input id="inp-setup-pass" type="password" placeholder="用于本机 Pi Web 访问" autocomplete="new-password" />
+        </div>
+        <div class="field">
+          <label for="inp-setup-pass2">确认密码</label>
+          <input id="inp-setup-pass2" type="password" placeholder="再次输入确认" autocomplete="new-password" />
+        </div>
+        <div class="form-foot">
+          <button id="btn-setup-clear" class="ghost danger" hidden>清除本机密码</button>
+          <span id="setup-hint" class="hint"></span>
+          <button id="btn-setup" class="primary">设置并启动本机</button>
+        </div>
+      </section>
+
       <!-- 本地状态 -->
       <section class="card local-card">
         <div class="card-head">
@@ -34,11 +56,15 @@
           <button id="btn-start-local" class="primary" disabled>
             <span class="dot"></span>启动本机 Pi Web
           </button>
-          <label class="switch-row" title="本机无服务时自动拉起 pi-web CLI">
-            <input type="checkbox" id="chk-auto" checked />
-            <span class="switch"></span>
-            <span>无服务时自动拉起</span>
-          </label>
+          <button id="btn-change-local-pass" class="ghost mini" hidden title="修改或清除本机访问密码">修改本机密码</button>
+        </div>
+        <div class="field local-domain-field">
+          <label for="inp-local-domain">可信域名（Cloudflare 隧道等外部访问，可选）</label>
+          <div class="url-row">
+            <input id="inp-local-domain" type="text" placeholder="piweb.274747.xyz" autocomplete="off" />
+            <button type="button" id="btn-save-domain" class="ghost mini" title="保存可信域名并重启本机服务生效">保存</button>
+          </div>
+          <p id="domain-hint" class="hint"></p>
         </div>
       </section>
 

@@ -4,6 +4,7 @@ const invoke = window.__TAURI__.core.invoke;
 const $ = (id) => document.getElementById(id);
 
 let servers = [];
+let localServer = null; // 本机默认服务器信息（首次启动密码引导用）
 
 function toast(msg, kind = "") {
   const t = $("toast");
@@ -20,10 +21,6 @@ async function refresh() {
   } catch (e) {
     toast("读取服务器失败: " + e, "err");
   }
-  // 「无服务时自动拉起」勾选框同步持久化值（HTML 默认值不代表用户设置）
-  try {
-    $("chk-auto").checked = await invoke("get_local_auto_start");
-  } catch (_) {}
 }
 
 function renderList() {
@@ -58,10 +55,41 @@ function escapeHtml(s) {
   }[c]));
 }
 
+/* ---------- 首次启动 · 设置本机密码 ---------- */
+function updateSetupUI() {
+  const hasPass = localServer && localServer.has_password;
+  $("setup-card").hidden = hasPass;
+  $("btn-change-local-pass").hidden = !hasPass;
+  $("setup-title").textContent = hasPass ? "修改本机密码" : "首次启动 · 设置本机密码";
+  $("btn-setup").textContent = hasPass ? "保存并连接本机" : "设置并启动本机";
+  $("btn-setup-clear").hidden = !hasPass;
+  $("inp-setup-pass").value = "";
+  $("inp-setup-pass2").value = "";
+  $("setup-hint").textContent = "";
+  $("inp-local-domain").value = (localServer && localServer.trusted_domain) || "";
+  $("domain-hint").textContent = "";
+}
+
+async function initSetup() {
+  try {
+    localServer = await invoke("ensure_local_server");
+    updateSetupUI();
+  } catch (e) {
+    toast("初始化失败: " + e, "err");
+  }
+}
+
 async function connect(id) {
   const srv = servers.find((s) => s.id === id);
+  if (!srv) return;
+  // 本地条目：点击「连接」需先拉起内置后端再连接（startLocal 内部处理
+  // 无密码引导 → 拉起 → 等待就绪 → 连接，避免后端未起时直接开窗命中 502）
+  if (srv.is_local) {
+    await startLocal();
+    return;
+  }
   // 未保存密码：不自动注入，引导用户到表单自己输入密码
-  if (srv && !srv.has_password) {
+  if (!srv.has_password) {
     openFormFor(srv);
     return;
   }
@@ -111,8 +139,14 @@ async function probe() {
   try {
     const r = await invoke("probe_local");
     if (r.local_alive) {
-      setLocalBadge("online", "服务在线");
-      $("local-desc").textContent = "检测到本机 Pi Web 服务，可直接连接。";
+      if (r.unauthenticated_local) {
+        setLocalBadge("warn", "未认证");
+        $("local-desc").textContent =
+          "检测到本机 Pi Web 服务，但未启用密码认证（对局域网开放）。建议设置本机访问密码以保护数据。";
+      } else {
+        setLocalBadge("online", "服务在线");
+        $("local-desc").textContent = "检测到本机 Pi Web 服务，可直接连接。";
+      }
       $("btn-start-local").disabled = true;
     } else if (r.cli_found) {
       setLocalBadge("offline", "未运行");
@@ -130,6 +164,14 @@ async function probe() {
 }
 
 async function startLocal() {
+  // 先设密码再拉起：无密码时引导设置，避免 0.0.0.0:30141 无认证暴露
+  if (localServer && !localServer.has_password) {
+    $("setup-card").hidden = false;
+    $("setup-card").scrollIntoView({ behavior: "smooth" });
+    $("inp-setup-pass").focus();
+    toast("请先设置本机访问密码", "err");
+    return;
+  }
   const btn = $("btn-start-local");
   btn.disabled = true;
   btn.textContent = "正在启动本机 Pi Web…";
@@ -215,6 +257,78 @@ $("form-server").addEventListener("submit", async (e) => {
   }
 });
 
+/* ---------- 首次启动密码引导 ---------- */
+$("btn-setup").addEventListener("click", async () => {
+  const p1 = $("inp-setup-pass").value;
+  const p2 = $("inp-setup-pass2").value;
+  $("setup-hint").textContent = "";
+  if (p1.length < 6) {
+    $("setup-hint").textContent = "密码至少 6 位";
+    return;
+  }
+  if (p1 !== p2) {
+    $("setup-hint").textContent = "两次输入的密码不一致";
+    return;
+  }
+  const btn = $("btn-setup");
+  btn.disabled = true;
+  try {
+    const r = await invoke("set_local_password", { password: p1 });
+    localServer = r.server;
+    updateSetupUI();
+    refresh();
+    if (r.warning) {
+      // 服务由外部启动：密码已保存但需手动重启，不自动连接（旧进程仍用旧密码，会 401）
+      toast(r.warning, "err");
+      probe();
+    } else {
+      toast("本机密码已保存，正在启动本机服务…", "ok");
+      await startLocal();
+    }
+  } catch (e) {
+    $("setup-hint").textContent = String(e).replace(/^Error:\s*/, "");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("btn-setup-clear").addEventListener("click", async () => {
+  $("setup-hint").textContent = "";
+  try {
+    const r = await invoke("set_local_password", { password: "" });
+    localServer = r.server;
+    toast(r.warning ? r.warning : "已清除本机密码", r.warning ? "err" : "ok");
+    updateSetupUI();
+    refresh();
+  } catch (e) {
+    $("setup-hint").textContent = String(e).replace(/^Error:\s*/, "");
+  }
+});
+
+$("btn-change-local-pass").addEventListener("click", () => {
+  $("setup-card").hidden = false;
+  $("setup-card").scrollIntoView({ behavior: "smooth" });
+  $("inp-setup-pass").focus();
+});
+
+/* 可信域名：保存后作为 PI_WEB_ALLOWED_HOSTS 注入内置后端，隧道外域访问可过 Host 校验 */
+$("btn-save-domain").addEventListener("click", async () => {
+  const domain = $("inp-local-domain").value.trim();
+  $("domain-hint").textContent = "";
+  const btn = $("btn-save-domain");
+  btn.disabled = true;
+  try {
+    localServer = await invoke("set_local_domain", { domain });
+    $("inp-local-domain").value = localServer.trusted_domain || "";
+    toast("已保存；若本机服务正在运行将自动重启生效", "ok");
+    refresh();
+  } catch (e) {
+    $("domain-hint").textContent = String(e).replace(/^Error:\s*/, "");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 /* ---------- 杂项 ---------- */
 $("btn-start-local").addEventListener("click", startLocal);
 
@@ -231,12 +345,6 @@ $("btn-get-local").addEventListener("click", async () => {
   } catch (e) {
     toast("检测失败: " + e, "err");
   }
-});
-
-$("chk-auto").addEventListener("change", async (e) => {
-  try {
-    await invoke("set_local_auto_start", { enabled: e.target.checked });
-  } catch (_) {}
 });
 
 $("btn-quit").addEventListener("click", () => invoke("quit_app"));
@@ -256,8 +364,9 @@ $("btn-update").addEventListener("click", async () => {
   }
 });
 
-/* 载入自动拉起偏好 */
+/* 载入：首次启动密码引导 + 服务器列表 + 本机状态 */
 (async () => {
+  await initSetup();
   await refresh();
   probe();
 })();

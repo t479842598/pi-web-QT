@@ -5,10 +5,18 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde::Serialize;
+use tauri::AppHandle;
+#[cfg(not(mobile))]
+use tauri::Manager;
 
 use crate::config::{Config, DEFAULT_LOCAL_URL};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// V8 堆上限（与 bin/with-memory-limit.js 保持一致）。独立打包时无法依赖
+/// 该脚本，直接在 Rust 侧注入 NODE_OPTIONS 兜底。
+const MEMORY_LIMIT_MB: u32 = 3072;
+const SEMI_SPACE_MB: u32 = 128;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct ProbeResult {
@@ -17,12 +25,19 @@ pub struct ProbeResult {
     pub candidates: Vec<String>,
     /// 实际探测到的本机服务地址（供「获取本机链接」直接填入）
     pub alive_url: Option<String>,
+    /// 本机服务在线但未启用密码认证（无凭据访问 /api/home 返回 200 而非 401），
+    /// 连接页据此给出警告。
+    pub unauthenticated_local: bool,
 }
 
 /// 移动端无本地服务概念。
 #[cfg(mobile)]
-pub fn spawn_local() -> bool {
-    false
+pub fn spawn_local(
+    _app: &AppHandle,
+    _password: Option<&str>,
+    _trusted_domain: Option<&str>,
+) -> Option<std::process::Child> {
+    None
 }
 
 /// 探测候选地址：默认 30141 + localhost + 上次使用的本地服务器。
@@ -74,6 +89,17 @@ pub fn alive(base: &str) -> bool {
     }
 }
 
+/// 探测本机服务是否「在线但未启用认证」：无凭据 GET /api/home 若返回 200
+/// 说明 PI_WEB_PASSWORD 未生效（0.0.0.0 无认证暴露），连接页据此警告。
+/// 返回 401/403（已启用认证）或连接失败（不在线）均视为 false。
+pub fn local_unauthenticated(base: &str) -> bool {
+    let url = format!("{}/api/home", base.trim_end_matches('/'));
+    match ureq::get(&url).timeout(PROBE_TIMEOUT).call() {
+        Ok(resp) => resp.status() == 200,
+        Err(_) => false,
+    }
+}
+
 /// 逐个探测候选，返回第一个存活的地址。
 pub fn probe_alive(cfg: &Config) -> Option<String> {
     for c in candidates(cfg) {
@@ -84,15 +110,17 @@ pub fn probe_alive(cfg: &Config) -> Option<String> {
     None
 }
 
-pub fn probe(cfg: &Config) -> ProbeResult {
+pub fn probe(app: &AppHandle, cfg: &Config) -> ProbeResult {
     let live = probe_alive(cfg);
+    let unauthenticated_local = live.as_deref().map(local_unauthenticated).unwrap_or(false);
     ProbeResult {
         local_alive: live.is_some(),
-        // 服务已在线时无需再查 CLI（探测本身证明本机有服务在跑），
-        // 避免每次轮询都 spawn 一次 npm 查 prefix。
-        cli_found: live.is_some() || find_cli().is_some(),
+        // 「可启动」= 服务已在线（探测本身证明）或本机有 pi-web CLI 或随包内置后端；
+        // 纯内置安装（无 npm CLI）时也必须为 true，否则连接页误判「未检测到」。
+        cli_found: live.is_some() || find_cli().is_some() || bundled_available(app),
         candidates: candidates(cfg),
         alive_url: live,
+        unauthenticated_local,
     }
 }
 
@@ -213,23 +241,156 @@ fn is_executable(p: &std::path::Path) -> bool {
     p.is_file()
 }
 
-/// 拉起本机 pi-web CLI（--no-open 不弹浏览器）。
-/// 仅负责启动进程并立即返回（不等待就绪，避免阻塞主线程/命令线程）；
-/// 就绪探测由前端轮询 probe_local 完成。
+/// 在资源目录内定位内置 Node 二进制（随包携带，免本机 npm/CLI）。
 #[cfg(not(mobile))]
-pub fn spawn_local() -> bool {
-    if alive(DEFAULT_LOCAL_URL) {
-        return true;
+fn find_node(res: &Path) -> Option<PathBuf> {
+    let mut cands: Vec<PathBuf> = Vec::new();
+    #[cfg(windows)]
+    {
+        cands.push(res.join("node").join("node.exe"));
+        cands.push(res.join("node.exe"));
     }
-    let Some(cli) = find_cli() else {
-        return false;
-    };
+    #[cfg(not(windows))]
+    {
+        cands.push(res.join("node").join("node"));
+        cands.push(res.join("node"));
+    }
+    cands.into_iter().find(|c| is_executable(c))
+}
+
+/// 随包内置后端的位置（Node 二进制 + standalone server.js + 工作目录）。
+#[cfg(not(mobile))]
+struct BundledBackend {
+    node: PathBuf,
+    server_js: PathBuf,
+    backend_dir: PathBuf,
+}
+
+/// 从应用资源目录定位内置后端；缺失返回 None。
+#[cfg(not(mobile))]
+fn locate_bundled(app: &AppHandle) -> Option<BundledBackend> {
+    let res = app.path().resource_dir().ok()?;
+    let backend_dir = res.join("backend");
+    let server_js = backend_dir.join("server.js");
+    if !server_js.is_file() {
+        return None;
+    }
+    let node = find_node(&res)?;
+    Some(BundledBackend {
+        node,
+        server_js,
+        backend_dir,
+    })
+}
+
+/// 内置后端资源是否存在（probe 的 cli_found 判定用：纯内置安装无 npm CLI 也判「可启动」）。
+#[cfg(not(mobile))]
+fn bundled_available(app: &AppHandle) -> bool {
+    locate_bundled(app).is_some()
+}
+
+#[cfg(mobile)]
+fn bundled_available(_app: &AppHandle) -> bool {
+    false
+}
+
+/// 拉起随包内置的 Node + Next.js standalone 后端（`resources/backend/server.js`）。
+/// 成功返回子进程句柄；资源缺失或启动失败返回 None（调用方回退 CLI）。
+#[cfg(not(mobile))]
+fn spawn_bundled(
+    app: &AppHandle,
+    password: Option<&str>,
+    trusted_domain: Option<&str>,
+) -> Option<std::process::Child> {
+    let bundled = locate_bundled(app)?;
+    let mut cmd = Command::new(&bundled.node);
+    cmd.arg(&bundled.server_js)
+        // 命令行参数与 env 双保险：新版 standalone 读 PORT/HOSTNAME，旧版读参数。
+        // 绑 0.0.0.0：允许局域网/远程直连 30141 + Cloudflare 隧道（cloudflared 连
+        // localhost:30141）。代价是 Windows 首启会弹防火墙授权；本机访问密码
+        // （PI_WEB_PASSWORD）已保护对外访问。
+        .arg("-H")
+        .arg("0.0.0.0")
+        .arg("-p")
+        .arg("30141")
+        .current_dir(&bundled.backend_dir)
+        .env("HOSTNAME", "0.0.0.0")
+        .env("PORT", "30141")
+        .env(
+            "NODE_OPTIONS",
+            format!("--max-old-space-size={MEMORY_LIMIT_MB} --max-semi-space-size={SEMI_SPACE_MB}"),
+        )
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // 注入本机访问密码（Next.js middleware 据此启用 HTTP Basic Auth）
+    if let Some(pw) = password {
+        if !pw.is_empty() {
+            cmd.env("PI_WEB_PASSWORD", pw);
+        }
+    }
+    // 注入可信域名（Cloudflare 隧道等外部访问时后端放行的 Host）
+    if let Some(domain) = trusted_domain {
+        let d = domain.trim();
+        if !d.is_empty() {
+            cmd.env("PI_WEB_ALLOWED_HOSTS", d);
+        }
+    }
+    // 独立进程组：改密/退出时可整组 kill（连带 next 孙进程），避免残留占用 30141
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    // Windows：GUI 应用无控制台，抑制 cmd 黑框
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    match cmd.spawn() {
+        Ok(child) => {
+            eprintln!("[desktop] 拉起内置后端: node {:?}", bundled.server_js);
+            Some(child)
+        }
+        Err(e) => {
+            eprintln!("[desktop] 内置后端启动失败: {e}");
+            None
+        }
+    }
+}
+
+/// 拉起本机 pi-web CLI（--no-open 不弹浏览器）——内置后端缺失时的回退。
+#[cfg(not(mobile))]
+pub(crate) fn spawn_cli(
+    password: Option<&str>,
+    trusted_domain: Option<&str>,
+) -> Option<std::process::Child> {
+    let cli = find_cli()?;
     eprintln!("[desktop] 拉起 pi-web: {:?}", cli);
     let mut cmd = Command::new(&cli);
     cmd.arg("--no-open")
         // 重定向子进程输出，避免继承管道阻塞
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // 注入本机访问密码（bin/pi-web.js 透传 process.env 给 Next.js）
+    if let Some(pw) = password {
+        if !pw.is_empty() {
+            cmd.env("PI_WEB_PASSWORD", pw);
+        }
+    }
+    // 注入可信域名（Cloudflare 隧道等外部访问时后端放行的 Host）
+    if let Some(domain) = trusted_domain {
+        let d = domain.trim();
+        if !d.is_empty() {
+            cmd.env("PI_WEB_ALLOWED_HOSTS", d);
+        }
+    }
+    // 独立进程组：改密/退出时可整组 kill（连带 next 孙进程），避免残留占用 30141
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     // Windows：GUI 应用无控制台，直接 spawn .cmd shim 会闪出 cmd 黑框；
     // CREATE_NO_WINDOW 抑制新控制台窗口。
     #[cfg(windows)]
@@ -237,6 +398,75 @@ pub fn spawn_local() -> bool {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let spawned = cmd.spawn().map(|_| true).unwrap_or(false);
-    spawned || alive(DEFAULT_LOCAL_URL)
+    cmd.spawn().ok()
+}
+
+/// 杀掉子进程及其整个进程树（改密重启/退出清理用）：
+/// - Unix：spawn 时已 process_group(0) 建立独立进程组，这里 kill(-pgid) 整组清除
+/// - Windows：taskkill /T /F 杀进程树
+/// kill 后 wait 回收，避免僵尸。
+#[cfg(not(mobile))]
+pub(crate) fn kill_child_tree(child: &mut std::process::Child) {
+    let pid = child.id();
+    #[cfg(unix)]
+    {
+        // SIGKILL 负 pid = 杀整个进程组（组 id == 子进程 pid）
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            // CREATE_NO_WINDOW：GUI 应用无控制台，抑制 taskkill 弹出的 cmd 黑框
+            .creation_flags(0x0800_0000);
+        let _ = cmd.status();
+    }
+    let _ = child.wait();
+}
+
+/// 杀掉壳拉起的本机后端子进程并清空句柄（改密/退出清理用）。
+/// 幂等：句柄为空（外部启动或已清理）时无副作用。
+/// 放在独立函数里，供退出路径（quit 命令 / 托盘「退出」/ RunEvent::Exit）复用，
+/// 避免清理逻辑散落或遗漏导致 30141 被孤儿 node 进程占用。
+#[cfg(not(mobile))]
+pub(crate) fn kill_local_child(app: &AppHandle) {
+    let state = app.state::<crate::AppState>();
+    let child = state.local_child.lock().unwrap().take();
+    if let Some(mut child) = child {
+        kill_child_tree(&mut child);
+    }
+}
+
+/// 忽略「已在线」检查直接拉起（改密重启用：刚 kill 旧进程，端口可能仍在
+/// TIME_WAIT，不能因 alive 短路）。
+#[cfg(not(mobile))]
+pub(crate) fn spawn_local_force(
+    app: &AppHandle,
+    password: Option<&str>,
+    trusted_domain: Option<&str>,
+) -> Option<std::process::Child> {
+    spawn_bundled(app, password, trusted_domain).or_else(|| spawn_cli(password, trusted_domain))
+}
+
+/// 拉起本机 Pi Web 后端：优先随包内置的 Node + standalone；找不到内置资源时
+/// 回退本机已装的 pi-web CLI。仅负责启动进程并立即返回（不等待就绪，避免阻塞
+/// 主线程/命令线程）；就绪探测由前端轮询 probe_local 完成。
+/// 返回 Some(child) = 本次新拉起的子进程；None = 已在跑 / 无可用后端。
+/// `password`：本机访问密码，非空时作为 PI_WEB_PASSWORD 注入（先设密码再拉起，
+/// 避免 0.0.0.0:30141 无认证暴露）。
+#[cfg(not(mobile))]
+pub fn spawn_local(
+    app: &AppHandle,
+    password: Option<&str>,
+    trusted_domain: Option<&str>,
+) -> Option<std::process::Child> {
+    if alive(DEFAULT_LOCAL_URL) {
+        return None;
+    }
+    spawn_local_force(app, password, trusted_domain)
 }
