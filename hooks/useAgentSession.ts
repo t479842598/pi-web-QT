@@ -2215,6 +2215,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
         if (sid) {
           sentSessionId = sid;
+          // Promote the new session to the AppShell immediately — as soon as
+          // the real id exists, BEFORE the SSE handshake (up to 4s) and the
+          // prompt round-trip. onSessionCreated drives the sidebar refresh +
+          // selectedSession switch, so the conversation appears in the list
+          // instantly and the current view stays on it while the agent runs,
+          // instead of freezing in "new session" limbo and then being replaced
+          // by a freshly-opened session window.
+          promoteNewSession(1, message);
           if (selectedModel) {
             setPendingModel(selectedModel);
             if (existingSid) {
@@ -2233,7 +2241,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             message: sentMessage,
             ...(piImages?.length ? { images: piImages } : {}),
           });
-          promoteNewSession(1, message);
           if (!sseReady) void waitForPromptSettlement(sid, promptRunId);
           // Server-side goal engine: register the goal so it auto-continues
           // even if the page is closed/refreshed (wish-style development).
@@ -2321,9 +2328,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       const sid = sessionIdRef.current ?? session?.id ?? await ensureNewSession();
       if (!sid) throw new Error("Unable to create a session for the shell command");
+      // Promote immediately (same rationale as handleSend): the sidebar must
+      // show the new session as soon as it exists, not after the bash round-trip.
+      promoteNewSession(1, inputText);
       await sendAgentCommand(sid, { type: "bash", command, excludeFromContext });
       await loadSession(sid);
-      promoteNewSession(1, inputText);
     } catch (e) {
       console.error("Failed to execute shell command:", e);
       addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });

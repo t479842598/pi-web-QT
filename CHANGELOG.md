@@ -2,6 +2,14 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.10.5 — 2026-08-20（新会话首条消息即时上侧边栏：promote 提前 + 会话文件即时落盘）
+
+### 修复
+- **新对话创建后发送首条消息：界面卡住、弹出会话窗口、侧边栏延迟显示（重要）** — 根因有两处叠加：① 客户端 `promoteNewSession`（通知 AppShell 接管新会话并刷新侧边栏的唯一切换点）位于 `await sendAgentCommand(prompt)` **之后**，SSE 握手（最多 4 秒）+ prompt 网络往返 + 模型冷启动全部被夹在「界面卡住（新会话意图态）」与「一次性视图切换」之间，观感即卡住后弹出会话窗口，且异常路径可能永不触发 promote；② 服务端 pi SDK 在第一条 assistant 消息产出前**不写会话文件**（`SessionManager` 延迟落盘设计），而 `/api/sessions` 通过 `SessionManager.listAll()` 扫描磁盘文件，新会话创建成功但侧边栏扫不到 → 需等首条回复落盘 + 列表刷新（节流 2s）才可见。修复：① `handleSend`/`executeBash` 在拿到真实 sid 后**立即** `promoteNewSession`（AppShell 即时接管：选中新会话、URL 更新、列表刷新），当前聊天窗不重挂载、在会话内正常等待流式结果；② 服务端 `startRpcSession` 新会话创建成功后立即调用 `persistSessionFileIfMissing()`（复用原 bash-only 落盘逻辑泛化而来），会话 `.jsonl` 文件在 `/api/agent/new` 响应前已落盘，侧边栏刷新立即可见；③ AppShell `handleSessionCreated` 在 1200ms 重试基础上增加 4000ms 二次刷新兜底（文件系统/缓存滞后场景）。
+
+### 其他
+- `lib/rpc-manager.ts`：`persistBashOnlySession()` 泛化为 public `persistSessionFileIfMissing()`（幂等：文件已存在则跳过；bash-only 会话同样安全）。
+
 ## v0.10.4 — 2026-08-20（桌面端开箱即用：内置后端 + 可信域名 + 启动连接页）
 
 ### 新增

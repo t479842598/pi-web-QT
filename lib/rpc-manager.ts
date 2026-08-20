@@ -856,7 +856,18 @@ export class AgentSessionWrapper {
     }, DISPOSE_GRACE_MS);
   }
 
-  private persistBashOnlySession(): void {
+  /** Ensure the session file exists on disk even before the first assistant
+   *  message. The SDK delays its first flush until an assistant message
+   *  exists, which means a freshly created session is invisible to
+   *  SessionManager.listAll() (and therefore to /api/sessions and the
+   *  sidebar) for the whole first turn. Writing the header + current entries
+   *  immediately makes the session appear in the sidebar as soon as it is
+   *  created; subsequent entries append normally (flushed=true).
+   *
+   *  Idempotent: if the file already exists (opened session, or this method
+   *  was already called) it is left untouched. Safe for bash-only sessions
+   *  too (no assistant message ever arrives there). */
+  persistSessionFileIfMissing(): void {
     const manager = this.inner.sessionManager;
     const sessionFile = manager.getSessionFile();
     if (!sessionFile || existsSync(sessionFile)) return;
@@ -869,9 +880,9 @@ export class AgentSessionWrapper {
       .join("\n") + "\n";
     writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
 
-    // Pi normally delays the first flush until an assistant message exists.
-    // A leading shell command has no assistant message, so mark this SDK
-    // manager as flushed after writing its own generated entries.
+    // Mark this SDK manager as flushed after writing its own entries so the
+    // first user/assistant message appends instead of trying to create the
+    // file again with "wx".
     (manager as unknown as { flushed: boolean }).flushed = true;
     cacheSessionPath(this.inner.sessionId, sessionFile);
   }
@@ -1410,7 +1421,7 @@ export class AgentSessionWrapper {
         );
         try {
           const result = await execution;
-          this.persistBashOnlySession();
+          this.persistSessionFileIfMissing();
           return result;
         } finally {
           this.resetIdleTimer();
@@ -2241,6 +2252,14 @@ export async function startRpcSession(
     const realSessionId = inner.sessionId as string;
     const realSessionFile = inner.sessionFile as string | undefined;
     if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
+
+    // A brand-new session (no pre-existing file) must be persisted right away:
+    // the SDK defers its first flush until an assistant message exists, so
+    // without this the sidebar (/api/sessions -> SessionManager.listAll, which
+    // scans files on disk) would not show the session until the first response
+    // arrives. Persist now so the list refresh triggered by onSessionCreated
+    // already finds the file (idempotent for opened sessions).
+    wrapper.persistSessionFileIfMissing();
 
     wrapper.onDestroy(() => {
       cleanupAsyncBash();

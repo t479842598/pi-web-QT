@@ -488,12 +488,13 @@ export function AppShell() {
     // workspace — the sidebar list went empty and the tab title reset until a
     // full page reload. history.replaceState is a pure address-bar update.
     window.history.replaceState(null, "", `?session=${encodeURIComponent(session.id)}`);
-    // The session file is written asynchronously by the agent backend, so a
-    // list refresh right now may scan before the file exists and the sidebar
-    // keeps showing the old list (or "no sessions") until the cache expires.
-    // Keep a delayed retry for filesystems where the first assistant entry is
-    // flushed after the optimistic session promotion.
+    // The session file is written by startRpcSession BEFORE the API response
+    // (persistSessionFileIfMissing), so a refresh immediately finds it. Keep
+    // two delayed retries for filesystems/cache layers where the scan lags
+    // (e.g. antivirus, network mounts) so the sidebar never shows the old list
+    // (or "no sessions") until the next agent_end refresh.
     window.setTimeout(() => setRefreshKey((k) => k + 1), 1200);
+    window.setTimeout(() => setRefreshKey((k) => k + 1), 4000);
   }, [router, hydrateSelectedSession]);
 
   const handleAgentEnd = useCallback(() => {
