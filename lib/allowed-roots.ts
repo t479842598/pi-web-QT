@@ -22,3 +22,16 @@ export function allowFileRoot(root: string): void {
   getAdditionalAllowedRoots().add(normalizedRoot);
   globalThis.__piAllowedRootsCache?.roots.add(normalizedRoot);
 }
+
+/**
+ * Revoke a previously allowed root (e.g. after its worktree is removed).
+ * Only the in-memory additional-roots set is pruned; the merged cache is
+ * dropped so it rebuilds from session-derived roots — a path that is also a
+ * session cwd therefore stays allowed.
+ */
+export function disallowFileRoot(root: string): void {
+  if (!root) return;
+  const normalizedRoot = normalizeSlashes(root);
+  getAdditionalAllowedRoots().delete(normalizedRoot);
+  globalThis.__piAllowedRootsCache = undefined;
+}

@@ -890,6 +890,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const sdkAgentActiveRef = useRef(false);
   const rpcPromptPendingRef = useRef(false);
   const notifiedPromptRunIdRef = useRef(-1);
+  // False between unmount and (StrictMode) remount: long-running async loops
+  // (waitForPromptSettlement) bail out instead of fetching on a dead instance.
+  const mountedRef = useRef(true);
+  // Marks that the current continuous running period already produced its
+  // completion notification. agent_start arms a new period only when the
+  // agent was idle; chained extension runs keep the flag, so a prompt_done
+  // notification followed by the chained run's agent_settled fires exactly
+  // one onAgentEnd instead of two.
+  const stageNotifiedRef = useRef(false);
   const bashRunningRef = useRef(false);
   const handleAgentEventRef = useRef<((event: AgentEvent) => void) | null>(null);
   const initialScrollDoneRef = useRef(false);
@@ -1558,7 +1567,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     let idleSince = Date.now();
     let consecutiveFailures = 0;
     while (Date.now() - idleSince < PROMPT_SETTLE_MAX_MS) {
-      if (promptRunIdRef.current !== runId) return;
+      if (!mountedRef.current || promptRunIdRef.current !== runId) return;
       try {
         const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
         if (res.ok) {
@@ -1741,6 +1750,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         resetStreamUpdates();
         resetTokenRate();
         cancelEventStreamGrace();
+        if (!agentRunningRef.current) stageNotifiedRef.current = false;
         sdkAgentActiveRef.current = true;
         agentRunningRef.current = true;
         setAgentRunning(true);
@@ -1779,10 +1789,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         const sid = sessionIdRef.current;
         if (sid) {
+          const runIdAtEnd = promptRunIdRef.current;
           void loadSession(sid);
           void fetch(`/api/agent/${encodeURIComponent(sid)}`)
             .then((response) => response.ok ? response.json() as Promise<{ state?: AgentStateResponse }> : undefined)
             .then((data) => {
+              // A new run may have started while this snapshot was in flight —
+              // never let its stale queue/recovery/goal state overwrite the
+              // fresh state of the current run.
+              if (promptRunIdRef.current !== runIdAtEnd) return;
               const state = data?.state;
               if (state?.contextUsage !== undefined) setContextUsage(state.contextUsage ?? null);
               if (state?.systemPrompt !== undefined) setSystemPrompt(state.systemPrompt ?? null);
@@ -1814,7 +1829,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           void loadSession(sid);
           scheduleEventStreamClose(sid);
         }
-        if (wasRunning) onAgentEnd?.();
+        // prompt_done may have already notified for this running period (RPC
+        // prompt completed while a chained extension run was still active) —
+        // never fire onAgentEnd twice for one logical stage.
+        if (wasRunning && !stageNotifiedRef.current) onAgentEnd?.();
+        stageNotifiedRef.current = false;
         // Goal auto-continue is now server-driven (AgentSessionWrapper listens
         // for agent_settled and fires the next follow_up). Nothing to do here.
         break;
@@ -1834,6 +1853,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         rpcPromptPendingRef.current = false;
         optimisticUserMessageKeyRef.current = null;
         const firstNotification = notifyPromptStage(runId);
+        if (firstNotification) stageNotifiedRef.current = true;
         if (!promptWasPending && !firstNotification) break;
 
         const sid = sessionIdRef.current;
@@ -1939,10 +1959,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           }
           const deliveredKey = userMessageKey(delivered);
           const optimisticKey = optimisticUserMessageKeyRef.current;
-          optimisticUserMessageKeyRef.current = null;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (optimisticKey && last?.role === "user" && userMessageKey(last) === optimisticKey) {
+              // Consume the optimistic key only when it actually matched —
+              // clearing it early (e.g. a steer from another device arriving
+              // before our prompt echo) would duplicate the later echo.
+              optimisticUserMessageKeyRef.current = null;
               return optimisticKey === deliveredKey
                 ? prev
                 : [...prev.slice(0, -1), delivered];
@@ -2031,9 +2054,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         const busy = Boolean(state.isStreaming || state.isPromptRunning || state.isBashRunning || state.isCompacting);
         if (busy) {
+          // Only dispatch "start" when transitioning into running. A mid-run
+          // SSE reconnect also delivers a busy state_sync; resetting the
+          // stream reducer here would blank the streaming bubble that is
+          // currently being rendered.
+          const wasRunning = agentRunningRef.current;
           agentRunningRef.current = true;
           setAgentRunning(true);
-          dispatch({ type: "start" });
+          if (!wasRunning) dispatch({ type: "start" });
         } else if (agentRunningRef.current && !rpcPromptPendingRef.current) {
           const sid = sessionIdRef.current;
           if (sid) void finishPromptWithoutStream(sid, promptRunIdRef.current);
@@ -3206,6 +3234,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   // Load session on mount
   useEffect(() => {
+    mountedRef.current = true;
     if (session) {
       sessionIdRef.current = session.id;
       // Sync the persisted approval mode + policy to the live RPC session so
@@ -3260,6 +3289,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // Do not destroy here: React Strict Mode intentionally runs effect
       // cleanup once during development before mounting the real effect.
       // Resetting still prevents an unmounted session from committing stale UI.
+      mountedRef.current = false;
       resetStreamUpdates();
       clearQueueReconcile();
       cancelEventStreamGrace();

@@ -247,8 +247,10 @@ function applyBorderDepth(depth: number) {
 
 // ─── Fetch + apply ──────────────────────────────────────────────────────────
 
-/** Cache keyed by `name::mode`. */
+/** Cache keyed by `name::mode`. Bounded: each entry is a full cssVars
+ *  snapshot, so switching through many themes must not grow this forever. */
 const themeCache = new Map<string, ResolvedTheme>();
+const THEME_CACHE_MAX = 50;
 
 async function fetchTheme(name: string, mode: ResolvedMode): Promise<ResolvedTheme | null> {
   const cacheKey = `${name}::${mode}`;
@@ -258,6 +260,11 @@ async function fetchTheme(name: string, mode: ResolvedMode): Promise<ResolvedThe
     if (!resp.ok) return null;
     const data: ResolvedTheme = await resp.json();
     themeCache.set(cacheKey, data);
+    while (themeCache.size > THEME_CACHE_MAX) {
+      const oldest = themeCache.keys().next().value;
+      if (oldest === undefined) break;
+      themeCache.delete(oldest);
+    }
     return data;
   } catch {
     return null;

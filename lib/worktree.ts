@@ -2,7 +2,7 @@ import { execFile } from "child_process";
 import { existsSync, mkdirSync, realpathSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { promisify } from "util";
-import { allowFileRoot } from "./allowed-roots";
+import { allowFileRoot, disallowFileRoot } from "./allowed-roots";
 import { samePath, toNativePath } from "./paths";
 
 const execFileAsync = promisify(execFile);
@@ -241,6 +241,10 @@ export async function removeWorktree(cwd: string, worktreePath: string, force = 
   } catch (error) {
     throw new Error(extractGitError(error));
   }
+  // The removed worktree must not stay on the file-access allow-list forever:
+  // a new directory created at the same path later would otherwise be
+  // browsable without ever being explicitly allowed.
+  disallowFileRoot(worktreePath);
   invalidateProjectCache();
 }
 

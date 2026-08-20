@@ -3,7 +3,11 @@ import { isApiRequestAllowed, isApiRequestHostAllowed } from "@/lib/request-secu
 import { isValidBasicAuthorization, isWebPasswordEnabled } from "@/lib/web-auth";
 
 export function proxy(request: NextRequest) {
-  const isDevelopmentChunk = request.nextUrl.pathname.startsWith("/_next/static/");
+  // Dev-only convenience: freshly compiled chunks must not be cached by the
+  // browser. Scoped to development — in production static assets go through
+  // the same trust checks as everything else.
+  const isDevelopmentChunk = process.env.NODE_ENV === "development"
+    && request.nextUrl.pathname.startsWith("/_next/static/");
   if (isDevelopmentChunk) {
     return NextResponse.next({
       headers: { "Cache-Control": "no-store" },
@@ -43,4 +47,6 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/", "/api/:path*", "/_next/static/:path*"] };
+// Match every path: any future page route must not silently bypass the
+// host allowlist and the basic-auth gate.
+export const config = { matcher: ["/:path*"] };

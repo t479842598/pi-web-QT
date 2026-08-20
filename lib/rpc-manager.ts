@@ -1190,11 +1190,15 @@ export class AgentSessionWrapper {
 
       case "clear_queue": {
         // Full clear only: pi has no single-item dequeue, and clear+requeue
-        // races against the agent loop pulling messages mid-flight.
-        this.queueMirror = [];
-        this.pendingQueueHints = { steer: [], followUp: [] };
-        this.persistQueue();
-        return this.inner.clearQueue();
+        // races against the agent loop pulling messages mid-flight. Run under
+        // the queue mutation lock so concurrent tabs cannot interleave clears
+        // with reorders/recovery writes and drop entries from the mirror.
+        return this.withQueueMutation(async () => {
+          this.queueMirror = [];
+          this.pendingQueueHints = { steer: [], followUp: [] };
+          this.persistQueue();
+          return this.inner.clearQueue();
+        });
       }
 
       case "move_queue": {
@@ -1257,20 +1261,22 @@ export class AgentSessionWrapper {
       }
 
       case "resolve_recovery": {
-        const keep = new Set((command.keep as string[] | undefined) ?? []);
-        const discard = new Set((command.discard as string[] | undefined) ?? []);
-        const continueRun = command.continueRun === true;
-        let kept = 0;
-        for (const entry of this.queueRecovery) {
-          if (!keep.has(entry.id)) continue;
-          await this.requeueEntry(entry);
-          this.ensureMirrored(entry);
-          kept += 1;
-        }
-        this.queueRecovery = this.queueRecovery.filter((entry) => !keep.has(entry.id) && !discard.has(entry.id));
-        this.persistQueue();
-        if (continueRun && kept > 0) this.runAgentContinue();
-        return { remaining: this.pendingRecoveryView(), kept };
+        return this.withQueueMutation(async () => {
+          const keep = new Set((command.keep as string[] | undefined) ?? []);
+          const discard = new Set((command.discard as string[] | undefined) ?? []);
+          const continueRun = command.continueRun === true;
+          let kept = 0;
+          for (const entry of this.queueRecovery) {
+            if (!keep.has(entry.id)) continue;
+            await this.requeueEntry(entry);
+            this.ensureMirrored(entry);
+            kept += 1;
+          }
+          this.queueRecovery = this.queueRecovery.filter((entry) => !keep.has(entry.id) && !discard.has(entry.id));
+          this.persistQueue();
+          if (continueRun && kept > 0) this.runAgentContinue();
+          return { remaining: this.pendingRecoveryView(), kept };
+        });
       }
 
       case "export_queue": {
@@ -1281,37 +1287,41 @@ export class AgentSessionWrapper {
       }
 
       case "import_queue": {
-        const entries = command.entries as QueueEntryInput[] | undefined;
-        if (!Array.isArray(entries)) throw new Error("import_queue requires entries[]");
-        this.validateQueueEntries(entries);
-        let imported = 0;
-        for (const entry of entries) {
-          if ((entry.kind !== "steer" && entry.kind !== "followUp") || typeof entry.text !== "string") continue;
-          const queued = createQueueEntry(entry.kind, entry.text, entry.images);
-          await this.requeueEntry(queued);
-          this.ensureMirrored(queued);
-          imported += 1;
-        }
-        this.persistQueue();
-        return {
-          imported,
-          steering: [...this.inner.getSteeringMessages()],
-          followUp: [...this.inner.getFollowUpMessages()],
-        };
+        return this.withQueueMutation(async () => {
+          const entries = command.entries as QueueEntryInput[] | undefined;
+          if (!Array.isArray(entries)) throw new Error("import_queue requires entries[]");
+          this.validateQueueEntries(entries);
+          let imported = 0;
+          for (const entry of entries) {
+            if ((entry.kind !== "steer" && entry.kind !== "followUp") || typeof entry.text !== "string") continue;
+            const queued = createQueueEntry(entry.kind, entry.text, entry.images);
+            await this.requeueEntry(queued);
+            this.ensureMirrored(queued);
+            imported += 1;
+          }
+          this.persistQueue();
+          return {
+            imported,
+            steering: [...this.inner.getSteeringMessages()],
+            followUp: [...this.inner.getFollowUpMessages()],
+          };
+        });
       }
 
       case "stage_recovery": {
-        const entries = command.entries as QueueEntryInput[] | undefined;
-        if (!Array.isArray(entries)) throw new Error("stage_recovery requires entries[]");
-        this.validateQueueEntries(entries);
-        let staged = 0;
-        for (const entry of entries) {
-          if ((entry.kind !== "steer" && entry.kind !== "followUp") || typeof entry.text !== "string") continue;
-          this.queueRecovery.push(createQueueEntry(entry.kind, entry.text, entry.images));
-          staged += 1;
-        }
-        this.persistQueue();
-        return { staged, pendingRecovery: this.pendingRecoveryView() };
+        return this.withQueueMutation(async () => {
+          const entries = command.entries as QueueEntryInput[] | undefined;
+          if (!Array.isArray(entries)) throw new Error("stage_recovery requires entries[]");
+          this.validateQueueEntries(entries);
+          let staged = 0;
+          for (const entry of entries) {
+            if ((entry.kind !== "steer" && entry.kind !== "followUp") || typeof entry.text !== "string") continue;
+            this.queueRecovery.push(createQueueEntry(entry.kind, entry.text, entry.images));
+            staged += 1;
+          }
+          this.persistQueue();
+          return { staged, pendingRecovery: this.pendingRecoveryView() };
+        });
       }
 
       case "steer": {

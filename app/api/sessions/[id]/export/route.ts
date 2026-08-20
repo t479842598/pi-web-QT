@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { execFile } from "child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { basename, dirname, join } from "path";
 import { promisify } from "util";
@@ -217,9 +217,14 @@ function patchExportHtml(html: string): string {
 async function exportSession(filePath: string, outputPath: string): Promise<void> {
   const cliPath = await getPiCliPath();
   if (cliPath) {
+    // Scale the timeout with session size: the fixed 30s used to kill exports
+    // of large sessions (the HTML export re-renders every message).
+    let sizeBytes = 0;
+    try { sizeBytes = statSync(filePath).size; } catch { /* default timeout */ }
+    const timeout = Math.min(300_000, 60_000 + Math.floor(sizeBytes / (50 * 1024 * 1024)) * 30_000);
     await execFileAsync(process.execPath, [cliPath, "--export", filePath, outputPath], {
       cwd: process.cwd(),
-      timeout: 30_000,
+      timeout,
       env: {
         ...process.env,
         PI_OFFLINE: "1",

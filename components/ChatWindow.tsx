@@ -1,12 +1,12 @@
 "use client";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { AgentMessage, AssistantContentBlock, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, SubagentStatus, ToolResultMessage, UserMessage } from "@/lib/types";
+import type { AgentMessage, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, SubagentStatus, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
-import { getDisplayableAssistantBlocks, splitFinalAssistantBlocks, extractPlanText } from "@/lib/message-display";
+import { splitFinalAssistantBlocks, extractPlanText } from "@/lib/message-display";
 import { buildHistoryPipeline, hasDisplayableProcessMessage, withAssistantBlocks } from "@/lib/chat-history-pipeline";
-import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
-import { collectProcessContentBlocks, splitAssistantContentBlocks, type ProcessContentBlock } from "@/lib/process-content";
+import { type WrittenFile } from "@/lib/turn-written-files";
+import { collectProcessContentBlocks, splitAssistantContentBlocks } from "@/lib/process-content";
 import { MessageView } from "./MessageView";
 import { PlanReviewDialog } from "./PlanReviewDialog";
 import { GoalBanner } from "./GoalBanner";
@@ -269,9 +269,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     if (soundEnabledRef.current) playDoneSoundRef.current();
   }, [extensionDialog]);
 
-  // Register the abort handler for the global Esc shortcut
+  // Register the abort handler for the global Esc shortcut. The registration
+  // is a module-level slot: without cleanup, unmounting (e.g. switching to the
+  // Tasks view) would leave Esc wired to a stale ChatWindow's abort handler.
   useEffect(() => {
     registerAbortHandler(agentRunning || bashRunning ? handleAbort : null);
+    return () => registerAbortHandler(null);
   }, [agentRunning, bashRunning, handleAbort]);
 
   // --- Scroll-edge fades ---
