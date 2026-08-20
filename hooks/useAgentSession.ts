@@ -904,7 +904,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // Best-effort; the next event or interval reconciles again.
       }
     }, 8000);
-  }, []);
+  }, [setQueuedMessages]);
   const clearQueueReconcile = useCallback(() => {
     if (queueReconcileTimerRef.current) {
       clearTimeout(queueReconcileTimerRef.current);
@@ -1135,7 +1135,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (showLoading && !messagesLoaded) setLoading(false);
     }
-  }, [applySubagents]);
+  }, [applySubagents, setPendingRecovery, setQueuedMessages]);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null) => {
     try {
@@ -1687,7 +1687,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch {
       // Network still down — the next poll / visibility / online tick retries.
     }
-  }, [finishPromptWithoutStream]);
+  }, [finishPromptWithoutStream, setPendingRecovery, setQueuedMessages]);
 
   // Recovery net for missed SSE events: while the agent is running, verify
   // against the server periodically and whenever the tab returns to the
@@ -2151,6 +2151,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     SUBAGENT_TOOL_NAMES,
     trackTokenRate,
     resetTokenRate,
+    setPendingRecovery,
+    setQueuedMessages,
   ]);
   handleAgentEventRef.current = handleAgentEvent;
 
@@ -2790,7 +2792,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to recall queued messages:", e);
       addNotice({ type: "error", message: "Failed to recall queued messages" });
     }
-  }, [opts.chatInputRef, addNotice]);
+  }, [opts.chatInputRef, addNotice, setQueuedMessages]);
 
   useEffect(() => {
     if (pendingRecovery.length === 0) setRecoveryIsImport(false);
@@ -2839,7 +2841,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: "Failed to resolve queued message recovery" });
       return pendingRecovery;
     }
-  }, [pendingRecovery, addNotice, connectEvents, waitForPromptSettlement]);
+  }, [pendingRecovery, addNotice, connectEvents, waitForPromptSettlement, setPendingRecovery]);
 
   const exportQueueData = useCallback(async (): Promise<{ live: QueueEntry[]; recovery: QueueEntry[] } | null> => {
     const sid = sessionIdRef.current;
@@ -2868,7 +2870,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: "Failed to import queue" });
       return null;
     }
-  }, [addNotice]);
+  }, [addNotice, setQueuedMessages]);
 
   const stageQueueImport = useCallback(async (entries: QueueEntryInput[]): Promise<number | null> => {
     const sid = sessionIdRef.current;
@@ -2886,7 +2888,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: "Failed to stage imported queue" });
       return null;
     }
-  }, [addNotice]);
+  }, [addNotice, setPendingRecovery]);
 
   const moveQueuedMessage = useCallback(async (
     kind: "steer" | "followUp",
@@ -2906,7 +2908,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: error instanceof Error ? error.message : "Failed to move queued message" });
       return false;
     }
-  }, [addNotice]);
+  }, [addNotice, setQueuedMessages]);
 
   const recallQueuedMessage = useCallback(async (
     kind: "steer" | "followUp",
@@ -2931,7 +2933,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: error instanceof Error ? error.message : "Failed to recall queued message" });
       return null;
     }
-  }, [addNotice]);
+  }, [addNotice, setQueuedMessages]);
 
   const requeueAt = useCallback(async (
     kind: "steer" | "followUp",
@@ -2956,7 +2958,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: error instanceof Error ? error.message : "Failed to requeue message" });
       return false;
     }
-  }, [addNotice]);
+  }, [addNotice, setQueuedMessages]);
 
   const removeQueuedMessage = useCallback(async (
     kind: "steer" | "followUp",
@@ -2975,7 +2977,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       addNotice({ type: "error", message: error instanceof Error ? error.message : "Failed to remove queued message" });
       return false;
     }
-  }, [addNotice]);
+  }, [addNotice, setQueuedMessages]);
 
   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
     thinkingLevelOverrideRef.current = level === "auto" ? null : level;
