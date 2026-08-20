@@ -6,6 +6,7 @@ import "@fontsource/ia-writer-quattro/400-italic.css";
 import "@fontsource/ia-writer-quattro/700.css";
 import "@fontsource/ia-writer-quattro/700-italic.css";
 import "@fontsource/lilex";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export const metadata: Metadata = {
   title: "Pi Agent Web",
