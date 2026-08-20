@@ -153,6 +153,10 @@ jobs:
         shell: bash
         env:
           NODE_DIST: ${{ matrix.node_dist }}
+          # 工作流顶层 env.NODE_ENV=development 会让 next build 进入不受支持的
+          # dev 模式（Next 官方明确警告 non-standard NODE_ENV，全平台构建异常），
+          # 这里显式覆盖为 production。
+          NODE_ENV: production
           # 规避 Next 16 在 Windows 上扫描用户主目录 junction（%USERPROFILE%\Local
           # Settings\Microsoft\WindowsApps 的 EACCES + 目录环），与本地构建同一处理：
           # 把 HOME/USERPROFILE 指向空目录，让 nft 只追踪该目录。
@@ -199,7 +203,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # beforeBuildCommand 会再次跑 bundle:backend，同样需要主目录沙箱（Windows）
+          # beforeBuildCommand 会再次跑 bundle:backend，同样需要 NODE_ENV=production
+          # 与主目录沙箱（Windows）
+          NODE_ENV: production
           HOME: "${{ runner.temp }}/piweb-fakehome"
           USERPROFILE: "${{ runner.temp }}/piweb-fakehome"
         with:
