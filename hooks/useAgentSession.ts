@@ -2658,8 +2658,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // reached the server the flag would otherwise stay true forever — ChatInput
   // shows a permanent streaming state and handleSend silently swallows every
   // later message. Check the server first: a genuinely active run keeps the
-  // indicator; idle or unreachable rolls back so the UI unblocks (a still-
-  // running session re-asserts via SSE events / the next successful poll).
+  // indicator; confirmed-idle rolls back immediately; unreachable/unclear
+  // hands off to waitForPromptSettlement so the UI converges via polling
+  // even when SSE is already closed.
   const rollbackFailedQueueSend = useCallback(async (sid: string) => {
     let serverConfirmedIdle = false;
     try {
