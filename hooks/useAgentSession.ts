@@ -134,6 +134,25 @@ export interface QueuedMessages {
   followUp: string[];
 }
 
+/** Content equality for queue state — setState calls fire on every
+ *  state_sync/reconcile tick (every 15s while running) with freshly built
+ *  objects; without dedup the new identities would re-render ChatWindow and
+ *  memo(ChatInput) for nothing. */
+export function sameQueuedMessages(a: QueuedMessages, b: QueuedMessages): boolean {
+  return sameStringArray(a.steering, b.steering) && sameStringArray(a.followUp, b.followUp);
+}
+
+function sameStringArray(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function samePendingRecovery(a: PendingRecoveryItem[], b: PendingRecoveryItem[]): boolean {
+  return a.length === b.length && a.every((item, index) => {
+    const other = b[index];
+    return item.id === other.id && item.kind === other.kind && item.text === other.text && item.hasImages === other.hasImages;
+  });
+}
+
 /** A tool-approval request waiting for the user (from the RPC wrapper). */
 export interface ApprovalRequestItem {
   id: string;
@@ -756,8 +775,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [extensionCustomUi, setExtensionCustomUi] = useState<ExtensionUiCustomRequest | null>(null);
   const [extensionStatuses, setExtensionStatuses] = useState<ExtensionStatusItem[]>([]);
   const [extensionWidgets, setExtensionWidgets] = useState<ExtensionWidgetItem[]>([]);
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessages>({ steering: [], followUp: [] });
-  const [pendingRecovery, setPendingRecovery] = useState<PendingRecoveryItem[]>([]);
+  const [queuedMessages, setQueuedMessagesRaw] = useState<QueuedMessages>({ steering: [], followUp: [] });
+  // Deduped setters (same value-or-updater signature as useState) so
+  // content-identical snapshots keep the previous reference.
+  const setQueuedMessages = useCallback((value: QueuedMessages | ((prev: QueuedMessages) => QueuedMessages)) => {
+    setQueuedMessagesRaw((prev) => {
+      const next = typeof value === "function" ? value(prev) : value;
+      return sameQueuedMessages(prev, next) ? prev : next;
+    });
+  }, []);
+  const [pendingRecovery, setPendingRecoveryRaw] = useState<PendingRecoveryItem[]>([]);
+  const setPendingRecovery = useCallback((value: PendingRecoveryItem[] | ((prev: PendingRecoveryItem[]) => PendingRecoveryItem[])) => {
+    setPendingRecoveryRaw((prev) => {
+      const next = typeof value === "function" ? value(prev) : value;
+      return samePendingRecovery(prev, next) ? prev : next;
+    });
+  }, []);
   const [recoveryIsImport, setRecoveryIsImport] = useState(false);
 
   // ── Subagent fleet monitor ────────────────────────────────────────────────
@@ -2628,6 +2661,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // indicator; idle or unreachable rolls back so the UI unblocks (a still-
   // running session re-asserts via SSE events / the next successful poll).
   const rollbackFailedQueueSend = useCallback(async (sid: string) => {
+    let serverConfirmedIdle = false;
     try {
       const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
       if (res.ok) {
@@ -2635,15 +2669,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const state = data.state;
         const busy = Boolean(data.running && state
           && (state.isStreaming || state.isPromptRunning || state.isBashRunning || state.isCompacting));
-        if (busy) return;
+        if (busy) return; // a run is genuinely active — keep the indicator
+        serverConfirmedIdle = true;
       }
     } catch {
-      // Unreachable — roll back below.
+      // fall through to the settlement path below
     }
-    agentRunningRef.current = false;
-    setAgentRunning(false);
-    setAgentPhase(null);
-  }, []);
+    if (serverConfirmedIdle) {
+      agentRunningRef.current = false;
+      setAgentRunning(false);
+      setAgentPhase(null);
+      return;
+    }
+    // Server unreachable / unclear: do NOT blindly drop the flag — SSE may
+    // already be closed (nothing would re-assert running), and the reconcile
+    // effect unmounts with it. waitForPromptSettlement polls unconditionally
+    // until the run settles or the outage is surfaced to the user.
+    void waitForPromptSettlement(sid);
+  }, [waitForPromptSettlement]);
 
   // Queued (undelivered) messages live in the queue panel only; the chat gets
   // the real user message when pi delivers it (user message_end event). An
