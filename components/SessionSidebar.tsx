@@ -1777,6 +1777,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const isLargeWorkspaceControl = location === "welcome";
     const isProjectDropdownOpen = workspaceProjectDropdownOpen === location;
     const isWorktreeDropdownOpen = workspaceWorktreeDropdownOpen === location;
+    // The welcome (new-session) project button must show the CURRENT project
+    // (selectedCwd/selectedProject), not the leading dropdown's pinned one:
+    // switching via a project tab changes selectedCwd but leaves
+    // dropdownPinnedProject untouched, which previously left a stale name on
+    // the new-session page. The title bar keeps the pinned label on purpose.
+    const currentProjectLabel = selectedProject
+      ? aliasFor(selectedProject) ?? pathBaseName(selectedProject)
+      : compactProjectLabel;
     // The standalone project dropdown button lives at the front of the tab bar
     // on desktop; hide it here so it is not duplicated (welcome keeps it).
     const hideProjectButton = location === "title" && !isMobile;
@@ -1821,7 +1829,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               e.currentTarget.style.color = isProjectDropdownOpen ? "var(--text)" : selectedCwd ? "var(--text-muted)" : "var(--text-dim)";
             }}
           >
-            <PathLabel text={compactProjectLabel} style={{ flex: 1, minWidth: 0, color: "inherit", direction: "ltr", fontFamily: "inherit" }} />
+            <PathLabel text={isLargeWorkspaceControl ? currentProjectLabel : compactProjectLabel} style={{ flex: 1, minWidth: 0, color: "inherit", direction: "ltr", fontFamily: "inherit" }} />
             <CaretDown size={12} weight="regular" style={{ flexShrink: 0, transition: "transform 0.12s", transform: isProjectDropdownOpen ? "rotate(180deg)" : "none" }} aria-hidden="true" />
           </button>
           <AnimatedDropdown open={isProjectDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "min(38vh, 300px)" }}>

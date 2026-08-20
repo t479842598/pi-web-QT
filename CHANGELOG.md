@@ -6,6 +6,7 @@
 
 ### 修复
 - **新对话创建后发送首条消息：界面卡住、弹出会话窗口、侧边栏延迟显示（重要）** — 根因有两处叠加：① 客户端 `promoteNewSession`（通知 AppShell 接管新会话并刷新侧边栏的唯一切换点）位于 `await sendAgentCommand(prompt)` **之后**，SSE 握手（最多 4 秒）+ prompt 网络往返 + 模型冷启动全部被夹在「界面卡住（新会话意图态）」与「一次性视图切换」之间，观感即卡住后弹出会话窗口，且异常路径可能永不触发 promote；② 服务端 pi SDK 在第一条 assistant 消息产出前**不写会话文件**（`SessionManager` 延迟落盘设计），而 `/api/sessions` 通过 `SessionManager.listAll()` 扫描磁盘文件，新会话创建成功但侧边栏扫不到 → 需等首条回复落盘 + 列表刷新（节流 2s）才可见。修复：① `handleSend`/`executeBash` 在拿到真实 sid 后**立即** `promoteNewSession`（AppShell 即时接管：选中新会话、URL 更新、列表刷新），当前聊天窗不重挂载、在会话内正常等待流式结果；② 服务端 `startRpcSession` 新会话创建成功后立即调用 `persistSessionFileIfMissing()`（复用原 bash-only 落盘逻辑泛化而来），会话 `.jsonl` 文件在 `/api/agent/new` 响应前已落盘，侧边栏刷新立即可见；③ AppShell `handleSessionCreated` 在 1200ms 重试基础上增加 4000ms 二次刷新兜底（文件系统/缓存滞后场景）。
+- **新会话页面顶部项目标题显示成「最左侧下拉固定的项目」（显示错、归属对）** — 在顶部项目标签页切换到项目 B 后点击「新建会话」，新会话欢迎页上方显示的项目标题仍是下拉固定的项目 A 名字，但实际创建的会话 cwd 属于 B。根因：`dropdownPinnedProject`（最左侧下拉固定项）只在首次加载与「通过下拉切换」时更新，点击项目标签页走 `selectProject(project)`（不带 `fromDropdown`）只更新 `selectedCwd`，而欢迎页大控件（`workspaceControls` welcome 位置）label 取的一直是 `compactProjectLabel`（=`dropdownPinnedProject` 名）。修复：welcome 位置新增基于当前 `selectedProject` 的 `currentProjectLabel` 并优先显示（`isLargeWorkspaceControl ? currentProjectLabel : compactProjectLabel`），标题栏最左侧下拉仍保留固定标签（设计意图不变）。
 
 ### 其他
 - `lib/rpc-manager.ts`：`persistBashOnlySession()` 泛化为 public `persistSessionFileIfMissing()`（幂等：文件已存在则跳过；bash-only 会话同样安全）。
