@@ -95,7 +95,21 @@ impl Config {
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, &json).map_err(|e| e.to_string())?;
-        fs::rename(&tmp, path).map_err(|e| e.to_string())
+        // The config stores plaintext server passwords (a documented trade-off
+        // to avoid keychain prompts) — keep both the tmp and the final file
+        // owner-only where the platform supports it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+        }
+        fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        }
+        Ok(())
     }
 
     pub fn find(&self, id: &str) -> Option<&Server> {

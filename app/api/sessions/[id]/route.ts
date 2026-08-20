@@ -251,6 +251,9 @@ export async function DELETE(
       }
     } catch { /* skip if dir unreadable */ }
     try {
+      // Force a fresh scan: the 10s list cache could miss a fork created
+      // seconds ago, and DELETE is a low-frequency operation.
+      invalidateSessionListCache();
       for (const session of await listAllSessions()) {
         if (session.parentSessionId === id && session.path !== filePath) childPaths.add(session.path);
       }
@@ -289,7 +292,9 @@ export async function DELETE(
       } catch { /* skip malformed / unreadable child */ }
     }
 
-    await getRpcSession(id)?.shutdown();
+    // Best-effort: a failing extension shutdown hook must not block the
+    // delete (the wrapper is destroyed in shutdown's finally regardless).
+    await getRpcSession(id)?.shutdown().catch(() => undefined);
     unlinkSync(filePath);
     invalidateOpenSessionCache(filePath);
     invalidateSessionPathCache(id);
