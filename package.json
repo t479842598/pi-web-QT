@@ -32,7 +32,7 @@
   "scripts": {
     "dev": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next dev -H 127.0.0.1 -p 0 --turbopack",
     "dev:lan": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next dev -H 0.0.0.0 -p 0 --turbopack",
-    "build": "env -u TURBOPACK next build --webpack",
+    "build": "env -u TURBOPACK -u __NEXT_PRIVATE_STANDALONE_CONFIG next build --webpack",
     "bundle:backend": "node scripts/bundle-backend.mjs",
     "start": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next start -H 127.0.0.1 -p 0",
     "start:lan": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next start -H 0.0.0.0 -p 0",
