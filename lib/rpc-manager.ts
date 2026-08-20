@@ -804,7 +804,20 @@ export class AgentSessionWrapper {
   }
 
   private emit(event: AgentEvent): void {
-    for (const l of this.listeners) l(event);
+    for (const l of this.listeners) {
+      // Isolate listeners from each other: a throwing listener (e.g. an SSE
+      // route writing to a closed controller) must not starve the remaining
+      // listeners of this event — nor propagate back into the SDK dispatch
+      // path, where it can skip message persistence for the same event.
+      try {
+        l(event);
+      } catch (error) {
+        console.error(
+          `[pi-web] session ${this.sessionId} event listener threw:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
   }
 
   private resetIdleTimer(): void {

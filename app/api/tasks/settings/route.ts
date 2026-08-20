@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
+import { getAllowedFileRoots, isFilePathAllowed } from "@/lib/file-access";
+import { getProjectTrustStatus } from "@/lib/project-trust";
 import {
   deleteSettingsRow,
   loadEffectiveSettings,
@@ -39,10 +42,27 @@ export async function PUT(req: Request) {
   }
   try {
     const body = (await req.json()) as { projectRoot?: unknown; settings?: unknown };
-    if (typeof body.projectRoot !== "string") {
+    if (typeof body.projectRoot !== "string" || !body.projectRoot.startsWith("/")) {
       return NextResponse.json({ error: "projectRoot is required" }, { status: 400 });
     }
+    // These settings can register shell commands (initCommand/preflightCommand)
+    // that the engine later executes — gate the write the same way project
+    // plugin changes are gated: known root + project trust for commands.
+    const allowedRoots = await getAllowedFileRoots();
+    if (!isFilePathAllowed(body.projectRoot, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
     const raw = (body.settings ?? {}) as Partial<WorkTaskFolderSettings>;
+    const registersCommand = Boolean(
+      (typeof raw.initCommand === "string" && raw.initCommand.trim()) ||
+      (typeof raw.preflightCommand === "string" && raw.preflightCommand.trim()),
+    );
+    if (registersCommand && !getProjectTrustStatus(body.projectRoot, getAgentDir()).trusted) {
+      return NextResponse.json(
+        { error: "Project resources must be trusted before registering task shell commands" },
+        { status: 403 },
+      );
+    }
     const settings: WorkTaskFolderSettings = {
       ...defaultTaskSettings(),
       ...raw,

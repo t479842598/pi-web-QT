@@ -74,7 +74,7 @@ export async function GET(
 
       function flushPendingUpdate() {
         if (pendingUpdate) {
-          encode(pendingUpdate);
+          try { encode(pendingUpdate); } catch { /* controller already closed */ }
           pendingUpdate = null;
         }
         if (coalesceTimer) {
@@ -102,7 +102,7 @@ export async function GET(
           // ordering is preserved (the buffered update logically precedes
           // whatever non-streaming event just arrived).
           flushPendingUpdate();
-          encode(clientEvent);
+          try { encode(clientEvent); } catch { /* controller already closed */ }
         }
       });
 
@@ -121,7 +121,7 @@ export async function GET(
         clearTimeout(coalesceTimer);
         clearTimeout(idleTimeout);
         unsubscribe();
-        controller.close();
+        try { controller.close(); } catch { /* already closed */ }
       }
       // Idle close: guard against half-open connections that never fire abort.
       // Mirrors the 2h cap already used by the tasks events route.

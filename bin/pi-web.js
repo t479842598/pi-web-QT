@@ -51,6 +51,22 @@ if (!fs.existsSync(nextDir)) {
   process.exit(1);
 }
 
+const isLoopback = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+if (!isLoopback) {
+  if (process.env.PI_WEB_PASSWORD) {
+    console.warn("Pi Web is exposed beyond loopback. HTTP Basic Auth does not encrypt credentials; use HTTPS or a trusted VPN.");
+  } else if (process.env.PI_WEB_ALLOW_INSECURE_LAN === "1") {
+    console.warn("Pi Web is exposed beyond loopback WITHOUT authentication (PI_WEB_ALLOW_INSECURE_LAN=1). Anyone on the network can run agent commands on this machine.");
+  } else {
+    // Hard fail: an unauthenticated listener on a LAN address hands every
+    // device on the network full read access to sessions/files plus
+    // same-origin write access (agent prompts, task shell commands).
+    console.error("Refusing to start: Pi Web is bound to " + hostname + " (beyond loopback) but PI_WEB_PASSWORD is not set.");
+    console.error("Set PI_WEB_PASSWORD to require HTTP Basic Auth, bind to 127.0.0.1 instead, or set PI_WEB_ALLOW_INSECURE_LAN=1 to override.");
+    process.exit(1);
+  }
+}
+
 const nextArgs = ["start", "-p", port, "-H", hostname];
 
 // Always run next's JS entry with node directly — avoids .bin symlink issues
@@ -60,14 +76,6 @@ const child = spawn(process.execPath, [nextBin, ...nextArgs], {
   stdio: ["inherit", "pipe", "inherit"],
   env: { ...process.env, PI_WEB_HOSTNAME: hostname },
 });
-
-if (hostname !== "127.0.0.1" && hostname !== "localhost" && hostname !== "::1") {
-  if (process.env.PI_WEB_PASSWORD) {
-    console.warn("Pi Web is exposed beyond loopback. HTTP Basic Auth does not encrypt credentials; use HTTPS or a trusted VPN.");
-  } else {
-    console.warn("Pi Web is exposed beyond loopback without authentication. Use only on a trusted network.");
-  }
-}
 
 let browserOpened = false;
 const url = `http://${hostname}:${port}`;

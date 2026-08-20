@@ -23,10 +23,14 @@ export function proxy(request: NextRequest) {
   }
 
   const password = process.env.PI_WEB_PASSWORD;
-  // Development convenience: skip basic auth during `next dev` so local
-  // debugging doesn't need credentials. Production builds keep the gate.
+  // Development convenience: skip basic auth during `next dev` for loopback
+  // clients only — `dev:lan` (0.0.0.0) must not silently drop the auth gate
+  // for every device on the network. Production builds always keep the gate.
   const isDev = process.env.NODE_ENV === "development";
-  if (!isDev && isWebPasswordEnabled(password) && !isValidBasicAuthorization(request.headers.get("authorization"), password)) {
+  const host = request.headers.get("host") ?? "";
+  const isLoopbackHost = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host);
+  const skipAuth = isDev && isLoopbackHost;
+  if (!skipAuth && isWebPasswordEnabled(password) && !isValidBasicAuthorization(request.headers.get("authorization"), password)) {
     return new NextResponse("Authentication required", {
       status: 401,
       headers: {

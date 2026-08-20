@@ -2592,6 +2592,31 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [addNotice, ensureNewSession, isCompacting, loadModels, loadSession, loadSlashCommands, loadTools, promoteNewSession, onSessionStatsPanelOpen]);
 
+  // Rollback for a failed steer/follow-up/queued-prompt POST. The optimistic
+  // agentRunning=true was set before the request; if the command never
+  // reached the server the flag would otherwise stay true forever — ChatInput
+  // shows a permanent streaming state and handleSend silently swallows every
+  // later message. Check the server first: a genuinely active run keeps the
+  // indicator; idle or unreachable rolls back so the UI unblocks (a still-
+  // running session re-asserts via SSE events / the next successful poll).
+  const rollbackFailedQueueSend = useCallback(async (sid: string) => {
+    try {
+      const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
+      if (res.ok) {
+        const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
+        const state = data.state;
+        const busy = Boolean(data.running && state
+          && (state.isStreaming || state.isPromptRunning || state.isBashRunning || state.isCompacting));
+        if (busy) return;
+      }
+    } catch {
+      // Unreachable — roll back below.
+    }
+    agentRunningRef.current = false;
+    setAgentRunning(false);
+    setAgentPhase(null);
+  }, []);
+
   // Queued (undelivered) messages live in the queue panel only; the chat gets
   // the real user message when pi delivers it (user message_end event). An
   // optimistic chat bubble here would duplicate the queue panel and turn into
@@ -2614,8 +2639,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       });
     } catch (e) {
       console.error("Failed to steer:", e);
+      void rollbackFailedQueueSend(sid);
     }
-  }, []);
+  }, [rollbackFailedQueueSend]);
 
   const handlePromptWithStreamingBehavior = useCallback(async (
     message: string,
@@ -2640,8 +2666,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       });
     } catch (e) {
       console.error("Failed to queue prompt:", e);
+      void rollbackFailedQueueSend(sid);
     }
-  }, []);
+  }, [rollbackFailedQueueSend]);
 
   const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
@@ -2661,8 +2688,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       });
     } catch (e) {
       console.error("Failed to follow up:", e);
+      void rollbackFailedQueueSend(sid);
     }
-  }, []);
+  }, [rollbackFailedQueueSend]);
 
   const handleAbortCompaction = useCallback(async () => {
     const sid = sessionIdRef.current;

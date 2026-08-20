@@ -40,6 +40,8 @@ export function useDeepSeekBalance() {
     };
   }, []);
 
+  const balanceRef = useRef<DeepSeekBalanceData | null>(null);
+
   const refresh = useCallback(async () => {
     controllerRef.current?.abort();
     const controller = new AbortController();
@@ -52,16 +54,30 @@ export function useDeepSeekBalance() {
       const data = (await res.json()) as DeepSeekBalanceData;
       if (!mountedRef.current) return;
       if (data?.available && data.totalBalance != null) {
-        setBalance(data);
+        // Field-level compare: replacing state with an identical-but-new object
+        // would change this callback's identity and retrigger the caller's
+        // refresh effect — an infinite fetch loop (see ChatWindow mount effect).
+        const prev = balanceRef.current;
+        const unchanged = prev !== null
+          && prev.available === data.available
+          && prev.reason === data.reason
+          && prev.currency === data.currency
+          && prev.totalBalance === data.totalBalance
+          && prev.grantedBalance === data.grantedBalance
+          && prev.toppedUpBalance === data.toppedUpBalance;
+        if (!unchanged) {
+          balanceRef.current = data;
+          setBalance(data);
+        }
         setFailed(false);
-      } else if (balance === null) {
+      } else if (balanceRef.current === null) {
         setFailed(true);
       }
     } catch {
       if (!mountedRef.current) return;
-      if (balance === null) setFailed(true);
+      if (balanceRef.current === null) setFailed(true);
     }
-  }, [balance]);
+  }, []);
 
   const refreshSoon = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);

@@ -249,7 +249,7 @@ export function deleteTask(id: number, projectRoot: string, deleteWorktree: bool
         // Worktree may already be gone; branch cleanup still runs.
       }
       try {
-        await runShellIn(projectRoot, `git branch -D ${JSON.stringify(task.workBranch)}`);
+        await runGitIn(projectRoot, ["branch", "-D", task.workBranch as string]);
       } catch {
         // Branch may be merged/renamed — leave it.
       }
@@ -631,6 +631,32 @@ function cleanupRun(run: LiveRun): void {
 
 // ─── Shell helpers (init command, preflight) ────────────────────────────────
 
+// Git invocations never go through a shell: task fields (workBranch) live in
+// the on-disk store and the merge message is user-supplied — string-building
+// a shell command lets `$(...)`/backticks execute even inside JSON-quoted
+// double quotes. Array-arg spawn removes the entire injection class.
+function runGitIn(cwd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", args, { cwd, stdio: "ignore" });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`git ${args[0] ?? ""} exited with code ${code ?? "null"}`));
+    });
+  });
+}
+
+function runGitCapture(cwd: string, args: string[]): Promise<{ code: number | null; output: string }> {
+  return new Promise((resolve) => {
+    const child = spawn("git", args, { cwd });
+    let output = "";
+    child.stdout?.on("data", (d: Buffer) => { output += d.toString(); });
+    child.stderr?.on("data", (d: Buffer) => { output += d.toString(); });
+    child.on("error", () => resolve({ code: 1, output }));
+    child.on("exit", (code) => resolve({ code, output }));
+  });
+}
+
 function runShellIn(cwd: string, command: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, { cwd, shell: true, stdio: "ignore" });
@@ -807,7 +833,7 @@ export async function completeTask(id: number, projectRoot: string, deleteWorktr
         await removeWorktree(projectRoot, task.worktreePath, true).catch(() => undefined);
       }
       if (task.workBranch) {
-        await runShellIn(projectRoot, `git branch -D ${JSON.stringify(task.workBranch)}`).catch(() => undefined);
+        await runGitIn(projectRoot, ["branch", "-D", task.workBranch]).catch(() => undefined);
       }
     } catch {
       // Best-effort cleanup.
@@ -858,7 +884,7 @@ async function gitMergeShell(projectRoot: string, task: WorkTask, message: strin
   if (!task.worktreePath || !task.workBranch) throw new Error("No worktree to merge");
   // Safety: never run a shell merge against a dirty main checkout — the
   // merge could sweep unrelated uncommitted changes into the commit.
-  const status = await runShellCapture(projectRoot, "git status --porcelain");
+  const status = await runGitCapture(projectRoot, ["status", "--porcelain"]);
   if (status.output.trim().length > 0) {
     throw new Error(
       "Main checkout has uncommitted changes; the agent-driven merge cannot run. Commit or stash them first.",
@@ -866,12 +892,12 @@ async function gitMergeShell(projectRoot: string, task: WorkTask, message: strin
   }
   const squash = message != null;
   // Worktree branch → base branch (main repo)
-  await runShellIn(projectRoot, `git merge --${squash ? "squash" : "no-ff"} ${task.workBranch}`);
+  await runGitIn(projectRoot, ["merge", squash ? "--squash" : "--no-ff", task.workBranch as string]);
   if (squash) {
     const msg = message || `Merge task ${task.id}: ${task.title}`;
-    await runShellIn(projectRoot, `git commit -m ${JSON.stringify(msg)}`);
+    await runGitIn(projectRoot, ["commit", "-m", msg]);
   }
-  const commit = await runShellCapture(projectRoot, "git rev-parse --short HEAD");
+  const commit = await runGitCapture(projectRoot, ["rev-parse", "--short", "HEAD"]);
   casStatus(task.id, task.runSeq, ["merging"], "done", {
     mergeCommit: commit.output.trim(),
     finishedAt: nowIso(),
@@ -881,7 +907,7 @@ async function gitMergeShell(projectRoot: string, task: WorkTask, message: strin
     await removeWorktree(projectRoot, task.worktreePath, true).catch(() => undefined);
   }
   if (deleteWorktree && task.workBranch) {
-    await runShellIn(projectRoot, `git branch -D ${JSON.stringify(task.workBranch)}`).catch(() => undefined);
+    await runGitIn(projectRoot, ["branch", "-D", task.workBranch as string]).catch(() => undefined);
   }
 }
 
@@ -889,7 +915,7 @@ async function gitMergeShell(projectRoot: string, task: WorkTask, message: strin
 function handleMergeEnd(run: LiveRun): void {
   const task = loadTask(run.projectRoot, run.taskId);
   if (!task || task.status !== "merging") return;
-  const commit = runShellCapture(run.session.cwd, "git rev-parse --short HEAD").then((r) => r.output.trim()).catch(() => null);
+  const commit = runGitCapture(run.session.cwd, ["rev-parse", "--short", "HEAD"]).then((r) => r.output.trim()).catch(() => null);
   void commit.then(async (hash) => {
     const live = loadTask(run.projectRoot, run.taskId);
     if (!live) return;
@@ -905,7 +931,7 @@ function handleMergeEnd(run: LiveRun): void {
         await removeWorktree(run.projectRoot, live.worktreePath, true).catch(() => undefined);
       }
       if (live.workBranch) {
-        await runShellIn(run.projectRoot, `git branch -D ${JSON.stringify(live.workBranch)}`).catch(() => undefined);
+        await runGitIn(run.projectRoot, ["branch", "-D", live.workBranch as string]).catch(() => undefined);
       }
     } catch {
       // Best-effort cleanup; a leftover worktree is visible in git worktree list.

@@ -12,7 +12,7 @@ export async function GET(req: Request) {
       });
 
       const initial = getRunningRpcSessionSnapshots();
-      encode({ type: "running", sessions: initial, runningSessionIds: initial.map((session) => session.id) });
+      try { encode({ type: "running", sessions: initial, runningSessionIds: initial.map((session) => session.id) }); } catch { /* closed */ }
       const heartbeat = setInterval(() => {
         try { controller.enqueue(encoder.encode(":\n\n")); } catch { /* closed */ }
       }, 30_000);
