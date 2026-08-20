@@ -170,6 +170,7 @@ export const zhCNLocale = {
     "desktop.subagentsBackToFiles": "文件",
     "desktop.subagentsEmpty": "暂无子代理运行",
     "desktop.subagentsBack": "返回",
+    "desktop.subagentCardProcessing": "正在处理",
     "desktop.subagentsNotFound": "子代理已结束",
     "desktop.subagentsNoTranscript": "暂无运行记录（子代理未写转录或已完成清理）",
     "desktop.subagentsWaitingFirstMessage": "等待子代理首条消息…",

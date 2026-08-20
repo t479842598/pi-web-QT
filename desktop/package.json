@@ -1,6 +1,6 @@
 {
   "name": "pi-web-desktop",
-  "version": "0.10.5",
+  "version": "0.10.6",
   "private": true,
   "description": "Pi Web 桌面端/移动端（Tauri 2）",
   "scripts": {

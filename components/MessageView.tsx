@@ -10,6 +10,8 @@ import { CompactionSummary } from "./CompactionSummary";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
 import type { WrittenFile } from "@/lib/turn-written-files";
+import { SubagentCard } from "./SubagentCard";
+import type { SubagentStatus } from "@/lib/types";
 import { ArrowBendDownRightIcon } from "@phosphor-icons/react/ArrowBendDownRight";
 import { ArrowDownIcon } from "@phosphor-icons/react/ArrowDown";
 import { ArrowUpIcon } from "@phosphor-icons/react/ArrowUp";
@@ -98,6 +100,10 @@ interface Props {
   writtenFiles?: WrittenFile[];
   /** "Turn this message into a work task" — user messages only. */
   onCreateTask?: (text: string, cwd: string | undefined) => void;
+  /** Live subagent fleet — lets Agent/Task tool calls render as subagent cards. */
+  subagents?: SubagentStatus[];
+  /** Open the fullscreen subagent conversation view for a spawned agent. */
+  onOpenSubagent?: (agentId: string) => void;
 }
 
 function formatTime(ts?: number): string | null {
@@ -127,12 +133,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onQuoteReply, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, onCreateTask, writtenFiles }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onQuoteReply, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, onCreateTask, writtenFiles, subagents, onOpenSubagent }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} onCreateTask={onCreateTask} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} onFork={onFork} forking={forking} writtenFiles={writtenFiles} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} onFork={onFork} forking={forking} writtenFiles={writtenFiles} subagents={subagents} onOpenSubagent={onOpenSubagent} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -166,7 +172,9 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.showTimestamp === next.showTimestamp
     && prev.prevTimestamp === next.prevTimestamp
     && prev.sessionId === next.sessionId
-    && prev.writtenFiles === next.writtenFiles;
+    && prev.writtenFiles === next.writtenFiles
+    && prev.subagents === next.subagents
+    && prev.onOpenSubagent === next.onOpenSubagent;
 });
 
 function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, onCreateTask }: {
@@ -372,6 +380,8 @@ function AssistantMessageView({
   onFork,
   forking,
   writtenFiles,
+  subagents,
+  onOpenSubagent,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -387,6 +397,8 @@ function AssistantMessageView({
   onFork?: (entryId: string) => void;
   forking?: boolean;
   writtenFiles?: WrittenFile[];
+  subagents?: SubagentStatus[];
+  onOpenSubagent?: (agentId: string) => void;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -561,7 +573,7 @@ function AssistantMessageView({
           </div>
         )}
         {blockItems.map(({ block, originalIndex }) => (
-          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
+          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} subagents={subagents} onOpenSubagent={onOpenSubagent} />
         ))}
       </div>
 
@@ -755,7 +767,7 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, onQuoteReply, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string) => void; onQuoteReply?: (quote: string) => void; sessionId?: string; entryId?: string; blockIndex: number }) {
+function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, onQuoteReply, sessionId, entryId, blockIndex, subagents, onOpenSubagent }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string) => void; onQuoteReply?: (quote: string) => void; sessionId?: string; entryId?: string; blockIndex: number; subagents?: SubagentStatus[]; onOpenSubagent?: (agentId: string) => void }) {
   if (block.type === "text") {
     return <TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} />;
   }
@@ -764,11 +776,36 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
   }
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
+    // Subagent spawn (Agent/Task tool): render a dedicated interactive card
+    // instead of the generic folding tool-call block.
+    if (SUBAGENT_TOOL_NAMES.has(tc.toolName)) {
+      const agent = subagents?.find((s) => s.id === tc.toolCallId) ?? makeRunningSubagentFromToolCall(tc);
+      return <SubagentCard agent={agent} cwd={cwd} onOpen={onOpenSubagent} />;
+    }
     const result = toolResults?.get(tc.toolCallId);
     const duration = toolCallDurations?.get(tc.toolCallId);
     return <ToolCallBlock block={tc} result={result} duration={duration} />;
   }
   return null;
+}
+
+/** Tool names that spawn a subagent — mirrors useAgentSession.SUBAGENT_TOOL_NAMES. */
+const SUBAGENT_TOOL_NAMES = new Set(["Agent", "Task"]);
+
+/**
+ * Fallback running entry used before the tool_execution_start event lands:
+ * the card still renders a spinner while waiting for the live status row.
+ */
+function makeRunningSubagentFromToolCall(block: ToolCallContent): SubagentStatus {
+  const input = block.input ?? {};
+  const description =
+    typeof input.description === "string" && input.description.trim()
+      ? input.description.trim()
+      : typeof input.prompt === "string"
+        ? input.prompt.slice(0, 80)
+        : "";
+  const agentType = typeof input.subagent_type === "string" && input.subagent_type ? input.subagent_type : block.toolName;
+  return { id: block.toolCallId, agentType, description, status: "running", startedAt: Date.now() };
 }
 
 function TextBlock({ block, isStreaming, cwd, onOpenFile, onQuoteReply }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string) => void; onQuoteReply?: (quote: string) => void }) {

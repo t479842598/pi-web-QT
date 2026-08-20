@@ -45,6 +45,10 @@ interface Props {
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
   /** Live subagent activity (Agent tool spawns/completions) forwarded to AppShell. */
   onSubagentsChange?: (subagents: SubagentStatus[]) => void;
+  /** Live subagent fleet — rendered as inline cards on Agent/Task tool calls. */
+  subagents?: SubagentStatus[];
+  /** Open the fullscreen subagent conversation view (AppShell). */
+  onOpenSubagent?: (agentId: string) => void;
   onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string) => void;
@@ -124,7 +128,7 @@ function withAssistantBlocks(
 
 
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSubagentsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onWorkspaceControlsHostChange, onViewFullHistory, systemPrompt, tasksBoardEnabled }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSubagentsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onWorkspaceControlsHostChange, onViewFullHistory, systemPrompt, tasksBoardEnabled, subagents, onOpenSubagent }: Props) {
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -858,6 +862,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
                     writtenFiles={options.writtenFiles}
+                    subagents={subagents}
+                    onOpenSubagent={onOpenSubagent}
                   />
                 );
                 if (!isVisible || options.attachRef === false || currentRefIdx === undefined) return view;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { ArrowLeft } from "@phosphor-icons/react";
+import { ArrowLeft, CaretLeft } from "@phosphor-icons/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -166,6 +166,11 @@ export function AppShell() {
     setSubagentViewOpen(false);
     setSubagentViewAgentId(null);
   }, []);
+  // Fullscreen subagent page: replaces the main chat area (input hidden) with
+  // the subagent's running conversation; "Back" restores the main dialogue.
+  const [subagentPageAgentId, setSubagentPageAgentId] = useState<string | null>(null);
+  const openSubagentPage = useCallback((agentId: string) => setSubagentPageAgentId(agentId), []);
+  const closeSubagentPage = useCallback(() => setSubagentPageAgentId(null), []);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(getDefaultRightPanelWidth(1366));
   const getResponsiveRightPanelWidth = useCallback(
@@ -874,6 +879,8 @@ export function AppShell() {
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
               onSubagentsChange={handleSubagentsChange}
+              subagents={subagents}
+              onOpenSubagent={openSubagentPage}
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
@@ -920,6 +927,42 @@ export function AppShell() {
               </div>
             )
           ) : null}
+
+          {/* Fullscreen subagent page — rendered as an overlay so ChatWindow
+              (and its live AgentSession/SSE) stays mounted underneath. */}
+          {subagentPageAgentId && (() => {
+            const agent = subagents.find((s) => s.id === subagentPageAgentId) ?? null;
+            return (
+              <div style={{ position: "absolute", inset: 0, zIndex: 30, background: "var(--bg)", display: "flex", flexDirection: "column" }}>
+                {agent ? (
+                  <SubagentDetail
+                    agent={agent}
+                    cwd={activeCwd ?? selectedSession?.cwd ?? undefined}
+                    onBack={closeSubagentPage}
+                  />
+                ) : (
+                  <>
+                    <div style={{ flexShrink: 0, borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", padding: "6px 8px" }}>
+                      <button
+                        type="button"
+                        onClick={closeSubagentPage}
+                        title={t("desktop.subagentsBack")}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 2, padding: "3px 6px", border: "none", borderRadius: 5, background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                      >
+                        <CaretLeft size={12} aria-hidden="true" />
+                        {t("desktop.subagentsBack")}
+                      </button>
+                    </div>
+                    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
+                      {t("desktop.subagentsNotFound")}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
 

@@ -170,6 +170,7 @@ export const enLocale = {
     "desktop.subagentsBackToFiles": "Files",
     "desktop.subagentsEmpty": "No subagents running",
     "desktop.subagentsBack": "Back",
+    "desktop.subagentCardProcessing": "Processing",
     "desktop.subagentsNotFound": "Subagent already ended",
     "desktop.subagentsNoTranscript": "No transcript yet (subagent not writing one or already cleaned up)",
     "desktop.subagentsWaitingFirstMessage": "Waiting for the subagent's first message…",

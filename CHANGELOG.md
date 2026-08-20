@@ -2,6 +2,17 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.10.6 — 2026-08-20（主对话流子代理卡片 + 全屏运行对话视图）
+
+> 本次为 **Beta 测试版**：npm 包发布为 `0.10.6-beta.0`（dist-tag `beta`），桌面/移动端版本号同步为 `0.10.6`（纯数字段）。
+
+### 新增
+- **主对话流直接显示子代理运行卡片** — 模型调用 `Agent`/`Task` 工具时，对话流中渲染子代理卡片（替代原普通折叠 JSON 卡片）：运行中显示旋转加载动画 + 「正在处理」标题 + 子代理类型/描述 + **最新一条运行内容实时预览**（运行中每 2s 轮询 transcript 文件），完成/失败/停止后显示对应状态色与 token/耗时汇总。卡片在 `tool_execution_start` 事件落地前即可渲染（fallback 运行中状态兜底）。
+- **点击卡片全屏查看子代理运行对话** — 点击卡片后主对话区域切换为子代理完整对话视图（transcript 实时刷新、自动滚动），输入框隐藏；顶部「返回」按钮一键回到主对话并恢复输入框。全屏视图以 absolute 覆盖层实现，底层 `ChatWindow`/SSE 保持挂载——运行中的主会话与子代理不因切换视图而中断。
+
+### 其他
+- 新增 `components/SubagentCard.tsx` 组件；`components/MessageView.tsx` 对 `Agent`/`Task` 工具调用新增专用渲染分支（`SUBAGENT_TOOL_NAMES` + `makeRunningSubagentFromToolCall` fallback），`ChatWindow`/`AppShell` 透传 `subagents` + `onOpenSubagent` 并实现主区域覆盖层切换；i18n 新增「正在处理 / Processing」文案。
+
 ## v0.10.5 — 2026-08-20（新会话首条消息即时上侧边栏：promote 提前 + 会话文件即时落盘）
 
 ### 修复
