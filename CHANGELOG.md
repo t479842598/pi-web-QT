@@ -2,6 +2,25 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.10.8 — 2026-08-21（Windows 桌面端白屏/挂起根治：主线程建窗 + 代理 alt-svc 剔除 + WebView2 禁用 GPU）
+
+### 修复
+- **Windows 桌面端连接远程服务器白屏且窗口挂起关不掉（重要）** — 三层根因叠加，逐一修复：
+  1. **`connect_server` 同步命令 + IPC 线程建窗**（`desktop/src/commands.rs`）：Windows 上 WebView2 controller 初始化要求主线程消息循环，同步命令阻塞 IPC 线程导致窗口停在 `about:blank`、导航不执行、主线程消息循环受阻（关窗无响应）。恢复为 `async` 命令 + `run_on_main_thread` 排队到主线程创建窗口，channel 等待建窗完成（15s 超时）。
+  2. **代理透传 `alt-svc: h3=":443"`**（`desktop/src/proxy.rs`）：Cloudflare 上游返回 HTTP/3 广告头，WebView2 收到后尝试 QUIC 连 `127.0.0.1:443`（无服务）→ 导航挂起白屏。`RESP_DROP` 增加 `alt-svc` 剔除。
+  3. **多虚拟显卡环境 WebView2 GPU 挂起**（`desktop/src/window.rs`）：本机含 Oray(状态 Error)/GameViewer/MuMu 多个虚拟显卡，WebView2 GPU 渲染导致 browser 进程崩溃（msedge.dll 0x80000003）与 AppHangB1（Windows 事件日志 13:41/13:50/14:12/14:15 多次）。连接页与服务器窗口两个 builder 增加 `.additional_browser_args("--disable-gpu")`，强制软件渲染。
+- **内置后端/远程凭据问题** — 远程 MAC 服务器 config 中保存的密码错误（`TANGlidong24ban2` 实测 401，正确为 `TANGlidong24ban@` 实测 200），已修正配置（`%APPDATA%\com.piweb.desktop\config.json`，旧值备份 `.bak-20260821`）。
+- **构建期 Node 22 的 `cpSync` 偶发崩溃**（0xC0000409）— `bundle:backend` 内嵌 next build 及装配阶段改用逐文件复制规避（构建脚本层处理，非应用代码）。
+
+### 验证
+- WebView2 CDP（`--remote-debugging-port=9222`）端到端实测：连接页点击 MAC「连接」→ `connect_server` 返回 200（不再挂起）→ 服务器窗口 URL=`http://127.0.0.1:29993/`、标题「项目研发 — Pi Agent Web」、完整渲染（深色主题，body 2984 字节）→ 页内 `/api/agent/running` 经代理 200。修复前该窗口停在 `about:blank` 且 `Page.captureScreenshot` 超时。
+- 实例稳定性：点击后持续存活 `Responding=True`；最近 5 分钟 Windows 事件日志零 AppHangB1。
+- 内置 backend 手动拉起：`node server.js` → 30141 LISTENING，`/api/home` 401（密码生效）。
+- 偏好持久化：`http://127.0.0.1:29993` origin 的 Local Storage 保存了主题（`pi-theme=vesper`、`pi-theme-mode=dark`）与全局模式配置 — 代理端口持久化（`proxy_port` 固定）保证重连后网页端偏好不丢失。
+
+### 其他
+- npm 升级 11.3.0 → 11.19.0（11.x 最新，兼容 node 22.19.0；npm@12 需 node≥22.22.2）。
+
 ## v0.10.7 — 2026-08-21（桌面端后端进程退出不彻底导致端口残留/内容错乱修复）
 
 ### 修复

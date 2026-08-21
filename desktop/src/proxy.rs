@@ -139,7 +139,9 @@ fn is_navigation(headers: &[(String, String)]) -> bool {
 }
 
 /// 响应侧不透传的头（小写；分帧相关头由 hyper 重新生成）。
-const RESP_DROP: [&str; 5] = [
+/// alt-svc：Cloudflare 等上游返回 `h3=":443"` 广告 HTTP/3，透传会给 WebView2
+/// 造成 "尝试 QUIC 连 127.0.0.1:443" 的误导 → 导航挂起白屏，必须剔除。
+const RESP_DROP: [&str; 6] = [
     "connection",
     "keep-alive",
     "transfer-encoding",
@@ -147,6 +149,7 @@ const RESP_DROP: [&str; 5] = [
     // WebView2 对 401 + WWW-Authenticate 会弹系统凭据对话框（本次修复的源头场景）；
     // 凭据由代理统一注入，不需要向 WebView 发起挑战
     "www-authenticate",
+    "alt-svc",
 ];
 
 type ServerLoader = Arc<dyn Fn() -> Option<Server> + Send + Sync>;

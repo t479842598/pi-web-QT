@@ -343,7 +343,7 @@ pub fn set_local_domain(app: AppHandle, domain: String) -> Result<ServerInfo, St
 
 /// 连接指定服务器：记录最近使用并打开/聚焦窗口（桌面）或导航主窗口（移动端）。
 #[tauri::command]
-pub fn connect_server(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn connect_server(app: AppHandle, id: String) -> Result<(), String> {
     let srv = {
         let state = app.state::<AppState>();
         let mut cfg = state.config.lock().unwrap().clone();
@@ -357,7 +357,23 @@ pub fn connect_server(app: AppHandle, id: String) -> Result<(), String> {
         srv
     };
     #[cfg(not(mobile))]
-    window::open_server_window(&app, &srv).map_err(|e| e.to_string())?;
+    {
+        // 关键修复：Windows 上 WebView2 controller 初始化要求主线程消息循环，
+        // 同步命令会阻塞 IPC 线程导致窗口创建挂起/白屏。排队到主线程创建窗口，
+        // 等待其完成后再返回（08-14 已验证：窗口先以本地页创建、build 返回后导航）。
+        let app2 = app.clone();
+        let srv2 = srv.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        app.run_on_main_thread(move || {
+            let r = window::open_server_window(&app2, &srv2)
+                .map(|_| ())
+                .map_err(|e| e.to_string());
+            let _ = tx.send(r);
+        })
+        .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(15))
+            .map_err(|e| format!("创建服务器窗口超时: {e}"))??;
+    }
     #[cfg(mobile)]
     window::navigate_main(&app, &window::build_url(&srv));
     Ok(())

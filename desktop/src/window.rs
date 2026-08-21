@@ -140,19 +140,33 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
         let cfg = state.config.lock().unwrap();
         build_window_menu(app, &cfg).ok()
     };
-    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
+    // 注意：Windows WebView2 上 WebviewUrl::External 的初始导航可能因 controller
+    // 未就绪而丢失（窗口停在 about:blank → 白屏），因此先以本地页创建窗口，
+    // build 返回后显式 navigate 到目标服务器（08-14 已验证的修复路径）。
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        &label,
+        WebviewUrl::App(std::path::PathBuf::from("index.html")),
+    )
         .title(&server.name)
         .inner_size(1280.0, 820.0)
         .min_inner_size(800.0, 600.0)
-        .center()
-        // 远程凭据注入由本地反向代理完成（见 window_url）：Tauri 的
-        // on_web_resource_request 只作用于 tauri:// 资源，无法拦截外部 http(s)，
-        // 早期"请求头注入"方案在两个平台都未生效过（WebView2 弹凭据框 /
-        // WKWebView 白屏）。URL 保持干净 —— 不带 userinfo。
-        // 网页端设置里的「切换服务器」走 piweb-switch:// 自定义导航：
-        //   piweb-switch://manage -> 打开连接页
-        //   piweb-switch://<id>   -> 当前窗口导航到该服务器
-        .on_navigation({
+        .center();
+    // Windows：多虚拟显卡/远程控制环境（Oray/GameViewer/MuMu 等）下
+    // WebView2 GPU 渲染会导致 browser 进程崩溃或主线程挂起（AppHangB1）→
+    // 白屏。禁用 GPU 强制软件渲染，实测可稳定加载远程页面。
+    #[cfg(windows)]
+    {
+        builder = builder.additional_browser_args("--disable-gpu");
+    }
+    // 远程凭据注入由本地反向代理完成（见 window_url）：Tauri 的
+    // on_web_resource_request 只作用于 tauri:// 资源，无法拦截外部 http(s)，
+    // 早期"请求头注入"方案在两个平台都未生效过（WebView2 弹凭据框 /
+    // WKWebView 白屏）。URL 保持干净 —— 不带 userinfo。
+    // 网页端设置里的「切换服务器」走 piweb-switch:// 自定义导航：
+    //   piweb-switch://manage -> 打开连接页
+    //   piweb-switch://<id>   -> 当前窗口导航到该服务器
+    builder = builder.on_navigation({
             let app_handle = app.clone();
             let label_owner = label.clone();
             move |url| {
@@ -197,6 +211,9 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
         .insert(server.id.clone(), label);
     let _ = win.show();
     let _ = win.set_focus();
+    // 窗口构建完成（WebView2 controller 已就绪）后再导航到目标服务器，
+    // 避免 Windows 上 External 初始导航丢失导致白屏。
+    let _ = win.navigate(url);
     Ok(win)
 }
 
@@ -209,7 +226,7 @@ pub fn open_connect_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         let _ = w.set_focus();
         return Ok(w);
     }
-    let win = WebviewWindowBuilder::new(
+    let mut win_builder = WebviewWindowBuilder::new(
         app,
         CONNECT_LABEL,
         WebviewUrl::App("index.html".into()),
@@ -217,8 +234,13 @@ pub fn open_connect_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     .title("Pi Web — 连接管理")
     .inner_size(920.0, 660.0)
     .min_inner_size(640.0, 480.0)
-    .resizable(true)
-    .build()?;
+    .resizable(true);
+    // Windows：同 open_server_window，禁用 GPU 软件渲染避免 WebView2 挂起白屏
+    #[cfg(windows)]
+    {
+        win_builder = win_builder.additional_browser_args("--disable-gpu");
+    }
+    let win = win_builder.build()?;
     let _ = win.show();
     let _ = win.set_focus();
     Ok(win)

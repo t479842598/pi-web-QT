@@ -468,7 +468,135 @@ pub fn spawn_local(
     trusted_domain: Option<&str>,
 ) -> Option<std::process::Child> {
     if alive(DEFAULT_LOCAL_URL) {
+        // 关键修复：30141 有响应 ≠ 我们自己拉起的服务在工作。
+        // 必须核验占用进程的 exe 路径是否在本应用 resource_dir 内；
+        // 否则 (孤儿 node.exe 占用 / 旧实例路径错乱) 复用它将导致白屏。
+        if let Some(bd) = locate_bundled(app) {
+            if !port_owner_is_owned_backend(30141, &bd.backend_dir) {
+                eprintln!(
+                    "[desktop] 30141 被非自有进程占用，强制回收后重新拉起: {:?}",
+                    port_owner_exe(30141)
+                );
+                force_free_port(30141);
+                // 端口释放后给 OS 一点时间回收 TIME_WAIT
+                std::thread::sleep(Duration::from_millis(300));
+                return spawn_local_force(app, password, trusted_domain);
+            }
+        }
+        // 自有进程在跑 → 直接复用
         return None;
     }
     spawn_local_force(app, password, trusted_domain)
 }
+
+/// Windows-only：查询占用指定端口的进程 ID（如存在）。
+#[cfg(all(not(mobile), windows))]
+fn port_owner_pid(port: u16) -> Option<u32> {
+    use std::process::Command;
+    // netstat -ano | findstr LISTENING | findstr :<port>
+    let out = Command::new("netstat")
+        .args(["-ano", "-p", "TCP"])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for line in stdout.lines() {
+        let l = line.trim();
+        // 形如: TCP    0.0.0.0:30141    0.0.0.0:0    LISTENING    7008
+        if !l.starts_with("TCP") {
+            continue;
+        }
+        let parts: Vec<&str> = l.split_whitespace().collect();
+        if parts.len() < 5 {
+            continue;
+        }
+        let local = parts[1];
+        if parts[3] != "LISTENING" {
+            continue;
+        }
+        // 严格匹配 :<port> 结束（避免误中 130141 等）
+        if local.ends_with(&format!(":{}", port)) {
+            if let Ok(pid) = parts[parts.len() - 1].parse::<u32>() {
+                return Some(pid);
+            }
+        }
+    }
+    None
+}
+
+/// Windows-only：取进程的可执行路径；失败返回 None。
+#[cfg(all(not(mobile), windows))]
+fn exe_path_of_pid(pid: u32) -> Option<std::path::PathBuf> {
+    use std::process::Command;
+    // wmic 在精简系统可能缺失，使用 PowerShell Get-Process 兜底
+    let script = format!("(Get-Process -Id {} -ErrorAction SilentlyContinue).Path", pid);
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(s))
+    }
+}
+
+/// Windows-only：返回占用 port 的进程 exe 路径（调试打印用）。
+#[cfg(all(not(mobile), windows))]
+fn port_owner_exe(port: u16) -> Option<std::path::PathBuf> {
+    port_owner_pid(port).and_then(exe_path_of_pid)
+}
+
+/// 判断端口占用者是否位于我们自己的 backend 目录下（即是否为自有 node.exe 服务）。
+///
+/// 逻辑：自有 node.exe 必须位于 resource_dir/node/node.exe，
+/// 但端口占用者其实是该 node.exe。所以校验进程路径的**父目录**是否为 resource_dir/node，
+/// 或本身是否在 resource_dir 之下（兜底）。
+#[cfg(all(not(mobile), windows))]
+fn port_owner_is_owned_backend(port: u16, backend_dir: &Path) -> bool {
+    // backend_dir = <res>/backend，自有 node.exe = <res>/node/node.exe。
+    let Some(res_dir) = backend_dir.parent() else {
+        return false;
+    };
+    let expected_node = res_dir.join("node").join("node.exe");
+    let Some(exe) = port_owner_exe(port) else {
+        return false;
+    };
+    // 规范化比较（Windows 上 both 均为绝对路径）
+    let canon = |p: &Path| {
+        p.canonicalize()
+            .unwrap_or_else(|_| p.to_path_buf())
+            .to_string_lossy()
+            .to_ascii_lowercase()
+    };
+    canon(&exe) == canon(&expected_node)
+}
+
+/// 非 Windows 平台暂不做路径核验（移动端本案不覆盖）。
+#[cfg(all(not(mobile), not(windows)))]
+fn port_owner_is_owned_backend(_port: u16, _backend_dir: &Path) -> bool {
+    // POSIX 侧通过 lsof 也可做，但本次白屏案仅 Windows；保持现状避免无限回收。
+    true
+}
+
+#[cfg(all(not(mobile), not(windows)))]
+fn port_owner_exe(_port: u16) -> Option<std::path::PathBuf> {
+    None
+}
+
+/// 强制释放端口：taskkill 整组（含子进程）。
+#[cfg(all(not(mobile), windows))]
+fn force_free_port(port: u16) {
+    if let Some(pid) = port_owner_pid(port) {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000);
+        let _ = cmd.status();
+    }
+}
+
+#[cfg(all(not(mobile), not(windows)))]
+fn force_free_port(_port: u16) {}
