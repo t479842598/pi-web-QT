@@ -142,22 +142,22 @@ export function lineFromEntry(entry: Record<string, unknown>): SubagentTranscrip
 
 /**
  * Read the transcript file and return parsed lines (newest appended last).
- * The file is append-only and can grow very large for agentic tasks, so the
- * limit applies to the TAIL — the caller previews the last lines and the
- * full-screen view shows the most recent activity; reading from the head
- * would freeze the preview at line `limit` forever.
+ * The file is append-only. When `limit` > 0 the TAIL is returned (the caller
+ * previews the last lines); when `limit` <= 0 (default) the whole transcript
+ * is returned so the read-only viewer can display the full conversation.
  * Returns an empty array when the file is missing or unreadable.
  */
-export function readSubagentTranscript(path: string, limit = 400): SubagentTranscriptLine[] {
+export function readSubagentTranscript(path: string, limit = 0): SubagentTranscriptLine[] {
   if (!existsSync(path)) return [];
   try {
     const raw = readFileSync(path, "utf8");
-    // Cap the parse window to the tail: raw lines are roughly 1:1 with parsed
-    // lines, so reading 2x the limit (blank/malformed lines get dropped) keeps
-    // the cost bounded while still returning the newest `limit` parsed lines.
     const rawLines = raw.split("\n");
-    const window = Math.max(limit * 2, 64);
-    const tail = rawLines.length > window ? rawLines.slice(-window) : rawLines;
+    // limit > 0: cap the parse window to the tail (roughly 1:1 raw→parsed;
+    // blank/malformed lines are dropped, so 2x limit keeps the newest `limit`
+    // parsed lines). limit <= 0: parse everything.
+    const tail = limit > 0 && rawLines.length > Math.max(limit * 2, 64)
+      ? rawLines.slice(-Math.max(limit * 2, 64))
+      : rawLines;
     const parsed: SubagentTranscriptLine[] = [];
     for (const line of tail) {
       if (!line.trim()) continue;
@@ -169,7 +169,7 @@ export function readSubagentTranscript(path: string, limit = 400): SubagentTrans
         // Skip malformed lines (partial writes while streaming).
       }
     }
-    return parsed.length > limit ? parsed.slice(-limit) : parsed;
+    return limit > 0 && parsed.length > limit ? parsed.slice(-limit) : parsed;
   } catch {
     return [];
   }
