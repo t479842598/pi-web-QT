@@ -2,16 +2,25 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
-## v0.10.6 — 2026-08-20（主对话流子代理卡片 + 全屏运行对话视图）
+## v0.10.6 — 2026-08-21（主对话流子代理卡片 + 全屏运行对话视图 + 安全/性能/稳定性全面修复）
 
-> 本次为 **Beta 测试版**：npm 包发布为 `0.10.6-beta.0`（dist-tag `beta`），桌面/移动端版本号同步为 `0.10.6`（纯数字段）。
+> 本次为**正式版**（在 `0.10.6-beta.0` 基础上完成三轮代码审查 + 全面修复后发布）；npm 包发布为 `0.10.6`（latest dist-tag），桌面/移动端版本号同步为 `0.10.6`。
 
 ### 新增
-- **主对话流直接显示子代理运行卡片** — 模型调用 `Agent`/`Task` 工具时，对话流中渲染子代理卡片（替代原普通折叠 JSON 卡片）：运行中显示旋转加载动画 + 「正在处理」标题 + 子代理类型/描述 + **最新一条运行内容实时预览**（运行中每 2s 轮询 transcript 文件），完成/失败/停止后显示对应状态色与 token/耗时汇总。卡片在 `tool_execution_start` 事件落地前即可渲染（fallback 运行中状态兜底）。
-- **点击卡片全屏查看子代理运行对话** — 点击卡片后主对话区域切换为子代理完整对话视图（transcript 实时刷新、自动滚动），输入框隐藏；顶部「返回」按钮一键回到主对话并恢复输入框。全屏视图以 absolute 覆盖层实现，底层 `ChatWindow`/SSE 保持挂载——运行中的主会话与子代理不因切换视图而中断。
+- **主对话流直接显示子代理运行卡片** — 模型调用 `Agent`/`Task` 工具时，对话流中渲染子代理卡片（替代原普通折叠 JSON 卡片）：运行中显示旋转加载动画 + 「正在处理」标题 + 子代理类型/描述 + **最新一条运行内容实时预览**，完成/失败/停止后显示对应状态色与 token/耗时汇总。卡片在 `tool_execution_start` 事件落地前即可渲染（fallback 运行中状态兜底）。
+- **点击卡片全屏查看子代理运行对话（只读完整记录）** — 点击卡片后主对话区域切换为子代理完整对话视图（transcript 全量展示、实时刷新、自动滚动），输入框隐藏；顶部「返回」按钮一键回到主对话并恢复输入框。全屏视图以 absolute 覆盖层实现，底层 `ChatWindow`/SSE 保持挂载——运行中的主会话与子代理不因切换视图而中断。
+
+### 修复（经 4 轮全量审查，含 8 项严重 + 13 项中级问题）
+- **安全（P0）** — 修复任务引擎 `git commit -m` 命令注入（RCE：merge消息中的 `$(...)` 会被 shell 执行，已实证）；任务设置写入口补 allowed-root + project-trust 门禁（`initCommand`/`preflightCommand` 不再可任意写入）；非环回监听未设密码时拒绝启动（`PI_WEB_ALLOW_INSECURE_LAN=1` 可豁免）；proxy 开发模式免认证收窄到环回 Host；SSE 事件流 encode/close 全量防护 + `emit()` 监听器隔离（修复消息落盘被跳过的风险）；DeepSeek 余额无限轮询循环；steer/follow-up 失败后发送卡死（`agentRunning` 永不复位）。
+- **性能（P1）** — 流式输出期间不再对全部历史消息做全量变换（`ChatWindow` 历史管线 useMemo 化）；`ChatInput` 巨型输入框 memo 化（不再随每个 token 重建）；Markdown interning 缓存跳过 streaming tail 并加 LRU 上限（修复长流式回答内存膨胀）；会话侧边栏 2.5s 轮询在内容不变时不再全树重渲染（`SessionItem`/`SessionTreeItem` memo 化）。
+- **服务端健壮性（P2）** — 会话详情/分支切换/用量页不再每请求全量同步解析 jsonl（`openSessionCached` 按 mtime+size 缓存只读 `SessionManager`，实测会话详情约 97 倍加速）；usage 路由加每会话汇总缓存；删除会话级联重写子会话改为「先停子 wrapper + 原子 tmp+rename」（修复并发丢失尾部消息 + 崩溃截断）；文件访问允许根内 symlink 逃逸修复（GET 与上传路径统一 realpath 双侧校验）；`startRpcSession` 错误路径不再泄漏 AgentSession、不再复用 shutdown 中的 wrapper；任务引擎定时 reconcile 加 catch（不再因损坏 task 文件打崩进程）。
+- **状态一致性与打磨（P3）** — SSE 断线重连不再清空正在渲染的流式气泡；链式 run 的完成提示音不再双响；队列命令（clear/resolve/import/stage）统一走互斥锁；全局 Esc 处理器卸载时正确解绑；proxy matcher 扩为全路径（新增页面不再绕鉴权）；导出超时按会话文件大小缩放（大会话不再 30s 必 500）；草稿/主题缓存上限；worktree 删除后回收文件访问允许根。
+- **子代理视图完备性** — 转录默认全量显示（修复原只读前 400 行导致实时预览冻结的缺陷）；历史 Agent/Task 卡片由 toolResult 推导终态（刷新后不再永远转圈）；全屏覆盖层 Esc 关闭覆盖层（不再误中止主 agent）；会话切换自动关闭残留覆盖层；子代理结束时补一次最终转录拉取（捕获末条输出）；完成记录状态映射白名单化（未知/异常不再误标「完成」）；角色标签 i18n 化；transcript 接口不再返回绝对路径。
+- **桌面端配置文件加固** — `config.json`（含明文服务器密码）写盘改为 0600 权限。
 
 ### 其他
-- 新增 `components/SubagentCard.tsx` 组件；`components/MessageView.tsx` 对 `Agent`/`Task` 工具调用新增专用渲染分支（`SUBAGENT_TOOL_NAMES` + `makeRunningSubagentFromToolCall` fallback），`ChatWindow`/`AppShell` 透传 `subagents` + `onOpenSubagent` 并实现主区域覆盖层切换；i18n 新增「正在处理 / Processing」文案。
+- 新增 `components/SubagentCard.tsx` 组件；`components/MessageView.tsx` 对 `Agent`/`Task` 工具调用新增专用渲染分支（`SUBAGENT_TOOL_NAMES` + `makeFallbackSubagentFromToolCall` fallback），`ChatWindow`/`AppShell` 透传 `subagents` + `onOpenSubagent` 并实现主区域覆盖层切换；`lib/chat-history-pipeline.ts` 提取历史渲染管线供单元测试；i18n 新增「正在处理 / Processing」与转录角色标签文案。
+- 测试基建：新增 40+ 单元测试（行为测试 + 源码断言守护测试），全量 506 pass / 0 fail；`tsc` 0 错误；ESLint 零新增告警。
 
 ## v0.10.5 — 2026-08-20（新会话首条消息即时上侧边栏：promote 提前 + 会话文件即时落盘）
 
