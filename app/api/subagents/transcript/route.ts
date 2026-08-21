@@ -25,7 +25,7 @@ export async function GET(req: Request) {
     }
     const path = resolveTranscriptPath(cwd, id, sessionId);
     const lines: SubagentTranscriptLine[] = path ? readSubagentTranscript(path) : [];
-    return NextResponse.json({ lines, path });
+    return NextResponse.json({ lines });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },

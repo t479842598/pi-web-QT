@@ -171,6 +171,23 @@ export function AppShell() {
   const [subagentPageAgentId, setSubagentPageAgentId] = useState<string | null>(null);
   const openSubagentPage = useCallback((agentId: string) => setSubagentPageAgentId(agentId), []);
   const closeSubagentPage = useCallback(() => setSubagentPageAgentId(null), []);
+
+  // While the fullscreen subagent overlay is open, Esc must close the overlay
+  // — NOT abort the main agent (the global Esc handler in useKeyboardShortcuts
+  // would otherwise stop the run underneath the overlay). Capture-phase
+  // listener stops the event before it reaches the bubble listener.
+  useEffect(() => {
+    if (!subagentPageAgentId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        setSubagentPageAgentId(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [subagentPageAgentId]);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(getDefaultRightPanelWidth(1366));
   const getResponsiveRightPanelWidth = useCallback(
@@ -604,6 +621,18 @@ export function AppShell() {
   const initialCwdPending = initialCwdStatus === "validating" || initialCwdStatus === "error";
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
   const showChat = !initialCwdPending && (selectedSession !== null || effectiveNewSessionCwd !== null);
+
+  // The fullscreen subagent overlay targets a fleet row that belongs to the
+  // current session. Switching sessions (or leaving the chat view entirely)
+  // empties that fleet; leaving the overlay open would pin it to a stale
+  // "ended" agent forever.
+  const overlaySessionId = selectedSession?.id;
+  useEffect(() => {
+    if (!subagentPageAgentId) return;
+    setSubagentPageAgentId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlaySessionId, showChat]);
+
   const projectTrustCwd = selectedSession?.cwd ?? effectiveNewSessionCwd;
 
   // Task board view toggle (desktop only — the button is hidden on mobile).

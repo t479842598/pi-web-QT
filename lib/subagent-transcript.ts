@@ -142,25 +142,34 @@ export function lineFromEntry(entry: Record<string, unknown>): SubagentTranscrip
 
 /**
  * Read the transcript file and return parsed lines (newest appended last).
+ * The file is append-only and can grow very large for agentic tasks, so the
+ * limit applies to the TAIL — the caller previews the last lines and the
+ * full-screen view shows the most recent activity; reading from the head
+ * would freeze the preview at line `limit` forever.
  * Returns an empty array when the file is missing or unreadable.
  */
 export function readSubagentTranscript(path: string, limit = 400): SubagentTranscriptLine[] {
   if (!existsSync(path)) return [];
   try {
     const raw = readFileSync(path, "utf8");
-    const lines: SubagentTranscriptLine[] = [];
-    for (const line of raw.split("\n")) {
+    // Cap the parse window to the tail: raw lines are roughly 1:1 with parsed
+    // lines, so reading 2x the limit (blank/malformed lines get dropped) keeps
+    // the cost bounded while still returning the newest `limit` parsed lines.
+    const rawLines = raw.split("\n");
+    const window = Math.max(limit * 2, 64);
+    const tail = rawLines.length > window ? rawLines.slice(-window) : rawLines;
+    const parsed: SubagentTranscriptLine[] = [];
+    for (const line of tail) {
       if (!line.trim()) continue;
       try {
         const entry = JSON.parse(line) as Record<string, unknown>;
-        const parsed = lineFromEntry(entry);
-        if (parsed) lines.push(parsed);
+        const lineParsed = lineFromEntry(entry);
+        if (lineParsed) parsed.push(lineParsed);
       } catch {
         // Skip malformed lines (partial writes while streaming).
       }
-      if (lines.length >= limit) break;
     }
-    return lines;
+    return parsed.length > limit ? parsed.slice(-limit) : parsed;
   } catch {
     return [];
   }

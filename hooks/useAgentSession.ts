@@ -836,9 +836,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const description = typeof record.description === "string" ? record.description : "";
     const statusRaw = typeof record.status === "string" ? record.status : "";
     const status: SubagentStatus["status"] =
-      statusRaw === "error" || statusRaw === "aborted" ? "failed"
-        : statusRaw === "stopped" ? "stopped"
-          : "completed";
+      statusRaw === "stopped" ? "stopped"
+        : statusRaw === "completed" || statusRaw === "success" || statusRaw === "ok" || statusRaw === "done"
+          ? "completed"
+          : "failed"; // unknown / cancelled / timeout / interrupted → not "completed"
     const startedAt = typeof record.startedAt === "number" ? record.startedAt : Date.now();
     const completedAt = typeof record.completedAt === "number" ? record.completedAt : Date.now();
     const tokens = typeof record.tokens === "object" && record.tokens !== null

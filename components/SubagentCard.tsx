@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CaretRight, SpinnerGap } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import type { SubagentStatus } from "@/lib/types";
@@ -18,13 +18,6 @@ const STATUS_COLORS: Record<SubagentStatus["status"], string> = {
   completed: "#22c55e",
   failed: "#ef4444",
   stopped: "#d97706",
-};
-
-const ROLE_LABEL: Partial<Record<SubagentTranscriptLine["role"], string>> = {
-  user: "User",
-  assistant: "Assistant",
-  toolResult: "Result",
-  bashExecution: "Bash",
 };
 
 /** Compact token count: "12.3k" / "1.2M" / "980". */
@@ -54,6 +47,14 @@ function formatDuration(ms: number | undefined): string {
  */
 export function SubagentCard({ agent, cwd, onOpen }: Props) {
   const { t } = useI18n();
+  const roleLabel = (role: SubagentTranscriptLine["role"] | undefined): string | undefined => {
+    if (!role) return undefined;
+    const key = role === "user" ? "desktop.transcriptRoleUser"
+      : role === "assistant" ? "desktop.transcriptRoleAssistant"
+        : role === "toolResult" ? "desktop.transcriptRoleResult"
+          : "desktop.transcriptRoleBash";
+    return t(key);
+  };
   const [hovered, setHovered] = useState(false);
   // Live elapsed tick for running rows (re-renders this row every second).
   const [now, setNow] = useState(() => Date.now());
@@ -82,6 +83,16 @@ export function SubagentCard({ agent, cwd, onOpen }: Props) {
   useEffect(() => {
     void loadLatest();
   }, [loadLatest]);
+
+  // Fetch once more when the run transitions to a terminal state: the last
+  // 2s poll may have run just before the final assistant output landed.
+  const statusRef = useRef(agent.status);
+  useEffect(() => {
+    const wasRunning = statusRef.current === "running";
+    statusRef.current = agent.status;
+    if (wasRunning && agent.status !== "running") void loadLatest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.status]);
 
   useEffect(() => {
     if (agent.status !== "running") return;
@@ -153,9 +164,9 @@ export function SubagentCard({ agent, cwd, onOpen }: Props) {
       {/* Latest transcript line preview */}
       {latest && (
         <div style={{ padding: "3px 10px 0", display: "flex", alignItems: "flex-start", gap: 6, minWidth: 0 }}>
-          {latest.role && ROLE_LABEL[latest.role] && (
+          {latest.role && roleLabel(latest.role) && (
             <span style={{ flexShrink: 0, fontSize: 9.5, fontFamily: "var(--font-mono)", fontWeight: 600, color: "var(--accent)", marginTop: 1 }}>
-              [{ROLE_LABEL[latest.role]}]
+              [{roleLabel(latest.role)}]
             </span>
           )}
           <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 1.45, color: "var(--text-muted)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" }}>

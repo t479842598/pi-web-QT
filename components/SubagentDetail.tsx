@@ -12,11 +12,11 @@ interface Props {
   onBack: () => void;
 }
 
-const ROLE_COLORS: Record<SubagentTranscriptRole, { label: string; color: string }> = {
-  user: { label: "User", color: "var(--accent)" },
-  assistant: { label: "Assistant", color: "var(--text)" },
-  toolResult: { label: "Result", color: "var(--text-dim)" },
-  bashExecution: { label: "Bash", color: "var(--text-muted)" },
+const ROLE_COLORS: Record<SubagentTranscriptRole, { color: string }> = {
+  user: { color: "var(--accent)" },
+  assistant: { color: "var(--text)" },
+  toolResult: { color: "var(--text-dim)" },
+  bashExecution: { color: "var(--text-muted)" },
 };
 
 /** Compact token count: "12.3k" / "1.2M" / "980". */
@@ -37,12 +37,12 @@ function formatDuration(ms: number | undefined): string {
   return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
 }
 
-function TranscriptLine({ line }: { line: SubagentTranscriptLine }) {
+function TranscriptLine({ line, roleLabel }: { line: SubagentTranscriptLine; roleLabel: (role: SubagentTranscriptRole) => string }) {
   const meta = ROLE_COLORS[line.role] ?? ROLE_COLORS.toolResult;
   return (
     <div style={{ marginBottom: 6 }}>
       <div style={{ fontSize: 10.5, fontWeight: 600, color: meta.color, marginBottom: 2, fontFamily: "var(--font-mono)" }}>
-        [{meta.label}]
+        [{roleLabel(line.role)}]
       </div>
       <pre style={{
         margin: 0,
@@ -72,6 +72,13 @@ function TranscriptLine({ line }: { line: SubagentTranscriptLine }) {
  */
 export function SubagentDetail({ agent, cwd, onBack }: Props) {
   const { t } = useI18n();
+  const roleLabel = (role: SubagentTranscriptRole): string => {
+    const key = role === "user" ? "desktop.transcriptRoleUser"
+      : role === "assistant" ? "desktop.transcriptRoleAssistant"
+        : role === "toolResult" ? "desktop.transcriptRoleResult"
+          : "desktop.transcriptRoleBash";
+    return t(key);
+  };
   const [lines, setLines] = useState<SubagentTranscriptLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +108,16 @@ export function SubagentDetail({ agent, cwd, onBack }: Props) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Fetch once more when the run transitions to a terminal state: the last
+  // 2s poll may have run just before the final assistant output landed.
+  const statusRef = useRef(agent.status);
+  useEffect(() => {
+    const wasRunning = statusRef.current === "running";
+    statusRef.current = agent.status;
+    if (wasRunning && agent.status !== "running") void load(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.status]);
 
   // Live polling while running — the .output file appends per turn_end.
   useEffect(() => {
@@ -180,7 +197,7 @@ export function SubagentDetail({ agent, cwd, onBack }: Props) {
           </div>
         ) : (
           <div style={{ paddingBottom: 8 }}>
-            {lines.map((line, i) => <TranscriptLine key={i} line={line} />)}
+            {lines.map((line, i) => <TranscriptLine key={i} line={line} roleLabel={roleLabel} />)}
           </div>
         )}
       </div>

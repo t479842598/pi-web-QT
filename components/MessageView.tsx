@@ -779,7 +779,9 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
     // Subagent spawn (Agent/Task tool): render a dedicated interactive card
     // instead of the generic folding tool-call block.
     if (SUBAGENT_TOOL_NAMES.has(tc.toolName)) {
-      const agent = subagents?.find((s) => s.id === tc.toolCallId) ?? makeRunningSubagentFromToolCall(tc);
+      const result = toolResults?.get(tc.toolCallId);
+      const agent = subagents?.find((s) => s.id === tc.toolCallId)
+        ?? makeFallbackSubagentFromToolCall(tc, result);
       return <SubagentCard agent={agent} cwd={cwd} onOpen={onOpenSubagent} />;
     }
     const result = toolResults?.get(tc.toolCallId);
@@ -793,10 +795,16 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
 const SUBAGENT_TOOL_NAMES = new Set(["Agent", "Task"]);
 
 /**
- * Fallback running entry used before the tool_execution_start event lands:
- * the card still renders a spinner while waiting for the live status row.
+ * Fallback subagent entry used when the live fleet has no row for this
+ * toolCallId (page refresh, or the fleet evicted old rows). The terminal
+ * status is derived from the session's own tool result: a historical Agent
+ * call whose toolCallId already has a result finished — showing it as
+ * permanently "running" would freeze a spinner on every reloaded message.
  */
-function makeRunningSubagentFromToolCall(block: ToolCallContent): SubagentStatus {
+function makeFallbackSubagentFromToolCall(
+  block: ToolCallContent,
+  result?: ToolResultMessage,
+): SubagentStatus {
   const input = block.input ?? {};
   const description =
     typeof input.description === "string" && input.description.trim()
@@ -805,7 +813,20 @@ function makeRunningSubagentFromToolCall(block: ToolCallContent): SubagentStatus
         ? input.prompt.slice(0, 80)
         : "";
   const agentType = typeof input.subagent_type === "string" && input.subagent_type ? input.subagent_type : block.toolName;
-  return { id: block.toolCallId, agentType, description, status: "running", startedAt: Date.now() };
+  const base = { id: block.toolCallId, agentType, description };
+  if (result) {
+    // The result exists in the session file — the run is over. Only mark it
+    // "running" while the stream is still live and the result has not landed.
+    const now = Date.now();
+    return {
+      ...base,
+      status: result.isError ? "failed" : "completed",
+      startedAt: now,
+      completedAt: now,
+      error: result.isError ? "Subagent returned an error" : undefined,
+    };
+  }
+  return { ...base, status: "running", startedAt: Date.now() };
 }
 
 function TextBlock({ block, isStreaming, cwd, onOpenFile, onQuoteReply }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string) => void; onQuoteReply?: (quote: string) => void }) {
