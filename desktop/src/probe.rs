@@ -385,6 +385,8 @@ pub(crate) fn spawn_cli(
             cmd.env("PI_WEB_ALLOWED_HOSTS", d);
         }
     }
+    // 同上：CLI 后端也要带看门狗（bin/pi-web.js 会把 env 透传给 next）。
+    cmd.env("PI_WEB_PARENT_PID", std::process::id().to_string());
     // 独立进程组：改密/退出时可整组 kill（连带 next 孙进程），避免残留占用 30141
     #[cfg(unix)]
     {
