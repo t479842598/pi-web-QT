@@ -16,6 +16,8 @@ import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { getToolNamesForPreset, PRESET_PLAN, type ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import type { SessionFileStats } from "@/lib/session-stats";
+import { estimateTokens } from "@/lib/token-estimate";
 import type { PendingRecoveryItem, QueueEntry, QueueEntryInput } from "@/lib/queue-store";
 import type { ChatDraftImage } from "@/lib/draft-store";
 import { createStreamUpdateScheduler, type StreamUpdateScheduler } from "@/lib/stream-update-scheduler";
@@ -57,6 +59,8 @@ export interface SessionData {
   sessionId: string;
   filePath: string;
   totalActiveMs: number;
+  /** Cumulative usage over ALL session-file entries (incl. compacted history). */
+  stats?: SessionFileStats;
   tree: SessionTreeNode[];
   leafId: string | null;
   context: {
@@ -544,14 +548,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const tokenRateRef = useRef({
     lastChars: 0,
     window: [] as Array<{ at: number; chars: number }>,
-    charsPerToken: 4,
   });
   const resetTokenRate = useCallback(() => {
-    tokenRateRef.current = { lastChars: 0, window: [], charsPerToken: 4 };
+    tokenRateRef.current = { lastChars: 0, window: [] };
     setTokenRate(null);
   }, []);
 
-  /** Count printable characters in an assistant content block list. */
+  /** Count tokens in an assistant content block list (CJK≈1 token, else 4 chars/token). */
   const countAssistantChars = useCallback((msg: Partial<AgentMessage> | undefined): number => {
     if (!msg || msg.role !== "assistant") return 0;
     const content = msg.content as unknown;
@@ -559,11 +562,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     let total = 0;
     for (const block of content as unknown[]) {
       if (typeof block === "string") {
-        total += block.length;
+        total += estimateTokens(block);
       } else if (block && typeof block === "object") {
         const b = block as { type?: string; text?: string; thinking?: string };
-        if (typeof b.text === "string") total += b.text.length;
-        else if (typeof b.thinking === "string") total += b.thinking.length;
+        if (typeof b.text === "string") total += estimateTokens(b.text);
+        else if (typeof b.thinking === "string") total += estimateTokens(b.thinking);
       }
     }
     return total;
@@ -584,7 +587,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const sum = ref.window.reduce((acc, s) => acc + s.chars, 0);
     const windowMs = ref.window.length > 0 ? now - ref.window[0].at : 0;
     if (windowMs < 200) return; // too early for a stable rate
-    const perSec = (sum / Math.max(1, windowMs)) * 1000 / ref.charsPerToken;
+    const perSec = (sum / Math.max(1, windowMs)) * 1000;
     setTokenRate(Math.max(0, Math.round(perSec * 10) / 10));
   }, [countAssistantChars]);
   const [agentRunning, setAgentRunning] = useState(false);
@@ -882,6 +885,45 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }));
   }, [applySubagents]);
 
+  /** Bridge the upstream engine's completion notification into a fleet row.
+   *  The engine emits customType "pi-web:subagent-notification" with `details`
+   *  (SubagentToolDetails) once a background subagent finishes; foreground
+   *  subagents report through the tool result instead. */
+  const upsertSubagentNotification = useCallback((details: Record<string, unknown>) => {
+    const id = typeof details.sessionId === "string" ? details.sessionId : "";
+    const type = typeof details.profile === "string" ? details.profile : "Agent";
+    const description = typeof details.description === "string" ? details.description : "";
+    const statusRaw = typeof details.status === "string" ? details.status : "";
+    const status: SubagentStatus["status"] =
+      statusRaw === "completed"
+        ? "completed"
+        : statusRaw === "aborted" || statusRaw === "interrupted" || statusRaw === "stopped"
+          ? "stopped"
+          : "failed";
+    const startedAt = typeof details.createdAt === "string" ? Date.parse(details.createdAt) : Date.now();
+    const completedAt = typeof details.completedAt === "string" ? Date.parse(details.completedAt) : Date.now();
+    const error = typeof details.error === "string" && details.error ? details.error : undefined;
+
+    applySubagents((prev) => {
+      const idx = prev.findIndex((s) => s.id === id || (s.agentType === type && s.description === description));
+      const entry: SubagentStatus = {
+        id: id || prev[idx]?.id || `${type}-${startedAt}`,
+        agentType: type,
+        description,
+        status,
+        startedAt,
+        completedAt,
+        error,
+      };
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = entry;
+        return next;
+      }
+      return [...prev, entry].slice(-MAX_SUBAGENT_ROWS);
+    });
+  }, [applySubagents]);
+
 
   // Queue reconciliation: the empty queue_update can be lost during an SSE
   // drop/reconnect window (the bus does not replay history), which leaves
@@ -1019,8 +1061,27 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         costUSD += costTotal;
       }
     }
+    // File stats span the ENTIRE session file — including history that
+    // compaction summarized away — while `messages` only covers the current
+    // (post-compaction) context. Merge per-field with max() so token/cost
+    // counters keep increasing after compaction and survive page reloads;
+    // session entries are only ever appended, never removed. The file aggregate
+    // is USD-only, so fold it into costUSD (costCNY is fork-derived and cannot
+    // be reconstructed from the file aggregate).
+    const fileStats = data?.stats;
+    if (fileStats) {
+      tokens.input = Math.max(tokens.input, fileStats.tokens.input);
+      tokens.output = Math.max(tokens.output, fileStats.tokens.output);
+      tokens.cacheRead = Math.max(tokens.cacheRead, fileStats.tokens.cacheRead);
+      tokens.cacheWrite = Math.max(tokens.cacheWrite, fileStats.tokens.cacheWrite);
+      costUSD = Math.max(costUSD, fileStats.cost);
+      userMessages = Math.max(userMessages, fileStats.userMessages);
+      assistantMessages = Math.max(assistantMessages, fileStats.assistantMessages);
+      toolResults = Math.max(toolResults, fileStats.toolResults);
+      toolCalls = Math.max(toolCalls, fileStats.toolCalls);
+    }
     tokens.total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
-    if (tokens.total === 0 && messages.length === 0) return null;
+    if (tokens.total === 0 && messages.length === 0 && !fileStats) return null;
     return {
       sessionFile: data?.filePath || undefined,
       sessionId: sessionIdRef.current ?? session?.id ?? "",
@@ -1029,7 +1090,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       assistantMessages,
       toolCalls,
       toolResults,
-      totalMessages: messages.length,
+      totalMessages: fileStats ? Math.max(messages.length, fileStats.totalMessages) : messages.length,
       tokens,
       cost,
       costCNY,
@@ -1037,16 +1098,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       totalActiveMs: data?.totalActiveMs,
       ...(contextUsage ? { contextUsage } : {}),
     } satisfies SessionStatsInfo;
-  }, [messages, sessionStatsOverride, contextUsage, data?.filePath, data?.totalActiveMs, session?.id, session?.name]);
+  }, [messages, sessionStatsOverride, contextUsage, data?.filePath, data?.totalActiveMs, data?.stats, session?.id, session?.name]);
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
     let messagesLoaded = false;
     try {
       if (showLoading) setLoading(true);
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
-      // 超时兜底：服务端异常/大会话卡住时 15s 后结束 loading，避免“永远加载中”
+      // 超时兜底：服务端异常/大会话卡住时结束 loading，避免”永远加载中”。
+      // 大会话冷启动可能超过 15s，放宽到 30s；超时按可重试处理，不向用户
+      // 暴露 “AbortError: Fetch is aborted”。
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
+      const timer = setTimeout(() => controller.abort(), 30000);
       let res: Response;
       try {
         res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`, {
@@ -1093,7 +1156,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
       try {
         const stateController = new AbortController();
-        const stateTimer = setTimeout(() => stateController.abort(), 10000);
+        const stateTimer = setTimeout(() => stateController.abort(), 20000);
         let stateRes: Response;
         try {
           stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`, {
@@ -1131,7 +1194,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return null;
       }
     } catch (e) {
-      setError(String(e));
+      // 超时中止不是致命错误：保留上次已加载的会话，给出可读提示即可，
+      // 而不是把 "AbortError: Fetch is aborted" 原样甩到界面上。
+      const aborted = e instanceof DOMException && e.name === "AbortError";
+      setError(aborted
+        ? "Timed out loading this conversation. Please try again."
+        : String(e));
       return null;
     } finally {
       if (showLoading && !messagesLoaded) setLoading(false);
@@ -2042,9 +2110,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       }
       case "entry_appended": {
-        const entry = (event as { entry?: { customType?: string; data?: unknown } }).entry;
+        const entry = (event as { entry?: { customType?: string; data?: unknown; details?: unknown } }).entry;
         if (entry?.customType === "subagents:record" && typeof entry.data === "object" && entry.data !== null) {
           upsertSubagentRecord(entry.data as Record<string, unknown>);
+        } else if (entry?.customType === "pi-web:subagent-notification" && typeof entry.details === "object" && entry.details !== null) {
+          upsertSubagentNotification(entry.details as Record<string, unknown>);
         }
         break;
       }
@@ -2148,6 +2218,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     clearQueueReconcile,
     addRunningSubagent,
     upsertSubagentRecord,
+    upsertSubagentNotification,
     finishRunningSubagent,
     SUBAGENT_TOOL_NAMES,
     trackTokenRate,
@@ -3293,24 +3364,27 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         void sendAgentCommand(session.id, { type: "set_approval_policy", policy: rules }).catch(() => {});
       }
       loadSession(session.id, true, true).then((agentState) => {
-        if (agentState?.running) {
-          if (agentState.state?.isBashRunning) {
+        const restoreRunning = (state: AgentStateResponse) => {
+          if (state.isBashRunning) {
             bashRunningRef.current = true;
             setBashRunning(true);
           }
           loadTools(session.id);
-          if (agentState.state?.isStreaming || agentState.state?.isPromptRunning) {
-            sdkAgentActiveRef.current = Boolean(agentState.state.isStreaming);
-            rpcPromptPendingRef.current = Boolean(agentState.state.isPromptRunning);
+          if (state.isStreaming || state.isPromptRunning) {
+            sdkAgentActiveRef.current = Boolean(state.isStreaming);
+            rpcPromptPendingRef.current = Boolean(state.isPromptRunning);
             agentRunningRef.current = true;
             setAgentRunning(true);
-            setAgentPhase(phaseFromServerState(agentState.state));
+            setAgentPhase(phaseFromServerState(state));
             dispatch({ type: "start" });
             void connectEvents(session.id);
-            if (!agentState.state.isStreaming && agentState.state.isPromptRunning) {
+            if (!state.isStreaming && state.isPromptRunning) {
               void waitForPromptSettlement(session.id);
             }
           }
+        };
+        if (agentState?.running && agentState.state) {
+          restoreRunning(agentState.state);
         }
         if (agentState?.state) {
           if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
@@ -3322,12 +3396,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (agentState.state.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(agentState.state.queuedMessages));
           if (agentState.state.pendingRecovery !== undefined) setPendingRecovery(agentState.state.pendingRecovery ?? []);
         }
-        // 入口对账：包装器存活但空闲时，上次访问遗留的计划模式只读工具集
-        // 不得泄漏进本次访问。轻量检查（GET 不创建包装器），不付冷启动代价。
+        // 入口对账 + 自愈：state 拉取失败/超时（agentState 为 null）或 state 路由
+        // 短暂未看到存活包装器时，再打一次轻量 GET（不创建包装器）兜底恢复
+        // 运行态。否则"打开一个正在运行的会话"会停在 idle，只能切换会话才恢复。
         if (!agentState?.running) {
           fetch(`/api/agent/${encodeURIComponent(session.id)}`)
             .then((r) => (r.ok ? r.json() : null))
-            .then((d) => { if (d && (d as { running?: boolean }).running) loadTools(session.id); })
+            .then((d) => {
+              const snapshot = d as { running?: boolean; state?: AgentStateResponse } | null;
+              if (snapshot?.running && snapshot.state) restoreRunning(snapshot.state);
+            })
             .catch(() => { /* best-effort; the first send reconciles tools */ });
         }
       });

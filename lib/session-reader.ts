@@ -6,36 +6,61 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { closeSync, openSync, readSync, statSync } from "fs";
 import { normalize as normalizePath } from "path";
-import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
+import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 import { stripModeInstructionBlocks } from "./modes";
+import { projectIdentityKey } from "./project-identity";
+import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
 import { readSettingsJsonUnlocked } from "./settings-lock";
 
 export { getAgentDir };
 
-async function loadAllSessions(): Promise<SessionInfo[]> {
-  const piSessions: PiSessionInfo[] = await SessionManager.listAll();
-  const pathToId = new Map<string, string>();
-  for (const s of piSessions) pathToId.set(normalizePath(s.path), s.id);
-
-  // Resolve each unique cwd to its project root (main repo shared by all
-  // worktrees). resolveProject caches per-cwd, so this is cheap after warmup.
-  const uniqueCwds = [...new Set(piSessions.map((s) => s.cwd).filter(Boolean))];
+export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise<SessionInfo[]> {
+  const uniqueCwds = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
   const projectByCwd = new Map<string, ProjectInfo>();
   await Promise.all(uniqueCwds.map(async (cwd) => {
     projectByCwd.set(cwd, await resolveProject(cwd));
   }));
+
+  return sessions.map((session) => {
+    const project = session.cwd ? projectByCwd.get(session.cwd) : undefined;
+    const projectRoot = project?.projectRoot ?? session.cwd;
+    return {
+      ...session,
+      projectRoot,
+      projectKey: projectIdentityKey(projectRoot),
+      ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
+    };
+  });
+}
+
+export function mergeSessionLists(
+  persistedSessions: SessionInfo[],
+  supplementalSessions: SessionInfo[],
+): SessionInfo[] {
+  const byId = new Map(supplementalSessions.map((session) => [session.id, session]));
+  // A disk scan is authoritative once the JSONL exists. In particular, this
+  // replaces a transient registry snapshot without briefly rendering two rows.
+  for (const session of persistedSessions) byId.set(session.id, session);
+  return [...byId.values()].sort((a, b) => b.modified.localeCompare(a.modified));
+}
+
+async function loadAllSessions(): Promise<SessionInfo[]> {
+  const piSessions: PiSessionInfo[] = await SessionManager.listAll();
+  const pathToId = new Map<string, string>();
+  for (const s of piSessions) pathToId.set(sessionPathKey(s.path), s.id);
 
   // Read pinned session ids from settings.json (sessionPins: string[])
   const settings = readSettingsJsonUnlocked();
   const rawPins = Array.isArray(settings.sessionPins) ? (settings.sessionPins as unknown[]) : [];
   const pinSet = new Set(rawPins.filter((p): p is string => typeof p === "string"));
 
-  return piSessions.map((s) => {
+  // Project resolution (projectRoot/projectKey/worktreeBranch) is attached
+  // downstream by attachSessionProjectInfo(), shared with other callers.
+  const sessions = piSessions.map((s) => {
     cacheSessionPath(s.id, s.path);
-    const project = s.cwd ? projectByCwd.get(s.cwd) : undefined;
     return {
       path: s.path,
       id: s.id,
@@ -45,16 +70,17 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
       modified: s.modified instanceof Date ? s.modified.toISOString() : String(s.modified),
       messageCount: s.messageCount,
       firstMessage: stripModeInstructionBlocks(s.firstMessage || "(no messages)").slice(0, FIRST_MESSAGE_MAX_CHARS),
-      parentSessionId: s.parentSessionPath ? pathToId.get(normalizePath(s.parentSessionPath)) : undefined,
-      projectRoot: project?.projectRoot ?? s.cwd,
+      parentSessionId: s.parentSessionPath ? pathToId.get(sessionPathKey(s.parentSessionPath)) : undefined,
+      transient: false,
       pinned: pinSet.has(s.id),
       importedFrom: (s as unknown as { importedFrom?: string }).importedFrom,
-      ...(project?.branch ? { worktreeBranch: project.branch } : {}),
     };
   });
+  return attachSessionProjectInfo(sessions);
 }
 
-export async function listAllSessions(): Promise<SessionInfo[]> {
+export async function listAllSessions(options: { force?: boolean } = {}): Promise<SessionInfo[]> {
+  if (options.force) invalidateSessionListCache();
   const generation = globalThis.__piSessionListGeneration ?? 0;
 
   // Return cached result if still fresh (avoids re-scanning session files
@@ -70,11 +96,13 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
   }
 
   const loadPromise = loadAllSessions().then((data) => {
-    // An invalidation may happen while the scan is in flight. Do not let that
-    // older result repopulate the cache after a session mutation.
-    if ((globalThis.__piSessionListGeneration ?? 0) === generation) {
-      globalThis.__piSessionListCache = { data, ts: Date.now() };
+    // If a mutation invalidated this scan, make this caller join (or start) a
+    // scan for the current generation. Returning the stale result here made a
+    // refresh race indistinguishable from a successful refresh.
+    if ((globalThis.__piSessionListGeneration ?? 0) !== generation) {
+      return listAllSessions();
     }
+    globalThis.__piSessionListCache = { data, ts: Date.now() };
     return data;
   });
   const trackedPromise = loadPromise.finally(() => {
@@ -289,10 +317,17 @@ export function invalidateOpenSessionCache(filePath?: string): void {
   else cache.clear();
 }
 
+export interface BuildSessionContextOptions {
+  deferThinking?: boolean;
+  deferToolResultImages?: boolean;
+  /** Session id used to build lazy URLs for historical tool-result images. */
+  sessionId?: string;
+}
+
 export function buildSessionContext(
   entries: SessionEntry[],
   leafId?: string | null,
-  options: { deferThinking?: boolean; deferToolResultImages?: boolean } = {},
+  options: BuildSessionContextOptions = {},
 ): SessionContext {
   const byId = new Map<string, SessionEntry>();
   for (const e of entries) byId.set(e.id, e);
@@ -354,21 +389,38 @@ function base64ImageInfo(block: unknown): { bytes: number; mime?: string } | nul
   return { bytes: Math.max(0, Math.floor(data.length * 3 / 4) - padding), mime };
 }
 
-function omitToolResultBase64Images(message: AgentMessage): AgentMessage {
+function deferToolResultBase64Images(
+  message: AgentMessage,
+  sessionId: string | undefined,
+  entryId: string,
+): AgentMessage {
   if (message.role !== "toolResult") return message;
 
   let omitted = 0;
   let bytes = 0;
   const mimes = new Set<string>();
-  const content = message.content.filter((block) => {
+  const content = message.content.flatMap((block, blockIndex) => {
     const image = base64ImageInfo(block);
-    if (!image) return true;
+    if (!image) return [block];
+
+    // 保持历史响应精简，但保留一个懒加载图片块：浏览器只在展开折叠的
+    // 工具结果时才取图。
+    if (sessionId) {
+      const source: ImageContent["source"] = {
+        type: "url",
+        ...(image.mime ? { media_type: image.mime } : {}),
+        url: `/api/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/tool-result-image?blockIndex=${blockIndex}`,
+      };
+      return [{ type: "image", source } satisfies ImageContent];
+    }
+
+    // 无 sessionId 的调用方保留旧的有界回退（丢弃 + 占位文本）。
     omitted += 1;
     bytes += image.bytes;
     if (image.mime) mimes.add(image.mime);
-    return false;
+    return [];
   });
-  if (omitted === 0) return message;
+  if (omitted === 0) return { ...message, content };
 
   const mimeText = mimes.size > 0 ? `: ${[...mimes].join(", ")}` : "";
   content.push({
@@ -382,12 +434,12 @@ function omitToolResultBase64Images(message: AgentMessage): AgentMessage {
 // Returns null for entries that do not map to chat history (metadata, non-message types).
 function entryToUiMessage(
   entry: SessionEntry,
-  options: { deferThinking?: boolean; deferToolResultImages?: boolean },
+  options: BuildSessionContextOptions,
 ): AgentMessage | null {
   switch (entry.type) {
     case "message": {
       const message = options.deferToolResultImages
-        ? omitToolResultBase64Images(normalizeToolCalls(entry.message))
+        ? deferToolResultBase64Images(normalizeToolCalls(entry.message), options.sessionId, entry.id)
         : normalizeToolCalls(entry.message);
       if (!options.deferThinking || message.role !== "assistant") return message;
       return {

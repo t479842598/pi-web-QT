@@ -390,9 +390,21 @@ pub fn open_connect(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
-    // 先同步杀掉壳拉起的本机后端子进程，再退出；不依赖 RunEvent::Exit 兜底，
-    // 确保孤儿 node 不会继续占用 30141。
+    // 先同步关闭本机后端（杀壳拉起子进程；外部启动/孤儿进程按端口回收），
+    // 再退出；不依赖 RunEvent::Exit 兜底，确保 30141 不被孤儿 node 占用。
     #[cfg(not(mobile))]
-    crate::probe::kill_local_child(&app);
+    crate::probe::stop_local_server(&app);
     app.exit(0);
+}
+
+/// 关闭本机 Pi Web 服务（连接页「关闭本机服务」按钮调用）。幂等：
+/// 服务不在线时直接返回 false。
+#[tauri::command]
+pub fn stop_local(app: AppHandle) -> Result<bool, String> {
+    #[cfg(mobile)]
+    {
+        return Err("仅桌面端支持关闭本机服务".into());
+    }
+    #[cfg(not(mobile))]
+    Ok(crate::probe::stop_local_server(&app))
 }

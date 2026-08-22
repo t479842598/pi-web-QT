@@ -14,6 +14,7 @@ import { QuickChangesPanel } from "./QuickChangesPanel";
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { samePath } from "@/lib/paths";
 import { stripModeInstructionBlocks } from "@/lib/modes";
+import { showBrowserNotification } from "@/lib/browser-notifications";
 
 interface Props {
   selectedSessionId: string | null;
@@ -29,6 +30,8 @@ interface Props {
   explorerRefreshKey?: number;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
+  onFileCreated?: (filePath: string) => void;
+  onFileDeleted?: (filePath: string, isDir: boolean) => void;
   /** Open the settings modal (used by the title-generation failure banner). */
   onOpenSettings?: (tab?: string) => void;
   selectedSessionStats?: SessionStatsInfo | null;
@@ -400,7 +403,7 @@ function orderGroupRows(sessions: SessionInfo[], allSessions: SessionInfo[], fla
 
 
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onFileCreated, onFileDeleted, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -827,8 +830,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       });
     }
 
+    // 后台会话跑完时（且当前标签页隐藏/失焦）弹浏览器通知，避免切换工作区
+    // 才发现任务早已结束。
+    if (completedInBackground.length > 0 && (document.visibilityState !== "visible" || !document.hasFocus())) {
+      const finished = allSessions.filter((s) => completedInBackground.includes(s.id));
+      const label = finished.length === 1
+        ? (finished[0]?.name || "Pi Web")
+        : `${finished.length} conversations`;
+      void showBrowserNotification({
+        title: "Pi Web",
+        body: finished.length === 1 ? "Agent finished" : `${label} finished`,
+        sessionUrl: `/?session=${completedInBackground[0]}`,
+        onClick: () => window.focus(),
+      });
+    }
+
     previousRunningSessionIdsRef.current = runningSessionIds;
-  }, [runningSessionIds, selectedSessionId]);
+  }, [runningSessionIds, selectedSessionId, allSessions]);
 
   useEffect(() => {
     if (!selectedSessionId) return;
@@ -1979,7 +1997,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         host,
         location,
       ))}
-      {workspaceControlsHosts?.titleRight && createPortal(
+      {workspaceControlsHosts?.titleRight && !isMobile && createPortal(
         <div ref={(node) => { workspaceDropdownRefs.current.titleRight = node; }} style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           {branchChip}
           {titleWorktreeControl}
@@ -2704,6 +2722,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 onAtMention={onAtMention}
                 onAtMentions={onAtMentions}
                 onUploadBusyChange={setExplorerUploadBusy}
+                onFileCreated={onFileCreated}
+                onFileDeleted={onFileDeleted}
               />
             </div>
           )}

@@ -6,6 +6,7 @@ import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
 import type { SnippetItem } from "@/lib/snippet-store";
 import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
+import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
 import {
   isBase64ImageWithinLimits,
   MAX_ATTACHED_IMAGES,
@@ -1373,6 +1374,26 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       processImageFiles(files);
       return;
     }
+    // 文件管理器粘贴路径：提取绝对路径并格式化插入，不触发长文本折叠。
+    const paths = extractPathsFromClipboardData(e.clipboardData, { fallbackToFileName: true });
+    if (paths.length > 0) {
+      e.preventDefault();
+      const pastedText = formatPathsForInput(paths);
+      const ta = textareaRef.current;
+      const start = ta?.selectionStart ?? value.length;
+      const end = ta?.selectionEnd ?? value.length;
+      const nextValue = value.slice(0, start) + pastedText + value.slice(end);
+      setValue(nextValue);
+      requestAnimationFrame(() => {
+        if (ta) {
+          const nextCursor = start + pastedText.length;
+          ta.selectionStart = nextCursor;
+          ta.selectionEnd = nextCursor;
+          handleInput();
+        }
+      });
+      return;
+    }
     // Fold very long text pastes into a placeholder so the textarea does not
     // choke on hundreds of lines of code (mirrors Reasonix's pasted blocks).
     const textItem = items.find((item) => item.type.startsWith("text/plain"));
@@ -1402,7 +1423,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       ta.setSelectionRange(pos, pos);
       ta.focus();
     });
-  }, [processImageFiles, t, value]);
+  }, [processImageFiles, t, value, handleInput]);
 
   useEffect(() => {
     if (historyActiveIndex >= (inputHistory?.length ?? 0)) {
@@ -2497,7 +2518,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             })()}
           </div>
           <div className="chat-input-toolbar-left" style={{ flex: "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
-            {onCollaborationModeChange && onTokenModeChange && onToolApprovalModeChange && (
+            {!isMobile && onCollaborationModeChange && onTokenModeChange && onToolApprovalModeChange && (
               <ModeControls
                 collaborationMode={collaborationMode}
                 tokenMode={tokenMode}

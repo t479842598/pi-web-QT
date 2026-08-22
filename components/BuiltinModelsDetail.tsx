@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ThinkingLevelMapEditor } from "./ModelsConfig";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import type { DiscoveredModel } from "@/lib/model-discovery";
 import { useI18n } from "@/hooks/useI18n";
 import { buildOverridePatches, type OverrideDraft } from "@/lib/builtin-model-overrides";
 
@@ -217,6 +218,68 @@ export function BuiltinModelsDetail({
     return onRegisterFlush(providerId, saveCurrent) ?? undefined;
   }, [onRegisterFlush, providerId, saveCurrent]);
 
+  // ── 获取新模型（内置提供商，从上游 API 拉最新列表）──
+  const [discovery, setDiscovery] = useState<
+    { phase: "idle" | "loading" | "success" | "error"; models?: DiscoveredModel[]; newIds?: Set<string>; message?: string }
+  >({ phase: "idle" });
+  const [selectedNewIds, setSelectedNewIds] = useState<string[]>([]);
+
+  const handleFetchModels = useCallback(async () => {
+    setDiscovery({ phase: "loading" });
+    try {
+      const res = await fetch("/api/models-config/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerName: providerId, provider: {} }),
+      });
+      const data = await res.json() as { models?: DiscoveredModel[]; error?: string };
+      if (!res.ok || data.error || !data.models) {
+        setDiscovery({ phase: "error", message: data.error ?? `HTTP ${res.status}` });
+        return;
+      }
+      const existingIds = new Set(modelsRef.current.map((m) => m.id));
+      const newIds = new Set(data.models.filter((m) => !existingIds.has(m.id)).map((m) => m.id));
+      setDiscovery({ phase: "success", models: data.models, newIds });
+      setSelectedNewIds(data.models.filter((m) => newIds.has(m.id)).map((m) => m.id));
+    } catch (e) {
+      setDiscovery({ phase: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  }, [providerId]);
+
+  const handleAddModels = useCallback(async () => {
+    if (!discovery.models?.length) return;
+    setSaving(true);
+    setError(null);
+    try {
+      // 写入完整上游模型列表（避免任何合并语义下丢模型），服务端按 {id,name?} 接受。
+      const fullList = discovery.models.map((m) => ({ id: m.id, ...(m.name ? { name: m.name } : {}) }));
+      const res = await fetch("/api/models-config/builtin", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: providerId, models: fullList }),
+      });
+      const data = await res.json() as { success?: boolean; error?: string; provider?: Record<string, unknown> | null };
+      if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
+      onConfigChange?.(data.provider ?? null);
+      setDiscovery({ phase: "idle" });
+      setSelectedNewIds([]);
+      // 重新加载模型列表
+      const reload = await fetch(`/api/models-config/builtin?provider=${encodeURIComponent(providerId)}`);
+      if (reload.ok) {
+        const reloaded = await reload.json() as { models?: BuiltinModelInfo[]; overrides?: Record<string, unknown> };
+        if (reloaded.models) {
+          setModels(reloaded.models);
+          modelsRef.current = reloaded.models;
+          setDirty(new Set());
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [discovery.models, onConfigChange, providerId]);
+
   if (loading) {
     return (
       <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 12 }}>
@@ -230,6 +293,91 @@ export function BuiltinModelsDetail({
       <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
         {t("desktop.builtinModelsTitle")}
       </div>
+      {/* 获取新模型：拉取上游最新模型列表，新增模型可勾选添加 */}
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => { void handleFetchModels(); }}
+            disabled={discovery.phase === "loading"}
+            style={{
+              padding: "5px 12px",
+              background: discovery.phase === "loading" ? "var(--bg-panel)" : "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 5,
+              color: discovery.phase === "loading" ? "var(--text-dim)" : "var(--text-muted)",
+              cursor: discovery.phase === "loading" ? "not-allowed" : "pointer",
+              fontSize: 12,
+            }}
+          >
+            {discovery.phase === "loading" ? t("desktop.modelsDiscoveryFetching") : t("desktop.builtinModelsFetchNew")}
+          </button>
+          {discovery.phase === "success" && discovery.models && (
+            <button
+              type="button"
+              onClick={() => { void handleAddModels(); }}
+              disabled={saving || selectedNewIds.length === 0}
+              style={{
+                padding: "5px 12px",
+                background: selectedNewIds.length > 0 && !saving ? "var(--accent)" : "var(--bg-panel)",
+                border: "none",
+                borderRadius: 5,
+                color: selectedNewIds.length > 0 && !saving ? "#fff" : "var(--text-dim)",
+                cursor: selectedNewIds.length > 0 && !saving ? "pointer" : "not-allowed",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {saving ? t("desktop.modelsSaving") : `${t("desktop.modelsAddModelManual")} (${selectedNewIds.length})`}
+            </button>
+          )}
+        </div>
+
+        {discovery.phase === "error" && (
+          <p style={{ margin: 0, fontSize: 11, color: "#f87171" }}>{discovery.message}</p>
+        )}
+
+        {discovery.phase === "success" && discovery.models && (
+          <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)" }}>
+            {discovery.models.map((model) => {
+              const isNew = discovery.newIds?.has(model.id) ?? false;
+              const checked = selectedNewIds.includes(model.id);
+              return (
+                <label
+                  key={model.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    minHeight: 32, padding: "5px 9px",
+                    borderBottom: "1px solid var(--border)",
+                    cursor: isNew ? "pointer" : "default",
+                    opacity: isNew ? 1 : 0.55,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!isNew}
+                    onChange={(e) => {
+                      setSelectedNewIds((prev) => e.target.checked
+                        ? [...prev, model.id]
+                        : prev.filter((id) => id !== model.id));
+                    }}
+                    style={{ width: 13, height: 13, accentColor: "var(--accent)", flexShrink: 0 }}
+                  />
+                  <span style={{ fontSize: 12, color: "var(--text)", fontWeight: isNew ? 600 : 400 }}>{model.name || model.id}</span>
+                  <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
+                  {isNew && (
+                    <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--accent)", color: "#fff", marginLeft: "auto" }}>
+                      新
+                    </span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {error && <p style={{ margin: 0, fontSize: 11, color: "#f87171" }}>{error}</p>}
       {models.length === 0 && !error && (
         <p style={{ margin: 0, fontSize: 11, color: "var(--text-dim)" }}>{t("desktop.builtinModelsEmpty")}</p>
@@ -356,6 +504,7 @@ export function BuiltinModelsDetail({
           </span>
         )}
       </div>
+
     </div>
   );
 }

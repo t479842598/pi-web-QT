@@ -1,14 +1,20 @@
 import type { NextConfig } from "next";
 import { readFileSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 
-const { version } = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf8")) as { version: string };
-const allowedDevOrigins = (process.env.PI_WEB_ALLOWED_HOSTS?.split(",") ?? [])
-  .map((host) => host.trim())
-  .filter(Boolean);
+// Next 16 loads this file as ESM — __dirname is unavailable, derive from import.meta.
+const configDir = dirname(fileURLToPath(import.meta.url));
+const { version } = JSON.parse(readFileSync(join(configDir, "package.json"), "utf8")) as { version: string };
+// Loopback/LAN defaults first, then operator-supplied extra hosts.
+const allowedDevOrigins = ["127.0.0.1", "192.168.*.*",
+  ...(process.env.PI_WEB_ALLOWED_HOSTS?.split(",") ?? [])
+    .map((host) => host.trim())
+    .filter(Boolean),
+];
 let piVersion = "unknown";
 try {
-  const piPkgPath = join(__dirname, "node_modules/@earendil-works/pi-coding-agent/package.json");
+  const piPkgPath = join(configDir, "node_modules/@earendil-works/pi-coding-agent/package.json");
   piVersion = (JSON.parse(readFileSync(piPkgPath, "utf8")) as { version: string }).version;
 } catch { /* package not found, use default */ }
 
@@ -16,6 +22,7 @@ const nextConfig: NextConfig = {
   // M1 内置打包：产出 .next/standalone（自包含 server.js + 最小 node_modules），
   // 桌面壳随包拉起 node <standalone/server.js>，免本机 npm/CLI。
   output: "standalone",
+  outputFileTracingRoot: configDir,
   allowedDevOrigins,
   devIndicators: false,
   // proxy.ts clones the request body for /api/*; the Next.js default of

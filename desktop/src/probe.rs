@@ -444,6 +444,18 @@ pub(crate) fn kill_local_child(app: &AppHandle) {
     }
 }
 
+/// 关闭本机 Pi Web 服务：先杀壳拉起的子进程；端口仍被占用（外部启动/孤儿
+/// 进程）时按端口强制回收。返回关闭后是否已不在线。桌面端退出与连接页
+/// 「关闭本机服务」按钮共用；幂等。
+#[cfg(not(mobile))]
+pub(crate) fn stop_local_server(app: &AppHandle) -> bool {
+    kill_local_child(app);
+    if alive(DEFAULT_LOCAL_URL) {
+        force_free_port(30141);
+    }
+    !alive(DEFAULT_LOCAL_URL)
+}
+
 /// 忽略「已在线」检查直接拉起（改密重启用：刚 kill 旧进程，端口可能仍在
 /// TIME_WAIT，不能因 alive 短路）。
 #[cfg(not(mobile))]
@@ -491,6 +503,7 @@ pub fn spawn_local(
 
 /// Windows-only：查询占用指定端口的进程 ID（如存在）。
 #[cfg(all(not(mobile), windows))]
+#[cfg(all(not(mobile), windows))]
 fn port_owner_pid(port: u16) -> Option<u32> {
     use std::process::Command;
     // netstat -ano | findstr LISTENING | findstr :<port>
@@ -521,6 +534,21 @@ fn port_owner_pid(port: u16) -> Option<u32> {
         }
     }
     None
+}
+
+/// macOS/Linux：用 lsof 找监听端口的 PID（`lsof -ti tcp:<port>` 只输出监听者 PID）。
+#[cfg(all(not(mobile), not(windows)))]
+fn port_owner_pid(port: u16) -> Option<u32> {
+    use std::process::Command;
+    let out = Command::new("lsof")
+        .args(["-ti", &format!("tcp:{}", port)])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    text.lines().next()?.trim().parse::<u32>().ok()
 }
 
 /// Windows-only：取进程的可执行路径；失败返回 None。
@@ -598,5 +626,14 @@ fn force_free_port(port: u16) {
     }
 }
 
+/// macOS/Linux 强制释放端口：先 SIGTERM，短暂等待后仍存活再 SIGKILL。
 #[cfg(all(not(mobile), not(windows)))]
-fn force_free_port(_port: u16) {}
+fn force_free_port(port: u16) {
+    use std::process::Command;
+    let Some(pid) = port_owner_pid(port) else { return };
+    let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    if port_owner_pid(port).is_some() {
+        let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+    }
+}

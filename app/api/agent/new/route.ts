@@ -33,21 +33,33 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
   }
 
+  let commandType: string | undefined;
+  let promptAccepted = false;
   try {
     const body = await req.json() as unknown;
     if (!isRecord(body)) {
       return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
     }
     const { cwd, ...command } = body;
+    commandType = typeof command.type === "string" ? command.type : undefined;
 
     if (!cwd || typeof cwd !== "string") {
-      return NextResponse.json({ error: "cwd is required" }, { status: 400 });
+      return NextResponse.json({
+        error: "cwd is required",
+        ...(commandType === "prompt"
+          ? { code: "prompt_rejected", accepted: false }
+          : {}),
+      }, { status: 400 });
     }
-
     const allowedRoots = await getAllowedFileRoots();
     const legalCwd = resolveAllowedNewSessionCwd(cwd, allowedRoots);
     if (!legalCwd) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      return NextResponse.json({
+        error: "Access denied",
+        ...(commandType === "prompt"
+          ? { code: "prompt_rejected", accepted: false }
+          : {}),
+      }, { status: 403 });
     }
 
     const { provider, modelId, toolNames, thinkingLevel, ...promptCommand } = command as {
@@ -97,9 +109,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ ...response, data: null });
     }
 
+    const result = await session.send(promptCommand);
+    promptAccepted = promptCommand.type === "prompt";
+
     return NextResponse.json({
       ...response,
-      data: await session.send(promptCommand),
+      data: result,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -109,6 +124,11 @@ export async function POST(req: Request) {
       || message.includes("must be")
       ? 400
       : 500;
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({
+      error: message,
+      ...(commandType === "prompt" && !promptAccepted
+        ? { code: "prompt_rejected", accepted: false }
+        : {}),
+    }, { status });
   }
 }

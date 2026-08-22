@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isApiRequestAllowed } from "@/lib/request-security";
-import { resolveTranscriptPath, readSubagentTranscript, type SubagentTranscriptLine } from "@/lib/subagent-transcript";
+import { resolveTranscriptPath, readSubagentTranscript, readSubagentSessionTranscript, type SubagentTranscriptLine } from "@/lib/subagent-transcript";
+import { getSubagentRun } from "@/lib/rpc-manager";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,16 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "id and cwd are required" }, { status: 400 });
     }
     const path = resolveTranscriptPath(cwd, id, sessionId);
-    const lines: SubagentTranscriptLine[] = path ? readSubagentTranscript(path) : [];
+    let lines: SubagentTranscriptLine[] = path ? readSubagentTranscript(path) : [];
+    if (lines.length === 0) {
+      // Fall back to the built-in subagent engine: it records each subagent as
+      // its own persisted session, so read the conversation from that file when
+      // the legacy /tmp transcript is absent.
+      const run = await getSubagentRun(id);
+      if (run?.sessionPath) {
+        lines = readSubagentSessionTranscript(run.sessionPath);
+      }
+    }
     return NextResponse.json({ lines });
   } catch (error) {
     return NextResponse.json(

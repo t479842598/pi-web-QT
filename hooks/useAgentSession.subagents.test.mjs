@@ -25,7 +25,7 @@ test("upserts subagents:record completions into the fleet list", () => {
   assert.match(entryCase, /customType === "subagents:record"/);
   assert.match(entryCase, /upsertSubagentRecord\(/);
   // Record fields mapped: status → completed/failed/stopped, tokens + toolUses.
-  assert.match(source, /statusRaw === "error" \|\| statusRaw === "aborted"/);
+  assert.match(source, /statusRaw === "stopped" \? "stopped"/);
   assert.match(source, /typeof record\.tokens === "object"/);
   assert.match(source, /typeof record\.toolUses === "number"/);
 });

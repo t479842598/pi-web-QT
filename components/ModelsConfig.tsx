@@ -269,7 +269,8 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
   }, [name, provider.baseUrl, provider.api, provider.apiKey]);
 
   const handleDiscoverModels = useCallback(async () => {
-    if (!provider.baseUrl?.trim() || discoveryState.phase === "loading") return;
+    // 内置提供商（deepseek 等）未配置 baseUrl 时也允许：服务端从 SDK 注册表解析。
+    if (discoveryState.phase === "loading") return;
     const requestId = ++discoveryRequestIdRef.current;
     setDiscoveryState({ phase: "loading" });
     setSelectedModelIds([]);
@@ -285,7 +286,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
         setDiscoveryState({ phase: "error", message: data.error ?? `HTTP ${res.status}` });
         return;
       }
-      setDiscoveryState({ phase: "success", models: data.models, endpoint: data.endpoint ?? provider.baseUrl });
+      setDiscoveryState({ phase: "success", models: data.models, endpoint: data.endpoint ?? provider.baseUrl ?? "" });
     } catch (error) {
       if (requestId !== discoveryRequestIdRef.current) return;
       setDiscoveryState({ phase: "error", message: error instanceof Error ? error.message : String(error) });
@@ -376,7 +377,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
           {discoveryState.phase !== "success" && (
             <button
               onClick={handleDiscoverModels}
-              disabled={!provider.baseUrl?.trim() || discoveryState.phase === "loading"}
+              disabled={discoveryState.phase === "loading"}
               style={{
                 height: 30, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 5,
                 background: "var(--bg-panel)", color: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "var(--text-dim)" : "var(--text-muted)",

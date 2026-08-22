@@ -99,6 +99,7 @@ pub fn run() {
             commands::connect_server,
             commands::open_connect,
             commands::quit_app,
+            commands::stop_local,
         ])
         .on_window_event(|window, event| {
             // 桌面：关闭 = 隐藏（驻留托盘）；移动端用系统默认行为（返回键/手势退出）
@@ -167,7 +168,7 @@ pub fn run() {
         // 前同步清理；此处覆盖其余经事件循环退出的场景。
         if let tauri::RunEvent::Exit = event {
             #[cfg(not(mobile))]
-            crate::probe::kill_local_child(app_handle);
+            crate::probe::stop_local_server(app_handle);
         }
     });
 }

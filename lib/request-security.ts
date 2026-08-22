@@ -74,13 +74,40 @@ export function isApiRequestHostAllowed(
   return configuredHostnames.some((configured) => normalizeConfiguredHostname(configured) === hostname);
 }
 
-/** Reject browser cross-site API requests while allowing non-browser clients. */
+/**
+ * Compare an Origin header against the request's own origin, tolerating the
+ * one legitimate case where they differ: Chromium 150+ strips the port from
+ * the Origin header for same-origin requests on non-default ports. Scheme and
+ * hostname must always match; an explicit Origin port must match exactly. An
+ * Origin WITHOUT a port is accepted on the hostname match alone, which keeps
+ * legitimate Chromium requests working while still rejecting a same-host
+ * service on a different port (its Origin carries that port).
+ */
+function originMatchesRequest(origin: string, requestOrigin: string): boolean {
+  let originUrl: URL;
+  let requestUrl: URL;
+  try {
+    originUrl = new URL(origin);
+    requestUrl = new URL(requestOrigin);
+  } catch {
+    return false;
+  }
+  if (originUrl.protocol !== requestUrl.protocol) return false;
+  if (originUrl.hostname.toLowerCase() !== requestUrl.hostname.toLowerCase()) return false;
+  if (!originUrl.port) return true; // port stripped by Chromium → tolerate
+  const requestPort = requestUrl.port || (requestUrl.protocol === "https:" ? "443" : "80");
+  return originUrl.port === requestPort;
+}
+
+/** Reject browser cross-site API requests while preserving non-browser clients. */
 export function isApiRequestOriginAllowed(request: Request): boolean {
   if (request.headers.get("sec-fetch-site") === "cross-site") return false;
   const origin = request.headers.get("origin");
   if (!origin) return true;
+
   const requestOrigin = getRequestOrigin(request);
-  return requestOrigin !== null && canonicalOrigin(origin) === requestOrigin;
+  if (!requestOrigin) return false;
+  return originMatchesRequest(origin, requestOrigin);
 }
 
 export function shouldCheckApiRequestOrigin(request: Request): boolean {

@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import {
   getAllowedFileRoots,
+  isExistingFilePathAllowed,
   isFilePathAllowed,
   isWindowsAbsolutePath,
   normalizeSlashes,
@@ -28,6 +29,12 @@ import {
   validateUploadFileNames,
 } from "@/lib/file-upload";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
+import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
+import { samePath } from "@/lib/paths";
+import { isFileEditingEnabled } from "@/lib/file-editing";
+
+// 编辑保存的软上限：处理器能接收大 body，但仍需限制，避免失控客户端耗尽内存。
+const MAX_EDIT_CONTENT_BYTES = 16 * 1024 * 1024;
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -145,6 +152,99 @@ function parseUploadFileNames(value: unknown): string[] | null {
   return value;
 }
 
+async function resolveRealRoots(allowedRoots: Set<string>): Promise<Set<string>> {
+  const realRoots = new Set<string>();
+  for (const root of allowedRoots) {
+    try {
+      realRoots.add(fs.realpathSync(root));
+    } catch {
+      // Ignore stale session roots that no longer exist.
+    }
+  }
+  return realRoots;
+}
+
+async function getEditableFileTarget(segments: string[]): Promise<
+  { filePath: string; realPath: string; mode: number } | { response: NextResponse }
+> {
+  const filePath = filePathFromSegments(segments);
+  const allowedRoots = await getAllowedFileRoots();
+  if (!isFilePathAllowed(filePath, allowedRoots)) {
+    return { response: NextResponse.json({ error: "Access denied" }, { status: 403 }) };
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    return { response: NextResponse.json({ error: "File not found" }, { status: 404 }) };
+  }
+  if (!stat.isFile()) {
+    return { response: NextResponse.json({ error: "Not a file" }, { status: 400 }) };
+  }
+
+  // 可浏览文件可能是符号链接。写入前两侧都解析，防止根目录内的符号链接
+  // 把编辑重定向到根外。
+  const realPath = fs.realpathSync(filePath);
+  const realRoots = await resolveRealRoots(allowedRoots);
+  if (!isFilePathAllowed(realPath, realRoots)) {
+    return { response: NextResponse.json({ error: "Access denied" }, { status: 403 }) };
+  }
+
+  // 保留 rwx 权限位，编辑过的可执行脚本保持可执行；setuid/setgid/sticky
+  // 位出于安全故意丢弃。
+  return { filePath, realPath, mode: stat.mode & 0o777 };
+}
+
+/**
+ * 解析要删除的路径。文件与目录都可删，但拒绝删除 allow-root 本身
+ * （不能通过此端点删除 cwd 或项目根）。
+ *
+ * 返回 `rmPath`——真正传给 fs.rmSync 的路径。普通文件/目录是 realpath 加固
+ * 后的目标；符号链接则是链接本身（绝不解析到目标），删除符号链接不会触碰
+ * 其指向，也能清理目标已不存在的悬空链接。
+ */
+async function getDeletableFileTarget(segments: string[]): Promise<
+  { filePath: string; rmPath: string; isDir: boolean } | { response: NextResponse }
+> {
+  const filePath = filePathFromSegments(segments);
+  const allowedRoots = await getAllowedFileRoots();
+  if (!isFilePathAllowed(filePath, allowedRoots)) {
+    return { response: NextResponse.json({ error: "Access denied" }, { status: 403 }) };
+  }
+
+  // lstatSync 不跟随符号链接，悬空链接也能在此解析（statSync 会对缺失目标抛 ENOENT）。
+  let lstat: fs.Stats;
+  try {
+    lstat = fs.lstatSync(filePath);
+  } catch {
+    return { response: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  }
+
+  if (lstat.isSymbolicLink()) {
+    // 符号链接通过删除链接本身移除；绝不解析到目标，因此根内的符号链接
+    // 不能用来清掉根外任意位置。同时比对逻辑与解析后的根集合。
+    const realRoots = await resolveRealRoots(allowedRoots);
+    if (allowedRoots.has(filePath) || realRoots.has(filePath)) {
+      return { response: NextResponse.json({ error: "Cannot delete an allowed root" }, { status: 403 }) };
+    }
+    return { filePath, rmPath: filePath, isDir: false };
+  }
+
+  // 普通文件/目录：realpath 加固，防止被改名/重链接的祖先把 rm 重定向出根。
+  const realPath = fs.realpathSync(filePath);
+  const realRoots = await resolveRealRoots(allowedRoots);
+  if (!isFilePathAllowed(realPath, realRoots)) {
+    return { response: NextResponse.json({ error: "Access denied" }, { status: 403 }) };
+  }
+  // 禁止删除 allow-root 本身——那会清掉 cwd / 项目根 / worktree 顶层。
+  if (realRoots.has(realPath)) {
+    return { response: NextResponse.json({ error: "Cannot delete an allowed root" }, { status: 403 }) };
+  }
+
+  return { filePath, rmPath: realPath, isDir: lstat.isDirectory() };
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
@@ -159,6 +259,53 @@ export async function POST(
     if ("response" in uploadDirectory) return uploadDirectory.response;
     const { directory } = uploadDirectory;
     const type = request.nextUrl.searchParams.get("type") ?? "upload";
+
+    if (type === "create") {
+      // 在 realpath 加固过的允许父目录内创建空文件/目录。与 PATCH 同一开关，
+      // create/edit/变异共享一个信任边界。
+      if (!isFileEditingEnabled()) {
+        return NextResponse.json({ error: "File editing is disabled" }, { status: 403 });
+      }
+      const body = await request.json().catch(() => null) as {
+        name?: unknown;
+        kind?: unknown;
+        content?: unknown;
+      } | null;
+      if (!body || typeof body.name !== "string" || typeof body.kind !== "string") {
+        return NextResponse.json({ error: "Request body must be { name: string, kind: \"file\"|\"directory\" }" }, { status: 400 });
+      }
+      const kind = body.kind;
+      if (kind !== "file" && kind !== "directory") {
+        return NextResponse.json({ error: "kind must be \"file\" or \"directory\"" }, { status: 400 });
+      }
+      const name = body.name;
+      const validationError = validateUploadFileNames([name]);
+      if (validationError) {
+        return NextResponse.json({ error: validationError }, { status: 400 });
+      }
+      const content = typeof body.content === "string" ? body.content : "";
+      if (Buffer.byteLength(content, "utf8") > MAX_EDIT_CONTENT_BYTES) {
+        return NextResponse.json({ error: "Content exceeds 16MB limit" }, { status: 413 });
+      }
+      const target = path.join(directory, name);
+      // directory 已是 realpath 加固的父目录，validateUploadFileNames 已拒绝
+      // "/"、"\\"、".."，target 保证留在允许根内。
+      try {
+        if (kind === "file") {
+          // flag: "wx" 已存在即失败（EEXIST），符合"新建空文件"意图，不覆盖。
+          fs.writeFileSync(target, content, { flag: "wx" });
+        } else {
+          fs.mkdirSync(target, { recursive: false, mode: 0o755 });
+        }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "EEXIST") {
+          return NextResponse.json({ error: "File or directory already exists" }, { status: 409 });
+        }
+        throw error;
+      }
+      return NextResponse.json({ path: target, kind, size: 0 });
+    }
 
     if (type === "upload-check") {
       if (!hasJsonContentType(request)) {
@@ -267,6 +414,95 @@ export async function POST(
   }
 }
 
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  if (!isApiRequestAllowed(request)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+
+  if (!isFileEditingEnabled()) {
+    return NextResponse.json({ error: "File editing is disabled" }, { status: 403 });
+  }
+
+  try {
+    const { path: segments } = await params;
+    const target = await getEditableFileTarget(segments);
+    if ("response" in target) return target.response;
+    const { realPath, mode } = target;
+
+    const body = await request.json().catch(() => null) as { content?: unknown } | null;
+    if (!body || typeof body.content !== "string") {
+      return NextResponse.json({ error: "Request body must be { content: string }" }, { status: 400 });
+    }
+    const content = body.content;
+    if (Buffer.byteLength(content, "utf8") > MAX_EDIT_CONTENT_BYTES) {
+      return NextResponse.json({ error: "Edited content exceeds 16MB limit" }, { status: 413 });
+    }
+
+    const bytes = Buffer.from(content, "utf8");
+    // 先写同目录临时文件再改名，部分写入不会截断目标文件；同一文件系统内
+    // fs.renameSync 是原子的。
+    const tmpPath = `${realPath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      fs.writeFileSync(tmpPath, bytes);
+      // 恢复原 rwx 位，编辑过的可执行脚本保持可执行。
+      fs.chmodSync(tmpPath, mode);
+      fs.renameSync(tmpPath, realPath);
+    } catch (error) {
+      try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+      throw error;
+    }
+
+    const stat = fs.statSync(realPath);
+    return NextResponse.json({ size: stat.size });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  if (!isApiRequestAllowed(request)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+
+  if (!isFileEditingEnabled()) {
+    return NextResponse.json({ error: "File editing is disabled" }, { status: 403 });
+  }
+
+  try {
+    const { path: segments } = await params;
+    const target = await getDeletableFileTarget(segments);
+    if ("response" in target) return target.response;
+    const { filePath, rmPath, isDir } = target;
+
+    // force:false 让缺失路径（stat 与 rm 之间被删）抛 ENOENT 而非静默忽略；
+    // recursive 镜像条目类型，目录递归删除；符号链接 rmPath 是链接本身、
+    // isDir 为 false，只删链接不碰目标。
+    try {
+      fs.rmSync(rmPath, { recursive: isDir, force: false });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      if (code === "ENOTEMPTY") {
+        return NextResponse.json({ error: "Directory is not empty" }, { status: 409 });
+      }
+      throw error;
+    }
+
+    return NextResponse.json({ path: filePath, wasDirectory: isDir });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
+}
+
 function createFileBodyStream(filePath: string, range?: { start: number; end: number }): ReadableStream<Uint8Array> {
   const fileStream = fs.createReadStream(filePath, range);
   let closed = false;
@@ -322,12 +558,23 @@ function getContentDisposition(filePath: string, asDownload = false): string {
 }
 
 function streamFile(filePath: string, stat: fs.Stats, contentType: string, rangeHeader: string | null, asDownload = false): Response {
-  const headers = {
+  const headers: Record<string, string> = {
     "Content-Type": contentType,
     "Cache-Control": "no-cache",
     "Accept-Ranges": "bytes",
     "Content-Disposition": getContentDisposition(filePath, asDownload),
+    "X-Content-Type-Options": "nosniff",
   };
+  // SVG is the only preview type a browser executes as a document. A
+  // repo-controlled SVG navigated to directly (for example through a link in
+  // a transcript) would otherwise run script in the Pi Web origin, where it
+  // can call any /api route. These headers only affect document rendering;
+  // <img> preview embedding ignores them.
+  if (contentType === "image/svg+xml") {
+    headers["Content-Security-Policy"] =
+      "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+    headers["Referrer-Policy"] = "no-referrer";
+  }
 
   if (!rangeHeader) {
     return new Response(createFileBodyStream(filePath), {
@@ -464,15 +711,25 @@ export async function GET(
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
-    let stat: fs.Stats;
+    let stat: fs.Stats | undefined;
     try {
       stat = fs.statSync(filePath);
     } catch {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+      if (type !== "watch") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+    }
+
+    const existingAuthorizationPath = stat ? filePath : path.dirname(filePath);
+    if (
+      !allowedBySessionReference
+      && !isExistingFilePathAllowed(existingAuthorizationPath, allowedRoots)
+    ) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
     if (type === "read") {
-      if (!stat.isFile()) {
+      if (!stat?.isFile()) {
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
       }
       const imageMime = getImageMime(filePath);
@@ -499,7 +756,7 @@ export async function GET(
     }
 
     if (type === "download") {
-      if (!stat.isFile()) {
+      if (!stat?.isFile()) {
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
       }
       const mime = getImageMime(filePath) || getAudioMime(filePath) || getDocumentMime(filePath) || "application/octet-stream";
@@ -507,7 +764,7 @@ export async function GET(
     }
 
     if (type === "meta") {
-      if (!stat.isFile()) {
+      if (!stat?.isFile()) {
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
       }
       const imageMime = getImageMime(filePath);
@@ -522,7 +779,7 @@ export async function GET(
     }
 
     if (type === "preview") {
-      if (!stat.isFile()) {
+      if (!stat?.isFile()) {
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
       }
       if (getFileExt(filePath) !== "docx") {
@@ -553,10 +810,15 @@ export async function GET(
     }
 
     if (type === "watch") {
-      if (!stat.isFile()) {
+      if (stat && !stat.isFile()) {
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
       }
       let watcher: fs.FSWatcher | null = null;
+      let lastMtimeMs = stat?.mtimeMs ?? 0;
+      let lastCtimeMs = stat?.ctimeMs ?? 0;
+      let lastIno = stat?.ino ?? 0;
+      let lastSize = stat?.size ?? 0;
+      let lastExists = stat !== undefined;
       const stream = new ReadableStream({
         start(controller) {
           const send = (eventName: string, data: Record<string, unknown>) => {
@@ -567,20 +829,44 @@ export async function GET(
               // client disconnected
             }
           };
-          // Send initial ping so client knows connection is live
-          send("connected", { filePath });
           try {
-            watcher = fs.watch(filePath, () => {
+            const watchedDirectory = path.dirname(filePath);
+            watcher = fs.watch(watchedDirectory, (_eventType, changedName) => {
+              if (
+                changedName != null
+                && !samePath(path.join(watchedDirectory, changedName.toString()), filePath)
+              ) return;
               try {
                 const s = fs.statSync(filePath);
+                // Some platforms emit watch events for file reads/attribute
+                // access. Ignore those or the client's refresh read loops.
+                if (
+                  lastExists
+                  && s.mtimeMs === lastMtimeMs
+                  && s.ctimeMs === lastCtimeMs
+                  && s.ino === lastIno
+                  && s.size === lastSize
+                ) return;
+                lastExists = true;
+                lastMtimeMs = s.mtimeMs;
+                lastCtimeMs = s.ctimeMs;
+                lastIno = s.ino;
+                lastSize = s.size;
                 send("change", { mtime: s.mtime.toISOString(), size: s.size });
               } catch {
+                if (!lastExists) return;
+                lastExists = false;
                 send("change", { mtime: new Date().toISOString(), size: 0 });
               }
             });
             watcher.on("error", () => {
+              try { watcher?.close(); } catch { /* ignore */ }
+              watcher = null;
               try { controller.close(); } catch { /* ignore */ }
             });
+            // The client snapshots only after this event, so emit it after the
+            // watcher exists to avoid dropping changes between those steps.
+            send("connected", { filePath });
           } catch {
             send("error", { message: "Failed to watch file" });
             controller.close();
@@ -601,7 +887,7 @@ export async function GET(
     }
 
     // type === "list"
-    if (!stat.isDirectory()) {
+    if (!stat?.isDirectory()) {
       return NextResponse.json({ error: "Not a directory" }, { status: 400 });
     }
 

@@ -136,9 +136,11 @@ async function probe() {
   setLocalBadge("probing", "检测中…");
   $("local-desc").textContent = "正在探测本机 Pi Web 服务…";
   $("btn-start-local").disabled = true;
+  $("btn-stop-local").disabled = true;
   try {
     const r = await invoke("probe_local");
     if (r.local_alive) {
+      $("btn-stop-local").disabled = false;
       if (r.unauthenticated_local) {
         setLocalBadge("warn", "未认证");
         $("local-desc").textContent =
@@ -304,6 +306,20 @@ $("btn-setup-clear").addEventListener("click", async () => {
     $("setup-hint").textContent = String(e).replace(/^Error:\s*/, "");
   }
 });
+
+async function stopLocal() {
+  const btn = $("btn-stop-local");
+  btn.disabled = true;
+  try {
+    const closed = await invoke("stop_local");
+    toast(closed ? "本机 Pi Web 服务已关闭" : "本机服务未在运行", closed ? "ok" : "warn");
+  } catch (e) {
+    toast("关闭失败: " + e, "err");
+  }
+  probe();
+}
+
+$("btn-stop-local").addEventListener("click", stopLocal);
 
 $("btn-change-local-pass").addEventListener("click", () => {
   $("setup-card").hidden = false;

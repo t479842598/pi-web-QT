@@ -1,9 +1,11 @@
 "use client";
 
 import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useRef, useMemo } from "react";
-import { At, CaretRight, Check, DownloadSimple, Info, MinusCircle, Spinner, UploadSimple, Warning, X } from "@phosphor-icons/react";
+import { At, CaretRight, Check, DownloadSimple, FilePlus, FolderPlus, Info, MinusCircle, Spinner, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
 import { encodeFilePathForApi, getRelativeFilePath, joinFilePath } from "@/lib/file-paths";
+import { useI18n } from "@/hooks/useI18n";
+import { isFileEditingEnabled } from "@/lib/file-editing";
 import type { GitFileStatusKind, GitStatusResponse } from "@/lib/git-types";
 
 
@@ -30,10 +32,14 @@ interface Props {
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
   onUploadBusyChange?: (busy: boolean) => void;
+  onFileCreated?: (filePath: string) => void;
+  onFileDeleted?: (filePath: string, isDir: boolean) => void;
 }
 
 export interface FileExplorerHandle {
   openUploadPicker: () => void;
+  openCreateFilePicker: (parentDir?: string) => void;
+  openCreateFolderPicker: (parentDir?: string) => void;
 }
 
 type UploadPhase = "idle" | "checking" | "uploading";
@@ -202,6 +208,69 @@ function DismissButton({ onClick, title }: { onClick: () => void; title: string 
   );
 }
 
+interface CreateEntryResponse {
+  path?: string;
+  kind?: string;
+  size?: number;
+  error?: string;
+}
+
+// 新建走 POST /api/files/[...path]?type=create（与 PATCH/DELETE 同一开关门控）。
+async function createEntry(
+  parentDir: string,
+  name: string,
+  kind: "file" | "directory",
+  content?: string,
+): Promise<{ path: string }> {
+  const res = await fetch(
+    `/api/files/${encodeFilePathForApi(parentDir)}?type=create`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, kind, content: content ?? "" }),
+    },
+  );
+  const data = await res.json().catch(() => ({})) as CreateEntryResponse;
+  if (!res.ok || !data.path) {
+    throw new Error(data.error ?? `Create failed (HTTP ${res.status})`);
+  }
+  return { path: data.path };
+}
+
+// 删除走 DELETE /api/files/[...path]，目录由服务端递归删除。
+async function deleteEntry(targetPath: string): Promise<void> {
+  const res = await fetch(`/api/files/${encodeFilePathForApi(targetPath)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    let message = `Delete failed (HTTP ${res.status})`;
+    try {
+      const data = await res.json() as { error?: string };
+      if (data.error) message = data.error;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new Error(message);
+  }
+}
+
+// hover 操作按钮（新建文件/新建目录/下载/删除）共用的外观。
+const HOVER_ACTION_STYLE: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 4,
+  padding: "0 5px",
+  height: 20,
+  background: "var(--bg-panel)",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontSize: 11,
+  fontWeight: 600,
+  whiteSpace: "nowrap",
+};
+
 function TreeNode({
   node,
   depth,
@@ -214,6 +283,10 @@ function TreeNode({
   highlightedPaths,
   ignoredPaths,
   changedFiles,
+  editingEnabled,
+  onCreateFile,
+  onCreateFolder,
+  onDelete,
 }: {
   node: FileNode;
   depth: number;
@@ -226,7 +299,12 @@ function TreeNode({
   highlightedPaths: Set<string>;
   ignoredPaths: Set<string>;
   changedFiles: Map<string, ExplorerGitStatus>;
+  editingEnabled: boolean;
+  onCreateFile: (parentDir: string) => void;
+  onCreateFolder: (parentDir: string) => void;
+  onDelete: (filePath: string, name: string, isDir: boolean) => void;
 }) {
+  const { t } = useI18n();
   const open = expandedPaths.has(node.fullPath);
   const highlighted = highlightedPaths.has(node.fullPath);
   const pathKey = gitPathKey(node.fullPath);
@@ -337,69 +415,93 @@ function TreeNode({
         {loading && (
           <Spinner size={10} color="var(--text-dim)" weight="regular" aria-hidden="true" />
         )}
-        {onAtMention && hovered && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onAtMention(getRelativeFilePath(node.fullPath, cwd), node.isDir);
-            }}
-            title="Insert path into chat"
-            style={{
-              position: "absolute",
-              right: !node.isDir ? 28 : 4,
-              top: "50%",
-              transform: "translateY(-50%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-              padding: "0 8px",
-              height: 20,
-              background: "var(--bg-panel)",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              color: "var(--accent)",
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 600,
-              whiteSpace: "nowrap",
-            }}
-          >
-            <MentionIcon />
-            mention
-          </button>
-        )}
-        {hovered && !node.isDir && (
-          <a
-            href={`/api/files/${encodeFilePathForApi(node.fullPath)}?type=download`}
-            download
-            onClick={(e) => e.stopPropagation()}
-            title="Download file"
-            style={{
-              position: "absolute",
-              right: 4,
-              top: "50%",
-              transform: "translateY(-50%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-              padding: "0 5px",
-              height: 20,
-              background: "var(--bg-panel)",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 600,
-              whiteSpace: "nowrap",
-              textDecoration: "none",
-            }}
-          >
-            <DownloadSimple size={11} weight="regular" aria-hidden="true" />
-          </a>
-        )}
+        {hovered && (() => {
+          // hover 操作收集进同一个绝对定位 flex 行，避免多个绝对定位按钮互相
+          // 重叠。从左到右：提及 → 新建文件/新建目录（目录）→ 下载（文件）
+          // → 删除；最右操作贴 right: 4。
+          const actions: Array<React.ReactNode> = [];
+          if (onAtMention) {
+            actions.push(
+              <button
+                key="mention"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAtMention(getRelativeFilePath(node.fullPath, cwd), node.isDir);
+                }}
+                title={t("files.insertPath")}
+                style={{ ...HOVER_ACTION_STYLE, color: "var(--accent)" }}
+              >
+                <MentionIcon />
+                {t("files.mention")}
+              </button>,
+            );
+          }
+          if (editingEnabled && node.isDir) {
+            actions.push(
+              <button
+                key="new-file"
+                onClick={(e) => { e.stopPropagation(); onCreateFile(node.fullPath); }}
+                title={t("files.newFile")}
+                aria-label={t("files.newFile")}
+                style={HOVER_ACTION_STYLE}
+              >
+                <FilePlus size={11} weight="regular" aria-hidden="true" />
+              </button>,
+              <button
+                key="new-folder"
+                onClick={(e) => { e.stopPropagation(); onCreateFolder(node.fullPath); }}
+                title={t("files.newFolder")}
+                aria-label={t("files.newFolder")}
+                style={HOVER_ACTION_STYLE}
+              >
+                <FolderPlus size={11} weight="regular" aria-hidden="true" />
+              </button>,
+            );
+          }
+          if (!node.isDir) {
+            actions.push(
+              <a
+                key="download"
+                href={`/api/files/${encodeFilePathForApi(node.fullPath)}?type=download`}
+                download
+                onClick={(e) => e.stopPropagation()}
+                title={t("files.download")}
+                style={{ ...HOVER_ACTION_STYLE, color: "var(--text-muted)", textDecoration: "none" }}
+              >
+                <DownloadSimple size={11} weight="regular" aria-hidden="true" />
+              </a>,
+            );
+          }
+          if (editingEnabled) {
+            actions.push(
+              <button
+                key="delete"
+                onClick={(e) => { e.stopPropagation(); onDelete(node.fullPath, node.name, node.isDir); }}
+                title={t("files.delete")}
+                aria-label={t("files.delete")}
+                style={{ ...HOVER_ACTION_STYLE, color: "#f87171" }}
+              >
+                <Trash size={11} weight="regular" aria-hidden="true" />
+              </button>,
+            );
+          }
+          if (actions.length === 0) return null;
+          return (
+            <div
+              style={{
+                position: "absolute",
+                right: 4,
+                top: "50%",
+                transform: "translateY(-50%)",
+                display: "flex",
+                alignItems: "center",
+                gap: 3,
+              }}
+            >
+              {actions}
+            </div>
+          );
+        })()}
       </div>
       {node.isDir && open && (
         <div>
@@ -417,6 +519,10 @@ function TreeNode({
               highlightedPaths={highlightedPaths}
               ignoredPaths={ignoredPaths}
               changedFiles={changedFiles}
+              editingEnabled={editingEnabled}
+              onCreateFile={onCreateFile}
+              onCreateFolder={onCreateFolder}
+              onDelete={onDelete}
             />
           ))}
           {children.length === 0 && loaded && (
@@ -437,7 +543,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   onAtMention,
   onAtMentions,
   onUploadBusyChange,
+  onFileCreated,
+  onFileDeleted,
 }, ref) {
+  const { t } = useI18n();
   const [roots, setRoots] = useState<FileNode[]>([]);
   const [gitStatus, setGitStatus] = useState<GitStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -450,10 +559,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSummary, setUploadSummary] = useState<UploadSummary | null>(null);
   const [pendingConflict, setPendingConflict] = useState<PendingConflict | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const prevCwdRef = useRef<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}`;
   const uploadBusy = uploadPhase !== "idle";
+  // isFileEditingEnabled 读取 NEXT_PUBLIC_ 环境变量（构建期内联），与门控服务端
+  // 路由用的是同一个值，因此客户端按钮与服务端开关天然一致。
+  const mutationsEnabled = isFileEditingEnabled();
   const ignoredPaths = useMemo(
     () => new Set((gitStatus?.ignoredPaths ?? []).map(gitPathKey)),
     [gitStatus],
@@ -561,11 +674,64 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     void prepareUpload(files);
   }, [prepareUpload]);
 
+  const handleCreateFile = useCallback(async (parentDir: string) => {
+    setMutationError(null);
+    const name = window.prompt(t("files.promptFileName"));
+    if (!name) return;
+    try {
+      await createEntry(parentDir, name, "file");
+      // 用逻辑 parentDir + name（与树节点 fullPath 一致）而不是服务端返回的
+      // realpath 路径：当 cwd 是符号链接（如 worktree）时服务端路径会不匹配，
+      // 导致高亮不亮、之后从树里点开文件会重复开标签页。
+      const logicalPath = joinFilePath(parentDir, name);
+      setHighlightedPaths(new Set([logicalPath]));
+      setTreeRefreshKey((k) => k + 1);
+      onFileCreated?.(logicalPath);
+    } catch (e) {
+      setMutationError(e instanceof Error ? e.message : String(e));
+    }
+  }, [onFileCreated, t]);
+
+  const handleCreateFolder = useCallback(async (parentDir: string) => {
+    setMutationError(null);
+    const name = window.prompt(t("files.promptFolderName"));
+    if (!name) return;
+    try {
+      await createEntry(parentDir, name, "directory");
+      const logicalPath = joinFilePath(parentDir, name);
+      setHighlightedPaths(new Set([logicalPath]));
+      setTreeRefreshKey((k) => k + 1);
+    } catch (e) {
+      setMutationError(e instanceof Error ? e.message : String(e));
+    }
+  }, [t]);
+
+  const handleDelete = useCallback(async (filePath: string, name: string, isDir: boolean) => {
+    setMutationError(null);
+    const message = isDir
+      ? t("files.confirmDeleteDirectory", { name })
+      : t("files.confirmDeleteFile", { name });
+    if (!window.confirm(message)) return;
+    try {
+      await deleteEntry(filePath);
+      setTreeRefreshKey((k) => k + 1);
+      onFileDeleted?.(filePath, isDir);
+    } catch (e) {
+      setMutationError(e instanceof Error ? e.message : String(e));
+    }
+  }, [onFileDeleted, t]);
+
   useImperativeHandle(ref, () => ({
     openUploadPicker() {
       if (!uploadBusy) uploadInputRef.current?.click();
     },
-  }), [uploadBusy]);
+    openCreateFilePicker(parentDir?: string) {
+      void handleCreateFile(parentDir ?? cwd);
+    },
+    openCreateFolderPicker(parentDir?: string) {
+      void handleCreateFolder(parentDir ?? cwd);
+    },
+  }), [uploadBusy, cwd, handleCreateFile, handleCreateFolder]);
 
   useEffect(() => {
     onUploadBusyChange?.(uploadBusy);
@@ -716,7 +882,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         </div>
       )}
 
-
+      {mutationError && (
+        <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "6px 8px", borderBottom: "1px solid var(--border)", fontSize: 11, lineHeight: 1.35, color: "#f87171" }}>
+          <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{mutationError}</span>
+          <DismissButton onClick={() => setMutationError(null)} title={t("files.dismissError")} />
+        </div>
+      )}
 
       <div style={{ padding: "2px 4px" }}>
         {loading ? (
@@ -738,6 +909,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               highlightedPaths={highlightedPaths}
               ignoredPaths={ignoredPaths}
               changedFiles={changedFiles}
+              editingEnabled={mutationsEnabled}
+              onCreateFile={handleCreateFile}
+              onCreateFolder={handleCreateFolder}
+              onDelete={handleDelete}
             />
           ))
         )}

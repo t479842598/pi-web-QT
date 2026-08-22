@@ -11,7 +11,7 @@ test("tracks streamed assistant content to derive a token rate", () => {
     source.indexOf("// ── Live token rate"),
     source.indexOf("const countAssistantChars"),
   );
-  assert.match(rateSource, /charsPerToken: 4/);
+  assert.match(rateSource, /tokens\/sec/);
   assert.match(rateSource, /window: \[\]/);
 
   const counterSource = source.slice(
@@ -19,6 +19,7 @@ test("tracks streamed assistant content to derive a token rate", () => {
     source.indexOf("const trackTokenRate"),
   );
   assert.match(counterSource, /msg\.role !== "assistant"/);
+  assert.match(counterSource, /estimateTokens/);
   assert.match(counterSource, /typeof b\.text === "string"/);
   assert.match(counterSource, /typeof b\.thinking === "string"/);
 

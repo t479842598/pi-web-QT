@@ -10,7 +10,12 @@ import { createQueueEntry, loadQueue, removeQueue, saveQueue, type PendingRecove
 import { invalidateModelsCache } from "./models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
-import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
+import { cacheSessionPath, invalidateSessionListCache, resolveSessionPath } from "./session-reader";
+import { createSubagentExtension, preferPiWebSubagentExtension } from "./subagent-extension";
+import { listSubagentProfiles } from "./subagents";
+import { createSubagentController } from "./subagent-runtime";
+import { isBuiltInSubagentsEnabled } from "./subagent-settings";
+import { createProjectCommandBashOperations } from "./project-command-env";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import { readModeSettings } from "./modes-config";
 import { decide, policyFromStrings, type Policy } from "./permission";
@@ -178,7 +183,7 @@ const CODING_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"
 class PlainTextTheme extends Theme {
   constructor() {
     super(
-      { thinkingXhigh: "" } as ConstructorParameters<typeof Theme>[0],
+      { thinkingXhigh: "", searchMatchText: "" } as ConstructorParameters<typeof Theme>[0],
       { selectedBg: "" } as ConstructorParameters<typeof Theme>[1],
       "truecolor",
     );
@@ -284,6 +289,7 @@ export class AgentSessionWrapper {
   private queueMutationTail: Promise<void> = Promise.resolve();
   private onDestroyCallback: (() => void) | null = null;
   private shutdownPromise: Promise<void> | null = null;
+  private sessionShutdownEmitted = false;
   private _alive = true;
   private approvalPolicy: Policy = policyFromStrings(readModeSettings().permissionRules);
   private approvalMode: "ask" | "auto" | "yolo" = readModeSettings().toolApprovalMode;
@@ -325,6 +331,10 @@ export class AgentSessionWrapper {
   isAlive(): boolean {
     return this._alive;
   }
+
+  /** Subagent runtime awaits the host session before spawning; the parent is
+   *  already fully started by the time its Agent tool runs, so resolve now. */
+  async waitUntilReady(): Promise<void> {}
 
   /** True once shutdown has been initiated (destroy may still be pending). */
   isShuttingDown(): boolean {
@@ -833,9 +843,13 @@ export class AgentSessionWrapper {
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
+      // 即使 isRunning() 卡在 true，也照常 shutdown，让扩展收到
+      // session_shutdown 并回收子进程；先中止 bash/agent 再走关闭。
       if (this.isRunning()) {
-        this.resetIdleTimer();
-        return;
+        if (this.inner.isBashRunning) this.inner.abortBash();
+        void this.inner.abort().catch(() => {
+          // 忽略中止失败；shutdown 仍会发出 session_shutdown。
+        });
       }
       void this.shutdown().catch((error) => {
         console.error("[pi-web] failed to shut down idle session:", error instanceof Error ? error.message : error);
@@ -1463,10 +1477,19 @@ export class AgentSessionWrapper {
         if (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning) {
           throw new Error("Cannot run a shell command while the session is busy");
         }
+        // 隔离宿主运行时变量：子命令不继承 pi-web 进程的 NODE_ENV/NEXT_*/PORT 等，
+        // 避免项目命令误读宿主环境（#487）。用当前 shell 设置构造本地执行器。
+        const shellPath = this.inner.settingsManager?.getShellPath?.();
+        const operations = createProjectCommandBashOperations(
+          typeof shellPath === "string" && shellPath ? { shellPath } : {},
+        );
         const execution = this.inner.executeBash(
           command.command as string,
           undefined,
-          { excludeFromContext: command.excludeFromContext as boolean | undefined },
+          {
+            excludeFromContext: command.excludeFromContext as boolean | undefined,
+            operations,
+          },
         );
         try {
           const result = await execution;
@@ -1506,12 +1529,44 @@ export class AgentSessionWrapper {
     this.pendingUiResponses.clear();
     this.pendingUiRequests.clear();
     this.rejectAllApprovals("Session closed while approval was pending");
-    try {
-      this.inner.dispose();
-    } finally {
-      this.onDestroyCallback?.();
-      notifyRunningChange();
+
+    const finishDispose = () => {
+      try {
+        this.inner.dispose();
+      } finally {
+        try {
+          this.onDestroyCallback?.();
+        } finally {
+          notifyRunningChange();
+        }
+      }
+    };
+
+    // 无论调用方是否先走 shutdown()（进程退出、直接 destroy），dispose 前都
+    // 发出 session_shutdown，让扩展 MCP 子进程在 runner 失效前完成回收。
+    if (this.sessionShutdownEmitted) {
+      finishDispose();
+      return;
     }
+    this.sessionShutdownEmitted = true;
+    // SDK 的 ExtensionRunner.emit 只接受 reason:"quit"，dispose 是 pi-web 自有的
+    // 语义；调用处局部断言以复用其 runner（参数为方法，双变下可安全调用）。
+    const emit = this.inner.extensionRunner?.emit as unknown as
+      ((event: { type: "session_shutdown"; reason: "quit" | "dispose" }) => Promise<unknown>) | undefined;
+    if (typeof emit !== "function") {
+      finishDispose();
+      return;
+    }
+    void Promise.resolve(
+      emit.call(this.inner.extensionRunner, { type: "session_shutdown", reason: "dispose" }),
+    )
+      .catch((error) => {
+        console.error(
+          "[pi-web] session_shutdown before dispose failed:",
+          error instanceof Error ? error.message : error,
+        );
+      })
+      .finally(finishDispose);
   }
 
   async shutdown(): Promise<void> {
@@ -1528,7 +1583,10 @@ export class AgentSessionWrapper {
             error instanceof Error ? error.message : error,
           );
         }
-        await this.inner.extensionRunner.emit?.({ type: "session_shutdown", reason: "quit" });
+        if (!this.sessionShutdownEmitted) {
+          this.sessionShutdownEmitted = true;
+          await this.inner.extensionRunner.emit?.({ type: "session_shutdown", reason: "quit" });
+        }
       } finally {
         this.destroy();
       }
@@ -2014,6 +2072,47 @@ export function getRunningRpcSessionIds(): string[] {
   return getRunningRpcSessionSnapshots().map((snapshot) => snapshot.id);
 }
 
+// ─── Built-in subagent controller ───────────────────────────────────────────
+// Bridges the upstream subagent engine (lib/subagent-runtime.ts) to this fork's
+// AgentSessionWrapper registry. Subagent sessions are thin wrappers: no async
+// bash, no goal engine — they only need to be reachable by id so the runtime
+// can steer/abort them and the UI can list them.
+
+function registerSubagentWrapper(inner: AgentSessionLike): AgentSessionWrapper {
+  const wrapper = new AgentSessionWrapper(inner, inner.sessionManager.getCwd());
+  wrapper.start();
+  const sessionId = inner.sessionId as string;
+  const registry = getRegistry();
+  wrapper.onDestroy(() => registry.delete(sessionId));
+  registry.set(sessionId, wrapper);
+  return wrapper;
+}
+
+const SUBAGENT_CONTROLLER = createSubagentController({
+  getSession: (sessionId) => getRegistry().get(sessionId),
+  registerSession: (inner) => {
+    registerSubagentWrapper(inner);
+  },
+  reopenSession: async (sessionId, sessionFile) =>
+    (await startRpcSession(sessionId, sessionFile, undefined)).session,
+  resolveSessionPath,
+  invalidateSessionList: invalidateSessionListCache,
+  notifyRunningChange,
+  isBuiltInSubagentsEnabled,
+});
+
+export function getSubagentRun(sessionId: string) {
+  return SUBAGENT_CONTROLLER.get(sessionId);
+}
+
+export function steerSubagent(sessionId: string, message: string) {
+  return SUBAGENT_CONTROLLER.steer(sessionId, message);
+}
+
+export function abortSubagent(sessionId: string) {
+  return SUBAGENT_CONTROLLER.abort(sessionId);
+}
+
 // ─── Cross-client session event bus ────────────────────────────────────────
 
 /** Subscribe to session events broadcast across all clients. */
@@ -2220,6 +2319,16 @@ export async function startRpcSession(
       cwd: sessionCwd,
       agentDir,
       modelRuntimeSignal: startController.signal,
+      resourceLoaderOptions: {
+        extensionFactories: [
+          createSubagentExtension(
+            SUBAGENT_CONTROLLER.extensionRuntime,
+            () => listSubagentProfiles(sessionCwd),
+            isBuiltInSubagentsEnabled,
+          ),
+        ],
+        extensionsOverride: (base) => preferPiWebSubagentExtension(base),
+      },
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
 

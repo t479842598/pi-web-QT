@@ -4,11 +4,13 @@ import { memo, useState, useRef, useEffect, useMemo } from "react";
 import { MarkdownBody } from "./MarkdownBody";
 import { copyText, markdownToPlainText } from "@/lib/clipboard";
 import { resolveSlashDisplayText } from "@/lib/slash-display";
+import { ImagePreview } from "./ImagePreview";
 
 import { isEmptyThinkingBlock } from "@/lib/message-display";
 import { CompactionSummary } from "./CompactionSummary";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
+import { getToolResultImages } from "@/lib/tool-result-images";
 import type { WrittenFile } from "@/lib/turn-written-files";
 import { SubagentCard } from "./SubagentCard";
 import type { SubagentStatus } from "@/lib/types";
@@ -106,8 +108,7 @@ interface Props {
   onOpenSubagent?: (agentId: string) => void;
 }
 
-function formatTime(ts?: number): string | null {
-  if (!ts) return null;
+function formatTime(ts?: number): string | null {  if (!ts) return null;
   const d = new Date(ts);
   const now = new Date();
   const isToday = d.getFullYear() === now.getFullYear() &&
@@ -177,6 +178,19 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.onOpenSubagent === next.onOpenSubagent;
 });
 
+/**
+ * Removes Markdown image references (`![alt](url)`) from user message text.
+ * pi writes the attached image's path back into the text as such a reference;
+ * the image is already rendered separately from the message's image blocks, so
+ * keeping the reference would render the same picture twice (MarkdownBody
+ * resolves the local path and shows it at full size).
+ */
+function stripMarkdownImageLinks(text: string): string {
+  return text
+    .replace(/(?<!\\)!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/[ \t]*\n{3,}/g, "\n\n");
+}
+
 function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, onCreateTask }: {
   message: UserMessage;
   cwd?: string;
@@ -193,7 +207,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const content =
+  const rawContent =
     typeof message.content === "string"
       ? message.content
       : message.content
@@ -205,6 +219,11 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
     typeof message.content === "string"
       ? []
       : message.content.filter((b): b is ImageContent => b.type === "image");
+
+  // pi 把附件图片路径以 Markdown 图片引用写回用户文本（如 `![x.png](/abs/x.png)`），
+  // 图片已由上方 imageBlocks 单独渲染；去掉引用避免 MarkdownBody 再按原图尺寸渲染一次。
+  const content = imageBlocks.length > 0 ? stripMarkdownImageLinks(rawContent) : rawContent;
+
   const displayContent = resolveSlashDisplayText(content) ?? content;
 
   const time = formatTime(message.timestamp);
@@ -240,13 +259,14 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     ? `data:${flat.mimeType};base64,${flat.data}`
                     : "";
                 return (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={i}
-                    src={src}
-                    alt=""
-                    style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid rgba(59,130,246,0.15)" }}
-                  />
+                  <ImagePreview key={i} src={src}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={src}
+                      alt=""
+                      style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid rgba(59,130,246,0.15)" }}
+                    />
+                  </ImagePreview>
                 );
               })}
             </div>
@@ -997,6 +1017,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ block, result, durati
       : null),
     [result],
   );
+  const resultImages = getToolResultImages(result);
   const resultIsEmpty = resultText === null ? false : (resultText.trim() === "(no output)" || resultText.trim() === "");
   const isError = result?.isError ?? false;
 
@@ -1041,6 +1062,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ block, result, durati
         ) : (
           <PairedResult
             text={resultText ?? ""}
+            images={resultImages}
             isEmpty={resultIsEmpty}
             isError={isError}
             processStyle={processStyle}
@@ -1322,8 +1344,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function PairedResult({ text, isEmpty, isError, processStyle = false }: {
+function PairedResult({ text, images = [], isEmpty, isError, processStyle = false }: {
   text: string;
+  images?: ImageContent[];
   isEmpty: boolean;
   isError: boolean;
   processStyle?: boolean;
@@ -1333,6 +1356,7 @@ function PairedResult({ text, isEmpty, isError, processStyle = false }: {
   const border = processStyle ? "var(--border)" : isError ? "rgba(248,113,113,0.3)" : "rgba(34,197,94,0.15)";
   const truncated = !isEmpty && text.length > RESULT_PREVIEW_CHARS && !showFull;
   const displayText = truncated ? text.slice(0, RESULT_PREVIEW_CHARS) : text;
+  const showText = !isEmpty || images.length === 0;
   return (
     <div
       style={{
@@ -1340,6 +1364,33 @@ function PairedResult({ text, isEmpty, isError, processStyle = false }: {
         background: processStyle ? "var(--bg-subtle)" : isError ? "rgba(248,113,113,0.04)" : "var(--bg-subtle)",
       }}
     >
+      {images.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "10px", background: "var(--bg)" }}>
+          {images.map((image, index) => {
+            const src = imageSource(image);
+            if (!src) return null;
+            return (
+              <ImagePreview key={`${src}-${index}`} src={src}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt={`Tool result image ${index + 1}`}
+                  loading="lazy"
+                  style={{
+                    display: "block",
+                    maxWidth: "min(100%, 720px)",
+                    maxHeight: 520,
+                    borderRadius: 6,
+                    objectFit: "contain",
+                    border: "1px solid var(--border)",
+                  }}
+                />
+              </ImagePreview>
+            );
+          })}
+        </div>
+      )}
+      {showText && (
       <pre
         style={{
           margin: 0,
@@ -1358,6 +1409,7 @@ function PairedResult({ text, isEmpty, isError, processStyle = false }: {
       >
         {isEmpty ? t("desktop.noOutput") : displayText}
       </pre>
+      )}
       {truncated && (
         <button
           onClick={() => setShowFull(true)}
@@ -1440,13 +1492,14 @@ function CustomMessageView({ message, isStreaming, cwd, onOpenFile }: { message:
                   const src = imageSource(img);
                   if (!src) return null;
                   return (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={i}
-                      src={src}
-                      alt=""
-                      style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
-                    />
+                    <ImagePreview key={i} src={src}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={src}
+                        alt=""
+                        style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
+                      />
+                    </ImagePreview>
                   );
                 })}
               </div>

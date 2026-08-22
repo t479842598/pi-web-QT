@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { resolveModelDiscoveryAuth } from "@/lib/model-discovery-auth";
 import { buildModelsListUrl, parseDiscoveredModels } from "@/lib/model-discovery";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
@@ -13,6 +17,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasHeader(headers: Headers, name: string): boolean {
   return headers.has(name);
+}
+
+/**
+ * 从 SDK 内置注册表解析提供商的 baseUrl（deepseek、anthropic 等未在
+ * models.json 配置 baseUrl 的提供商）。用临时配置建 ModelRuntime，读取
+ * getProvider 的定义；解析失败返回 null。模型列表 URL 走 openai-completions
+ * 约定（baseUrl/models），api 参数保持路由默认值。
+ */
+async function resolveBuiltinProviderDef(
+  providerName: string,
+): Promise<{ baseUrl: string } | null> {
+  let tempDir: string | undefined;
+  try {
+    tempDir = mkdtempSync(join(tmpdir(), "pi-web-model-def-"));
+    const modelsPath = join(tempDir, "models.json");
+    writeFileSync(modelsPath, JSON.stringify({ providers: { [providerName]: { models: [] } } }), "utf8");
+    const runtime = await ModelRuntime.create({ modelsPath });
+    const provider = runtime.getProvider(providerName);
+    if (!provider?.baseUrl) return null;
+    return { baseUrl: provider.baseUrl };
+  } catch {
+    return null;
+  } finally {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 function buildHeaders(api: string, apiKey: string | undefined, configured: Record<string, string>): Headers {
@@ -44,11 +73,19 @@ export async function POST(req: Request) {
     if (!providerName) return NextResponse.json({ error: "providerName is required" }, { status: 400 });
     if (!isRecord(body.provider)) return NextResponse.json({ error: "provider is required" }, { status: 400 });
 
-    const baseUrl = typeof body.provider.baseUrl === "string" ? body.provider.baseUrl.trim() : "";
-    if (!baseUrl) return NextResponse.json({ error: "Base URL is required" }, { status: 400 });
-    const api = typeof body.provider.api === "string" && body.provider.api
+    let baseUrl = typeof body.provider.baseUrl === "string" ? body.provider.baseUrl.trim() : "";
+    let api = typeof body.provider.api === "string" && body.provider.api
       ? body.provider.api
       : "openai-completions";
+    if (!baseUrl) {
+      // SDK 内置提供商（deepseek 等）未在 models.json 配置 baseUrl：
+      // 从 SDK 注册表解析，让「获取新模型」对内置模型同样可用。
+      const def = await resolveBuiltinProviderDef(providerName);
+      if (def) {
+        baseUrl = def.baseUrl;
+      }
+    }
+    if (!baseUrl) return NextResponse.json({ error: "Base URL is required" }, { status: 400 });
 
     let endpoint: URL;
     try {

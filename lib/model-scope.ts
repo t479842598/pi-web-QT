@@ -38,6 +38,16 @@ export function invalidateAvailableModelsCache(): void {
 }
 
 
+const THINKING_LEVEL_SUFFIXES = new Set<ThinkingLevel>([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+
 /**
  * Uses pi's resolver so pi-web accepts the same enabledModels globs, fuzzy
  * references, and thinking pins as the CLI rather than maintaining a second
@@ -69,6 +79,54 @@ function matchesModel(
   return model.provider === reference.provider && model.id === reference.modelId;
 }
 
+function hasGlob(pattern: string): boolean {
+  return pattern.includes("*") || pattern.includes("?") || pattern.includes("[");
+}
+
+function exactReferenceMatches(pattern: string, models: readonly Model<Api>[]): Model<Api>[] {
+  const normalized = pattern.toLowerCase();
+  const canonical = models.filter(
+    (model) => `${model.provider}/${model.id}`.toLowerCase() === normalized,
+  );
+  if (canonical.length > 0) return canonical;
+  return models.filter((model) => model.id.toLowerCase() === normalized);
+}
+
+function assertNoAmbiguousExactPatterns(
+  patterns: readonly string[],
+  models: readonly Model<Api>[],
+): void {
+  for (const pattern of patterns) {
+    if (hasGlob(pattern)) continue;
+
+    let matches = exactReferenceMatches(pattern, models);
+    if (matches.length === 0) {
+      const colonIndex = pattern.lastIndexOf(":");
+      const suffix = colonIndex >= 0 ? pattern.slice(colonIndex + 1) : "";
+      if (THINKING_LEVEL_SUFFIXES.has(suffix as ThinkingLevel)) {
+        matches = exactReferenceMatches(pattern.slice(0, colonIndex), models);
+      }
+    }
+
+    if (matches.length > 1) {
+      const references = matches
+        .map((model) => `${model.provider}/${model.id}`)
+        .sort()
+        .join(", ");
+      throw new Error(
+        `Ambiguous enabledModels entry "${pattern}" matches multiple models: ${references}. Use provider/modelId.`,
+      );
+    }
+  }
+}
+
+/**
+ * Resolve the visible model list for `patterns`.
+ *
+ * Falls back to every available model when no patterns are configured or when
+ * the patterns resolve to nothing, so a stale or typo'd setting can never leave
+ * the UI without any selectable model.
+ */
 export async function resolveVisibleModels(
   modelRuntime: ModelRuntime,
   patterns: string[] | undefined,
@@ -85,6 +143,7 @@ export async function resolveVisibleModels(
     }
   }
 
+  const available = await getAvailableModels(modelRuntime, options.signal);
   const cleanedPatterns = (patterns ?? []).map((pattern) => pattern.trim()).filter(Boolean);
   let visible: readonly Model<Api>[] = [];
   let scopedModels: readonly ScopedModel[] = [];
@@ -92,13 +151,18 @@ export async function resolveVisibleModels(
   const warnings: string[] = [];
 
   if (cleanedPatterns.length === 0) {
-    visible = await getAvailableModels(modelRuntime, options.signal);
+    visible = available;
   } else {
-    const result = await resolveModelScopeWithDiagnostics(cleanedPatterns, modelRuntime);
+    assertNoAmbiguousExactPatterns(cleanedPatterns, available);
+    // Hand the SDK resolver a snapshot so it never refetches the model list.
+    const snapshotRuntime = {
+      getAvailable: async () => available,
+    } as ModelRuntime;
+    const result = await resolveModelScopeWithDiagnostics(cleanedPatterns, snapshotRuntime);
     scopedModels = result.scopedModels;
     visible = result.scopedModels.length > 0
       ? result.scopedModels.map((s) => s.model)
-      : await getAvailableModels(modelRuntime, options.signal);
+      : available;
     warnings.push(...result.diagnostics.map((d) => d.message));
     for (const scopedModel of scopedModels) {
       if (scopedModel.thinkingLevel) {
