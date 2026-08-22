@@ -882,6 +882,45 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }));
   }, [applySubagents]);
 
+  /** Bridge the upstream engine's completion notification into a fleet row.
+   *  The engine emits customType "pi-web:subagent-notification" with `details`
+   *  (SubagentToolDetails) once a background subagent finishes; foreground
+   *  subagents report through the tool result instead. */
+  const upsertSubagentNotification = useCallback((details: Record<string, unknown>) => {
+    const id = typeof details.sessionId === "string" ? details.sessionId : "";
+    const type = typeof details.profile === "string" ? details.profile : "Agent";
+    const description = typeof details.description === "string" ? details.description : "";
+    const statusRaw = typeof details.status === "string" ? details.status : "";
+    const status: SubagentStatus["status"] =
+      statusRaw === "completed"
+        ? "completed"
+        : statusRaw === "aborted" || statusRaw === "interrupted" || statusRaw === "stopped"
+          ? "stopped"
+          : "failed";
+    const startedAt = typeof details.createdAt === "string" ? Date.parse(details.createdAt) : Date.now();
+    const completedAt = typeof details.completedAt === "string" ? Date.parse(details.completedAt) : Date.now();
+    const error = typeof details.error === "string" && details.error ? details.error : undefined;
+
+    applySubagents((prev) => {
+      const idx = prev.findIndex((s) => s.id === id || (s.agentType === type && s.description === description));
+      const entry: SubagentStatus = {
+        id: id || prev[idx]?.id || `${type}-${startedAt}`,
+        agentType: type,
+        description,
+        status,
+        startedAt,
+        completedAt,
+        error,
+      };
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = entry;
+        return next;
+      }
+      return [...prev, entry].slice(-MAX_SUBAGENT_ROWS);
+    });
+  }, [applySubagents]);
+
 
   // Queue reconciliation: the empty queue_update can be lost during an SSE
   // drop/reconnect window (the bus does not replay history), which leaves
@@ -2042,9 +2081,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       }
       case "entry_appended": {
-        const entry = (event as { entry?: { customType?: string; data?: unknown } }).entry;
+        const entry = (event as { entry?: { customType?: string; data?: unknown; details?: unknown } }).entry;
         if (entry?.customType === "subagents:record" && typeof entry.data === "object" && entry.data !== null) {
           upsertSubagentRecord(entry.data as Record<string, unknown>);
+        } else if (entry?.customType === "pi-web:subagent-notification" && typeof entry.details === "object" && entry.details !== null) {
+          upsertSubagentNotification(entry.details as Record<string, unknown>);
         }
         break;
       }
@@ -2148,6 +2189,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     clearQueueReconcile,
     addRunningSubagent,
     upsertSubagentRecord,
+    upsertSubagentNotification,
     finishRunningSubagent,
     SUBAGENT_TOOL_NAMES,
     trackTokenRate,
