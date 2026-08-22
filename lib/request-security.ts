@@ -74,12 +74,29 @@ export function isApiRequestHostAllowed(
   return configuredHostnames.some((configured) => normalizeConfiguredHostname(configured) === hostname);
 }
 
-function originHostname(value: string): string | null {
+/**
+ * Compare an Origin header against the request's own origin, tolerating the
+ * one legitimate case where they differ: Chromium 150+ strips the port from
+ * the Origin header for same-origin requests on non-default ports. Scheme and
+ * hostname must always match; an explicit Origin port must match exactly. An
+ * Origin WITHOUT a port is accepted on the hostname match alone, which keeps
+ * legitimate Chromium requests working while still rejecting a same-host
+ * service on a different port (its Origin carries that port).
+ */
+function originMatchesRequest(origin: string, requestOrigin: string): boolean {
+  let originUrl: URL;
+  let requestUrl: URL;
   try {
-    return new URL(value).hostname;
+    originUrl = new URL(origin);
+    requestUrl = new URL(requestOrigin);
   } catch {
-    return null;
+    return false;
   }
+  if (originUrl.protocol !== requestUrl.protocol) return false;
+  if (originUrl.hostname.toLowerCase() !== requestUrl.hostname.toLowerCase()) return false;
+  if (!originUrl.port) return true; // port stripped by Chromium → tolerate
+  const requestPort = requestUrl.port || (requestUrl.protocol === "https:" ? "443" : "80");
+  return originUrl.port === requestPort;
 }
 
 /** Reject browser cross-site API requests while preserving non-browser clients. */
@@ -88,18 +105,9 @@ export function isApiRequestOriginAllowed(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return true;
 
-  // Chromium 150+ strips the port from the Origin header for same-origin
-  // requests on non-default ports. Strict canonical-origin comparison would
-  // therefore reject those legitimate requests ("http://127.0.0.1:30141"
-  // vs. the browser-sent "http://127.0.0.1"). The Host header is the
-  // authoritative source for where the request actually went, so accept any
-  // Origin whose hostname matches it. Hostnames are case-insensitive, which
-  // the URL constructor already handles for us.
   const requestOrigin = getRequestOrigin(request);
   if (!requestOrigin) return false;
-  const originHost = originHostname(origin);
-  const requestHost = originHostname(requestOrigin);
-  return originHost !== null && originHost === requestHost;
+  return originMatchesRequest(origin, requestOrigin);
 }
 
 export function shouldCheckApiRequestOrigin(request: Request): boolean {
