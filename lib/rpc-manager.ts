@@ -10,7 +10,11 @@ import { createQueueEntry, loadQueue, removeQueue, saveQueue, type PendingRecove
 import { invalidateModelsCache } from "./models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
-import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
+import { cacheSessionPath, invalidateSessionListCache, resolveSessionPath } from "./session-reader";
+import { createSubagentExtension, preferPiWebSubagentExtension } from "./subagent-extension";
+import { listSubagentProfiles } from "./subagents";
+import { createSubagentController } from "./subagent-runtime";
+import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import { readModeSettings } from "./modes-config";
 import { decide, policyFromStrings, type Policy } from "./permission";
@@ -325,6 +329,10 @@ export class AgentSessionWrapper {
   isAlive(): boolean {
     return this._alive;
   }
+
+  /** Subagent runtime awaits the host session before spawning; the parent is
+   *  already fully started by the time its Agent tool runs, so resolve now. */
+  async waitUntilReady(): Promise<void> {}
 
   /** True once shutdown has been initiated (destroy may still be pending). */
   isShuttingDown(): boolean {
@@ -2014,6 +2022,47 @@ export function getRunningRpcSessionIds(): string[] {
   return getRunningRpcSessionSnapshots().map((snapshot) => snapshot.id);
 }
 
+// ─── Built-in subagent controller ───────────────────────────────────────────
+// Bridges the upstream subagent engine (lib/subagent-runtime.ts) to this fork's
+// AgentSessionWrapper registry. Subagent sessions are thin wrappers: no async
+// bash, no goal engine — they only need to be reachable by id so the runtime
+// can steer/abort them and the UI can list them.
+
+function registerSubagentWrapper(inner: AgentSessionLike): AgentSessionWrapper {
+  const wrapper = new AgentSessionWrapper(inner, inner.sessionManager.getCwd());
+  wrapper.start();
+  const sessionId = inner.sessionId as string;
+  const registry = getRegistry();
+  wrapper.onDestroy(() => registry.delete(sessionId));
+  registry.set(sessionId, wrapper);
+  return wrapper;
+}
+
+const SUBAGENT_CONTROLLER = createSubagentController({
+  getSession: (sessionId) => getRegistry().get(sessionId),
+  registerSession: (inner) => {
+    registerSubagentWrapper(inner);
+  },
+  reopenSession: async (sessionId, sessionFile) =>
+    (await startRpcSession(sessionId, sessionFile, undefined)).session,
+  resolveSessionPath,
+  invalidateSessionList: invalidateSessionListCache,
+  notifyRunningChange,
+  isBuiltInSubagentsEnabled,
+});
+
+export function getSubagentRun(sessionId: string) {
+  return SUBAGENT_CONTROLLER.get(sessionId);
+}
+
+export function steerSubagent(sessionId: string, message: string) {
+  return SUBAGENT_CONTROLLER.steer(sessionId, message);
+}
+
+export function abortSubagent(sessionId: string) {
+  return SUBAGENT_CONTROLLER.abort(sessionId);
+}
+
 // ─── Cross-client session event bus ────────────────────────────────────────
 
 /** Subscribe to session events broadcast across all clients. */
@@ -2220,6 +2269,16 @@ export async function startRpcSession(
       cwd: sessionCwd,
       agentDir,
       modelRuntimeSignal: startController.signal,
+      resourceLoaderOptions: {
+        extensionFactories: [
+          createSubagentExtension(
+            SUBAGENT_CONTROLLER.extensionRuntime,
+            () => listSubagentProfiles(sessionCwd),
+            isBuiltInSubagentsEnabled,
+          ),
+        ],
+        extensionsOverride: (base) => preferPiWebSubagentExtension(base),
+      },
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
 
