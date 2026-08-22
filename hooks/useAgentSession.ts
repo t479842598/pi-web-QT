@@ -1083,9 +1083,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       if (showLoading) setLoading(true);
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
-      // 超时兜底：服务端异常/大会话卡住时 15s 后结束 loading，避免“永远加载中”
+      // 超时兜底：服务端异常/大会话卡住时结束 loading，避免”永远加载中”。
+      // 大会话冷启动可能超过 15s，放宽到 30s；超时按可重试处理，不向用户
+      // 暴露 “AbortError: Fetch is aborted”。
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
+      const timer = setTimeout(() => controller.abort(), 30000);
       let res: Response;
       try {
         res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`, {
@@ -1132,7 +1134,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
       try {
         const stateController = new AbortController();
-        const stateTimer = setTimeout(() => stateController.abort(), 10000);
+        const stateTimer = setTimeout(() => stateController.abort(), 20000);
         let stateRes: Response;
         try {
           stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`, {
@@ -1170,7 +1172,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return null;
       }
     } catch (e) {
-      setError(String(e));
+      // 超时中止不是致命错误：保留上次已加载的会话，给出可读提示即可，
+      // 而不是把 "AbortError: Fetch is aborted" 原样甩到界面上。
+      const aborted = e instanceof DOMException && e.name === "AbortError";
+      setError(aborted
+        ? "Timed out loading this conversation. Please try again."
+        : String(e));
       return null;
     } finally {
       if (showLoading && !messagesLoaded) setLoading(false);
@@ -3335,24 +3342,27 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         void sendAgentCommand(session.id, { type: "set_approval_policy", policy: rules }).catch(() => {});
       }
       loadSession(session.id, true, true).then((agentState) => {
-        if (agentState?.running) {
-          if (agentState.state?.isBashRunning) {
+        const restoreRunning = (state: AgentStateResponse) => {
+          if (state.isBashRunning) {
             bashRunningRef.current = true;
             setBashRunning(true);
           }
           loadTools(session.id);
-          if (agentState.state?.isStreaming || agentState.state?.isPromptRunning) {
-            sdkAgentActiveRef.current = Boolean(agentState.state.isStreaming);
-            rpcPromptPendingRef.current = Boolean(agentState.state.isPromptRunning);
+          if (state.isStreaming || state.isPromptRunning) {
+            sdkAgentActiveRef.current = Boolean(state.isStreaming);
+            rpcPromptPendingRef.current = Boolean(state.isPromptRunning);
             agentRunningRef.current = true;
             setAgentRunning(true);
-            setAgentPhase(phaseFromServerState(agentState.state));
+            setAgentPhase(phaseFromServerState(state));
             dispatch({ type: "start" });
             void connectEvents(session.id);
-            if (!agentState.state.isStreaming && agentState.state.isPromptRunning) {
+            if (!state.isStreaming && state.isPromptRunning) {
               void waitForPromptSettlement(session.id);
             }
           }
+        };
+        if (agentState?.running && agentState.state) {
+          restoreRunning(agentState.state);
         }
         if (agentState?.state) {
           if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
@@ -3364,12 +3374,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (agentState.state.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(agentState.state.queuedMessages));
           if (agentState.state.pendingRecovery !== undefined) setPendingRecovery(agentState.state.pendingRecovery ?? []);
         }
-        // 入口对账：包装器存活但空闲时，上次访问遗留的计划模式只读工具集
-        // 不得泄漏进本次访问。轻量检查（GET 不创建包装器），不付冷启动代价。
+        // 入口对账 + 自愈：state 拉取失败/超时（agentState 为 null）或 state 路由
+        // 短暂未看到存活包装器时，再打一次轻量 GET（不创建包装器）兜底恢复
+        // 运行态。否则"打开一个正在运行的会话"会停在 idle，只能切换会话才恢复。
         if (!agentState?.running) {
           fetch(`/api/agent/${encodeURIComponent(session.id)}`)
             .then((r) => (r.ok ? r.json() : null))
-            .then((d) => { if (d && (d as { running?: boolean }).running) loadTools(session.id); })
+            .then((d) => {
+              const snapshot = d as { running?: boolean; state?: AgentStateResponse } | null;
+              if (snapshot?.running && snapshot.state) restoreRunning(snapshot.state);
+            })
             .catch(() => { /* best-effort; the first send reconciles tools */ });
         }
       });
