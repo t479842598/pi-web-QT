@@ -6,7 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { closeSync, openSync, readSync, statSync } from "fs";
 import { normalize as normalizePath } from "path";
-import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
+import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 import { stripModeInstructionBlocks } from "./modes";
@@ -317,10 +317,17 @@ export function invalidateOpenSessionCache(filePath?: string): void {
   else cache.clear();
 }
 
+export interface BuildSessionContextOptions {
+  deferThinking?: boolean;
+  deferToolResultImages?: boolean;
+  /** Session id used to build lazy URLs for historical tool-result images. */
+  sessionId?: string;
+}
+
 export function buildSessionContext(
   entries: SessionEntry[],
   leafId?: string | null,
-  options: { deferThinking?: boolean; deferToolResultImages?: boolean } = {},
+  options: BuildSessionContextOptions = {},
 ): SessionContext {
   const byId = new Map<string, SessionEntry>();
   for (const e of entries) byId.set(e.id, e);
@@ -382,21 +389,38 @@ function base64ImageInfo(block: unknown): { bytes: number; mime?: string } | nul
   return { bytes: Math.max(0, Math.floor(data.length * 3 / 4) - padding), mime };
 }
 
-function omitToolResultBase64Images(message: AgentMessage): AgentMessage {
+function deferToolResultBase64Images(
+  message: AgentMessage,
+  sessionId: string | undefined,
+  entryId: string,
+): AgentMessage {
   if (message.role !== "toolResult") return message;
 
   let omitted = 0;
   let bytes = 0;
   const mimes = new Set<string>();
-  const content = message.content.filter((block) => {
+  const content = message.content.flatMap((block, blockIndex) => {
     const image = base64ImageInfo(block);
-    if (!image) return true;
+    if (!image) return [block];
+
+    // 保持历史响应精简，但保留一个懒加载图片块：浏览器只在展开折叠的
+    // 工具结果时才取图。
+    if (sessionId) {
+      const source: ImageContent["source"] = {
+        type: "url",
+        ...(image.mime ? { media_type: image.mime } : {}),
+        url: `/api/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/tool-result-image?blockIndex=${blockIndex}`,
+      };
+      return [{ type: "image", source } satisfies ImageContent];
+    }
+
+    // 无 sessionId 的调用方保留旧的有界回退（丢弃 + 占位文本）。
     omitted += 1;
     bytes += image.bytes;
     if (image.mime) mimes.add(image.mime);
-    return false;
+    return [];
   });
-  if (omitted === 0) return message;
+  if (omitted === 0) return { ...message, content };
 
   const mimeText = mimes.size > 0 ? `: ${[...mimes].join(", ")}` : "";
   content.push({
@@ -410,12 +434,12 @@ function omitToolResultBase64Images(message: AgentMessage): AgentMessage {
 // Returns null for entries that do not map to chat history (metadata, non-message types).
 function entryToUiMessage(
   entry: SessionEntry,
-  options: { deferThinking?: boolean; deferToolResultImages?: boolean },
+  options: BuildSessionContextOptions,
 ): AgentMessage | null {
   switch (entry.type) {
     case "message": {
       const message = options.deferToolResultImages
-        ? omitToolResultBase64Images(normalizeToolCalls(entry.message))
+        ? deferToolResultBase64Images(normalizeToolCalls(entry.message), options.sessionId, entry.id)
         : normalizeToolCalls(entry.message);
       if (!options.deferThinking || message.role !== "assistant") return message;
       return {

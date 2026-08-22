@@ -10,6 +10,7 @@ import { isEmptyThinkingBlock } from "@/lib/message-display";
 import { CompactionSummary } from "./CompactionSummary";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
+import { getToolResultImages } from "@/lib/tool-result-images";
 import type { WrittenFile } from "@/lib/turn-written-files";
 import { SubagentCard } from "./SubagentCard";
 import type { SubagentStatus } from "@/lib/types";
@@ -1016,6 +1017,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ block, result, durati
       : null),
     [result],
   );
+  const resultImages = getToolResultImages(result);
   const resultIsEmpty = resultText === null ? false : (resultText.trim() === "(no output)" || resultText.trim() === "");
   const isError = result?.isError ?? false;
 
@@ -1060,6 +1062,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({ block, result, durati
         ) : (
           <PairedResult
             text={resultText ?? ""}
+            images={resultImages}
             isEmpty={resultIsEmpty}
             isError={isError}
             processStyle={processStyle}
@@ -1341,8 +1344,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function PairedResult({ text, isEmpty, isError, processStyle = false }: {
+function PairedResult({ text, images = [], isEmpty, isError, processStyle = false }: {
   text: string;
+  images?: ImageContent[];
   isEmpty: boolean;
   isError: boolean;
   processStyle?: boolean;
@@ -1352,6 +1356,7 @@ function PairedResult({ text, isEmpty, isError, processStyle = false }: {
   const border = processStyle ? "var(--border)" : isError ? "rgba(248,113,113,0.3)" : "rgba(34,197,94,0.15)";
   const truncated = !isEmpty && text.length > RESULT_PREVIEW_CHARS && !showFull;
   const displayText = truncated ? text.slice(0, RESULT_PREVIEW_CHARS) : text;
+  const showText = !isEmpty || images.length === 0;
   return (
     <div
       style={{
@@ -1359,6 +1364,33 @@ function PairedResult({ text, isEmpty, isError, processStyle = false }: {
         background: processStyle ? "var(--bg-subtle)" : isError ? "rgba(248,113,113,0.04)" : "var(--bg-subtle)",
       }}
     >
+      {images.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "10px", background: "var(--bg)" }}>
+          {images.map((image, index) => {
+            const src = imageSource(image);
+            if (!src) return null;
+            return (
+              <ImagePreview key={`${src}-${index}`} src={src}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt={`Tool result image ${index + 1}`}
+                  loading="lazy"
+                  style={{
+                    display: "block",
+                    maxWidth: "min(100%, 720px)",
+                    maxHeight: 520,
+                    borderRadius: 6,
+                    objectFit: "contain",
+                    border: "1px solid var(--border)",
+                  }}
+                />
+              </ImagePreview>
+            );
+          })}
+        </div>
+      )}
+      {showText && (
       <pre
         style={{
           margin: 0,
@@ -1377,6 +1409,7 @@ function PairedResult({ text, isEmpty, isError, processStyle = false }: {
       >
         {isEmpty ? t("desktop.noOutput") : displayText}
       </pre>
+      )}
       {truncated && (
         <button
           onClick={() => setShowFull(true)}
