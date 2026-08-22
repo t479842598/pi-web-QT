@@ -2,6 +2,50 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.11.0 — 2026-08-22（合并上游 v0.8.9 + 内置子代理引擎 + 移动端/桌面端增强）
+
+### 上游合并（agegr/pi-web v0.8.7..v0.8.9，SDK 0.84.0 → 0.84.2）
+- 全量合并上游 91 个提交，78 个冲突按 fork 优先裁决；Next 16.3.1
+- 吸收：路径安全公共化、projectKey/sessionPathKey、model-scope 歧义拒绝、
+  read-only 预设结构、进程生命周期、图片预览样式、frontmatter 解析、i18n key 并集
+
+### 子代理（built-in-subagents 引擎）
+- 移植上游子代理运行时引擎并接入 rpc-manager：`Agent` 工具、可检查子代理会话、
+  舰队监控、全屏运行视图、实时转录（引擎会话文件 fallback）
+- 桥接引擎完成通知（pi-web:subagent-notification）到舰队行状态
+
+### 修复
+- **打开会话 AbortError 与运行状态不同步**：15s 超时中止导致状态恢复被跳过，
+  放宽超时 + AbortError 可读化 + 入口自愈兜底
+- #544 Chromium 150+ Origin 剥端口（端口感知校验 + 回归测试）
+- #519 skills 开关破坏 SKILL.md frontmatter
+- #520 SVG 预览 CSP
+- #557 token/费用计数跨压缩单调（session-stats）
+- #561 删模型清理 enabledModels 残留
+- #575 session_shutdown 全 dispose 路径
+- #533 用户消息图片不重复渲染
+- #487 项目命令环境隔离（RPC bash + async-bash 双路径）
+- 主题切换、tool-presets 语义对齐（plan 预设）
+
+### 功能
+- 聊天图片点击放大（ImagePreview）
+- 工具结果图片内联显示 + 历史懒加载（#499）
+- 粘贴文件管理器路径 + WSL 映射（#536）
+- 后台会话完成浏览器通知
+- CJK 按 ~1 token 校正 TPS 速率
+- 文件手动编辑 + 文件夹管理（#464，`NEXT_PUBLIC_PI_WEB_FILE_EDITING` 门控）
+- 内置提供商（deepseek 等）「获取新模型」：从上游 API 拉最新模型列表，新模型
+  勾选添加（如 deepseek-v4-flash-vision-exp）
+
+### 桌面端
+- 连接页「关闭本机服务」按钮：探测到服务在线才可用
+- 退出时清理本地进程（含 macOS lsof 端口回收、外部进程 SIGTERM→KILL）
+- 标题栏工作树标签不再遮挡会话标题；移动端隐藏分支 chip/worktree 按钮
+- 移动端输入框精简（隐藏模式控制按钮）；新建会话页版本号显示在图标下方
+
+### 验证
+- tsc 0 错误；npm test 735 通过 / 0 失败；桌面端 Rust 21 单测通过
+
 ## v0.10.8 — 2026-08-21（Windows 桌面端白屏/挂起根治：主线程建窗 + 代理 alt-svc 剔除 + WebView2 禁用 GPU）
 
 ### 修复
