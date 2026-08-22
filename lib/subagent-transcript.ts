@@ -174,3 +174,37 @@ export function readSubagentTranscript(path: string, limit = 0): SubagentTranscr
     return [];
   }
 }
+
+/**
+ * Read a built-in subagent's conversation from its own session .jsonl file.
+ * The upstream engine (lib/subagent-runtime.ts) records each subagent as a
+ * persisted session instead of the legacy /tmp/pi-subagents-* .output files;
+ * this maps its message entries onto the same lightweight transcript lines.
+ */
+export function readSubagentSessionTranscript(sessionPath: string, limit = 0): SubagentTranscriptLine[] {
+  if (!existsSync(sessionPath)) return [];
+  try {
+    const raw = readFileSync(sessionPath, "utf8");
+    const lines: SubagentTranscriptLine[] = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      let entry: Record<string, unknown>;
+      try {
+        entry = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (entry.type !== "message") continue;
+      const message = (typeof entry.message === "object" && entry.message !== null
+        ? entry.message as Record<string, unknown>
+        : undefined);
+      const role = message?.role;
+      if (role !== "user" && role !== "assistant" && role !== "toolResult") continue;
+      const mapped = lineFromEntry({ type: role, message });
+      if (mapped) lines.push(mapped);
+    }
+    return limit > 0 ? lines.slice(-limit) : lines;
+  } catch {
+    return [];
+  }
+}
