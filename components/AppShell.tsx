@@ -592,6 +592,34 @@ export function AppShell() {
     });
   }, [fileTabs]);
 
+  // 新建的文件直接开一个新标签页（与上传后即查看的流程一致）；目录不开。
+  const handleFileCreated = useCallback((filePath: string) => {
+    setExplorerRefreshKey((k) => k + 1);
+    handleOpenFile(filePath, getFileName(filePath));
+  }, [handleOpenFile]);
+
+  // 关闭指向已删除文件的标签页；删除目录时关闭其下所有文件的标签页。与
+  // handleCloseFileTab 的活动标签回退逻辑一致，保证删除后右侧面板不会停在
+  // 一个过期的路径上。
+  const handleFileDeleted = useCallback((filePath: string, isDir: boolean) => {
+    setExplorerRefreshKey((k) => k + 1);
+    const prefix = filePath.endsWith("/") ? filePath : filePath + "/";
+    const isAffected = (tabPath: string) =>
+      tabPath === filePath || (isDir && tabPath.startsWith(prefix));
+    setFileTabs((prev) => {
+      const next = prev.filter((t) => !isAffected(t.filePath));
+      if (next.length === 0) setRightPanelOpen(false);
+      return next;
+    });
+    setActiveFileTabId((cur) => {
+      if (!cur) return cur;
+      const activeTab = fileTabs.find((t) => t.id === cur);
+      if (!activeTab || !isAffected(activeTab.filePath)) return cur;
+      const remaining = fileTabs.filter((t) => !isAffected(t.filePath));
+      return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
+    });
+  }, [fileTabs]);
+
   const sessionTitle = selectedSession
     // 恢复的最小 SessionInfo 没有 name：回退到 ChatWindow 加载后回传的真实标题
     ? stripModeInstructionBlocks(selectedSession.name || sessionStats?.sessionName) ||
@@ -752,6 +780,8 @@ export function AppShell() {
         explorerRefreshKey={explorerRefreshKey}
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
+        onFileCreated={handleFileCreated}
+        onFileDeleted={handleFileDeleted}
         workspaceControlsHosts={{
           title: titleWorkspaceControlsHost,
           welcome: welcomeWorkspaceControlsHost,
@@ -1104,6 +1134,7 @@ export function AppShell() {
               )}
               onAtMention={handleAtMention}
               onMentionLines={handleFileLineMention}
+              onFileSaved={() => setExplorerRefreshKey((k) => k + 1)}
             />
           ) : (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>

@@ -30,6 +30,8 @@ interface Props {
   explorerRefreshKey?: number;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
+  onFileCreated?: (filePath: string) => void;
+  onFileDeleted?: (filePath: string, isDir: boolean) => void;
   /** Open the settings modal (used by the title-generation failure banner). */
   onOpenSettings?: (tab?: string) => void;
   selectedSessionStats?: SessionStatsInfo | null;
@@ -401,7 +403,7 @@ function orderGroupRows(sessions: SessionInfo[], allSessions: SessionInfo[], fla
 
 
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onFileCreated, onFileDeleted, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2720,6 +2722,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 onAtMention={onAtMention}
                 onAtMentions={onAtMentions}
                 onUploadBusyChange={setExplorerUploadBusy}
+                onFileCreated={onFileCreated}
+                onFileDeleted={onFileDeleted}
               />
             </div>
           )}
