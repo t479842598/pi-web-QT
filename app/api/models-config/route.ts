@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
-import { assertModelsConfigBody, mutateModelsConfig, readModelsConfig } from "@/lib/models-config-store";
+import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { assertModelsConfigBody, mutateModelsConfig, readModelsConfig, type ModelsConfigData } from "@/lib/models-config-store";
+import { pruneRemovedEnabledModels } from "@/lib/enabled-model-pruning";
+import { invalidateAvailableModelsCache } from "@/lib/model-scope";
 import { isApiRequestAllowed, hasJsonContentType } from "@/lib/request-security";
-import type { ModelsConfigData } from "@/lib/models-config-store";
 
 export const dynamic = "force-dynamic";
 
@@ -61,11 +63,26 @@ export async function PUT(req: Request) {
   try {
     const body = await req.json() as unknown;
     assertModelsConfigBody(body);
+    let previousConfig: ModelsConfigData | null = null;
     const persisted = await mutateModelsConfig((current) => {
+      previousConfig = current;
       const next = mergeFullSaveWithCurrent(current, body);
       return { data: next, result: next };
     });
-    return NextResponse.json({ success: true, config: persisted });
+    // A full save may delete a provider/model that enabledModels still
+    // references by canonical "provider/modelId". Prune those stale entries so
+    // the enabled scope never points at a model that no longer exists.
+    let prunedEnabledModels = 0;
+    if (previousConfig) {
+      const settings = SettingsManager.create(process.cwd(), getAgentDir());
+      prunedEnabledModels = await pruneRemovedEnabledModels(
+        settings,
+        previousConfig as unknown as Record<string, unknown>,
+        persisted as unknown as Record<string, unknown>,
+      );
+      if (prunedEnabledModels > 0) invalidateAvailableModelsCache();
+    }
+    return NextResponse.json({ success: true, config: persisted, prunedEnabledModels });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
