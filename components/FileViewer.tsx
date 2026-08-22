@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback, useMemo, type MouseEvent } from "react";
-import { DownloadSimple } from "@phosphor-icons/react";
+import { useEffect, useState, useRef, useCallback, useMemo, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from "react";
+import { DownloadSimple, FloppyDisk, PencilSimple, X } from "@phosphor-icons/react";
 import { PrismLight as SyntaxHighlighter } from "@/lib/prism-languages";
 import ReactMarkdown from "react-markdown";
 import { useI18n } from "@/hooks/useI18n";
@@ -13,6 +13,7 @@ import {
   isImagePath,
 } from "@/lib/file-types";
 import { encodeFilePathForApi, getFileDirectory, getFileName, getRelativeFilePath } from "@/lib/file-paths";
+import { isFileEditingEnabled } from "@/lib/file-editing";
 import { resolveLocalFileHref } from "@/lib/file-links";
 import { headingId, markdownRehypePlugins, markdownRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
 import { prismTheme } from "@/lib/prism-theme";
@@ -28,6 +29,7 @@ interface Props {
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
   initialDisplayMode?: "diff";
+  onFileSaved?: () => void;
 }
 
 interface FileData {
@@ -98,6 +100,45 @@ function DownloadLink({ filePath, sourceSessionId }: { filePath: string; sourceS
       <DownloadSimple size={11} aria-hidden="true" />
     </a>
   );
+}
+
+// 编辑器的 textarea 与行号槽共用同一套等宽排版，保证行号与正文逐行对齐。
+const FILE_CODE_STYLE: CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 13,
+  lineHeight: 1.6,
+  tabSize: 2,
+};
+
+const FILE_LINE_NUMBER_STYLE: CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 13,
+  lineHeight: 1.6,
+  padding: "12px 0 12px 16px",
+  color: "var(--text-dim)",
+  textAlign: "right",
+  userSelect: "none",
+};
+
+// 文本预览以 utf-8 读取，二进制内容里通常带有 \u0000，据此识别二进制文件并禁用编辑。
+function hasBinaryContent(content: string): boolean {
+  return content.includes("\u0000");
+}
+
+// 保存走 PATCH /api/files/[...path]（与上传同一 allow-list + realpath 加固，
+// 由 isFileEditingEnabled() 门控）。返回保存后的字节数。
+async function saveFileEdit(filePath: string, content: string): Promise<number> {
+  const response = await fetch(`/api/files/${encodeFilePathForApi(filePath)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? `HTTP ${response.status}`);
+  }
+  const body = await response.json() as { size?: number };
+  return typeof body.size === "number" ? body.size : 0;
 }
 
 type DiffLine =
@@ -770,7 +811,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
-export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMention, onMentionLines, initialDisplayMode }: Props) {
+export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMention, onMentionLines, initialDisplayMode, onFileSaved }: Props) {
   if (isImagePath(filePath)) {
     return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
@@ -780,10 +821,10 @@ export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMen
   if (isDocumentPreviewPath(filePath)) {
     return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
-  return <TextFileViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onAtMention={onAtMention} onMentionLines={onMentionLines} initialDisplayMode={initialDisplayMode} />;
+  return <TextFileViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onAtMention={onAtMention} onMentionLines={onMentionLines} initialDisplayMode={initialDisplayMode} onFileSaved={onFileSaved} />;
 }
 
-function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMention, onMentionLines, initialDisplayMode }: Props) {
+function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMention, onMentionLines, initialDisplayMode, onFileSaved }: Props) {
   const { t } = useI18n();
   const [data, setData] = useState<FileData | null>(null);
   const [prevContent, setPrevContent] = useState<string | null>(null);
@@ -797,6 +838,22 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
   const [selectedLineRange, setSelectedLineRange] = useState<SelectedLineRange | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  // 编辑态状态：draft 与磁盘原始内容分离，SSE 外部变更在编辑态不覆盖 textarea。
+  const [editMode, setEditMode] = useState(false);
+  const [draftContent, setDraftContent] = useState("");
+  const [originalContent, setOriginalContent] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [externalModified, setExternalModified] = useState(false);
+  const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const draftLineNumbersRef = useRef<HTMLDivElement | null>(null);
+  const saveRequestRef = useRef(0);
+  const editModeRef = useRef(false);
+
+  useEffect(() => { editModeRef.current = editMode; }, [editMode]);
+
+  const isDirty = editMode && draftContent !== originalContent;
+  const isBinary = Boolean(data?.content && hasBinaryContent(data.content));
 
   const fetchGitDiff = useCallback(async (targetPath: string) => {
     if (!cwd) {
@@ -849,6 +906,12 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
     setViewMode("source");
     setWrapLines(false);
     setChangeCount(0);
+    setEditMode(false);
+    setDraftContent("");
+    setOriginalContent("");
+    setSaveError(null);
+    setExternalModified(false);
+    setIsSaving(false);
 
     if (esRef.current) {
       esRef.current.close();
@@ -868,6 +931,11 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
     esRef.current = es;
 
     es.addEventListener("change", () => {
+      // 编辑态下绝不覆盖 textarea——只标记外部修改，由用户决定是否重载。
+      if (editModeRef.current) {
+        setExternalModified(true);
+        return;
+      }
       fetchContent(filePath, true);
       void fetchGitDiff(filePath);
     });
@@ -877,6 +945,109 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
       esRef.current = null;
     };
   }, [filePath, fetchContent, fetchGitDiff, initialDisplayMode, sourceSessionId]);
+
+  const enterEdit = useCallback(() => {
+    if (!data || isBinary) return;
+    setDraftContent(data.content);
+    setOriginalContent(data.content);
+    setSaveError(null);
+    setExternalModified(false);
+    setEditMode(true);
+  }, [data, isBinary]);
+
+  const exitEdit = useCallback(() => {
+    setEditMode(false);
+    setDraftContent("");
+    setOriginalContent("");
+    setSaveError(null);
+    setExternalModified(false);
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    if (isDirty && !window.confirm(t("files.unsavedChanges"))) return;
+    exitEdit();
+  }, [isDirty, exitEdit, t]);
+
+  const saveEdit = useCallback(async () => {
+    if (!data || isSaving) return;
+    const requestId = ++saveRequestRef.current;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const size = await saveFileEdit(filePath, draftContent);
+      if (requestId !== saveRequestRef.current) return;
+      // 刷新内存中的磁盘快照，让后续 SSE change 与刚保存的版本对比，
+      // 而不是编辑前的旧内容。
+      setData((prev) => prev ? { ...prev, content: draftContent, size } : prev);
+      setOriginalContent(draftContent);
+      setIsSaving(false);
+      exitEdit();
+      // 自己写入触发的 SSE change 事件在 editModeRef 仍为 "edit" 时到达并被
+      // 吞掉，这里显式刷新 git diff 与文件树。
+      void fetchGitDiff(filePath);
+      onFileSaved?.();
+    } catch (e) {
+      if (requestId !== saveRequestRef.current) return;
+      setSaveError(e instanceof Error ? e.message : String(e));
+      setIsSaving(false);
+    }
+  }, [data, isSaving, draftContent, filePath, exitEdit, fetchGitDiff, onFileSaved]);
+
+  // Cmd/Ctrl+S 保存、Esc 取消（仅编辑态生效）。
+  useEffect(() => {
+    if (!editMode) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isSaveShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
+      if (isSaveShortcut) {
+        event.preventDefault();
+        void saveEdit();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelEdit();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editMode, saveEdit, cancelEdit]);
+
+  // 有未保存改动时，关闭页面/切走前弹出浏览器守卫。
+  useEffect(() => {
+    if (!isDirty) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  // textarea 与行号槽滚动同步。
+  const handleDraftScroll = useCallback(() => {
+    const ta = draftTextareaRef.current;
+    const gutter = draftLineNumbersRef.current;
+    if (ta && gutter) gutter.scrollTop = ta.scrollTop;
+  }, []);
+
+  // 编辑态下 Tab 插入两个空格而不是移走焦点。
+  const handleDraftKeyDown = useCallback((event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Tab" || event.metaKey || event.ctrlKey || event.altKey) return;
+    event.preventDefault();
+    const ta = event.currentTarget;
+    const { selectionStart, selectionEnd } = ta;
+    const indent = "  ";
+    const next = ta.value.slice(0, selectionStart) + indent + ta.value.slice(selectionEnd);
+    setDraftContent(next);
+    // 等 React 重渲染 textarea 后再恢复光标位置。
+    requestAnimationFrame(() => {
+      const el = draftTextareaRef.current;
+      if (!el) return;
+      const pos = selectionStart + indent.length;
+      el.selectionStart = pos;
+      el.selectionEnd = pos;
+    });
+  }, []);
 
   const normalizedMarkdown = useMemo(
     () => normalizeDisplayMath(data?.content ?? ""),
@@ -961,6 +1132,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
   const lines = data.content.split("\n");
   const hasLiveDiff = prevContent !== null && prevContent !== data.content;
   const hasDiff = hasLiveDiff || hasGitDiff;
+  const canEdit = !isDeletedGitDiff && !isBinary && isFileEditingEnabled();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -982,11 +1154,11 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
           {getRelativeFilePath(filePath, cwd)}
         </span>
         <span style={{ marginLeft: "auto" }}>{data.language}</span>
-        {viewMode === "source" && <span>{t("desktop.lines", { count: lines.length })}</span>}
+        {viewMode === "source" && !editMode && <span>{t("desktop.lines", { count: lines.length })}</span>}
         <span>{formatSize(data.size)}</span>
 
         {/* Diff / Source toggle — shown only when there are changes */}
-        {hasDiff && (
+        {hasDiff && !editMode && (
           <div style={{ display: "flex", borderRadius: 5, overflow: "hidden", border: "1px solid var(--border)" }}>
             <button
               onClick={() => setViewMode("source")}
@@ -1014,7 +1186,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
         )}
 
         {/* Word wrap toggle */}
-        {viewMode === "source" && !previewMode && (
+        {viewMode === "source" && !previewMode && !editMode && (
           <button
             onClick={() => setWrapLines((v) => !v)}
             title={wrapLines ? t("desktop.disableWordWrap") : t("desktop.enableWordWrap")}
@@ -1031,7 +1203,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
         )}
 
         {/* HTML source/preview toggle */}
-        {isHtml && viewMode === "source" && (
+        {isHtml && viewMode === "source" && !editMode && (
           <div style={{ display: "flex", borderRadius: 5, overflow: "hidden", border: "1px solid var(--border)" }}>
             <button
               onClick={() => setPreviewMode(false)}
@@ -1059,7 +1231,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
         )}
 
         {/* Markdown preview/raw toggle */}
-        {isMarkdown && viewMode === "source" && (
+        {isMarkdown && viewMode === "source" && !editMode && (
           <div style={{ display: "flex", borderRadius: 5, overflow: "hidden", border: "1px solid var(--border)" }}>
             <button
               onClick={() => setPreviewMode(true)}
@@ -1085,7 +1257,43 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
             </button>
           </div>
         )}
-        {(onAtMention || onMentionLines) && (
+
+        {/* 编辑态控制：保存 / 取消；非编辑态显示编辑入口（门控） */}
+        {editMode ? (
+          <>
+            <button
+              type="button"
+              onClick={() => void saveEdit()}
+              disabled={isSaving}
+              title={t("files.saveHint")}
+              aria-label={t("files.save")}
+              style={{ height: 20, minWidth: 20, padding: "0 5px", display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-selected)", color: "var(--text)", cursor: "pointer" }}
+            >
+              <FloppyDisk size={13} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={cancelEdit}
+              disabled={isSaving}
+              title={t("files.cancelEdit")}
+              aria-label={t("files.cancelEdit")}
+              style={{ height: 20, minWidth: 20, padding: "0 5px", display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--text-muted)", cursor: "pointer" }}
+            >
+              <X size={13} aria-hidden="true" />
+            </button>
+          </>
+        ) : viewMode === "source" && canEdit ? (
+          <button
+            type="button"
+            onClick={enterEdit}
+            title={t("files.edit")}
+            aria-label={t("files.edit")}
+            style={{ height: 20, minWidth: 20, padding: "0 5px", display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--text-muted)", cursor: "pointer" }}
+          >
+            <PencilSimple size={13} aria-hidden="true" />
+          </button>
+        ) : null}
+        {(onAtMention || onMentionLines) && !editMode && (
           <button
             type="button"
             onPointerDown={(event) => event.preventDefault()}
@@ -1102,12 +1310,111 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
             @
           </button>
         )}
-        <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
+        {!editMode && <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />}
       </div>
 
       {/* Content area */}
       <div ref={contentRef} style={{ flex: 1, overflow: "auto", background: "var(--bg)" }}>
-        {viewMode === "diff" && hasDiff ? (
+        {editMode ? (
+          <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+            {externalModified && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "5px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  background: "rgba(214,168,75,0.14)",
+                  color: "#d6a84b",
+                  fontSize: 11,
+                  flexShrink: 0,
+                }}
+              >
+                <span style={{ flex: 1 }}>{t("files.externalModified")}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isDirty && !window.confirm(t("files.reloadOverwriteConfirm"))) return;
+                    void fetchContent(filePath).then((d) => {
+                      if (!d) return;
+                      setDraftContent(d.content);
+                      setOriginalContent(d.content);
+                      setExternalModified(false);
+                    });
+                  }}
+                  disabled={isSaving}
+                  style={{
+                    padding: "2px 8px",
+                    fontSize: 11,
+                    border: "1px solid #d6a84b",
+                    borderRadius: 4,
+                    background: "transparent",
+                    color: "#d6a84b",
+                    cursor: "pointer",
+                  }}
+                >
+                  {t("files.reload")}
+                </button>
+              </div>
+            )}
+            {saveError && (
+              <div
+                style={{
+                  padding: "5px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  background: "rgba(248,113,113,0.14)",
+                  color: "#f87171",
+                  fontSize: 11,
+                  flexShrink: 0,
+                }}
+              >
+                {t("files.saveFailed", { error: saveError })}
+              </div>
+            )}
+            <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+              <div
+                ref={draftLineNumbersRef}
+                aria-hidden="true"
+                style={{
+                  ...FILE_LINE_NUMBER_STYLE,
+                  height: "100%",
+                  overflow: "hidden",
+                  whiteSpace: "pre",
+                  pointerEvents: "none",
+                }}
+              >
+                {draftContent.split("\n").map((_, i) => `${i + 1}\n`).join("")}
+              </div>
+              <textarea
+                ref={draftTextareaRef}
+                value={draftContent}
+                onChange={(e) => setDraftContent(e.target.value)}
+                onScroll={handleDraftScroll}
+                onKeyDown={handleDraftKeyDown}
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                wrap="off"
+                style={{
+                  flex: 1,
+                  height: "100%",
+                  resize: "none",
+                  border: "none",
+                  outline: "none",
+                  background: "var(--bg)",
+                  color: "var(--text)",
+                  ...FILE_CODE_STYLE,
+                  whiteSpace: "pre",
+                  overflow: "auto",
+                  padding: 0,
+                  tabSize: 2,
+                }}
+              />
+            </div>
+          </div>
+        ) : viewMode === "diff" && hasDiff ? (
           hasGitDiff
             ? <GitDiffView patch={gitDiff.patch!} />
             : <DiffView oldContent={prevContent!} newContent={data.content} />
