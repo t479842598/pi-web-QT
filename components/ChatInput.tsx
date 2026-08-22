@@ -2518,7 +2518,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             })()}
           </div>
           <div className="chat-input-toolbar-left" style={{ flex: "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
-            {onCollaborationModeChange && onTokenModeChange && onToolApprovalModeChange && (
+            {!isMobile && onCollaborationModeChange && onTokenModeChange && onToolApprovalModeChange && (
               <ModeControls
                 collaborationMode={collaborationMode}
                 tokenMode={tokenMode}
