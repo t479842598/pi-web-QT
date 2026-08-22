@@ -1,6 +1,7 @@
 import { readdir, realpath, stat } from "fs/promises";
 import { homedir } from "os";
 import path from "path";
+import { convertWindowsPathToWsl } from "./paths";
 
 export interface BrowsableDirectory {
   name: string;
@@ -38,9 +39,15 @@ export async function listWindowsDrives(): Promise<BrowsableDirectory[]> {
   return candidates.filter((drive): drive is BrowsableDirectory => drive !== null);
 }
 
-export function normalizeDirectory(directory: string): string {
+export function normalizeDirectory(
+  directory: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
   if (directory === "~") return homedir();
   if (directory.startsWith("~/")) return path.resolve(homedir(), directory.slice(2));
+  if (platform === "linux" && /^[a-zA-Z]:/.test(directory)) {
+    return path.resolve(convertWindowsPathToWsl(directory));
+  }
   return path.resolve(directory);
 }
 

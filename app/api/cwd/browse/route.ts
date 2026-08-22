@@ -32,7 +32,22 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Directory does not exist" }, { status: 404 });
     }
 
-    const directoryStat = await stat(resolved);
+    let directoryStat = await stat(resolved);
+    if (!directoryStat.isDirectory()) {
+      // 粘贴的文件路径：目标不是目录时，回退到其父目录并继续浏览。
+      const parent = getParentDirectory(resolved);
+      if (parent) {
+        try {
+          const parentStat = await stat(parent);
+          if (parentStat.isDirectory()) {
+            resolved = parent;
+            directoryStat = parentStat;
+          }
+        } catch {
+          // 回退失败则按原路径报错
+        }
+      }
+    }
     if (!directoryStat.isDirectory()) {
       return NextResponse.json({ error: "Path is not a directory" }, { status: 400 });
     }
