@@ -232,6 +232,7 @@ node bin/pi-web.js -H 127.0.0.1 -p 30141 --no-open
 ## 开发与验证
 
 ```bash
+npm test
 node_modules/.bin/tsc --noEmit
 npm run lint
 ```

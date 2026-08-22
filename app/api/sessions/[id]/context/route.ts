@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveSessionPath, buildSessionContext, openSessionCached } from "@/lib/session-reader";
+import { getRpcSession } from "@/lib/rpc-manager";
 
 export async function GET(
   req: Request,
@@ -12,12 +13,19 @@ export async function GET(
   const deferToolResultImages = url.searchParams.has("deferMedia");
 
   try {
-    const filePath = await resolveSessionPath(id);
-    if (!filePath) {
+    const rpc = getRpcSession(id);
+    const liveRpc = rpc?.isAlive() ? rpc : undefined;
+    const filePath = liveRpc ? null : await resolveSessionPath(id);
+    if (!liveRpc && !filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const sm = openSessionCached(filePath);
+    // A live wrapper's SessionManager sees in-flight entries a cold file read
+    // would miss (transient sessions); fall back to the cached file reader.
+    const sm = liveRpc?.inner.sessionManager ?? (filePath ? openSessionCached(filePath) : undefined);
+    if (!sm) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
     const context = buildSessionContext(sm.getEntries() as never, leafId, {
       deferThinking,
       deferToolResultImages,

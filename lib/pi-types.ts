@@ -1,11 +1,13 @@
 import type {
   AgentSessionEvent,
+  BashOperations,
   SessionManager,
   SettingsManager,
   SlashCommandInfo,
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import type {
+  AgentMessage as PiAgentMessage,
   BeforeToolCallContext,
   BeforeToolCallResult,
 } from "@earendil-works/pi-agent-core";
@@ -33,7 +35,7 @@ export type BeforeToolCallContextLike = BeforeToolCallContext;
  * hook wraps it (keeps a reference and calls it after the policy gate).
  */
 export interface AgentHookLike {
-  state?: { systemPrompt?: string; thinkingLevel?: string };
+  state?: { systemPrompt?: string; thinkingLevel?: string; streamingMessage?: PiAgentMessage };
   beforeToolCall?: (
     context: BeforeToolCallContext,
     signal?: AbortSignal,
@@ -72,9 +74,9 @@ export interface SessionStatsInfo {
   costCNY?: number;
   /** SDK USD spend for non-deepseek-v4 models. */
   costUSD?: number;
+  contextUsage?: ContextUsage;
   /** Estimated active time across all entries in the session file. */
   totalActiveMs?: number;
-  contextUsage?: ContextUsage;
 }
 
 interface PromptTemplateLike {
@@ -170,15 +172,13 @@ export interface AgentSessionLike {
     images?: Array<{ type: "image"; data: string; mimeType: string }>;
     streamingBehavior?: "steer" | "followUp";
     source?: "interactive" | "rpc";
+    preflightResult?: (success: boolean) => void;
   }): Promise<void>;
   abort(): Promise<void>;
-  executeBash(command: string, onChunk?: (chunk: string) => void, options?: { excludeFromContext?: boolean }): Promise<{
-    output: string;
-    exitCode?: number;
-    cancelled?: boolean;
-    truncated?: boolean;
-    fullOutputPath?: string;
-  }>;
+  executeBash(command: string, onChunk?: (chunk: string) => void, options?: {
+    excludeFromContext?: boolean;
+    operations?: BashOperations;
+  }): Promise<{ output: string; exitCode?: number; cancelled?: boolean; truncated?: boolean; fullOutputPath?: string }>;
   abortBash(): void;
   readonly isBashRunning: boolean;
   setModel(model: ModelLike): Promise<void>;

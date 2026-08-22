@@ -32,6 +32,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  if (req.signal.aborted) return new Response(null, { status: 204 });
 
   // Fast path: already-running session
   let session = getRpcSession(id);
@@ -40,6 +41,7 @@ export async function GET(
     if (!filePath) {
       return new Response("Session not found", { status: 404 });
     }
+    if (req.signal.aborted) return new Response(null, { status: 204 });
     try {
       ({ session } = await startRpcSession(id, filePath, undefined));
     } catch (error) {
@@ -135,8 +137,9 @@ export async function GET(
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

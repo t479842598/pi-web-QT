@@ -4,6 +4,8 @@ import { homedir } from "os";
 import { isAbsolute, resolve } from "path";
 import { allowFileRoot } from "@/lib/file-access";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
+import { projectIdentityKey } from "@/lib/project-identity";
+import { resolveProject } from "@/lib/worktree";
 
 function normalizeCwd(cwd: string): string {
   if (cwd === "~") return homedir();
@@ -51,7 +53,13 @@ export async function POST(req: Request) {
     }
 
     allowFileRoot(canonicalCwd);
-    return NextResponse.json({ success: true, cwd: canonicalCwd });
+    const project = await resolveProject(canonicalCwd);
+    return NextResponse.json({
+      success: true,
+      cwd: canonicalCwd,
+      projectRoot: project.projectRoot,
+      projectKey: projectIdentityKey(project.projectRoot),
+    });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
