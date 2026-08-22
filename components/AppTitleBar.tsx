@@ -201,6 +201,7 @@ export function AppTitleBar({
             justifyContent: "center",
             height: "100%",
             padding: "0 12px",
+            overflow: "hidden",
             userSelect: "none",
           }}
         >
@@ -211,7 +212,8 @@ export function AppTitleBar({
               title={isMobile ? sessionTitle : undefined}
               style={{
                 display: "block",
-                maxWidth: "100%",
+                flex: "0 1 auto",
+                minWidth: 0,
                 fontSize: 12,
                 fontWeight: 500,
                 color: "var(--text-muted)",

@@ -1997,7 +1997,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         host,
         location,
       ))}
-      {workspaceControlsHosts?.titleRight && createPortal(
+      {workspaceControlsHosts?.titleRight && !isMobile && createPortal(
         <div ref={(node) => { workspaceDropdownRefs.current.titleRight = node; }} style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           {branchChip}
           {titleWorktreeControl}
