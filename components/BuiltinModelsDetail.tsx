@@ -293,6 +293,91 @@ export function BuiltinModelsDetail({
       <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
         {t("desktop.builtinModelsTitle")}
       </div>
+      {/* 获取新模型：拉取上游最新模型列表，新增模型可勾选添加 */}
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => { void handleFetchModels(); }}
+            disabled={discovery.phase === "loading"}
+            style={{
+              padding: "5px 12px",
+              background: discovery.phase === "loading" ? "var(--bg-panel)" : "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 5,
+              color: discovery.phase === "loading" ? "var(--text-dim)" : "var(--text-muted)",
+              cursor: discovery.phase === "loading" ? "not-allowed" : "pointer",
+              fontSize: 12,
+            }}
+          >
+            {discovery.phase === "loading" ? t("desktop.modelsDiscoveryFetching") : t("desktop.builtinModelsFetchNew")}
+          </button>
+          {discovery.phase === "success" && discovery.models && (
+            <button
+              type="button"
+              onClick={() => { void handleAddModels(); }}
+              disabled={saving || selectedNewIds.length === 0}
+              style={{
+                padding: "5px 12px",
+                background: selectedNewIds.length > 0 && !saving ? "var(--accent)" : "var(--bg-panel)",
+                border: "none",
+                borderRadius: 5,
+                color: selectedNewIds.length > 0 && !saving ? "#fff" : "var(--text-dim)",
+                cursor: selectedNewIds.length > 0 && !saving ? "pointer" : "not-allowed",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {saving ? t("desktop.modelsSaving") : `${t("desktop.modelsAddModelManual")} (${selectedNewIds.length})`}
+            </button>
+          )}
+        </div>
+
+        {discovery.phase === "error" && (
+          <p style={{ margin: 0, fontSize: 11, color: "#f87171" }}>{discovery.message}</p>
+        )}
+
+        {discovery.phase === "success" && discovery.models && (
+          <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)" }}>
+            {discovery.models.map((model) => {
+              const isNew = discovery.newIds?.has(model.id) ?? false;
+              const checked = selectedNewIds.includes(model.id);
+              return (
+                <label
+                  key={model.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    minHeight: 32, padding: "5px 9px",
+                    borderBottom: "1px solid var(--border)",
+                    cursor: isNew ? "pointer" : "default",
+                    opacity: isNew ? 1 : 0.55,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!isNew}
+                    onChange={(e) => {
+                      setSelectedNewIds((prev) => e.target.checked
+                        ? [...prev, model.id]
+                        : prev.filter((id) => id !== model.id));
+                    }}
+                    style={{ width: 13, height: 13, accentColor: "var(--accent)", flexShrink: 0 }}
+                  />
+                  <span style={{ fontSize: 12, color: "var(--text)", fontWeight: isNew ? 600 : 400 }}>{model.name || model.id}</span>
+                  <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
+                  {isNew && (
+                    <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--accent)", color: "#fff", marginLeft: "auto" }}>
+                      新
+                    </span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {error && <p style={{ margin: 0, fontSize: 11, color: "#f87171" }}>{error}</p>}
       {models.length === 0 && !error && (
         <p style={{ margin: 0, fontSize: 11, color: "var(--text-dim)" }}>{t("desktop.builtinModelsEmpty")}</p>
@@ -420,90 +505,6 @@ export function BuiltinModelsDetail({
         )}
       </div>
 
-      {/* 获取新模型：拉取上游最新模型列表，新增模型可勾选添加 */}
-      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            onClick={() => { void handleFetchModels(); }}
-            disabled={discovery.phase === "loading"}
-            style={{
-              padding: "5px 12px",
-              background: discovery.phase === "loading" ? "var(--bg-panel)" : "var(--bg-panel)",
-              border: "1px solid var(--border)",
-              borderRadius: 5,
-              color: discovery.phase === "loading" ? "var(--text-dim)" : "var(--text-muted)",
-              cursor: discovery.phase === "loading" ? "not-allowed" : "pointer",
-              fontSize: 12,
-            }}
-          >
-            {discovery.phase === "loading" ? "正在获取…" : t("desktop.modelsDiscoveryFetch")}
-          </button>
-          {discovery.phase === "success" && discovery.models && (
-            <button
-              type="button"
-              onClick={() => { void handleAddModels(); }}
-              disabled={saving || selectedNewIds.length === 0}
-              style={{
-                padding: "5px 12px",
-                background: selectedNewIds.length > 0 && !saving ? "var(--accent)" : "var(--bg-panel)",
-                border: "none",
-                borderRadius: 5,
-                color: selectedNewIds.length > 0 && !saving ? "#fff" : "var(--text-dim)",
-                cursor: selectedNewIds.length > 0 && !saving ? "pointer" : "not-allowed",
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              {saving ? t("desktop.modelsSaving") : `${t("desktop.modelsAddModelManual")} (${selectedNewIds.length})`}
-            </button>
-          )}
-        </div>
-
-        {discovery.phase === "error" && (
-          <p style={{ margin: 0, fontSize: 11, color: "#f87171" }}>{discovery.message}</p>
-        )}
-
-        {discovery.phase === "success" && discovery.models && (
-          <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)" }}>
-            {discovery.models.map((model) => {
-              const isNew = discovery.newIds?.has(model.id) ?? false;
-              const checked = selectedNewIds.includes(model.id);
-              return (
-                <label
-                  key={model.id}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    minHeight: 32, padding: "5px 9px",
-                    borderBottom: "1px solid var(--border)",
-                    cursor: isNew ? "pointer" : "default",
-                    opacity: isNew ? 1 : 0.55,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={!isNew}
-                    onChange={(e) => {
-                      setSelectedNewIds((prev) => e.target.checked
-                        ? [...prev, model.id]
-                        : prev.filter((id) => id !== model.id));
-                    }}
-                    style={{ width: 13, height: 13, accentColor: "var(--accent)", flexShrink: 0 }}
-                  />
-                  <span style={{ fontSize: 12, color: "var(--text)", fontWeight: isNew ? 600 : 400 }}>{model.name || model.id}</span>
-                  <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
-                  {isNew && (
-                    <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--accent)", color: "#fff", marginLeft: "auto" }}>
-                      新
-                    </span>
-                  )}
-                </label>
-              );
-            })}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

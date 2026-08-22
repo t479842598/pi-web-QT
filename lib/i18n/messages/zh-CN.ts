@@ -239,6 +239,7 @@ export const zhCNLocale = {
     "desktop.importFromReasonix": "来自 Reasonix",
     "desktop.importFromCodex": "来自 Codex",
     "desktop.builtinModelsTitle": "模型配置",
+    "desktop.builtinModelsFetchNew": "获取新模型",
     "desktop.builtinModelsLoadFailed": "加载模型失败",
     "desktop.builtinModelsEmpty": "该供应商暂无可用模型。",
     "desktop.builtinModelsContext": "上下文",

@@ -239,6 +239,7 @@ export const enLocale = {
     "desktop.importFromReasonix": "from Reasonix",
     "desktop.importFromCodex": "from Codex",
     "desktop.builtinModelsTitle": "Model configuration",
+    "desktop.builtinModelsFetchNew": "Fetch new models",
     "desktop.builtinModelsLoadFailed": "Failed to load models",
     "desktop.builtinModelsEmpty": "No models available for this provider.",
     "desktop.builtinModelsContext": "Context",
