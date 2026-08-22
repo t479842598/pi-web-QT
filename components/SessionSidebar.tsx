@@ -14,6 +14,7 @@ import { QuickChangesPanel } from "./QuickChangesPanel";
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { samePath } from "@/lib/paths";
 import { stripModeInstructionBlocks } from "@/lib/modes";
+import { showBrowserNotification } from "@/lib/browser-notifications";
 
 interface Props {
   selectedSessionId: string | null;
@@ -827,8 +828,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       });
     }
 
+    // 后台会话跑完时（且当前标签页隐藏/失焦）弹浏览器通知，避免切换工作区
+    // 才发现任务早已结束。
+    if (completedInBackground.length > 0 && (document.visibilityState !== "visible" || !document.hasFocus())) {
+      const finished = allSessions.filter((s) => completedInBackground.includes(s.id));
+      const label = finished.length === 1
+        ? (finished[0]?.name || "Pi Web")
+        : `${finished.length} conversations`;
+      void showBrowserNotification({
+        title: "Pi Web",
+        body: finished.length === 1 ? "Agent finished" : `${label} finished`,
+        sessionUrl: `/?session=${completedInBackground[0]}`,
+        onClick: () => window.focus(),
+      });
+    }
+
     previousRunningSessionIdsRef.current = runningSessionIds;
-  }, [runningSessionIds, selectedSessionId]);
+  }, [runningSessionIds, selectedSessionId, allSessions]);
 
   useEffect(() => {
     if (!selectedSessionId) return;
