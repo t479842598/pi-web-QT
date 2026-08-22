@@ -106,8 +106,7 @@ interface Props {
   onOpenSubagent?: (agentId: string) => void;
 }
 
-function formatTime(ts?: number): string | null {
-  if (!ts) return null;
+function formatTime(ts?: number): string | null {  if (!ts) return null;
   const d = new Date(ts);
   const now = new Date();
   const isToday = d.getFullYear() === now.getFullYear() &&
@@ -177,6 +176,19 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.onOpenSubagent === next.onOpenSubagent;
 });
 
+/**
+ * Removes Markdown image references (`![alt](url)`) from user message text.
+ * pi writes the attached image's path back into the text as such a reference;
+ * the image is already rendered separately from the message's image blocks, so
+ * keeping the reference would render the same picture twice (MarkdownBody
+ * resolves the local path and shows it at full size).
+ */
+function stripMarkdownImageLinks(text: string): string {
+  return text
+    .replace(/(?<!\\)!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/[ \t]*\n{3,}/g, "\n\n");
+}
+
 function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, onCreateTask }: {
   message: UserMessage;
   cwd?: string;
@@ -193,7 +205,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const content =
+  const rawContent =
     typeof message.content === "string"
       ? message.content
       : message.content
@@ -205,6 +217,11 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
     typeof message.content === "string"
       ? []
       : message.content.filter((b): b is ImageContent => b.type === "image");
+
+  // pi 把附件图片路径以 Markdown 图片引用写回用户文本（如 `![x.png](/abs/x.png)`），
+  // 图片已由上方 imageBlocks 单独渲染；去掉引用避免 MarkdownBody 再按原图尺寸渲染一次。
+  const content = imageBlocks.length > 0 ? stripMarkdownImageLinks(rawContent) : rawContent;
+
   const displayContent = resolveSlashDisplayText(content) ?? content;
 
   const time = formatTime(message.timestamp);
