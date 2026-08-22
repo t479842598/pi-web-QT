@@ -129,7 +129,9 @@ export async function GET(
   try {
     const rpc = getRpcSession(id);
     const liveRpc = rpc?.isAlive() ? rpc : undefined;
-    const filePath = liveRpc ? null : await resolveSessionPath(id);
+    // A live wrapper exposes its own session file (null for a transient,
+    // not-yet-persisted session); otherwise resolve from the file cache.
+    const filePath = liveRpc ? (liveRpc.sessionFile ?? null) : await resolveSessionPath(id);
     if (!liveRpc && !filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
