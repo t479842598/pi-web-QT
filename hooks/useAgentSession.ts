@@ -16,6 +16,7 @@ import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { getToolNamesForPreset, PRESET_PLAN, type ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import type { SessionFileStats } from "@/lib/session-stats";
 import type { PendingRecoveryItem, QueueEntry, QueueEntryInput } from "@/lib/queue-store";
 import type { ChatDraftImage } from "@/lib/draft-store";
 import { createStreamUpdateScheduler, type StreamUpdateScheduler } from "@/lib/stream-update-scheduler";
@@ -57,6 +58,8 @@ export interface SessionData {
   sessionId: string;
   filePath: string;
   totalActiveMs: number;
+  /** Cumulative usage over ALL session-file entries (incl. compacted history). */
+  stats?: SessionFileStats;
   tree: SessionTreeNode[];
   leafId: string | null;
   context: {
@@ -1058,8 +1061,27 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         costUSD += costTotal;
       }
     }
+    // File stats span the ENTIRE session file — including history that
+    // compaction summarized away — while `messages` only covers the current
+    // (post-compaction) context. Merge per-field with max() so token/cost
+    // counters keep increasing after compaction and survive page reloads;
+    // session entries are only ever appended, never removed. The file aggregate
+    // is USD-only, so fold it into costUSD (costCNY is fork-derived and cannot
+    // be reconstructed from the file aggregate).
+    const fileStats = data?.stats;
+    if (fileStats) {
+      tokens.input = Math.max(tokens.input, fileStats.tokens.input);
+      tokens.output = Math.max(tokens.output, fileStats.tokens.output);
+      tokens.cacheRead = Math.max(tokens.cacheRead, fileStats.tokens.cacheRead);
+      tokens.cacheWrite = Math.max(tokens.cacheWrite, fileStats.tokens.cacheWrite);
+      costUSD = Math.max(costUSD, fileStats.cost);
+      userMessages = Math.max(userMessages, fileStats.userMessages);
+      assistantMessages = Math.max(assistantMessages, fileStats.assistantMessages);
+      toolResults = Math.max(toolResults, fileStats.toolResults);
+      toolCalls = Math.max(toolCalls, fileStats.toolCalls);
+    }
     tokens.total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
-    if (tokens.total === 0 && messages.length === 0) return null;
+    if (tokens.total === 0 && messages.length === 0 && !fileStats) return null;
     return {
       sessionFile: data?.filePath || undefined,
       sessionId: sessionIdRef.current ?? session?.id ?? "",
@@ -1068,7 +1090,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       assistantMessages,
       toolCalls,
       toolResults,
-      totalMessages: messages.length,
+      totalMessages: fileStats ? Math.max(messages.length, fileStats.totalMessages) : messages.length,
       tokens,
       cost,
       costCNY,
@@ -1076,7 +1098,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       totalActiveMs: data?.totalActiveMs,
       ...(contextUsage ? { contextUsage } : {}),
     } satisfies SessionStatsInfo;
-  }, [messages, sessionStatsOverride, contextUsage, data?.filePath, data?.totalActiveMs, session?.id, session?.name]);
+  }, [messages, sessionStatsOverride, contextUsage, data?.filePath, data?.totalActiveMs, data?.stats, session?.id, session?.name]);
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
     let messagesLoaded = false;

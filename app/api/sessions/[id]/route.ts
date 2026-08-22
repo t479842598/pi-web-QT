@@ -17,6 +17,8 @@ import {
 import { getRpcSession, broadcastSessionBusEvent } from "@/lib/rpc-manager";
 import { mutateSettingsJson } from "@/lib/settings-lock";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
+import { computeSessionStats } from "@/lib/session-stats";
+import type { SessionEntry } from "@/lib/types";
 import { stripModeInstructionBlocks } from "@/lib/modes";
 
 // BranchNavigator still traverses recursively, so keep the response tree shallow.
@@ -146,6 +148,9 @@ export async function GET(
     const deferToolResultImages = searchParams.has("deferMedia");
     const context = buildSessionContext(entries, leafId, { deferThinking, deferToolResultImages });
     const totalActiveMs = computeSessionTotalActiveMs(entries);
+    // Cumulative usage over ALL entries (incl. history compacted away) so the
+    // client keeps monotonic token/cost counters across compaction + reloads.
+    const stats = computeSessionStats(entries as unknown as SessionEntry[]);
 
     const header = sm.getHeader();
     let modified = header?.timestamp ?? new Date().toISOString();
@@ -181,6 +186,7 @@ export async function GET(
       tree,
       context,
       totalActiveMs,
+      stats,
     });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
