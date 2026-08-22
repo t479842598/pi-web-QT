@@ -17,6 +17,7 @@ import { sendAgentCommand } from "@/lib/agent-client";
 import { getToolNamesForPreset, PRESET_PLAN, type ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionFileStats } from "@/lib/session-stats";
+import { estimateTokens } from "@/lib/token-estimate";
 import type { PendingRecoveryItem, QueueEntry, QueueEntryInput } from "@/lib/queue-store";
 import type { ChatDraftImage } from "@/lib/draft-store";
 import { createStreamUpdateScheduler, type StreamUpdateScheduler } from "@/lib/stream-update-scheduler";
@@ -547,14 +548,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const tokenRateRef = useRef({
     lastChars: 0,
     window: [] as Array<{ at: number; chars: number }>,
-    charsPerToken: 4,
   });
   const resetTokenRate = useCallback(() => {
-    tokenRateRef.current = { lastChars: 0, window: [], charsPerToken: 4 };
+    tokenRateRef.current = { lastChars: 0, window: [] };
     setTokenRate(null);
   }, []);
 
-  /** Count printable characters in an assistant content block list. */
+  /** Count tokens in an assistant content block list (CJK≈1 token, else 4 chars/token). */
   const countAssistantChars = useCallback((msg: Partial<AgentMessage> | undefined): number => {
     if (!msg || msg.role !== "assistant") return 0;
     const content = msg.content as unknown;
@@ -562,11 +562,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     let total = 0;
     for (const block of content as unknown[]) {
       if (typeof block === "string") {
-        total += block.length;
+        total += estimateTokens(block);
       } else if (block && typeof block === "object") {
         const b = block as { type?: string; text?: string; thinking?: string };
-        if (typeof b.text === "string") total += b.text.length;
-        else if (typeof b.thinking === "string") total += b.thinking.length;
+        if (typeof b.text === "string") total += estimateTokens(b.text);
+        else if (typeof b.thinking === "string") total += estimateTokens(b.thinking);
       }
     }
     return total;
@@ -587,7 +587,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const sum = ref.window.reduce((acc, s) => acc + s.chars, 0);
     const windowMs = ref.window.length > 0 ? now - ref.window[0].at : 0;
     if (windowMs < 200) return; // too early for a stable rate
-    const perSec = (sum / Math.max(1, windowMs)) * 1000 / ref.charsPerToken;
+    const perSec = (sum / Math.max(1, windowMs)) * 1000;
     setTokenRate(Math.max(0, Math.round(perSec * 10) / 10));
   }, [countAssistantChars]);
   const [agentRunning, setAgentRunning] = useState(false);
