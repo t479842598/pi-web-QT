@@ -132,7 +132,7 @@ export async function PATCH(req: Request) {
     const body = await req.json() as { provider?: unknown; patches?: unknown; models?: unknown };
     const providerId = typeof body.provider === "string" ? body.provider.trim() : "";
     if (!providerId) return NextResponse.json({ error: "provider is required" }, { status: 400 });
-    const patches = parsePatches(body.patches);
+    const patches = parsePatches(body.patches ?? {});
 
     // models: 可选，写入该提供商的完整模型列表（「获取新模型」用）。
     // 写完整上游列表而非仅新增项，避免任何合并语义下丢模型。
