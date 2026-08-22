@@ -129,15 +129,33 @@ export async function PATCH(req: Request) {
   }
 
   try {
-    const body = await req.json() as { provider?: unknown; patches?: unknown };
+    const body = await req.json() as { provider?: unknown; patches?: unknown; models?: unknown };
     const providerId = typeof body.provider === "string" ? body.provider.trim() : "";
     if (!providerId) return NextResponse.json({ error: "provider is required" }, { status: 400 });
     const patches = parsePatches(body.patches);
 
+    // models: 可选，写入该提供商的完整模型列表（「获取新模型」用）。
+    // 写完整上游列表而非仅新增项，避免任何合并语义下丢模型。
+    let parsedModels: Array<{ id: string; name?: string }> | undefined;
+    if (body.models !== undefined) {
+      if (!Array.isArray(body.models) || !body.models.every((m) => isRecord(m) && typeof m.id === "string" && m.id.trim())) {
+        return NextResponse.json({ error: "models must be an array of { id, name? }" }, { status: 400 });
+      }
+      parsedModels = body.models.map((m) => ({
+        id: (m as { id: string }).id.trim(),
+        ...(typeof (m as { name?: unknown }).name === "string" && (m as { name: string }).name.trim()
+          ? { name: (m as { name: string }).name.trim() }
+          : {}),
+      }));
+    }
+
     const result = await mutateModelsConfig((current) => {
       const providers = isRecord(current.providers) ? current.providers : {};
       const existingProvider = isRecord(providers[providerId]) ? providers[providerId] : undefined;
-      const nextProvider = applyBuiltinOverridePatches(existingProvider, patches);
+      let nextProvider = applyBuiltinOverridePatches(existingProvider, patches);
+      if (parsedModels) {
+        nextProvider = { ...nextProvider, models: parsedModels };
+      }
       const nextProviders = { ...providers };
       if (Object.keys(nextProvider).length > 0) nextProviders[providerId] = nextProvider;
       else delete nextProviders[providerId];
