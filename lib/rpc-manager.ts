@@ -288,6 +288,7 @@ export class AgentSessionWrapper {
   private queueMutationTail: Promise<void> = Promise.resolve();
   private onDestroyCallback: (() => void) | null = null;
   private shutdownPromise: Promise<void> | null = null;
+  private sessionShutdownEmitted = false;
   private _alive = true;
   private approvalPolicy: Policy = policyFromStrings(readModeSettings().permissionRules);
   private approvalMode: "ask" | "auto" | "yolo" = readModeSettings().toolApprovalMode;
@@ -841,9 +842,13 @@ export class AgentSessionWrapper {
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
+      // 即使 isRunning() 卡在 true，也照常 shutdown，让扩展收到
+      // session_shutdown 并回收子进程；先中止 bash/agent 再走关闭。
       if (this.isRunning()) {
-        this.resetIdleTimer();
-        return;
+        if (this.inner.isBashRunning) this.inner.abortBash();
+        void this.inner.abort().catch(() => {
+          // 忽略中止失败；shutdown 仍会发出 session_shutdown。
+        });
       }
       void this.shutdown().catch((error) => {
         console.error("[pi-web] failed to shut down idle session:", error instanceof Error ? error.message : error);
@@ -1514,12 +1519,44 @@ export class AgentSessionWrapper {
     this.pendingUiResponses.clear();
     this.pendingUiRequests.clear();
     this.rejectAllApprovals("Session closed while approval was pending");
-    try {
-      this.inner.dispose();
-    } finally {
-      this.onDestroyCallback?.();
-      notifyRunningChange();
+
+    const finishDispose = () => {
+      try {
+        this.inner.dispose();
+      } finally {
+        try {
+          this.onDestroyCallback?.();
+        } finally {
+          notifyRunningChange();
+        }
+      }
+    };
+
+    // 无论调用方是否先走 shutdown()（进程退出、直接 destroy），dispose 前都
+    // 发出 session_shutdown，让扩展 MCP 子进程在 runner 失效前完成回收。
+    if (this.sessionShutdownEmitted) {
+      finishDispose();
+      return;
     }
+    this.sessionShutdownEmitted = true;
+    // SDK 的 ExtensionRunner.emit 只接受 reason:"quit"，dispose 是 pi-web 自有的
+    // 语义；调用处局部断言以复用其 runner（参数为方法，双变下可安全调用）。
+    const emit = this.inner.extensionRunner?.emit as unknown as
+      ((event: { type: "session_shutdown"; reason: "quit" | "dispose" }) => Promise<unknown>) | undefined;
+    if (typeof emit !== "function") {
+      finishDispose();
+      return;
+    }
+    void Promise.resolve(
+      emit.call(this.inner.extensionRunner, { type: "session_shutdown", reason: "dispose" }),
+    )
+      .catch((error) => {
+        console.error(
+          "[pi-web] session_shutdown before dispose failed:",
+          error instanceof Error ? error.message : error,
+        );
+      })
+      .finally(finishDispose);
   }
 
   async shutdown(): Promise<void> {
@@ -1536,7 +1573,10 @@ export class AgentSessionWrapper {
             error instanceof Error ? error.message : error,
           );
         }
-        await this.inner.extensionRunner.emit?.({ type: "session_shutdown", reason: "quit" });
+        if (!this.sessionShutdownEmitted) {
+          this.sessionShutdownEmitted = true;
+          await this.inner.extensionRunner.emit?.({ type: "session_shutdown", reason: "quit" });
+        }
       } finally {
         this.destroy();
       }
