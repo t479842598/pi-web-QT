@@ -15,6 +15,7 @@ import { createSubagentExtension, preferPiWebSubagentExtension } from "./subagen
 import { listSubagentProfiles } from "./subagents";
 import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
+import { createProjectCommandBashOperations } from "./project-command-env";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import { readModeSettings } from "./modes-config";
 import { decide, policyFromStrings, type Policy } from "./permission";
@@ -1476,10 +1477,19 @@ export class AgentSessionWrapper {
         if (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning) {
           throw new Error("Cannot run a shell command while the session is busy");
         }
+        // 隔离宿主运行时变量：子命令不继承 pi-web 进程的 NODE_ENV/NEXT_*/PORT 等，
+        // 避免项目命令误读宿主环境（#487）。用当前 shell 设置构造本地执行器。
+        const shellPath = this.inner.settingsManager?.getShellPath?.();
+        const operations = createProjectCommandBashOperations(
+          typeof shellPath === "string" && shellPath ? { shellPath } : {},
+        );
         const execution = this.inner.executeBash(
           command.command as string,
           undefined,
-          { excludeFromContext: command.excludeFromContext as boolean | undefined },
+          {
+            excludeFromContext: command.excludeFromContext as boolean | undefined,
+            operations,
+          },
         );
         try {
           const result = await execution;

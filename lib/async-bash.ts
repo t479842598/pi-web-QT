@@ -23,6 +23,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { sanitizeProjectCommandEnvironment } from "./project-command-env";
 import { defineTool, getShellConfig, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -429,7 +430,7 @@ export function createAsyncBashTools(manager: AsyncProcessManager): ToolDefiniti
 
       let mp: ManagedProcess;
       try {
-        mp = manager.spawn(command, cwd, process.env);
+        mp = manager.spawn(command, cwd, sanitizeProjectCommandEnvironment(process.env));
       } catch (err) {
         throw new Error(
           `Failed to spawn command: ${err instanceof Error ? err.message : String(err)}`,
