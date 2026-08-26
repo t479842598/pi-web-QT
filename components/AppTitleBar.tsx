@@ -156,7 +156,9 @@ export function AppTitleBar({
           alignItems: "center",
           flexShrink: 0,
           borderBottom: "1px solid var(--border)",
-          height: 36,
+          // 48px 对齐 u1s1：给右侧无边框窗口控制钮足够的呼吸空间
+          // （36px 时三个控制钮视觉上过于局促，用户实测反馈两次）
+          height: 48,
           background: "var(--bg-panel)",
           position: "relative",
           zIndex: 600,
@@ -254,7 +256,11 @@ export function AppTitleBar({
 
 
         {/* Right zone: task board / file panel / theme / settings buttons. */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%", flexShrink: 0 }}>
+        {/* Right zone: task board / file panel / theme / settings buttons.
+            允许收缩 + overflow hidden：窗口变窄时功能按钮从左侧开始让位
+            （justify-end 贴右、左端先被裁），保证最右侧的窗口控制三钮
+            永远完整可见 —— Windows 惯例：系统按钮优先于工具栏按钮。 */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%", flexShrink: 1, overflow: "hidden" }}>
 
         {/* Task board toggle — desktop only, hidden when the feature is off */}
         {!isMobile && tasksBoardEnabled && (
