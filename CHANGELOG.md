@@ -12,7 +12,11 @@
 
 ### 验证
 - 前端 `tsc --noEmit` 通过；`cargo check` 与 `cargo check --features updater` 均通过（无警告，capability `server-window.json` 含 `remote.urls` 放宽至任意 https/http + 本机回环代理，ACL 解析无误）。
+- macOS 真机验证通过：无边框窗口红绿灯悬浮正常、标题栏左侧内缩后不再遮挡项目选择器、拖动/主题联动/连接远程与本地功能均正常；`npm run bundle:backend` 全链路跑通。
 - 说明：macOS 构建需 macOS 构建机，本仓库在 Windows 侧仅完成 Rust/前端骨架与编译验证，mac 真机构建由 mac 端执行。
+
+### 升级说明
+- **以 CLI 方式（`pi-web.js`）常驻的本机后端需要重启一次**才能加载新版前端：桌面壳已是无边框窗口，若页面仍由旧版前端渲染，macOS 红绿灯会遮挡左上角项目选择下拉。在桌面壳内「连接本机」重拉即可，或手动重启该后端进程。
 
 
 ## v0.12.0 — 2026-08-26（桌面端打包改进：Pi Agent Server.app + 窗口主题联动 + 打包脚本增强）
