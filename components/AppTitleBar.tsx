@@ -341,10 +341,13 @@ export function AppTitleBar({
           <Gear size={16} aria-hidden="true" />
         </button>
 
-        {/* 无边框窗口控制（最小化/最大化/关闭）— 仅桌面壳且非 macOS 显示 */}
-        <WindowControls />
-
         </div>
+
+        {/* 无边框窗口控制（最小化/最大化/关闭）— 仅桌面壳且非 macOS 显示。
+            作为标题栏根容器的直接子级挂在最右侧：前面的标题区是 flex:1，
+            自然把本组推到右上角贴边；flex-shrink:0 保证这块空间永远不被
+            功能按钮挤占，左侧分隔线独立成区（对齐 u1s1 的排布方式）。 */}
+        <WindowControls />
 
       </div>
 
