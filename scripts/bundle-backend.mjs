@@ -23,8 +23,10 @@ import {
   existsSync,
   chmodSync,
   copyFileSync,
+  readdirSync,
+  readFileSync,
 } from "node:fs";
-import { join, resolve, dirname, basename } from "node:path";
+import { join, resolve, dirname, basename, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
@@ -147,18 +149,164 @@ for (const pkg of piPkgNames) {
   }
 }
 
-// 5. Node 二进制 → desktop/resources/node
+// 4.6 写入桌面启动器（父进程看门狗 + dlopen ABI 保护；见 desktop/server-launcher.cjs）
+// Rust 侧（probe::spawn_bundled）优先以 desktop-server.cjs 作为入口拉起。
+copyFileSync(
+  join(root, "desktop", "server-launcher.cjs"),
+  join(outBackend, "desktop-server.cjs"),
+);
+console.log("[bundle-backend] 写入启动器 desktop-server.cjs");
+
+// 5. Node 二进制 → desktop/resources/node（Win/Linux）
+//    macOS 额外包成 Pi Agent Server.app（LSBackgroundOnly，不进 Dock；
+//    bundle ID 与父应用一致避免 macOS Sequoia+ TCC 每次弹窗，见
+//    desktop/server-helper-Info.plist）。resources/node 仍保留作为回退。
 const nodeBin = process.env.PI_WEB_NODE_BIN || process.execPath;
 if (!existsSync(nodeBin)) {
   fail(`Node 二进制不存在: ${nodeBin}`);
 }
+// 自拷贝陷阱：当 nodeBin 恰好位于 outNode 内（如用打包产物里的 node 跑本脚本）
+// 时，先复制到临时位置，否则下面 rmSync(outNode) 会连源一起删掉。
+let nodeSrc = nodeBin;
+const outNodeAbs = resolve(outNode);
+const nodeBinAbs = resolve(nodeBin);
+if (nodeBinAbs.startsWith(outNodeAbs + sep)) {
+  const tmpDir = join(root, ".bundle-tmp");
+  mkdirSync(tmpDir, { recursive: true });
+  const tmpNode = join(tmpDir, "node-src");
+  copyFileSync(nodeBin, tmpNode);
+  nodeSrc = tmpNode;
+}
 rmSync(outNode, { recursive: true, force: true });
 mkdirSync(outNode, { recursive: true });
 const nodeTarget = join(outNode, process.platform === "win32" ? "node.exe" : "node");
-copyFileSync(nodeBin, nodeTarget);
+copyFileSync(nodeSrc, nodeTarget);
 if (process.platform !== "win32") {
   chmodSync(nodeTarget, 0o755);
 }
 
+// macOS：把 node 包成 LSBackgroundOnly .app（不进 Dock，bundle ID 复用父应用
+// 避免 Sequoia+ TCC 弹窗）。Windows/Linux：创建空目录占位（tauri.conf.json
+// 统一声明了该资源，缺失会导致 build 报错）。
+const serverHelperDir = join(root, "desktop", "resources", "Pi Agent Server.app");
+const helperContents = join(serverHelperDir, "Contents");
+rmSync(serverHelperDir, { recursive: true, force: true });
+if (process.platform === "darwin") {
+  const helperNode = join(helperContents, "MacOS", "node");
+  mkdirSync(dirname(helperNode), { recursive: true });
+  copyFileSync(nodeSrc, helperNode);
+  chmodSync(helperNode, 0o755);
+  copyFileSync(
+    join(root, "desktop", "server-helper-Info.plist"),
+    join(helperContents, "Info.plist"),
+  );
+  console.log(`[bundle-backend] 完成：node    -> ${helperNode} (Pi Agent Server.app)`);
+} else {
+  // 非 macOS 创建空目录让 tauri-build 的 WalkDir 跳过即可
+  mkdirSync(helperContents, { recursive: true });
+  console.log(`[bundle-backend] 完成：Pi Agent Server.app -> (占位，非 macOS 空)`);
+}
+
+// 6. 去重嵌套 node_modules：npm 会把同版本依赖重复嵌套进子 node_modules，
+//    每层嵌套让路径变长 ~45 字符，Windows NSIS 会撞 260 字符 MAX_PATH。
+//    仅删除与顶层精确同版本的嵌套副本（真正的版本冲突保留，Node 解析不受影响）。
+function listPackageDirs(nodeModulesDir) {
+  const packages = [];
+  let entries;
+  try {
+    entries = readdirSync(nodeModulesDir, { withFileTypes: true });
+  } catch {
+    return packages;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === ".bin") continue;
+    const entryPath = join(nodeModulesDir, entry.name);
+    if (entry.name.startsWith("@")) {
+      let scoped;
+      try {
+        scoped = readdirSync(entryPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const s of scoped) {
+        if (s.isDirectory()) {
+          packages.push({ name: `${entry.name}/${s.name}`, dir: join(entryPath, s.name) });
+        }
+      }
+      continue;
+    }
+    packages.push({ name: entry.name, dir: entryPath });
+  }
+  return packages;
+}
+
+function readPackageVersion(packageDir) {
+  try {
+    return JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")).version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function dedupeNestedPackages() {
+  const topLevelDir = join(outBackend, "node_modules");
+  const topLevelVersions = new Map();
+  for (const { name, dir } of listPackageDirs(topLevelDir)) {
+    topLevelVersions.set(name, readPackageVersion(dir));
+  }
+  let removed = 0;
+  for (const { dir } of listPackageDirs(topLevelDir)) {
+    const nestedDir = join(dir, "node_modules");
+    for (const nested of listPackageDirs(nestedDir)) {
+      const topVersion = topLevelVersions.get(nested.name);
+      if (!topVersion) continue;
+      if (topVersion !== readPackageVersion(nested.dir)) continue;
+      rmSync(nested.dir, { recursive: true, force: true });
+      removed += 1;
+    }
+  }
+  if (removed > 0) {
+    console.log(`[bundle-backend] 去重嵌套包: ${removed} 个`);
+  }
+  return removed;
+}
+
+dedupeNestedPackages();
+
+// 7. Windows MAX_PATH 预检：模拟 windows-latest runner 上的 checkout 路径，
+//    超 260 字符的路径在 macOS 上直接失败，而不是等 makensis 报"failed opening file"。
+function findOverlongPaths() {
+  const windowsPrefix =
+    "D:\\a\\pi-web-QT\\pi-web-QT\\desktop\\resources\\backend";
+  const overlong = [];
+  function walk(dir, relative) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const childRelative = relative ? `${relative}\\${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(join(dir, entry.name), childRelative);
+        continue;
+      }
+      const full = `${windowsPrefix}\\${childRelative}`;
+      if (full.length > 260) overlong.push({ length: full.length, path: childRelative });
+    }
+  }
+  walk(outBackend, "");
+  return overlong;
+}
+
+const overlong = findOverlongPaths();
+if (overlong.length > 0) {
+  console.error(
+    `[bundle-backend] ${overlong.length} 个暂存路径超 Windows 260 字符限制：\n` +
+      overlong.map(({ length, path }) => `  ${length}  ${path}`).join("\n"),
+  );
+  fail("暂存路径会破坏 Windows 安装包构建。");
+}
+
 console.log(`[bundle-backend] 完成：backend -> ${outBackend}`);
 console.log(`[bundle-backend] 完成：node    -> ${nodeTarget}`);
+
+// 清理临时副本（自拷贝场景）
+if (nodeSrc !== nodeBin) {
+  rmSync(dirname(nodeSrc), { recursive: true, force: true });
+}

@@ -245,6 +245,13 @@ fn is_executable(p: &std::path::Path) -> bool {
 #[cfg(not(mobile))]
 fn find_node(res: &Path) -> Option<PathBuf> {
     let mut cands: Vec<PathBuf> = Vec::new();
+    // macOS：优先随包 Pi Agent Server.app 内的 node（LSBackgroundOnly，不进
+    // Dock；bundle ID 与父应用一致避免 Sequoia+ TCC 弹窗）。resources/node 保留
+    // 作为旧包/其它平台回退。
+    #[cfg(target_os = "macos")]
+    {
+        cands.push(res.join("Pi Agent Server.app").join("Contents").join("MacOS").join("node"));
+    }
     #[cfg(windows)]
     {
         cands.push(res.join("node").join("node.exe"));
@@ -271,7 +278,14 @@ struct BundledBackend {
 fn locate_bundled(app: &AppHandle) -> Option<BundledBackend> {
     let res = app.path().resource_dir().ok()?;
     let backend_dir = res.join("backend");
-    let server_js = backend_dir.join("server.js");
+    // 优先带看门狗/ABI 保护的启动器入口（desktop-server.cjs）；旧包只有
+    // server.js 时回退。注意 desktop-server.cjs 依赖 PI_WEB_PARENT_PID，
+    // spawn_bundled 必须注入，否则看门狗会立即退出。
+    let server_js = if backend_dir.join("desktop-server.cjs").is_file() {
+        backend_dir.join("desktop-server.cjs")
+    } else {
+        backend_dir.join("server.js")
+    };
     if !server_js.is_file() {
         return None;
     }
@@ -316,6 +330,8 @@ fn spawn_bundled(
         .current_dir(&bundled.backend_dir)
         .env("HOSTNAME", "0.0.0.0")
         .env("PORT", "30141")
+        // 启动器看门狗依赖父进程 PID：GUI 崩溃/强杀时自动退出，防孤儿 node
+        .env("PI_WEB_PARENT_PID", std::process::id().to_string())
         .env(
             "NODE_OPTIONS",
             format!("--max-old-space-size={MEMORY_LIMIT_MB} --max-semi-space-size={SEMI_SPACE_MB}"),

@@ -2,6 +2,26 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.12.0 — 2026-08-26（桌面端打包改进：Pi Agent Server.app + 窗口主题联动 + 打包脚本增强）
+
+### 桌面端（desktop/）
+- **macOS Node 运行时包装为 Pi Agent Server.app**：LSBackgroundOnly（不进 Dock），bundle ID 复用父应用 `com.piweb.desktop`，macOS Sequoia+ 不再弹「访问其他 App 数据」TCC 窗口
+- **server-launcher.cjs 启动器**（desktop-server.cjs）：父进程看门狗（GUI 崩溃/强杀时自动退出，防孤儿 node 占端口）+ dlopen ABI 保护（桌面 Node v22 vs CLI 系统 Node 共享 ~/.pi/agent/npm 缓存时报清晰错误）
+- **窗口主题联动**：网页端切浅/深主题时，macOS 原生标题栏颜色和窗口背景色同步跟随（`set_ui_theme` IPC + ui-prefs.json 持久化，冷启动还原）
+- **打包脚本增强**（`scripts/bundle-backend.mjs`）：
+  - 去重嵌套 node_modules（减少 37 个冗余包，backend 体积 251M → 191M）
+  - Windows 超长路径预检（模拟 CI runner 路径，防止 makensis 报 failed opening file）
+  - macOS 自动产出 Pi Agent Server.app；非 macOS 创建空目录占位（tauri 资源声明兼容）
+- **Rust 壳适配**：`find_node` 优先寻找 Pi Agent Server.app 内 node，`spawn_bundled` 优先 desktop-server.cjs 入口并注入 `PI_WEB_PARENT_PID`
+
+### 修复
+- 修复自拷贝陷阱：bundle-backend 用打包产物内 node 跑脚本时不再因 rmSync 丢失源文件
+
+### 兼容性
+- 保留「连接远程/连接本地」多服务器功能不变
+- 保留反向代理、托盘切换、macOS 菜单栏入口
+- Windows/Linux 构建互不影响（Pi Agent Server.app 保持空占位）
+
 ## v0.11.0 — 2026-08-22（合并上游 v0.8.9 + 内置子代理引擎 + 移动端/桌面端增强）
 
 ### 上游合并（agegr/pi-web v0.8.7..v0.8.9，SDK 0.84.0 → 0.84.2）

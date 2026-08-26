@@ -152,6 +152,11 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
         .inner_size(1280.0, 820.0)
         .min_inner_size(800.0, 600.0)
         .center();
+    // 主题联动：已保存的浅/深主题应用到原生 chrome（macOS 标题栏/窗口背景色），
+    // 避免网页深色、标题栏浅色割裂；未保存时跟随系统外观。
+    if let Some(theme) = crate::theme::stored_theme(app) {
+        builder = crate::theme::apply_theme_to_builder(builder, theme);
+    }
     // Windows：多虚拟显卡/远程控制环境（Oray/GameViewer/MuMu 等）下
     // WebView2 GPU 渲染会导致 browser 进程崩溃或主线程挂起（AppHangB1）→
     // 白屏。禁用 GPU 强制软件渲染，实测可稳定加载远程页面。
@@ -235,6 +240,10 @@ pub fn open_connect_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     .inner_size(920.0, 660.0)
     .min_inner_size(640.0, 480.0)
     .resizable(true);
+    // 主题联动：连接页窗口同样跟随已保存主题。
+    if let Some(theme) = crate::theme::stored_theme(app) {
+        win_builder = crate::theme::apply_theme_to_builder(win_builder, theme);
+    }
     // Windows：同 open_server_window，禁用 GPU 软件渲染避免 WebView2 挂起白屏
     #[cfg(windows)]
     {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Pi Web",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "identifier": "com.piweb.desktop",
   "build": {
     "beforeBuildCommand": {
@@ -22,7 +22,8 @@
     "targets": "all",
     "resources": {
       "resources/backend": "backend",
-      "resources/node": "node"
+      "resources/node": "node",
+      "resources/Pi Agent Server.app": "Pi Agent Server.app"
     },
     "icon": [
       "icons/32x32.png",

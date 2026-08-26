@@ -308,6 +308,31 @@ const isWebKitWebView = (() => {
   return /AppleWebKit/.test(ua) && !/Chrome|Edg|OPR|Version\//.test(ua);
 })();
 
+// ─── Desktop shell theme sync ───────────────────────────────────────────────
+
+/** 桌面壳（Tauri WebView，withGlobalTauri=true）检测；网页浏览器无 window.__TAURI__。 */
+function hasDesktopShell(): boolean {
+  try {
+    return typeof window !== "undefined" && !!(window as unknown as { __TAURI__?: unknown }).__TAURI__;
+  } catch {
+    return false;
+  }
+}
+
+/** 把已解析的浅/深主题同步给桌面壳：Rust 侧持久化 ui-prefs.json 并更新原生
+ *  窗口外观（macOS 标题栏颜色、窗口背景色）。非桌面壳或 IPC 失败静默忽略。 */
+async function syncNativeTheme(resolvedMode: ResolvedMode): Promise<void> {
+  if (!hasDesktopShell()) return;
+  try {
+    const tauri = (window as unknown as {
+      __TAURI__?: { core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
+    }).__TAURI__;
+    await tauri?.core?.invoke?.("set_ui_theme", { theme: resolvedMode });
+  } catch {
+    // 非桌面壳 / IPC 失败：不影响网页内主题
+  }
+}
+
 export function useTheme() {
   const mode = useSyncExternalStore(subscribe, getModeSnapshot, getServerSnapshot);
   const storedThemeName = useSyncExternalStore(subscribe, getThemeSnapshot, () => "");
@@ -332,6 +357,15 @@ export function useTheme() {
   }, []);
 
   const isDark = resolvedMode === "dark";
+
+  // 桌面壳主题同步：resolvedMode 变化（mount 收敛 / 手动切换 / system 跟随 OS）
+  // 时通知壳更新原生窗口外观。用 ref 去重，避免重复 IPC；主题名切换不影响。
+  const lastNativeThemeRef = useRef<ResolvedMode | null>(null);
+  useEffect(() => {
+    if (lastNativeThemeRef.current === resolvedMode) return;
+    lastNativeThemeRef.current = resolvedMode;
+    void syncNativeTheme(resolvedMode);
+  }, [resolvedMode]);
 
   const applyingRef = useRef(false);
 

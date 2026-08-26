@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod probe;
 mod proxy;
+mod theme;
 mod window;
 
 #[cfg(test)]
@@ -85,6 +86,9 @@ pub fn run() {
             // 4. 启动路由：桌面（连接设置页）| 移动端（连接页）
             window::route_startup(handle, &cfg);
 
+            // 5. 主题同步：已有持久化主题时应用到原生窗口外观（标题栏/背景色）
+            theme::sync_on_startup(handle);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -100,6 +104,7 @@ pub fn run() {
             commands::open_connect,
             commands::quit_app,
             commands::stop_local,
+            theme::set_ui_theme,
         ])
         .on_window_event(|window, event| {
             // 桌面：关闭 = 隐藏（驻留托盘）；移动端用系统默认行为（返回键/手势退出）
