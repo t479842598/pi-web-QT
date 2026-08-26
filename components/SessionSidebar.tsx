@@ -613,6 +613,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [explorerKey, setExplorerKey] = useState(0);
   const [explorerUploadBusy, setExplorerUploadBusy] = useState(false);
+  const [explorerFileSearchOpen, setExplorerFileSearchOpen] = useState(false);
   const [sessionRefreshDone, setSessionRefreshDone] = useState(false);
   const [explorerRefreshDone, setExplorerRefreshDone] = useState(false);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
@@ -1308,7 +1309,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (!q) return filteredSessions;
     return filteredSessions.filter((s) => {
       const title = (s.name || s.firstMessage || "").toLowerCase();
-      const branch = (s.worktreeBranch || "").toLowerCase();
+      const branch = (s.branch || "").toLowerCase();
       return title.includes(q) || branch.includes(q);
     });
   }, [searchQuery, filteredSessions]);
@@ -2661,27 +2662,49 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </button>
             {explorerOpen && (
               <button
-                onClick={() => fileExplorerRef.current?.openUploadPicker()}
-                disabled={explorerUploadBusy}
-                title={t("desktop.uploadFilesToProjectRoot")}
-                aria-label={t("desktop.uploadFiles")}
+                onClick={() => setExplorerFileSearchOpen((open) => !open)}
+                title={t("sidebar.searchFiles")}
+                aria-label={t("sidebar.searchFiles")}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   width: 26, height: 26, padding: 0,
-                  background: "none",
+                  background: explorerFileSearchOpen ? "var(--bg-selected)" : "none",
                   border: "none",
-                  color: "var(--text-dim)",
-                  cursor: explorerUploadBusy ? "default" : "pointer",
+                  color: explorerFileSearchOpen ? "var(--accent)" : "var(--text-dim)",
+                  cursor: "pointer",
                   borderRadius: 5,
                   flexShrink: 0,
-                  opacity: explorerUploadBusy ? 0.6 : 1,
                   transition: "color 0.3s, background 0.3s",
                 }}
-                onMouseEnter={(e) => { if (explorerUploadBusy) return; e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                onMouseLeave={(e) => { if (explorerUploadBusy) return; e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
+                onMouseLeave={(e) => { if (explorerFileSearchOpen) return; e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
               >
-                <UploadSimple size={13} weight="regular" aria-hidden="true" />
+                <MagnifyingGlass size={13} weight="regular" aria-hidden="true" />
               </button>
+            )}
+            {explorerOpen && (
+              <button
+                onClick={() => fileExplorerRef.current?.openUploadPicker()}
+              disabled={explorerUploadBusy}
+              title={t("desktop.uploadFilesToProjectRoot")}
+              aria-label={t("desktop.uploadFiles")}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 26, height: 26, padding: 0,
+                background: "none",
+                border: "none",
+                color: "var(--text-dim)",
+                cursor: explorerUploadBusy ? "default" : "pointer",
+                borderRadius: 5,
+                flexShrink: 0,
+                opacity: explorerUploadBusy ? 0.6 : 1,
+                transition: "color 0.3s, background 0.3s",
+              }}
+              onMouseEnter={(e) => { if (explorerUploadBusy) return; e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
+              onMouseLeave={(e) => { if (explorerUploadBusy) return; e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+            >
+              <UploadSimple size={13} weight="regular" aria-hidden="true" />
+            </button>
             )}
             <button
               onClick={() => {
@@ -2722,6 +2745,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 onAtMention={onAtMention}
                 onAtMentions={onAtMentions}
                 onUploadBusyChange={setExplorerUploadBusy}
+                fileSearchOpen={explorerFileSearchOpen}
+                onFileSearchOpenChange={setExplorerFileSearchOpen}
                 onFileCreated={onFileCreated}
                 onFileDeleted={onFileDeleted}
               />
@@ -3387,13 +3412,13 @@ const SessionItem = memo(function SessionItem({
             <div style={{ marginTop: 2, display: "flex", gap: 8, color: "var(--text-dim)", fontSize: 11, minWidth: 0, flexWrap: "nowrap", whiteSpace: "nowrap" }}>
               <span title={session.modified} style={{ flexShrink: 0 }}>{formatRelativeTime(session.modified, t)}</span>
               <span style={{ flexShrink: 0 }}>{t("desktop.messagesCount", { count: session.messageCount })}</span>
-              {session.worktreeBranch && (
+              {session.isWorktree && session.branch && (
                 <span
                   title={t("desktop.worktree", { cwd: session.cwd })}
                   style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--accent)", minWidth: 0, overflow: "hidden", flex: "1 1 auto" }}
                 >
                   <GitBranch size={9} weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.worktreeBranch}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.branch}</span>
                 </span>
               )}
               {session.importedFrom && (
@@ -3883,10 +3908,10 @@ function SessionCompactRow({
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 1, minWidth: 0, height: 16, flexWrap: "nowrap", whiteSpace: "nowrap" }}>
             <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>{formatRelativeTime(session.modified, t)}</span>
             <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>{t("desktop.messagesCount", { count: session.messageCount })}</span>
-            {session.worktreeBranch && (
-              <span title={session.worktreeBranch} style={{ display: "inline-flex", alignItems: "center", gap: 3, maxWidth: "60%", background: "var(--bg-hover)", borderRadius: 4, padding: "0 5px", height: 15, minWidth: 0, overflow: "hidden" }}>
+            {session.isWorktree && session.branch && (
+              <span title={session.branch} style={{ display: "inline-flex", alignItems: "center", gap: 3, maxWidth: "60%", background: "var(--bg-hover)", borderRadius: 4, padding: "0 5px", height: 15, minWidth: 0, overflow: "hidden" }}>
                 <GitBranch size={8} weight="regular" color="var(--text-dim)" style={{ flexShrink: 0 }} aria-hidden="true" />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", lineHeight: "15px" }}>{session.worktreeBranch}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--text-muted)", lineHeight: "15px" }}>{session.branch}</span>
               </span>
             )}
             {session.parentSessionId && (

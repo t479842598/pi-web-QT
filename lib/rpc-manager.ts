@@ -12,9 +12,10 @@ import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { cacheSessionPath, invalidateSessionListCache, resolveSessionPath } from "./session-reader";
 import { createSubagentExtension, preferPiWebSubagentExtension } from "./subagent-extension";
-import { listSubagentProfiles } from "./subagents";
+import { listSubagentProfiles, readSubagentSessionResources } from "./subagents";
 import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
+import { resolveShellTools } from "./powershell-settings";
 import { createProjectCommandBashOperations } from "./project-command-env";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import { readModeSettings } from "./modes-config";
@@ -22,7 +23,7 @@ import { decide, policyFromStrings, type Policy } from "./permission";
 import { READ_ONLY_TOOL_NAMES } from "./modes";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
-import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem } from "./types";
+import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem, SessionEntry } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS } from "./custom-ui-terminal";
 import { recordErrorLog } from "./error-log";
 import { GoalEngine, GOAL_CONTINUE_INSTRUCTION, loadGoalState, saveGoalState, type GoalRuntimeState } from "./goal-engine";
@@ -177,7 +178,7 @@ export interface RpcSessionStartOptions {
   thinkingLevel?: ThinkingLevel;
 }
 
-const CODING_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+const CODING_TOOL_NAMES = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"];
 
 // Extensions require a complete Theme, while the web UI applies its own styling.
 class PlainTextTheme extends Theme {
@@ -211,12 +212,13 @@ function withExtensionTools(session: AgentSessionLike, toolNames: string[]): str
   if (toolNames.length === 0) return [];
 
   const codingToolNames = new Set(CODING_TOOL_NAMES);
+  const selectedToolNames = resolveShellTools(toolNames, session.settingsManager.getDefaultTools());
   const extensionToolNames = session
     .getAllTools()
     .map((t) => t.name)
     .filter((name) => !codingToolNames.has(name));
 
-  return [...new Set([...toolNames, ...extensionToolNames])];
+  return [...new Set([...selectedToolNames, ...extensionToolNames])];
 }
 
 /**
@@ -275,6 +277,8 @@ export class AgentSessionWrapper {
   private extensionBindingPromise: Promise<void> | null = null;
   private extensionBindingError: unknown = null;
   private forceEmptySystemPrompt = false;
+  /** Exact system prompt for subagent sessions restored from their snapshot. */
+  private exactSystemPrompt: string | null = null;
   private unsubscribe: (() => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   /** Number of live event listeners (per-session SSE + task engine). */
@@ -727,6 +731,12 @@ export class AgentSessionWrapper {
     this.applyForcedEmptySystemPrompt();
   }
 
+  /** Pin a subagent session's system prompt to its profile snapshot. */
+  setExactSystemPrompt(prompt: string): void {
+    this.exactSystemPrompt = prompt;
+    this.applyExactSystemPrompt();
+  }
+
   beginExtensionBinding(options: ExtensionBindingOptions = {}): void {
     void this.ensureExtensionsBound(options).catch((err) => {
       console.error("[pi-web] failed to dispatch session_start to extensions:", err instanceof Error ? err.message : err);
@@ -818,8 +828,18 @@ export class AgentSessionWrapper {
   }
 
   private applyForcedEmptySystemPrompt(): void {
-    if (this.forceEmptySystemPrompt && this.inner.agent.state) {
+    if (!this.inner.agent.state) return;
+    if (this.forceEmptySystemPrompt) {
       this.inner.agent.state.systemPrompt = "";
+    } else if (this.exactSystemPrompt !== null) {
+      this.inner.agent.state.systemPrompt = this.exactSystemPrompt;
+    }
+  }
+
+  private applyExactSystemPrompt(): void {
+    if (this.forceEmptySystemPrompt) return;
+    if (this.exactSystemPrompt !== null && this.inner.agent.state) {
+      this.inner.agent.state.systemPrompt = this.exactSystemPrompt;
     }
   }
 
@@ -1416,11 +1436,13 @@ export class AgentSessionWrapper {
       }
 
       case "reload": {
+        const activeToolNames = this.inner.getActiveToolNames();
         await this.waitForExtensionsBound();
         this.extensionStatuses.clear();
         this.extensionWidgets.clear();
         this.syncProjectTrust();
         await this.inner.reload();
+        this.inner.setActiveToolsByName(withExtensionTools(this.inner, activeToolNames));
         if (typeof this.inner.bindExtensions !== "function") {
           this.inner.extensionRunner.setUIContext?.(this.createExtensionUiContext(), "rpc");
         }
@@ -2078,8 +2100,13 @@ export function getRunningRpcSessionIds(): string[] {
 // bash, no goal engine — they only need to be reachable by id so the runtime
 // can steer/abort them and the UI can list them.
 
-function registerSubagentWrapper(inner: AgentSessionLike): AgentSessionWrapper {
+function registerSubagentWrapper(
+  inner: AgentSessionLike,
+  options?: { exactSystemPrompt?: string; chatOnly?: boolean },
+): AgentSessionWrapper {
   const wrapper = new AgentSessionWrapper(inner, inner.sessionManager.getCwd());
+  if (options?.chatOnly) wrapper.setForceEmptySystemPrompt(true);
+  else if (options?.exactSystemPrompt) wrapper.setExactSystemPrompt(options.exactSystemPrompt);
   wrapper.start();
   const sessionId = inner.sessionId as string;
   const registry = getRegistry();
@@ -2090,8 +2117,8 @@ function registerSubagentWrapper(inner: AgentSessionLike): AgentSessionWrapper {
 
 const SUBAGENT_CONTROLLER = createSubagentController({
   getSession: (sessionId) => getRegistry().get(sessionId),
-  registerSession: (inner) => {
-    registerSubagentWrapper(inner);
+  registerSession: (inner, options) => {
+    registerSubagentWrapper(inner, options);
   },
   reopenSession: async (sessionId, sessionFile) =>
     (await startRpcSession(sessionId, sessionFile, undefined)).session,
@@ -2288,6 +2315,12 @@ export async function startRpcSession(
     sessionManager = SessionManager.create(cwd, undefined);
   }
   const sessionCwd = sessionManager.getCwd();
+  // Subagent sessions persist a resource snapshot (appendSystemPrompt + tools +
+  // loadSkills/loadExtensions) so reopening them restores the exact tool set
+  // and prompt context instead of falling back to the host session's defaults.
+  const subagentResources = sessionFile
+    ? readSubagentSessionResources(sessionManager.getEntries() as unknown as SessionEntry[])
+    : null;
   const finishStartingSession = trackStartingSession(sessionCwd);
   const startController = new AbortController();
   const startTimeout = setTimeout(() => startController.abort(), START_SESSION_TIMEOUT_MS);
@@ -2298,8 +2331,8 @@ export async function startRpcSession(
 
     // Determine which tools to pass based on requested toolNames.
     // Since v0.68.0, session creation expects string[] tool names instead of Tool[] instances.
-    let toolsOption: string[] | undefined;
-    if (toolNames !== undefined) {
+    let toolsOption: string[] | undefined = subagentResources?.tools;
+    if (!subagentResources && toolNames !== undefined) {
       // toolNames === [] -> "all off" (an empty allow-list disables every tool).
       // Otherwise DO NOT pass a builtin-only allow-list: passing CODING_TOOL_NAMES
       // set allowedToolNames to coding builtins only, which filtered every
@@ -2314,21 +2347,32 @@ export async function startRpcSession(
     // before the SDK restores the saved model from the session file.
     // Creating services imports project extensions for provider discovery, so
     // gate project resources before repository-controlled code can run.
-    const trustReloadOptions = projectTrustReloadOptions(sessionCwd, agentDir);
+    const trustReloadOptions = subagentResources
+      ? undefined
+      : projectTrustReloadOptions(sessionCwd, agentDir);
     const services = await createAgentSessionServices({
       cwd: sessionCwd,
       agentDir,
       modelRuntimeSignal: startController.signal,
-      resourceLoaderOptions: {
-        extensionFactories: [
-          createSubagentExtension(
-            SUBAGENT_CONTROLLER.extensionRuntime,
-            () => listSubagentProfiles(sessionCwd),
-            isBuiltInSubagentsEnabled,
-          ),
-        ],
-        extensionsOverride: (base) => preferPiWebSubagentExtension(base),
-      },
+      resourceLoaderOptions: subagentResources
+        ? {
+            noExtensions: true,
+            noSkills: true,
+            noPromptTemplates: true,
+            noThemes: true,
+            noContextFiles: true,
+            appendSystemPrompt: subagentResources.appendSystemPrompt,
+          }
+        : {
+            extensionFactories: [
+              createSubagentExtension(
+                SUBAGENT_CONTROLLER.extensionRuntime,
+                () => listSubagentProfiles(sessionCwd),
+                isBuiltInSubagentsEnabled,
+              ),
+            ],
+            extensionsOverride: (base) => preferPiWebSubagentExtension(base),
+          },
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
 
@@ -2409,7 +2453,7 @@ export async function startRpcSession(
       // If specific tool names were requested (non-empty), set the active tools to the
       // requested builtin coding tools PLUS all extension/package tools, so installed
       // extensions stay usable in pi-web just like in the `pi` CLI.
-      if (toolNames && toolNames.length > 0) {
+      if (!subagentResources && toolNames && toolNames.length > 0) {
         inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
       }
 
@@ -2417,8 +2461,12 @@ export async function startRpcSession(
       // When all tools are disabled, clear the system prompt entirely.
       // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
       // keep this forced after extension resource discovery and reloads as well.
-      if (toolNames?.length === 0) {
+      if (toolNames?.length === 0 || subagentResources?.tools.length === 0) {
         wrapper.setForceEmptySystemPrompt(true);
+      } else if (subagentResources && subagentResources.appendSystemPrompt.length > 0) {
+        // Subagent sessions carry their profile's system prompt snapshot; apply it
+        // so reopening the session keeps the exact prompt the profile configured.
+        wrapper.setExactSystemPrompt(subagentResources.appendSystemPrompt[0]);
       }
       wrapper.start();
       wrapper.loadQueueRecovery();
@@ -2440,8 +2488,7 @@ export async function startRpcSession(
         registry.delete(realSessionId);
       });
       registry.set(realSessionId, wrapper);
-      wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });
-      enforceRegistryCap();
+      wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });      enforceRegistryCap();
 
       return { session: wrapper, realSessionId };
     } catch (error) {

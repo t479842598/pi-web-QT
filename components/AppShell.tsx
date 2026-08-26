@@ -42,7 +42,7 @@ import type { ProjectTrustStatus } from "@/lib/api-types";
 import { stripModeInstructionBlocks } from "@/lib/modes";
 import { WindowControls, useDesktopChrome, useWindowDrag } from "./desktop";
 
-type SessionCopyField = "file" | "id";
+type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
 
 export function AppShell() {
   const router = useRouter();
@@ -832,11 +832,13 @@ export function AppShell() {
         activeTopPanel={activeTopPanel}
         topPanelPos={topPanelPos}
         sessionStats={sessionStats}
+        selectedSession={selectedSession}
         contextUsage={contextUsage}
         copiedSessionField={copiedSessionField}
         onCopySessionField={handleCopySessionField}
         rightPanelOpen={rightPanelOpen}
         onToggleFilePanel={() => setRightPanelOpen((v) => !v)}
+        onRefreshSession={() => setSessionKey((k) => k + 1)}
         onOpenSettings={() => openSettings("models")}
         sessionTitle={sessionTitle}
         onWorkspaceControlsHostChange={setTitleWorkspaceControlsHost}

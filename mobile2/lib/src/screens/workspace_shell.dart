@@ -862,7 +862,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     final scheme = Theme.of(context).colorScheme;
     final pinned = _isPinned(s);
     final pathLabel = _pathLabel(s.projectRoot, s.cwd);
-    final branch = s.worktreeBranch;
+    // 与网页端会话卡一致：仅在 cwd 为链接 worktree 时显示分支 chip。
+    final branch = s.isWorktree ? s.branch : null;
     final isFork = s.parentSession != null && s.parentSession!.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),

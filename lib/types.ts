@@ -367,7 +367,10 @@ export interface SessionInfo {
    *  Internal only: use projectRoot/cwd for display and filesystem operations. */
   projectKey?: string;
   /** Branch name when cwd is a linked git worktree (not the main checkout) */
-  worktreeBranch?: string;
+  /** Current git branch for any git repo (undefined for non-git or detached HEAD) */
+  branch?: string;
+  /** True when cwd is a linked git worktree (not the main checkout) */
+  isWorktree?: boolean;
   /** Source tool when this session was imported (e.g. "reasonix", "codex") */
   importedFrom?: string;
   /** True while the runtime session exists only in memory and its JSONL file
@@ -378,6 +381,8 @@ export interface SessionInfo {
 export interface SessionContext {
   messages: AgentMessage[];
   entryIds: string[]; // parallel to messages — the session entry id for each message
+  oldestEntryId: string | null;
+  hasMore: boolean;
   thinkingLevel: string;
   model: { provider: string; modelId: string } | null;
 }

@@ -263,13 +263,33 @@ export function BuiltinModelsDetail({
       onConfigChange?.(data.provider ?? null);
       setDiscovery({ phase: "idle" });
       setSelectedNewIds([]);
-      // 重新加载模型列表
+      // 重新加载模型列表，并把新模型的默认值补进 drafts/initialDrafts：
+      // 否则新模型没有初始基线，后续编辑保存会被 buildOverridePatches 静默跳过
+      // （或把全部默认字段误写成 override）。
       const reload = await fetch(`/api/models-config/builtin?provider=${encodeURIComponent(providerId)}`);
       if (reload.ok) {
         const reloaded = await reload.json() as { models?: BuiltinModelInfo[]; overrides?: Record<string, unknown> };
         if (reloaded.models) {
           setModels(reloaded.models);
           modelsRef.current = reloaded.models;
+          const refreshed: Record<string, Draft> = {};
+          for (const m of reloaded.models) {
+            const override = (reloaded.overrides?.[m.id] ?? {}) as Record<string, unknown>;
+            refreshed[m.id] = {
+              name: typeof override.name === "string" && override.name.length > 0 ? override.name : m.name,
+              reasoning: typeof override.reasoning === "boolean" ? override.reasoning : m.reasoning,
+              contextWindow: typeof override.contextWindow === "number"
+                ? String(override.contextWindow)
+                : m.contextWindow != null ? String(m.contextWindow) : "",
+              maxTokens: typeof override.maxTokens === "number"
+                ? String(override.maxTokens)
+                : m.maxTokens != null ? String(m.maxTokens) : "",
+              hidden: typeof override.hidden === "boolean" ? override.hidden : false,
+              thinkingLevelMap: (override.thinkingLevelMap as Draft["thinkingLevelMap"]) ?? m.thinkingLevelMap,
+            };
+          }
+          setDrafts(refreshed);
+          setInitialDrafts(refreshed);
           setDirty(new Set());
         }
       }

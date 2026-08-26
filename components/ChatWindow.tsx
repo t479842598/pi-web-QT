@@ -154,6 +154,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     handleCollaborationModeChange, handleTokenModeChange, handleToolApprovalModeChange,
     approvalRequests, resolveApproval,
     goalState, handleGoalStart, handleGoalPause, handleGoalResume, handleGoalStop, handleGoalEdit,
+    historyCursor, hasEarlierMessages, loadContext,
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
@@ -331,6 +332,45 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       observer.disconnect();
     };
   }, [messages.length, scrollContainerRef, updateChatFades]);
+
+  // --- Load-earlier pagination ---
+  // The server returns a bounded tail window; scrolling to the very top of the
+  // virtualized list fetches and prepends the previous page. Guarded against
+  // concurrent fetches and duplicate prepends.
+  const loadingOlderRef = useRef(false);
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const maybeLoadEarlier = () => {
+      if (loadingOlderRef.current) return;
+      if (!hasEarlierMessages) return;
+      const cursor = historyCursor;
+      if (!cursor) return;
+      // Near the top (within ~8px of the first row): load the previous page.
+      if (container.scrollTop > 8) return;
+      const sid = session?.id;
+      if (!sid) return;
+      loadingOlderRef.current = true;
+      // Anchor by distance-from-bottom so the prepended page does not shift the
+      // viewport (and so the restored scrollTop lands below the 8px threshold,
+      // preventing the scroll event from immediately re-triggering a load).
+      const distanceFromBottom = container.scrollHeight - container.scrollTop;
+      void loadContext(sid, branchActiveLeafId, cursor).finally(() => {
+        loadingOlderRef.current = false;
+        // Prepend grew scrollHeight; restore the same distance-from-bottom.
+        requestAnimationFrame(() => {
+          const target = container.scrollHeight - distanceFromBottom;
+          if (Math.abs(container.scrollTop - target) > 1) {
+            container.scrollTo({ top: target, behavior: "auto" });
+          }
+        });
+      });
+    };
+
+    container.addEventListener("scroll", maybeLoadEarlier, { passive: true });
+    return () => container.removeEventListener("scroll", maybeLoadEarlier);
+  }, [scrollContainerRef, historyCursor, hasEarlierMessages, loadContext, session?.id, branchActiveLeafId]);
 
   // --- Virtualized message list ---
   // T-004 (方案 B): the full rendered array is the data source; the

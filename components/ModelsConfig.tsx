@@ -2298,7 +2298,7 @@ export function ModelsConfig({
               {t("desktop.cancel")}
             </button>
           )}
-          <ApplyNowButton sessionId={sessionId} />
+          <ApplyNowButton sessionId={sessionId} onBeforeApply={handleSave} />
           <button onClick={handleSave} disabled={saving || savedOk} style={{
             position: "relative",
             padding: "6px 16px",

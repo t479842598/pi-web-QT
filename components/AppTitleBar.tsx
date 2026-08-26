@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  ArrowClockwise,
   Check,
   Copy,
   Gear,
@@ -14,10 +15,11 @@ import {
 } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import type { SessionInfo } from "@/lib/types";
 import { WindowControls } from "./desktop";
 import type { DesktopChrome } from "./desktop/useDesktopChrome";
 
-type SessionCopyField = "file" | "id";
+type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
 
 interface AppTitleBarProps {
   topBarRef: React.RefObject<HTMLDivElement | null>;
@@ -34,11 +36,15 @@ interface AppTitleBarProps {
 
   topPanelPos: { top: number; left: number; width: number } | null;
   sessionStats: SessionStatsInfo | null;
+  /** Selected session (for Project Info: project dir / git branch / worktree). */
+  selectedSession: SessionInfo | null;
   contextUsage: { percent: number | null; contextWindow: number; tokens: number | null } | null;
   copiedSessionField: SessionCopyField | null;
   onCopySessionField: (field: SessionCopyField, value: string) => void;
   rightPanelOpen: boolean;
   onToggleFilePanel: () => void;
+  /** Force-reload the current session (re-fetch + reconnect SSE). */
+  onRefreshSession?: () => void;
   onOpenSettings: () => void;
   sessionTitle: string | null;
   onWorkspaceControlsHostChange?: (node: HTMLDivElement | null) => void;
@@ -113,11 +119,13 @@ export function AppTitleBar({
 
   topPanelPos,
   sessionStats,
+  selectedSession,
   contextUsage,
   copiedSessionField,
   onCopySessionField,
   rightPanelOpen,
   onToggleFilePanel,
+  onRefreshSession,
   onOpenSettings,
   sessionTitle,
   onWorkspaceControlsHostChange,
@@ -326,6 +334,24 @@ export function AppTitleBar({
         <button
           className="app-no-drag"
           type="button"
+          onClick={onRefreshSession}
+          title={translate("desktop.refreshSession")}
+          aria-label={translate("desktop.refreshSession")}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: 36, height: 36, padding: 0,
+            background: "none", border: "none",
+            color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "background 0.12s, color 0.12s",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
+        >
+          <ArrowClockwise size={16} aria-hidden="true" />
+        </button>
+
+        <button
+          className="app-no-drag"
+          type="button"
           onClick={onOpenSettings}
           title={translate("desktop.settings")}
           aria-label={translate("desktop.settings")}
@@ -456,10 +482,17 @@ export function AppTitleBar({
                 );
                 const copyButton = (field: SessionCopyField, value: string) => {
                   const copied = copiedSessionField === field;
+                  const copyTitleKey: Record<SessionCopyField, string> = {
+                    file: "desktop.copyFilePath",
+                    id: "desktop.copySessionId",
+                    projectDir: "desktop.copyProjectDir",
+                    gitBranch: "desktop.copyGitBranch",
+                    gitWorktree: "desktop.copyGitWorktree",
+                  };
                   return (
                     <button
                       type="button"
-                      title={copied ? translate("desktop.copied") : field === "file" ? translate("desktop.copyFilePath") : translate("desktop.copySessionId")}
+                      title={copied ? translate("desktop.copied") : translate(copyTitleKey[field])}
                       onClick={() => onCopySessionField(field, value)}
                       style={{
                         alignSelf: "start",
@@ -512,6 +545,32 @@ export function AppTitleBar({
                     </div>
                   </div>
                 );
+                const ws = selectedSession;
+                const projectRows = [
+                  ...(ws ? [{ label: translate("desktop.projectDir"), value: ws.projectRoot ?? ws.cwd, copyField: "projectDir" as const }] : []),
+                  ...(ws?.branch ? [{ label: translate("desktop.gitBranch"), value: ws.branch, copyField: "gitBranch" as const }] : []),
+                  ...(ws?.isWorktree ? [{ label: translate("desktop.gitWorktree"), value: ws.cwd, copyField: "gitWorktree" as const }] : []),
+                ];
+                const projectInfoSection = projectRows.length > 0 ? (
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{translate("desktop.projectSection")}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: 12, rowGap: 8, alignItems: "start" }}>
+                      {projectRows.map((row) => (
+                        <div key={`project-info:${row.label}`} style={{ display: "contents" }}>
+                          <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{row.label}</div>
+                          <div style={{
+                            color: "var(--text-muted)",
+                            minWidth: 0,
+                            overflowWrap: "anywhere",
+                            wordBreak: "break-word",
+                            whiteSpace: "normal",
+                          }}>{row.value}</div>
+                          <div>{row.copyField ? copyButton(row.copyField, row.value) : null}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null;
 
                 return (
                   <div style={{
@@ -524,7 +583,10 @@ export function AppTitleBar({
                     lineHeight: 1.5,
                     fontFamily: "var(--font-mono)",
                   }}>
-                    {sessionInfoSection}
+                    <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 16 : 20, minWidth: 0 }}>
+                      {sessionInfoSection}
+                      {projectInfoSection}
+                    </div>
                     {section(translate("desktop.sessionInfoMessages"), messageRows)}
                     {section(translate("desktop.sessionInfoTokens"), [...tokenRows, ...extraTokenRows], "right", true)}
                   </div>

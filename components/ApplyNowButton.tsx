@@ -16,10 +16,14 @@ import { sendAgentCommand } from "@/lib/agent-client";
 export function ApplyNowButton({
   sessionId,
   onApplied,
+  /** Persist pending edits (if any) before reloading pi — changes that are
+   *  still only in component state would otherwise not take effect. */
+  onBeforeApply,
 }: {
   sessionId?: string | null;
   /** Called after a successful reload so the page can refresh its data. */
   onApplied?: () => void;
+  onBeforeApply?: () => Promise<void> | void;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -32,6 +36,9 @@ export function ApplyNowButton({
     setError(null);
     setDone(false);
     try {
+      // Save unsaved edits first: reloading pi only helps once the new
+      // configuration is actually written to disk.
+      await onBeforeApply?.();
       await sendAgentCommand(sessionId, { type: "reload" });
       setDone(true);
       await onApplied?.();
@@ -40,7 +47,7 @@ export function ApplyNowButton({
     } finally {
       setBusy(false);
     }
-  }, [sessionId, onApplied]);
+  }, [sessionId, onApplied, onBeforeApply]);
 
   const disabled = busy || !sessionId;
 

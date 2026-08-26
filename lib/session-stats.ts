@@ -61,7 +61,12 @@ export function computeSessionStats(entries: SessionEntry[]): SessionFileStats {
       addUsage(message.usage);
     } else if (message.role === "assistant") {
       assistantMessages += 1;
-      toolCalls += message.content.filter((c) => c.type === "toolCall").length;
+      // Legacy/edge-case sessions may store assistant content as a plain string
+      // (real long sessions 500'd on content.map before this guard).
+      const content = message.content;
+      toolCalls += Array.isArray(content)
+        ? content.filter((c) => c.type === "toolCall").length
+        : 0;
       addUsage(message.usage);
     }
   }

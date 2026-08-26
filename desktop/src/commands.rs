@@ -390,10 +390,9 @@ pub fn open_connect(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
-    // 先同步关闭本机后端（杀壳拉起子进程；外部启动/孤儿进程按端口回收），
-    // 再退出；不依赖 RunEvent::Exit 兜底，确保 30141 不被孤儿 node 占用。
-    #[cfg(not(mobile))]
-    crate::probe::stop_local_server(&app);
+    // 进程保持策略：客户端退出时保留本机后端（0.0.0.0:30141）常驻运行，
+    // 下次启动 / 其他客户端 / 浏览器可直接复用；需要停止时用连接页
+    // 「关闭本机服务」按钮（stop_local 命令）。
     app.exit(0);
 }
 

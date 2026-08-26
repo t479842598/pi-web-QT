@@ -314,9 +314,8 @@ pub fn build_tray(app: &AppHandle, cfg: &Config) -> tauri::Result<tauri::tray::T
                     let _ = open_connect_window(app);
                 }
                 "quit" => {
-                    // 先同步关闭本机后端（含外部启动/孤儿进程按端口回收）再退出
-                    #[cfg(not(mobile))]
-                    crate::probe::stop_local_server(app);
+                    // 进程保持策略：退出时保留本机后端常驻，下次直接复用；
+                    // 需要停止时用连接页「关闭本机服务」按钮。
                     app.exit(0);
                 }
                 _ => {

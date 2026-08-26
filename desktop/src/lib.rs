@@ -107,11 +107,15 @@ pub fn run() {
             theme::set_ui_theme,
         ])
         .on_window_event(|window, event| {
-            // 桌面：关闭 = 隐藏（驻留托盘）；移动端用系统默认行为（返回键/手势退出）
+            // 桌面：窗口关闭 = 真正销毁并清理 server_windows 注册表。不做
+            // prevent_close + hide —— 隐藏窗口在 macOS 上会残留幽灵标签
+            // （Dock/App Switcher 显示窗口存在，但从任何入口都点不开）。
+            // 关闭后从托盘/菜单/连接管理重新打开时会走重建路径。
             #[cfg(not(mobile))]
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            if let tauri::WindowEvent::Destroyed = event {
+                let state = window.app_handle().state::<AppState>();
+                let label = window.label().to_string();
+                state.server_windows.lock().unwrap().retain(|_, l| *l != label);
             }
             #[cfg(mobile)]
             let _ = (window, event);
@@ -168,12 +172,30 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
-        // 退出前杀掉壳拉起的本机后端子进程，避免残留 0.0.0.0:30141 占用。
-        // 这是兜底：显式退出路径（quit_app 命令 / 托盘「退出」）已在调用 app.exit(0)
-        // 前同步清理；此处覆盖其余经事件循环退出的场景。
-        if let tauri::RunEvent::Exit = event {
-            #[cfg(not(mobile))]
-            crate::probe::stop_local_server(app_handle);
+        // 进程保持策略：客户端退出时保留本机后端（0.0.0.0:30141）常驻运行，
+        // 避免孤儿 node 被误杀导致下次启动重新拉起。需要停止时用连接页
+        // 「关闭本机服务」按钮（stop_local 命令）。
+        // 窗口已改为“关闭即销毁”：所有窗口都关闭后应用驻留托盘（不退出），
+        // macOS 点击 Dock 图标（Reopen）时恢复连接窗口，避免“有标签打不开”。
+        #[cfg(not(mobile))]
+        match event {
+            // macOS：点击 Dock 图标恢复窗口。has_visible_windows=false 表示
+            // 所有窗口都已关闭/隐藏，重新打开连接管理窗口。
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+                if !has_visible_windows {
+                    let _ = window::open_connect_window(app_handle);
+                }
+            }
+            // 最后一个窗口关闭（code: None）时保持应用运行（驻留托盘），
+            // 而不是退出；主动 app.exit()（code: Some，托盘「退出」/quit_app）
+            // 正常放行。
+            tauri::RunEvent::ExitRequested { code: None, api, .. } => {
+                api.prevent_exit();
+            }
+            _ => {}
         }
+        #[cfg(mobile)]
+        let _ = (app_handle, event);
     });
 }

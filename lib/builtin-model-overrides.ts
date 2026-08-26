@@ -95,8 +95,11 @@ export function buildOverridePatches(
   const patches: OverridePatches = {};
   for (const id of dirtyIds) {
     const next = drafts[id];
-    const before = initial[id];
-    if (!next || !before) continue;
+    if (!next) continue;
+    // Models added through the discovery flow have no initial draft yet —
+    // treat a missing initial as an empty baseline so their first edits
+    // still produce patches (previously the whole save was silently dropped).
+    const before = initial[id] ?? {};
     const patch: OverridePatch = {};
     for (const field of BUILTIN_OVERRIDE_FIELDS) {
       const nextValue = next[field];

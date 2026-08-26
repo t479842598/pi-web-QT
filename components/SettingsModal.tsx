@@ -15,12 +15,13 @@ import { SkillsConfig } from "./SkillsConfig";
 import { LogsConfig } from "./LogsConfig";
 import { SnippetsConfig } from "./SnippetsConfig";
 import { SubagentsConfig } from "./SubagentsConfig";
+import { ToolsConfig } from "./ToolsConfig";
 import { UsageConfig } from "./UsageConfig";
 import { ServerSwitchConfig } from "./ServerSwitchConfig";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 
-export type SettingsTab = "server" | "display" | "chat" | "models" | "skills" | "plugins" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import" | "mcp" | "subagents";
+export type SettingsTab = "server" | "display" | "chat" | "models" | "skills" | "plugins" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import" | "mcp" | "subagents" | "tools";
 
 interface SettingsModalProps {
   initialTab?: SettingsTab;
@@ -46,6 +47,7 @@ const tabs: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
   { id: "usage", labelKey: "desktop.usage", Icon: ChartBar },
   { id: "mcp", labelKey: "desktop.mcp", Icon: TerminalWindow },
   { id: "subagents", labelKey: "desktop.subagents", Icon: Robot },
+  { id: "tools", labelKey: "desktop.tools", Icon: TerminalWindow },
   { id: "backup", labelKey: "desktop.backup", Icon: Database },
   // Import stays desktop-only for now (Windows/macOS path handling).
   { id: "import", labelKey: "desktop.importSessions", Icon: DownloadSimple },
@@ -286,6 +288,9 @@ export function SettingsModal({
           </div>
           <div style={{ display: activeTab === "subagents" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <SubagentsConfig cwd={cwd} sessionId={sessionId} />
+          </div>
+          <div style={{ display: activeTab === "tools" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
+            <ToolsConfig sessionId={sessionId} onSessionReloaded={onSessionReloadedAction} />
           </div>
           <div style={{ display: activeTab === "backup" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <BackupConfig cwd={cwd} />

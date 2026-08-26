@@ -30,6 +30,7 @@ import {
 import type { SessionEntry } from "./types";
 import { buildSubagentPromptPlan } from "./subagent-prompt";
 import { appendSubagentInputFiles, loadSubagentInputFiles } from "./subagent-input";
+import { resolveShellTools } from "./powershell-settings";
 import { projectTrustReloadOptions } from "./project-trust";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 
@@ -201,7 +202,10 @@ export function createSubagentController(
       const extensionToolNames = profile.loadExtensions
         ? services.resourceLoader.getExtensions().extensions.flatMap((extension) => [...extension.tools.keys()])
         : [];
-      const activeTools = withSubagentExtensionTools(profile.tools, extensionToolNames);
+      const activeTools = resolveShellTools(
+        withSubagentExtensionTools(profile.tools, extensionToolNames),
+        settingsManager.getDefaultTools(),
+      );
 
       const sessionManager = SessionManager.create(parent.cwd, undefined, { parentSession: parent.sessionFile });
       const createdAt = new Date().toISOString();

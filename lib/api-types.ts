@@ -4,6 +4,11 @@ export interface SkillSearchResult {
   url: string;
 }
 
+export interface ShellToolSettingsResponse {
+  isWindows: boolean;
+  powerShellEnabled: boolean;
+}
+
 export type SkillInstallScope = "global" | "project";
 
 export interface SkillInstallInfo {

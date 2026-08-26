@@ -278,9 +278,8 @@ struct BundledBackend {
 fn locate_bundled(app: &AppHandle) -> Option<BundledBackend> {
     let res = app.path().resource_dir().ok()?;
     let backend_dir = res.join("backend");
-    // 优先带看门狗/ABI 保护的启动器入口（desktop-server.cjs）；旧包只有
-    // server.js 时回退。注意 desktop-server.cjs 依赖 PI_WEB_PARENT_PID，
-    // spawn_bundled 必须注入，否则看门狗会立即退出。
+    // 优先带 ABI 保护的启动器入口（desktop-server.cjs）；旧包只有
+    // server.js 时回退。
     let server_js = if backend_dir.join("desktop-server.cjs").is_file() {
         backend_dir.join("desktop-server.cjs")
     } else {
@@ -401,7 +400,7 @@ pub(crate) fn spawn_cli(
             cmd.env("PI_WEB_ALLOWED_HOSTS", d);
         }
     }
-    // 同上：CLI 后端也要带看门狗（bin/pi-web.js 会把 env 透传给 next）。
+    // 注入父进程 PID（供诊断；进程保持策略下后端不再随父进程退出）。
     cmd.env("PI_WEB_PARENT_PID", std::process::id().to_string());
     // 独立进程组：改密/退出时可整组 kill（连带 next 孙进程），避免残留占用 30141
     #[cfg(unix)]

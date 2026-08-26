@@ -2,6 +2,49 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.14.0 — 2026-08-26（合并上游 v0.8.11 正式版 + v0.8.12-beta.1 测试版：子代理增强、会话分页、桌面稳定性）
+
+### 上游合并（agegr/pi-web v0.8.9..v0.8.12-beta.1）
+
+#### 子代理（对齐测试版 built-in-subagents，启用状态）
+- **子代理核心 lib 同步**：`subagents.ts` / `subagent-extension.ts` / `subagent-input.ts` / `subagent-profile-precedence.ts` / `subagent-prompt.ts` / `subagent-settings.ts` 与上游测试版逐字节一致；新增 `chat-only.ts`（纯聊天会话）、`session-tool-selection.ts`（工具选择持久化）、`powershell-settings.ts`（PowerShell shell 工具）。
+- **子代理会话重开恢复 resources**：rpc-manager 启动时读取 `readSubagentSessionResources`，重开子代理会话时恢复其 profile 的 systemPrompt/工具集/资源加载（上游 d2687a6）。`registerSession` 透传 exactSystemPrompt/chatOnly。
+- **子代理会话 relation 持久化**：session-reader 识别会话文件中的子代理元数据，列表携带 `relation.kind="subagent"`（上游 d290da5/d81f640 思路），本地舰队监控/侧边栏数据结构就位。
+- **PowerShell shell 工具（上游 #081c5b1）**：工具预设支持 `powershell`，设置页新增「工具」tab（Windows 下可切换默认 shell 工具）。
+
+#### 正式版高价值功能
+- **Project Info（#605）**：会话信息面板新增「项目信息」区（项目目录 / Git 分支 / 工作树 + 复制按钮）；`SessionInfo.worktreeBranch` 改为 `branch + isWorktree`（任意 git 仓库都显示分支，worktree 才显示 Worktree 行）。
+- **扩展 widget ANSI 颜色（#601）**：新增 `AnsiText`（ansi_up），修复扩展 widget 内容 ANSI 转义码乱码。
+- **explorer 文件搜索（#591）**：侧边栏文件树新增搜索按钮，`/api/file-index` 支持 `?q=` 按文件名排序搜索，结果折叠为目录树。
+- **附件图片压缩（#590）**：聊天上传超大图片（>1MB，非 GIF）自动压缩至最长边 1024px / JPEG 0.85。
+- **pi SDK 0.84.2 → 0.84.3**（55164b5）。
+
+### 会话加载与分页（#587 移植）
+- **会话历史 tail 分页**：`/api/sessions/[id]` 与 `/context` 默认返回最近 50 条（`?tail` 可调，封顶 1000，`?before` 向前翻页）；前端滚动到顶自动加载更早一页并锚定位置——大会话不再一次性加载全部历史导致「正在加载中」卡死。
+- **BranchNavigator 迭代化**：深链线性会话不再栈溢出。
+- **字符串助手消息守卫**：`entryToUiMessage` 与 `session-stats` 兼容历史会话中 assistant 内容为纯字符串的旧格式（此前会 500）。
+- 会话 info（messageCount/firstMessage）从全量 entries 统计，不受 tail 窗口影响。
+
+### 内置供应商模型保存修复
+- **新导入模型编辑保存丢失**（用户报告）：内置供应商「获取新模型」导入的模型，编辑上下文/输出 token 后保存被静默跳过——`buildOverridePatches` 对无初始基线的模型直接 continue；已改为 `initial ?? {}` 兜底，且导入后同步刷新 drafts/initialDrafts。
+- **「立即生效」先保存再重载**：`ApplyNowButton` 新增 `onBeforeApply`，模型设置页点击「立即生效」会先 flush 未保存的编辑再 `session.reload`。
+
+### 桌面端（Tauri）
+- **进程保持**：客户端退出（quit_app / 托盘退出 / 窗口全关）不再关闭本机后端，30141 常驻运行，下次启动/其他客户端直接复用；需要停止时用连接页「关闭本机服务」。移除后端父进程看门狗（server-launcher.cjs）。
+- **窗口关闭即销毁**：服务器/连接窗口关闭不再「隐藏驻留」，注册表随 Destroyed 清理，根治「后台有标签但打不开」；macOS 点击 Dock 图标（Reopen）恢复连接窗口；最后一个窗口关闭时应用驻留托盘不退出（托盘「退出」仍可正常退出）。
+- **右上角刷新按钮**：标题栏新增「刷新会话」，强制重载当前会话（重新拉取 + 重连 SSE）。
+
+### 移动端（mobile2 Flutter）
+- `getSession` 显式传 `tail=1000`：适配服务端分页默认 50 条，移动端历史不被截断。
+- `PiSession` 适配 `branch`/`isWorktree` 新字段（兼容旧 `worktreeBranch`），移动端会话卡分支 chip 恢复显示。
+
+### 兼容性与行为变化
+- 会话文件格式不变（resourceSnapshot 为增量字段）。
+- macOS Cmd+Q 现在驻留托盘而非直接退出（需从托盘「退出」或连接页关闭）；后端进程保持常驻，需手动「关闭本机服务」停止。
+- 设置页保持现有 tab 形式，新增「工具」tab（PowerShell 开关，仅 Windows 显示）。
+
+### 验证
+- `tsc --noEmit` 0 错误；前端测试 813 通过 / 0 失败（含新增上游 subagent/分页/ANSI/搜索测试）；桌面端 `cargo check` + 21 单测通过；移动端 `dart analyze` 0 error。
 ## v0.13.1 — 2026-08-26（窗口控制独立分区，不被功能按钮挤占）
 
 ### 修复

@@ -11,6 +11,7 @@ import {
   invalidateOpenSessionCache,
   buildSessionContext,
   listAllSessions,
+  attachSessionProjectInfo,
   openSessionCached,
   readSessionHeader,
 } from "@/lib/session-reader";
@@ -143,12 +144,15 @@ export async function GET(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
     const entries = sm.getEntries() as never;
+    const allEntries = entries as unknown as SessionEntry[];
     const leafId = sm.getLeafId();
     const tree = projectTreeForResponse(sm.getTree());
     const searchParams = new URL(req.url).searchParams;
     const deferThinking = searchParams.has("deferThinking");
     const deferToolResultImages = searchParams.has("deferMedia");
-    const context = buildSessionContext(entries, leafId, { deferThinking, deferToolResultImages, sessionId: id });
+    const rawTail = Number(searchParams.get("tail"));
+    const tail = Number.isFinite(rawTail) && rawTail > 0 ? Math.min(rawTail, 1000) : 50;
+    const context = buildSessionContext(entries, leafId, { deferThinking, deferToolResultImages, tail, sessionId: id });
     const totalActiveMs = computeSessionTotalActiveMs(entries);
     // Cumulative usage over ALL entries (incl. history compacted away) so the
     // client keeps monotonic token/cost counters across compaction + reloads.
@@ -160,25 +164,27 @@ export async function GET(
     const parentSessionId = header?.parentSession
       ? await resolveSessionIdByPath(header.parentSession)
       : undefined;
-    const info = header ? {
-      path: filePath,
+    const info = header ? (await attachSessionProjectInfo([{
+      path: filePath ?? "",
       id: header.id,
       cwd: header.cwd ?? "",
       name: sm.getSessionName(),
       created: header.timestamp,
       modified,
-      messageCount: context.messages.length,
-      firstMessage: context.messages.find((m) => m.role === "user")
-        ? (() => {
-            const msg = context.messages.find((m) => m.role === "user")!;
-            const c = (msg as { content: unknown }).content;
-            const raw = typeof c === "string" ? c : (Array.isArray(c) ? (c.find((b: { type: string }) => b.type === "text") as { text: string } | undefined)?.text ?? "" : "") || "";
-            return stripModeInstructionBlocks(raw) || "(no messages)";
-          })()
-        : "(no messages)",
+      // info aggregates span the WHOLE session file — derive them from the
+      // full entries, not the tail-windowed context (long sessions would
+      // otherwise report messageCount ≤ tail and a wrong firstMessage).
+      messageCount: allEntries.filter((entry) => entry.type === "message" && (entry.message.role === "user" || entry.message.role === "assistant")).length,
+      firstMessage: (() => {
+        const firstUserEntry = allEntries.find((entry) => entry.type === "message" && entry.message.role === "user") as { message: { content: unknown } } | undefined;
+        if (!firstUserEntry) return "(no messages)";
+        const c = firstUserEntry.message.content;
+        const raw = typeof c === "string" ? c : (Array.isArray(c) ? (c.find((b: { type: string }) => b.type === "text") as { text: string } | undefined)?.text ?? "" : "") || "";
+        return stripModeInstructionBlocks(raw) || "(no messages)";
+      })(),
       parentSessionId,
       transient: !filePath || !existsSync(filePath),
-    } : null;
+    }]))[0] : null;
 
     return NextResponse.json({
       sessionId: id,

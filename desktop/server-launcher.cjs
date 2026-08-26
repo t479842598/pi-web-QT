@@ -7,20 +7,9 @@
 
 const expectedParentPid = Number.parseInt(process.env.PI_WEB_PARENT_PID ?? "", 10);
 
-// 正常退出由 Rust 壳负责。这个小看门狗额外兜底：GUI 进程崩溃或被 macOS
-// 强制终止时，防止本地服务器变成孤儿进程继续占用端口。
-const parentWatchdog = setInterval(() => {
-  if (!Number.isInteger(expectedParentPid) || process.ppid === 1) {
-    process.exit(0);
-  }
-
-  try {
-    process.kill(expectedParentPid, 0);
-  } catch {
-    process.exit(0);
-  }
-}, 1_000);
-parentWatchdog.unref();
+// 进程保持策略：客户端（GUI 壳）退出后，本机后端继续常驻运行，下次启动 /
+// 其他客户端 / 浏览器可直接复用 30141。不再随父进程退出；需要停止时用
+// 连接页「关闭本机服务」按钮（Rust 侧 stop_local 命令会杀本进程）。
 
 // ABI 不匹配保险丝：包装 process.dlopen，使按不同 NODE_MODULE_VERSION 编译的
 // 原生模块报出清晰、可操作的错误，而不是难懂的 "Live session indexing failed"

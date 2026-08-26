@@ -111,6 +111,10 @@ class PiApi {
           _uri('/api/sessions/${Uri.encodeComponent(sessionId)}', {
             'deferThinking': '1',
             'deferMedia': '1',
+            // Server returns a bounded tail window by default (50); the
+            // mobile client has no load-earlier pagination, so ask for the
+            // full cap so long-session history is not truncated.
+            'tail': '1000',
           }),
           headers: _headers,
         )

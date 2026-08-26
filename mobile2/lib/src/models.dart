@@ -83,7 +83,8 @@ class PiSession {
     this.projectRoot,
     this.running = false,
     this.pinned = false,
-    this.worktreeBranch,
+    this.branch,
+    this.isWorktree = false,
     this.parentSession,
   });
 
@@ -106,7 +107,10 @@ class PiSession {
       projectRoot: json['projectRoot']?.toString(),
       running: running,
       pinned: json['pinned'] == true,
-      worktreeBranch: json['worktreeBranch']?.toString(),
+      // 服务端 v0.14.0 起改为 branch + isWorktree（任意 git 仓库都有 branch）；
+      // 兼容旧字段 worktreeBranch（仅在 worktree 时返回）。
+      isWorktree: json['isWorktree'] == true,
+      branch: json['branch']?.toString() ?? json['worktreeBranch']?.toString(),
       parentSession: json['parentSession']?.toString(),
     );
   }
@@ -124,8 +128,11 @@ class PiSession {
   /// 是否置顶（服务端持久化，与网页端一致）。
   final bool pinned;
 
-  /// 所属 git worktree 分支（网页端会话条目的分支 chip）。
-  final String? worktreeBranch;
+  /// 当前 git 分支（任意 git 仓库；服务端旧版仅在 worktree 时返回）。
+  final String? branch;
+
+  /// cwd 是否为链接 worktree（非主检出）。
+  final bool isWorktree;
 
   /// Fork 来源会话 id（存在即为 fork 出来的会话）。
   final String? parentSession;
@@ -143,7 +150,8 @@ class PiSession {
     projectRoot: projectRoot,
     running: running ?? this.running,
     pinned: pinned ?? this.pinned,
-    worktreeBranch: worktreeBranch,
+    branch: branch,
+    isWorktree: isWorktree,
     parentSession: parentSession,
   );
 

@@ -16,7 +16,7 @@ export const PRESET_FULL: string[] = ["bash", "read", "edit", "write", "grep", "
 /** Read-only preset for plan mode — analysis only, no file mutation. */
 export const PRESET_PLAN: string[] = ["read", "grep", "find", "ls"];
 
-const BUILTIN_TOOL_NAMES = new Set(PRESET_FULL);
+const BUILTIN_TOOL_NAMES = new Set([...PRESET_FULL, "powershell"]);
 
 export function isToolPreset(value: unknown): value is ToolPreset {
   return typeof value === "string" && (TOOL_PRESET_VALUES as readonly string[]).includes(value);
@@ -28,6 +28,7 @@ export function getPresetFromTools(tools: ToolEntry[]): ToolPreset {
 
   const active = activeTools
     .map((t) => t.name)
+    .map((name) => name === "powershell" ? "bash" : name)
     .filter((name) => BUILTIN_TOOL_NAMES.has(name))
     .sort()
     .join(",");
