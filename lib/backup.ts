@@ -95,10 +95,16 @@ export interface RestoreReport {
 const require = createRequire(import.meta.url);
 
 function getVersions(): { piWebVersion: string; piSdkVersion: string } {
+  // 只读 web 自身版本。SDK 版本不在此读取：
+  //  `require("@earendil-works/pi-coding-agent/package.json")` 会因该包 exports 仅含
+  //  `import` 条件、未导出 `./package.json` 而在运行时抛 ERR_PACKAGE_PATH_NOT_EXPORTED
+  //  （被 try/catch 兜底成 unknown，历史行为即恒 unknown），next build 的
+  //   outputFileTracing 也会因静态解析该子路径报 Module not found 导致构建失败。
+  //  改用 import.meta.resolve/相对路径在 standalone 打包后均不可靠，故 SDK 版本
+  //  保持恒 "unknown"，与既有行为一致。
   try {
     const pkg = require("../package.json") as { version?: string };
-    const sdk = require("@earendil-works/pi-coding-agent/package.json") as { version?: string };
-    return { piWebVersion: pkg.version ?? "unknown", piSdkVersion: sdk.version ?? "unknown" };
+    return { piWebVersion: pkg.version ?? "unknown", piSdkVersion: "unknown" };
   } catch {
     return { piWebVersion: "unknown", piSdkVersion: "unknown" };
   }

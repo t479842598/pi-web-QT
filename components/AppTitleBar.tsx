@@ -14,6 +14,8 @@ import {
 } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import { WindowControls } from "./desktop";
+import type { DesktopChrome } from "./desktop/useDesktopChrome";
 
 type SessionCopyField = "file" | "id";
 
@@ -42,6 +44,10 @@ interface AppTitleBarProps {
   onWorkspaceControlsHostChange?: (node: HTMLDivElement | null) => void;
   /** Host slot for the git-branch chip displayed to the right of the session title. */
   onTitleRightHostChange?: (node: HTMLDivElement | null) => void;
+  /** Desktop shell chrome facts (drag region + macOS inset). Inert in a browser. */
+  desktopChrome?: DesktopChrome;
+  /** Windows/Linux mouse-drag workaround for the frameless title bar. */
+  windowDrag?: { onMouseDown?: (event: React.MouseEvent<HTMLElement>) => void };
 }
 
 /** Renders a placeholder icon until mounted, then the correct theme icon.
@@ -116,6 +122,8 @@ export function AppTitleBar({
   sessionTitle,
   onWorkspaceControlsHostChange,
   onTitleRightHostChange,
+  desktopChrome,
+  windowDrag,
 }: AppTitleBarProps) {
   const { t: translate } = useI18n();
   const [titleModalOpen, setTitleModalOpen] = useState(false);
@@ -141,6 +149,8 @@ export function AppTitleBar({
       <div
         ref={topBarRef}
         className="app-title-bar"
+        {...desktopChrome?.dragRegionProps}
+        {...windowDrag}
         style={{
           display: "flex",
           alignItems: "center",
@@ -150,6 +160,8 @@ export function AppTitleBar({
           background: "var(--bg-panel)",
           position: "relative",
           zIndex: 600,
+          // macOS 保留原生红绿灯（title_bar_style Overlay），左侧内缩让出它们
+          paddingLeft: desktopChrome?.isMacOS ? 76 : 0,
         }}
       >
         {/* Left zone: sidebar toggle + workspace controls (project picker +
@@ -328,6 +340,9 @@ export function AppTitleBar({
         >
           <Gear size={16} aria-hidden="true" />
         </button>
+
+        {/* 无边框窗口控制（最小化/最大化/关闭）— 仅桌面壳且非 macOS 显示 */}
+        <WindowControls />
 
         </div>
 

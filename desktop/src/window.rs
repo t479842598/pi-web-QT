@@ -68,7 +68,10 @@ pub fn server_menu_label(s: &Server) -> String {
 }
 
 /// 「服务器」子菜单：当前窗口切换服务器 + 连接管理入口。
+/// 仅 macOS 的系统菜单栏（install_app_menu）使用；Windows/Linux 无边框后不再
+/// 挂窗口菜单栏，因此在非 macOS 编译下该函数无调用者，标注以消除 dead_code 误报。
 #[cfg(not(mobile))]
+#[allow(dead_code)]
 pub fn build_servers_submenu(
     app: &AppHandle,
     cfg: &Config,
@@ -92,13 +95,6 @@ pub fn build_servers_submenu(
         items.push(it);
     }
     Submenu::with_items(app, "服务器", true, &items)
-}
-
-/// 窗口级菜单（Windows/Linux 显示在窗口内菜单栏；macOS 不使用，见 install_app_menu）。
-#[cfg(not(mobile))]
-pub fn build_window_menu(app: &AppHandle, cfg: &Config) -> tauri::Result<Menu<tauri::Wry>> {
-    let sub = build_servers_submenu(app, cfg)?;
-    Menu::with_items(app, &[&sub])
 }
 
 /// macOS 应用菜单：默认菜单 + 「服务器」子菜单（macOS 菜单栏项必须是顶级 submenu）。
@@ -131,15 +127,12 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
     }
     let url = url::Url::parse(&url)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-    // 窗口菜单（macOS 用应用菜单栏，不挂窗口菜单）
-    #[cfg(target_os = "macos")]
-    let menu: Option<Menu<tauri::Wry>> = None;
-    #[cfg(not(target_os = "macos"))]
-    let menu: Option<Menu<tauri::Wry>> = {
-        let state = app.state::<AppState>();
-        let cfg = state.config.lock().unwrap();
-        build_window_menu(app, &cfg).ok()
-    };
+    // 无边框（frameless）：服务器主窗口不再有原生标题栏/边框。服务器切换
+    // 由网页端右上角「切换服务器」入口（piweb-switch://）承载，因此不再挂
+    // 原生「服务器」菜单栏（那行菜单在 Windows 上显示为窗口内菜单栏）。
+    // 窗口拖动/最小化/最大化/关闭由前端的无边框标题栏（WindowControls +
+    // data-tauri-drag-region）负责。
+    // macOS 保留原生 traffic lights（无边框 + hidden_title，前端标题栏内缩）。
     // 注意：Windows WebView2 上 WebviewUrl::External 的初始导航可能因 controller
     // 未就绪而丢失（窗口停在 about:blank → 白屏），因此先以本地页创建窗口，
     // build 返回后显式 navigate 到目标服务器（08-14 已验证的修复路径）。
@@ -152,10 +145,20 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
         .inner_size(1280.0, 820.0)
         .min_inner_size(800.0, 600.0)
         .center();
-    // 主题联动：已保存的浅/深主题应用到原生 chrome（macOS 标题栏/窗口背景色），
-    // 避免网页深色、标题栏浅色割裂；未保存时跟随系统外观。
     if let Some(theme) = crate::theme::stored_theme(app) {
         builder = crate::theme::apply_theme_to_builder(builder, theme);
+    }
+    // 无边框：macOS 保留原生 traffic lights（title_bar_style Overlay + hidden_title，
+    // 前端标题栏内缩让出红绿灯）；Windows/Linux 完全无边框，窗口控制由前端绘制。
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.decorations(false);
     }
     // Windows：多虚拟显卡/远程控制环境（Oray/GameViewer/MuMu 等）下
     // WebView2 GPU 渲染会导致 browser 进程崩溃或主线程挂起（AppHangB1）→
@@ -205,9 +208,6 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
                 }
             }
         });
-    if let Some(m) = menu {
-        builder = builder.menu(m);
-    }
     let win = builder.build()?;
     app.state::<AppState>()
         .server_windows
@@ -346,15 +346,14 @@ pub fn rebuild_tray(app: &AppHandle, cfg: &Config) {
         }
     }
     drop(tray_guard);
-    // 2. 所有服务器窗口的切换菜单（Windows/Linux）+ 标题同步（改名后立即生效）
+    // 2. 所有服务器窗口标题同步（改名后立即生效）。窗口已无边框且不再挂
+    //    原生「服务器」切换菜单（服务器切换由网页端右上角入口承载），因此
+    //    这里只同步标题，不再 set_menu。
     let reg = state.server_windows.lock().unwrap().clone();
-    if let Ok(menu) = build_window_menu(app, cfg) {
-        for (sid, label) in &reg {
-            if let Some(w) = app.get_webview_window(label) {
-                let _ = w.set_menu(menu.clone());
-                if let Some(srv) = cfg.find(sid) {
-                    let _ = w.set_title(&srv.name);
-                }
+    for (sid, label) in &reg {
+        if let Some(w) = app.get_webview_window(label) {
+            if let Some(srv) = cfg.find(sid) {
+                let _ = w.set_title(&srv.name);
             }
         }
     }

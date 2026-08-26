@@ -2,6 +2,19 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.13.0 — 2026-08-26（桌面端服务器窗口无边框 + 安装包图标对齐桌面端 + mac 适配）
+
+### 新增
+- **桌面端服务器窗口改为无边框（frameless）** — `desktop/src/window.rs` 服务器主窗口不再有原生标题栏/边框，顶栏那行「服务器」原生菜单栏移除（服务器切换由网页端右上角入口 `piweb-switch://` 承载）。窗口拖动/最小化/最大化/关闭由前端自绘标题栏负责。macOS 保留原生交通灯（`title_bar_style Overlay` + `hidden_title`），前端标题栏左侧内縮让出；Windows/Linux 完全无边框。
+- **前端自绘窗口控制** — 新增 `components/desktop/`（`useDesktopChrome`/`useWindowDrag`/`WindowControls`）+ `lib/desktop-window.ts` / `lib/desktop-updater.ts`：仅在 Tauri 壳且非 macOS 时渲染最小化/最大化/关闭按钮，并在标题栏铺拖动区（`data-tauri-drag-region` + Windows/Linux 的 `closest()` 拖拽子元素修补）。浏览器/网页端渲染为空，无副作用。
+- **安装包图标对齐桌面端** — 以 `desktop/icons/app-icon.svg`（蓝紫 π）重新生成 `icon.icns`/`icon.ico`/`icon.png` 及全套尺寸图标，Windows NSIS / macOS .app / Linux 安装包统一使用桌面端 π 图标。
+- **依赖** — 新增 `@tauri-apps/api@^2.11.1`（前端窗口控制调用）。
+
+### 验证
+- 前端 `tsc --noEmit` 通过；`cargo check` 与 `cargo check --features updater` 均通过（无警告，capability `server-window.json` 含 `remote.urls` 放宽至任意 https/http + 本机回环代理，ACL 解析无误）。
+- 说明：macOS 构建需 macOS 构建机，本仓库在 Windows 侧仅完成 Rust/前端骨架与编译验证，mac 真机构建由 mac 端执行。
+
+
 ## v0.12.0 — 2026-08-26（桌面端打包改进：Pi Agent Server.app + 窗口主题联动 + 打包脚本增强）
 
 ### 桌面端（desktop/）

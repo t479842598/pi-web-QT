@@ -275,6 +275,39 @@ body {
   min-width: 0;
 }
 
+/* Frameless window controls (Tauri shell, non-macOS). Rendered only inside
+   the desktop app; in a browser these elements are absent, so the rules are
+   inert there. */
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  margin-left: auto;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+.window-control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.window-control-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.window-control-btn--close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
 /* On narrow screens show only the git-branch icon in the title bar, keeping
    the centered session title fully visible. */
 @media (max-width: 640px) {

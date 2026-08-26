@@ -40,6 +40,7 @@ import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { ProjectTrustStatus } from "@/lib/api-types";
 import { stripModeInstructionBlocks } from "@/lib/modes";
+import { WindowControls, useDesktopChrome, useWindowDrag } from "./desktop";
 
 type SessionCopyField = "file" | "id";
 
@@ -80,6 +81,12 @@ export function AppShell() {
   const [titleWorkspaceControlsHost, setTitleWorkspaceControlsHost] = useState<HTMLDivElement | null>(null);
   const [titleRightWorkspaceControlsHost, setTitleRightWorkspaceControlsHost] = useState<HTMLDivElement | null>(null);
   const [welcomeWorkspaceControlsHost, setWelcomeWorkspaceControlsHost] = useState<HTMLDivElement | null>(null);
+  // The desktop shell has no native title bar. macOS keeps the native traffic
+  // lights and only needs the top bar inset for them; other platforms get the
+  // minimize / maximize / close buttons from <WindowControls />, which renders
+  // nothing outside the Tauri shell.
+  const desktopChrome = useDesktopChrome();
+  const windowDrag = useWindowDrag();
 
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
 
@@ -834,6 +841,8 @@ export function AppShell() {
         sessionTitle={sessionTitle}
         onWorkspaceControlsHostChange={setTitleWorkspaceControlsHost}
         onTitleRightHostChange={setTitleRightWorkspaceControlsHost}
+        desktopChrome={desktopChrome}
+        windowDrag={windowDrag}
       />
       {showChat && projectTrust?.requiresTrust && !projectTrust.trusted && (
         <button
