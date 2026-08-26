@@ -289,6 +289,7 @@ body {
   align-items: stretch;
   height: 100%;
   flex-shrink: 0;
+  margin-left: auto;
   border-left: 1px solid var(--border);
   -webkit-app-region: no-drag;
 }

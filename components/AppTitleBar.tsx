@@ -257,10 +257,10 @@ export function AppTitleBar({
 
         {/* Right zone: task board / file panel / theme / settings buttons. */}
         {/* Right zone: task board / file panel / theme / settings buttons.
-            允许收缩 + overflow hidden：窗口变窄时功能按钮从左侧开始让位
-            （justify-end 贴右、左端先被裁），保证最右侧的窗口控制三钮
-            永远完整可见 —— Windows 惯例：系统按钮优先于工具栏按钮。 */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%", flexShrink: 1, overflow: "hidden" }}>
+            margin-left:auto 与 .window-controls 的 auto margin 共同平分剩余空间，
+            在功能按钮与窗口控制之间自动产生弹性间距（对齐 u1s1 的排布）。
+            窄窗口时 auto margin 收缩为 0 → 两区紧挨、overflow:hidden 裁掉功能钮。 */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%", flexShrink: 1, overflow: "hidden", marginLeft: "auto" }}>
 
         {/* Task board toggle — desktop only, hidden when the feature is off */}
         {!isMobile && tasksBoardEnabled && (
