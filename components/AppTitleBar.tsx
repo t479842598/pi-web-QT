@@ -164,7 +164,9 @@ export function AppTitleBar({
           alignItems: "center",
           flexShrink: 0,
           borderBottom: "1px solid var(--border)",
-          height: 36,
+          // 48px 对齐 u1s1：给右侧无边框窗口控制钮足够的呼吸空间
+          // （36px 时三个控制钮视觉上过于局促，用户实测反馈两次）
+          height: 48,
           background: "var(--bg-panel)",
           position: "relative",
           zIndex: 600,
@@ -262,7 +264,11 @@ export function AppTitleBar({
 
 
         {/* Right zone: task board / file panel / theme / settings buttons. */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%", flexShrink: 0 }}>
+        {/* Right zone: task board / file panel / theme / settings buttons.
+            margin-left:auto 与 .window-controls 的 auto margin 共同平分剩余空间，
+            在功能按钮与窗口控制之间自动产生弹性间距（对齐 u1s1 的排布）。
+            窄窗口时 auto margin 收缩为 0 → 两区紧挨、overflow:hidden 裁掉功能钮。 */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%", flexShrink: 1, overflow: "hidden" }}>
 
         {/* Task board toggle — desktop only, hidden when the feature is off */}
         {!isMobile && tasksBoardEnabled && (
@@ -369,10 +375,10 @@ export function AppTitleBar({
 
         </div>
 
-        {/* 无边框窗口控制（最小化/最大化/关闭）— 仅桌面壳且非 macOS 显示。
-            作为标题栏根容器的直接子级挂在最右侧：前面的标题区是 flex:1，
-            自然把本组推到右上角贴边；flex-shrink:0 保证这块空间永远不被
-            功能按钮挤占，左侧分隔线独立成区（对齐 u1s1 的排布方式）。 */}
+        {/* 功能区与窗口控制之间的固定间距 spacer */}
+        <div style={{ width: 12, flexShrink: 0, height: "100%", borderLeft: "1px solid var(--border)" }} aria-hidden="true" />
+
+        {/* 无边框窗口控制（最小化/最大化/关闭）— 仅桌面壳且非 macOS 显示。 */}
         <WindowControls />
 
       </div>

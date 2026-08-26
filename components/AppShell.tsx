@@ -857,7 +857,7 @@ export function AppShell() {
           aria-label={t("desktop.projectResourcesRestricted")}
           style={{
             position: "fixed",
-            top: isMobile ? 48 : 48,
+            top: 60,
             right: isMobile ? 12 : 20,
             zIndex: 700,
             display: "inline-flex",
@@ -1045,7 +1045,7 @@ export function AppShell() {
           aria-label={t("desktop.subagentsViewTitle")}
           style={{
             position: "fixed",
-            top: 46,
+            top: 58,
             right: isMobile ? 12 : rightPanelOpen && !subagentViewOpen ? `calc(${rightPanel.width}px + 16px)` : 16,
             zIndex: 500,
             display: "inline-flex",

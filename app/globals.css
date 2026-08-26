@@ -289,7 +289,6 @@ body {
   align-items: stretch;
   height: 100%;
   flex-shrink: 0;
-  border-left: 1px solid var(--border);
   -webkit-app-region: no-drag;
 }
 .window-control-btn {
