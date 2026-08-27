@@ -307,6 +307,8 @@ export const enLocale = {
     "desktop.minimize": "Minimize",
     "desktop.maximize": "Maximize",
     "desktop.restore": "Restore",
+    "desktop.islandLabel": "Window controls",
+    "desktop.islandResetHint": "Drag to move, double-click to reset",
     "desktop.close": "Close",
     "desktop.viewFullHistory": "View full history",
     "desktop.fullHistoryAvailableAfterSave": "Full history is available after the session is saved",

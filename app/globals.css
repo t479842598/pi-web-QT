@@ -275,45 +275,6 @@ body {
   min-width: 0;
 }
 
-/* Frameless window controls (Tauri shell, non-macOS). Mounted as the last
-   direct child of the title bar root — the centered title zone before it is
-   flex:1, which pushes this group flush to the top-right corner on its own.
-   NOTE: no margin-left:auto here — an auto margin would absorb all free
-   space and defeat the title zone's flex-grow (title would stop centering).
-   flex-shrink:0 + the buttons' own flex-shrink:0 reserve the zone's space so
-   feature buttons can never squeeze it (mirrors upstream u1s1 layout). The
-   left border marks it as a separate zone from the toolbar buttons. In a
-   browser these elements are absent, so the rules are inert there. */
-.window-controls {
-  display: flex;
-  align-items: stretch;
-  height: 100%;
-  flex-shrink: 0;
-  -webkit-app-region: no-drag;
-}
-.window-control-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 46px;
-  height: 100%;
-  padding: 0;
-  flex-shrink: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-.window-control-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-.window-control-btn--close:hover {
-  background: #e81123;
-  color: #fff;
-}
-
 /* On narrow screens show only the git-branch icon in the title bar, keeping
    the centered session title fully visible. */
 @media (max-width: 640px) {

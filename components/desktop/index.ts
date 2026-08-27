@@ -4,6 +4,6 @@
  * `isTauriDesktop()` branch around it.
  */
 
-export { WindowControls } from "./WindowControls";
+export { DynamicIsland } from "./DynamicIsland";
 export { useDesktopChrome, type DesktopChrome } from "./useDesktopChrome";
 export { useWindowDrag } from "./useWindowDrag";

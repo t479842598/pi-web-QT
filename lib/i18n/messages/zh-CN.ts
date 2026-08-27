@@ -307,6 +307,8 @@ export const zhCNLocale = {
     "desktop.minimize": "最小化",
     "desktop.maximize": "最大化",
     "desktop.restore": "还原",
+    "desktop.islandLabel": "窗口控制",
+    "desktop.islandResetHint": "拖动调整位置，双击复位",
     "desktop.close": "关闭",
     "desktop.viewFullHistory": "查看完整历史",
     "desktop.fullHistoryAvailableAfterSave": "保存会话后可查看完整历史",

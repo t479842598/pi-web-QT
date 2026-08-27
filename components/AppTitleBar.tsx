@@ -16,7 +16,7 @@ import {
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionInfo } from "@/lib/types";
-import { WindowControls } from "./desktop";
+import { DynamicIsland } from "./desktop";
 import type { DesktopChrome } from "./desktop/useDesktopChrome";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
@@ -263,11 +263,10 @@ export function AppTitleBar({
         </div>
 
 
-        {/* Right zone: task board / file panel / theme / settings buttons. */}
         {/* Right zone: task board / file panel / theme / settings buttons.
-            margin-left:auto 与 .window-controls 的 auto margin 共同平分剩余空间，
-            在功能按钮与窗口控制之间自动产生弹性间距（对齐 u1s1 的排布）。
-            窄窗口时 auto margin 收缩为 0 → 两区紧挨、overflow:hidden 裁掉功能钮。 */}
+            窗口控制已由悬浮灵动岛（DynamicIsland）承担，不再占用本行宽度；
+            窄窗口时本区收缩、overflow:hidden 从左侧裁掉功能钮，功能区最末
+            的「设置」始终保留。 */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%", flexShrink: 1, overflow: "hidden" }}>
 
         {/* Task board toggle — desktop only, hidden when the feature is off */}
@@ -336,7 +335,8 @@ export function AppTitleBar({
           </button>
         )}
 
-        {/* Settings */}
+        {/* 刷新会话 — 浏览器端保留在标题栏；桌面壳由灵动岛承担（避免重复按钮） */}
+        {!desktopShell && (
         <button
           className="app-no-drag"
           type="button"
@@ -354,6 +354,7 @@ export function AppTitleBar({
         >
           <ArrowClockwise size={16} aria-hidden="true" />
         </button>
+        )}
 
         <button
           className="app-no-drag"
@@ -375,13 +376,12 @@ export function AppTitleBar({
 
         </div>
 
-        {/* 功能区与窗口控制之间的固定间距 spacer */}
-        <div style={{ width: 12, flexShrink: 0, height: "100%", borderLeft: "1px solid var(--border)" }} aria-hidden="true" />
-
-        {/* 无边框窗口控制（最小化/最大化/关闭）— 仅桌面壳且非 macOS 显示。 */}
-        <WindowControls />
-
       </div>
+
+      {/* 悬浮灵动岛窗口控制（最小化/最大化/关闭 + 刷新）— 仅 Windows/Linux
+          桌面壳显示。渲染在标题栏 div 之外：标题栏的窗口拖动 mousedown 处理
+          不再拦截胶囊的按下/双击动作（按胶囊=拖胶囊，不=拖窗口）。 */}
+      <DynamicIsland />
 
       {/* Dropdown panel — fixed position, full width below title bar */}
       {activeTopPanel && topPanelPos && (
