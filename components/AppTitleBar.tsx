@@ -267,7 +267,7 @@ export function AppTitleBar({
             窗口控制已由悬浮灵动岛（DynamicIsland）承担，不再占用本行宽度；
             窄窗口时本区收缩、overflow:hidden 从左侧裁掉功能钮，功能区最末
             的「设置」始终保留。 */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 0, height: "100%", flexShrink: 1, overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, minWidth: 0, height: "100%", flexShrink: 1, overflow: "hidden" }}>
 
         {/* Task board toggle — desktop only, hidden when the feature is off */}
         {!isMobile && tasksBoardEnabled && (
