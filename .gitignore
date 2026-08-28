@@ -104,3 +104,6 @@ ref-repos
 /pi-web-new-*.ipa
 /desktop/node_modules/
 progress.md
+
+.playwright-mcp/
+.zcode/plans/
