@@ -8,9 +8,40 @@ export interface ChatDraftImage {
   mimeType: string;
 }
 
+/** A folded long paste: the placeholder label embedded in `value` plus the raw
+ *  text it must expand back into before sending. */
+export interface ChatDraftPastedBlock {
+  id: string;
+  label: string;
+  text: string;
+}
+
 export interface ChatDraft {
   value: string;
   images: ChatDraftImage[];
+  pastedBlocks?: ChatDraftPastedBlock[];
+}
+
+function clonePastedBlocks(blocks: ChatDraftPastedBlock[] | undefined): ChatDraftPastedBlock[] | undefined {
+  return blocks ? blocks.map((block) => ({ ...block })) : undefined;
+}
+
+/** Union of two pasted-block lists, deduped by label+text so rekey merges
+ *  never drop a block whose text survived in only one draft. */
+function mergePastedBlocks(
+  a: ChatDraftPastedBlock[] | undefined,
+  b: ChatDraftPastedBlock[] | undefined,
+): ChatDraftPastedBlock[] | undefined {
+  if (!a?.length && !b?.length) return undefined;
+  const merged: ChatDraftPastedBlock[] = [];
+  const seen = new Set<string>();
+  for (const block of [...(a ?? []), ...(b ?? [])]) {
+    const key = `${block.label}\u0000${block.text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ ...block });
+  }
+  return merged;
 }
 
 const drafts = new Map<string, ChatDraft>();
@@ -33,6 +64,7 @@ function cloneDraft(draft: ChatDraft): ChatDraft {
   return {
     value: draft.value,
     images: draft.images.map((image) => ({ ...image })),
+    pastedBlocks: clonePastedBlocks(draft.pastedBlocks),
   };
 }
 
@@ -70,6 +102,8 @@ export function mergeRestoredSubmissionDraft(
   submittedImages: ChatDraftImage[] | undefined,
   currentText: string,
   currentImages: ChatDraftImage[],
+  submittedBlocks?: ChatDraftPastedBlock[],
+  currentBlocks?: ChatDraftPastedBlock[],
 ): ChatDraft {
   const images = [...(submittedImages ?? []), ...currentImages]
     .filter(isBase64ImageWithinLimits)
@@ -79,6 +113,7 @@ export function mergeRestoredSubmissionDraft(
   return {
     value: mergeRestoredSubmissionText(submittedText, currentText),
     images,
+    pastedBlocks: mergePastedBlocks(currentBlocks, submittedBlocks),
   };
 }
 
@@ -93,6 +128,8 @@ export function restoreDraftSubmission(
     images,
     current.value,
     current.images,
+    undefined,
+    current.pastedBlocks,
   );
   setDraft(key, restored);
   return restored;
@@ -114,7 +151,7 @@ export function rekeyDraft(
   if (!previous) return next;
 
   const merged = next
-    ? mergeRestoredSubmissionDraft(next.value, next.images, previous.value, previous.images)
+    ? mergeRestoredSubmissionDraft(next.value, next.images, previous.value, previous.images, next.pastedBlocks, previous.pastedBlocks)
     : previous;
   setDraft(nextKey, merged);
   return cloneDraft(merged);

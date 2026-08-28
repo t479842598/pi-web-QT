@@ -1,0 +1,109 @@
+[     504ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[     535ms] [LOG] [HMR] connected @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[     763ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[    1192ms] [LOG] [Fast Refresh] done in 531ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[    4696ms] [LOG] [settle-debug] poll start {messages: 37} @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[    4950ms] [LOG] [settle-debug] tick {t: 254, scrollTop: 0, sh: 1298, intent: false} @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[    5201ms] [LOG] [settle-debug] tick {t: 505, scrollTop: 588, sh: 1298, intent: false} @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[    5452ms] [LOG] [settle-debug] tick {t: 757, scrollTop: 588, sh: 1298, intent: false} @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[    5954ms] [LOG] [settle-debug] tick {t: 1258, scrollTop: 588, sh: 1298, intent: false} @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[   23972ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[   24275ms] [LOG] [Fast Refresh] done in 404ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  222612ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  223035ms] [LOG] [Fast Refresh] done in 364ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  223043ms] [LOG] [Fast Refresh] done in 364ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  223130ms] [LOG] [settle-debug] poll start {messages: 37} @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  239681ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  240604ms] [LOG] [Fast Refresh] done in 858ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  240713ms] [LOG] [Fast Refresh] done in 858ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  297401ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  297824ms] [LOG] [Fast Refresh] done in 433ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  298007ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  298088ms] [LOG] [Fast Refresh] done in 185ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  318326ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  318715ms] [LOG] [Fast Refresh] done in 361ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  318898ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  318926ms] [LOG] [Fast Refresh] done in 131ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  342070ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  342401ms] [ERROR] The final argument passed to %s changed size between renders. The order and size of this array must remain constant.
+
+Previous: %s
+Incoming: %s useEffect [false, 87, (behavior = "smooth")=>{
+            ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
+            const container = scrollContainerRef.current;
+            const end = messagesEndRef.current;
+            if (!container || !end) return;
+            // Keep-out gap between the last message and the viewport bottom. The
+            // composer below the list can grow taller than the fixed constant
+            // (image previews, multi-line input, yolo banner, queued-banner), so
+            // measure the live composer and never let the last line hide behind it.
+            const composerHeight = opts.chatInputRef?.current?.measureHeight?.() ?? 0;
+            const keepOut = Math.max(BOTTOM_KEEP_OUT_PX, composerHeight);
+            const doScroll = {
+                "useAgentSession.useCallback[scrollToBottom].doScroll": ()=>{
+                    if (!container || !end) return;
+                    const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+                    const spacerH = CHAT_BOTTOM_SPACER_PX;
+                    const target = Math.max(0, endInContainer - spacerH - container.clientHeight + keepOut);
+                    container.scrollTo({
+                        top: target,
+                        behavior
+                    });
+                }
+            }["useAgentSession.useCallback[scrollToBottom].doScroll"];
+            doScroll();
+            // Settle correction: virtual list rows measure asynchronously, growing
+            // totalSize and shifting the sentinel. Re-scroll after measurements
+            // settle so we always land at the true bottom. "instant" covers initial
+            // load; "auto" covers streaming follow. Only re-scroll when the user
+            // hasn't scrolled away in the meantime.
+            if (behavior === "instant" || behavior === "auto") {
+                window.setTimeout({
+                    "useAgentSession.useCallback[scrollToBottom]": ()=>{
+                        if (container && end && isNearBottomRef.current) doScroll();
+                    }
+                }["useAgentSession.useCallback[scrollToBottom]"], 200);
+            }
+        }, 01a03ce7-4247-7e17-adc9-3b23bd491035] [false, (behavior = "smooth")=>{
+            ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
+            const container = scrollContainerRef.current;
+            const end = messagesEndRef.current;
+            if (!container || !end) return;
+            // Keep-out gap between the last message and the viewport bottom. The
+            // composer below the list can grow taller than the fixed constant
+            // (image previews, multi-line input, yolo banner, queued-banner), so
+            // measure the live composer and never let the last line hide behind it.
+            const composerHeight = opts.chatInputRef?.current?.measureHeight?.() ?? 0;
+            const keepOut = Math.max(BOTTOM_KEEP_OUT_PX, composerHeight);
+            const doScroll = {
+                "useAgentSession.useCallback[scrollToBottom].doScroll": ()=>{
+                    if (!container || !end) return;
+                    const endInContainer = end.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+                    const spacerH = CHAT_BOTTOM_SPACER_PX;
+                    const target = Math.max(0, endInContainer - spacerH - container.clientHeight + keepOut);
+                    container.scrollTo({
+                        top: target,
+                        behavior
+                    });
+                }
+            }["useAgentSession.useCallback[scrollToBottom].doScroll"];
+            doScroll();
+            // Settle correction: virtual list rows measure asynchronously, growing
+            // totalSize and shifting the sentinel. Re-scroll after measurements
+            // settle so we always land at the true bottom. "instant" covers initial
+            // load; "auto" covers streaming follow. Only re-scroll when the user
+            // hasn't scrolled away in the meantime.
+            if (behavior === "instant" || behavior === "auto") {
+                window.setTimeout({
+                    "useAgentSession.useCallback[scrollToBottom]": ()=>{
+                        if (container && end && isNearBottomRef.current) doScroll();
+                    }
+                }["useAgentSession.useCallback[scrollToBottom]"], 200);
+            }
+        }, 01a03ce7-4247-7e17-adc9-3b23bd491035] @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:1052
+[  342494ms] [LOG] [Fast Refresh] done in 377ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  342521ms] [LOG] [Fast Refresh] done in 377ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  342718ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  343009ms] [LOG] [Fast Refresh] done in 393ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  379695ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776
+[  380014ms] [LOG] [Fast Refresh] done in 421ms @ http://127.0.0.1:52274/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:776

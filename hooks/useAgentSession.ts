@@ -282,6 +282,12 @@ const SCROLL_BOTTOM_THRESHOLD = 150;
 // last line of live-followed content sits visibly clear of the input box
 // instead of hugging (or being covered by) it.
 export const BOTTOM_KEEP_OUT_PX = 88;
+
+// After the opened-session settle poll sees measurements stabilize, it keeps
+// re-anchoring while growth continues: deferred content (thinking fetch,
+// lazy images, mermaid, async highlighting) can keep growing rows for tens of
+// seconds. Exit after 2s without growth, with a hard cap for safety.
+const OPEN_SETTLE_MAX_MS = 30_000;
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
 const PROMPT_SETTLE_MAX_MS = 20_000;
@@ -980,6 +986,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // one onAgentEnd instead of two.
   const stageNotifiedRef = useRef(false);
   const bashRunningRef = useRef(false);
+  // Guards mount-time running-state restoration: the parallel /state probe and
+  // loadSession's own state fetch can both detect the same running session;
+  // restoreRunning must apply exactly once per opened session.
+  const runningRestoredRef = useRef(false);
   const handleAgentEventRef = useRef<((event: AgentEvent) => void) | null>(null);
   const initialScrollDoneRef = useRef(false);
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
@@ -1109,18 +1119,26 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       if (showLoading) setLoading(true);
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
-      // 超时兜底：服务端异常/大会话卡住时结束 loading，避免”永远加载中”。
-      // 大会话冷启动可能超过 15s，放宽到 30s；超时按可重试处理，不向用户
-      // 暴露 “AbortError: Fetch is aborted”。
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30000);
+      // 超时兜底：服务端异常/大会话卡住时结束 loading，避免"永远加载中"。
+      // 大会话冷启动可能超过 15s，放宽到 30s；超时视为偶发慢，自动重试一次，
+      // 两次都超时才向用户给出可读提示（不暴露 "AbortError: Fetch is aborted"）。
+      const fetchSessionData = async (): Promise<Response> => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30000);
+        try {
+          return await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`, {
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      };
       let res: Response;
       try {
-        res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`, {
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timer);
+        res = await fetchSessionData();
+      } catch (e) {
+        if (!(e instanceof DOMException && e.name === "AbortError")) throw e;
+        res = await fetchSessionData();
       }
       if (res.status === 404) {
         if (showLoading) {
@@ -3353,6 +3371,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (event instanceof KeyboardEvent) {
       if (!SCROLL_KEYS.has(event.key)) return;
       if (event.target instanceof Element && event.target.closest("input, textarea, [contenteditable='true']")) return;
+    } else if (event instanceof PointerEvent) {
+      // Opening a session starts with a pointerdown on the sidebar — far
+      // outside the chat scroller. Arming the intent window from it made the
+      // initial scroll's echo events read as user scrolls and killed the
+      // settle landing. Only presses inside the chat scroller count.
+      const container = scrollContainerRef.current;
+      if (container && event.target instanceof Element && !container.contains(event.target)) return;
     }
     userScrollIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_MS;
   }, []);
@@ -3395,26 +3420,51 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         void sendAgentCommand(session.id, { type: "set_approval_mode", mode: approvalMode }).catch(() => {});
         void sendAgentCommand(session.id, { type: "set_approval_policy", policy: rules }).catch(() => {});
       }
+      const restoreRunning = (state: AgentStateResponse) => {
+        if (runningRestoredRef.current) return;
+        runningRestoredRef.current = true;
+        if (state.isBashRunning) {
+          bashRunningRef.current = true;
+          setBashRunning(true);
+        }
+        loadTools(session.id);
+        if (state.isStreaming || state.isPromptRunning) {
+          sdkAgentActiveRef.current = Boolean(state.isStreaming);
+          rpcPromptPendingRef.current = Boolean(state.isPromptRunning);
+          agentRunningRef.current = true;
+          setAgentRunning(true);
+          setAgentPhase(phaseFromServerState(state));
+          dispatch({ type: "start" });
+          void connectEvents(session.id);
+          if (!state.isStreaming && state.isPromptRunning) {
+            void waitForPromptSettlement(session.id);
+          }
+        }
+      };
+      // 并行运行态探测（不等消息全量加载）：大会话的消息加载可达 15-30s，
+      // 期间聊天页只有无标识的 loading 占位。/state 不创建包装器、毫秒级
+      // 返回，探测到运行立即 restoreRunning（连 SSE + 显示运行态）。
+      void (async () => {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 20_000);
+          let res: Response;
+          try {
+            res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/state`, {
+              signal: controller.signal,
+            });
+          } finally {
+            clearTimeout(timer);
+          }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const agentState = await res.json() as { running: boolean; state?: AgentStateResponse };
+          if (!mountedRef.current || sessionIdRef.current !== session.id) return;
+          if (agentState.running && agentState.state) {
+            restoreRunning(agentState.state);
+          }
+        } catch { /* loadSession 的 state 路径与兜底重试仍会补上 */ }
+      })();
       loadSession(session.id, true, true).then((agentState) => {
-        const restoreRunning = (state: AgentStateResponse) => {
-          if (state.isBashRunning) {
-            bashRunningRef.current = true;
-            setBashRunning(true);
-          }
-          loadTools(session.id);
-          if (state.isStreaming || state.isPromptRunning) {
-            sdkAgentActiveRef.current = Boolean(state.isStreaming);
-            rpcPromptPendingRef.current = Boolean(state.isPromptRunning);
-            agentRunningRef.current = true;
-            setAgentRunning(true);
-            setAgentPhase(phaseFromServerState(state));
-            dispatch({ type: "start" });
-            void connectEvents(session.id);
-            if (!state.isStreaming && state.isPromptRunning) {
-              void waitForPromptSettlement(session.id);
-            }
-          }
-        };
         if (agentState?.running && agentState.state) {
           restoreRunning(agentState.state);
         }
@@ -3428,17 +3478,30 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (agentState.state.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(agentState.state.queuedMessages));
           if (agentState.state.pendingRecovery !== undefined) setPendingRecovery(agentState.state.pendingRecovery ?? []);
         }
-        // 入口对账 + 自愈：state 拉取失败/超时（agentState 为 null）或 state 路由
-        // 短暂未看到存活包装器时，再打一次轻量 GET（不创建包装器）兜底恢复
-        // 运行态。否则"打开一个正在运行的会话"会停在 idle，只能切换会话才恢复。
+        // 入口对账 + 自愈：state 拉取失败/超时（agentState 为 null）或 state
+        // 路由短暂未看到存活包装器时，用轻量 GET（不创建包装器）有界重试兜底
+        // 恢复运行态。reconcile 只在 agentRunning=true 后启动，撞上瞬态
+        //（如 wrapper shutdown 中间态）只能等切换会话才能恢复，故重试 5 次。
         if (!agentState?.running) {
-          fetch(`/api/agent/${encodeURIComponent(session.id)}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .then((d) => {
-              const snapshot = d as { running?: boolean; state?: AgentStateResponse } | null;
-              if (snapshot?.running && snapshot.state) restoreRunning(snapshot.state);
-            })
-            .catch(() => { /* best-effort; the first send reconciles tools */ });
+          void (async () => {
+            for (let attempt = 0; attempt < 5; attempt++) {
+              if (attempt > 0) {
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+              }
+              if (!mountedRef.current || sessionIdRef.current !== session.id) return;
+              if (agentRunningRef.current) return;
+              try {
+                const res = await fetch(`/api/agent/${encodeURIComponent(session.id)}`);
+                if (!res.ok) continue;
+                const snapshot = await res.json() as { running?: boolean; state?: AgentStateResponse } | null;
+                if (!mountedRef.current || sessionIdRef.current !== session.id) return;
+                if (snapshot?.running && snapshot.state) {
+                  restoreRunning(snapshot.state);
+                  return;
+                }
+              } catch { /* transient — keep polling */ }
+            }
+          })();
         }
       });
     }
@@ -3511,43 +3574,81 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Settle correction: virtual-list rows measure asynchronously, so the
   // initial scroll target computed from estimate heights drifts once rows
   // report their real sizes. Instead of a single 400ms re-scroll, poll until
-  // the container height stabilizes (measurement settled) — but only while
-  // the user is still parked at the bottom and no agent run owns the scroll.
-  // This guarantees an opened session lands on the LAST message, not halfway
-  // up the list after the rows grow.
-  const settleScrollDoneRef = useRef(false);
+  // the container height stabilizes (measurement settled).
+  //
+  // Three deliberate behaviors keep an opened session pinned to the LAST
+  // message:
+  // - The only thing that may hand scroll authority back to the user is a
+  //   REAL user gesture (wheel / touch / key / scrollbar press — all arm the
+  //   intent window) while they are away from the bottom, latched for the
+  //   rest of the landing. The isNearBottom/completionScrollAllowed flags
+  //   cannot be used here: our own programmatic scroll can land short as
+  //   rows measure up, its echo recomputes isNearBottom=false with NO
+  //   gesture involved, and the old flag gate killed this poll at its first
+  //   tick — the "opened a long session, stuck halfway" report.
+  // - No agentRunning exit either: the parallel /state probe sets
+  //   agentRunning long before messages commit. Streaming follow targets the
+  //   same bottom anchor, so the poll and the follow never disagree.
+  // - Re-anchoring is growth-driven: deferred content (thinking fetch, lazy
+  //   images, mermaid, async highlighting) keeps growing rows for tens of
+  //   seconds after mount, and virtual-list totalSize growth raises NO
+  //   scroll event. Exit after 2s without growth, hard-capped at 30s.
+  // The poll is keyed per session and must NOT depend on messages.length: an
+  // incoming message mid-landing re-runs this effect (cleanup cancels the
+  // running poll), and the session key would then block a re-arm.
+  const settleStartedForRef = useRef<string | null>(null);
+  const settleKey = session?.id ?? null;
   useEffect(() => {
     if (loading) {
-      settleScrollDoneRef.current = false;
+      settleStartedForRef.current = null;
       return;
     }
-    if (settleScrollDoneRef.current || messages.length === 0) return;
-    settleScrollDoneRef.current = true;
+    if (messages.length === 0) return;
+    if (settleStartedForRef.current === settleKey) return;
+    settleStartedForRef.current = settleKey;
     let cancelled = false;
+    let userInterrupted = false;
     let lastHeight = -1;
     let stableRuns = 0;
     let timer: number | undefined;
+    const startedAt = Date.now();
     const tick = () => {
-      if (cancelled || agentRunningRef.current) return; // streaming follow owns the scroll
-      if (!(completionScrollAllowedRef.current || isNearBottomRef.current)) return;
-      scrollToBottom("instant");
+      if (cancelled || userInterrupted) return;
       const container = scrollContainerRef.current;
       if (!container) return;
+      if (Date.now() < userScrollIntentUntilRef.current) {
+        const { scrollTop, clientHeight, scrollHeight } = container;
+        if (scrollTop + clientHeight < scrollHeight - SCROLL_BOTTOM_THRESHOLD) {
+          // A real user gesture grabbed the scroll while away from the
+          // bottom — stop the landing for good.
+          userInterrupted = true;
+          return;
+        }
+      }
+      scrollToBottom("instant");
       if (container.scrollHeight === lastHeight) {
         stableRuns += 1;
-        if (stableRuns >= 2) return; // measurements settled
+        // 2s without growth (4×500ms) is a real landing; the hard cap covers
+        // endless-growth streams (streaming follow takes over once this poll
+        // exits).
+        if (stableRuns >= 4 || Date.now() - startedAt >= OPEN_SETTLE_MAX_MS) return;
       } else {
         lastHeight = container.scrollHeight;
         stableRuns = 0;
+        if (Date.now() - startedAt >= OPEN_SETTLE_MAX_MS) return;
       }
-      timer = window.setTimeout(tick, 250);
+      timer = window.setTimeout(tick, stableRuns > 0 ? 500 : 250);
     };
     timer = window.setTimeout(tick, 250);
     return () => {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [loading, messages.length, scrollToBottom]);
+    // messages.length is intentionally read from the closure only: adding it
+    // to the deps would cancel a running landing poll on every incoming
+    // message (multi-client sync) and the session key would block re-arm.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, scrollToBottom, settleKey]);
 
   // Load model list
   useEffect(() => {

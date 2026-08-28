@@ -201,7 +201,31 @@ class _ChatScreenState extends State<ChatScreen> {
           curve: Curves.easeOut,
         );
       }
+      _scheduleStickCorrection();
     });
+  }
+
+  /// Markdown 落排版、工具卡片、思考块展开等异步布局会持续抬高
+  /// maxScrollExtent，单次 postFrame 滚动后视口仍会"停在中间"。吸底状态
+  /// 下对后续几帧再校正（web 端 settle 轮询的移动端对齐）；用户一旦上滑
+  /// （_stickToBottom 翻 false）立即停手，不抢滚动权。
+  void _scheduleStickCorrection() {
+    for (final delay in const [
+      Duration(milliseconds: 250),
+      Duration(milliseconds: 600),
+      Duration(milliseconds: 1200),
+    ]) {
+      Timer(delay, () {
+        if (!mounted || !_stickToBottom || !_scrollController.hasClients) return;
+        final position = _scrollController.position;
+        if (position.pixels >= position.maxScrollExtent - 4) return;
+        _scrollController.animateTo(
+          position.maxScrollExtent,
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+        );
+      });
+    }
   }
 
   void _trackScrollPosition() {
@@ -1079,6 +1103,8 @@ class _ChatScreenState extends State<ChatScreen> {
           final chatColumn = Column(
             children: [
               _SessionInfoBar(chat: chat),
+              if (chat.running)
+                _RunStatusRow(key: ValueKey(chat.activeSessionId)),
               if (chat.status != null)
                 Container(
                   width: double.infinity,
@@ -3140,14 +3166,126 @@ class _DeferredThinkingButtonState extends State<_DeferredThinkingButton> {
   }
 }
 
-class _TypingIndicator extends StatelessWidget {
+class _TypingIndicator extends StatefulWidget {
   const _TypingIndicator();
   @override
-  Widget build(BuildContext context) => const SizedBox(
-    width: 22,
-    height: 22,
-    child: CircularProgressIndicator(strokeWidth: 2),
-  );
+  State<_TypingIndicator> createState() => _TypingIndicatorState();
+}
+
+/// 打字点动画（三点脉冲）——替换原先的单个转圈，与 web 端"正在输出"
+/// 观感对齐。
+class _TypingIndicatorState extends State<_TypingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return SizedBox(
+      width: 44,
+      height: 22,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: List.generate(3, (index) {
+          return FadeTransition(
+            opacity: Tween<double>(begin: 0.25, end: 1.0).animate(
+              CurvedAnimation(
+                parent: _controller,
+                curve: Interval(
+                  index * 0.2,
+                  0.6 + index * 0.2,
+                  curve: Curves.easeOut,
+                ),
+              ),
+            ),
+            child: Container(
+              width: 6,
+              height: 6,
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+/// 运行状态行：打字点 + "AI 正在处理" + 实时耗时。此前 _RunStatusRow 被整体
+/// 删除后全 app 没有运行耗时显示；恢复轻量版挂在会话信息栏下。
+class _RunStatusRow extends StatefulWidget {
+  const _RunStatusRow({super.key});
+  @override
+  State<_RunStatusRow> createState() => _RunStatusRowState();
+}
+
+class _RunStatusRowState extends State<_RunStatusRow> {
+  late final DateTime _startedAt = DateTime.now();
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String _formatElapsed(Duration d) {
+    final minutes = d.inMinutes;
+    final seconds = d.inSeconds % 60;
+    if (minutes >= 60) {
+      return '${d.inHours}:${(d.inMinutes % 60).toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final elapsed = DateTime.now().difference(_startedAt);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: scheme.primary.withValues(alpha: .08),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 33,
+            height: 16,
+            child: _TypingIndicator(),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              context.tr(
+                '已运行 {time}',
+                {'time': _formatElapsed(elapsed)},
+              ),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// MonkeyCode-style session info bar: session name + model pill (tap to

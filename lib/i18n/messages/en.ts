@@ -695,6 +695,7 @@ export const enLocale = {
     "desktop.pastedShowPreview": "Preview pasted text",
     "desktop.pastedHidePreview": "Collapse pasted text preview",
     "desktop.pastedRemove": "Remove pasted text",
+    "desktop.pastedMissingContent": "A pasted-text placeholder lost its original content — send blocked. Please paste that content again.",
     "desktop.generateTitle": "Generate title",
     "desktop.generateAllTitles": "Generate titles for all sessions in this project",
     "desktop.generatingTitlesProgress": "Generating titles… {done}/{total}",

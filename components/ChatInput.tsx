@@ -5,7 +5,7 @@ import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, Slas
 import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
 import type { SnippetItem } from "@/lib/snippet-store";
-import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
+import { clearDraft, getDraft, setDraft, type ChatDraftImage, type ChatDraftPastedBlock } from "@/lib/draft-store";
 import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
 import {
   isBase64ImageWithinLimits,
@@ -310,6 +310,38 @@ function imageToDraftImage(image: AttachedImage): ChatDraftImage {
   return { data: image.data, mimeType: image.mimeType };
 }
 
+/** Re-expand folded paste placeholders back into their full raw text. Shared by
+ *  the direct-send and queue-send paths — missing it on the queue path leaked
+ *  the literal placeholder label into sent messages (#0.14.2 regression). */
+function expandPastedLabels(raw: string, blocks: Array<{ label: string; text: string }>): string {
+  let out = raw;
+  for (const block of blocks) {
+    out = out.split(block.label).join(block.text);
+  }
+  return out;
+}
+
+function escapeRegExp(source: string): string {
+  return source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Build a locale-correct detector for folded-paste placeholder labels by
+ *  rendering the i18n template with sentinel parameters, then turning the
+ *  numeric slots into regex groups. Used as a last-resort guard so a
+ *  placeholder whose raw text was lost can never be sent as the message. */
+function buildPasteLabelPattern(rendered: string): RegExp {
+  const ID_SENTINEL = "\u0000A\u0000";
+  const LINES_SENTINEL = "\u0000B\u0000";
+  const withGroups = rendered
+    .split(ID_SENTINEL).join("(\\d+)")
+    .split(LINES_SENTINEL).join("(\\d+)");
+  const escaped = withGroups
+    .split("(\\d+)")
+    .map(escapeRegExp)
+    .join("(\\d+)");
+  return new RegExp(escaped, "g");
+}
+
 export function canRestoreUserMessage(
   value: string,
   attachedImageCount: number,
@@ -480,8 +512,21 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   // Long pastes are folded into a compact `[已粘贴文本 #N · X 行]` placeholder
   // so the composer stays fast with huge pasted code (mirrors Reasonix). The
   // raw text is kept here and re-expanded on send.
-  const [pastedBlocks, setPastedBlocks] = useState<Array<{ id: string; label: string; text: string }>>([]);
+  const [pastedBlocks, setPastedBlocks] = useState<ChatDraftPastedBlock[]>(() => (
+    draftKey ? getDraft(draftKey)?.pastedBlocks ?? [] : []
+  ));
   const [openPastedIds, setOpenPastedIds] = useState<string[]>([]);
+  // Last-resort send guard: a placeholder label whose raw text was lost (e.g.
+  // an old draft predating block persistence) must never reach a message.
+  const pasteLabelPattern = React.useMemo(() => {
+    try {
+      return buildPasteLabelPattern(t("desktop.pastedLabel", { id: "\u0000A\u0000", lines: "\u0000B\u0000" }));
+    } catch {
+      return null;
+    }
+  }, [t]);
+  const [pasteGuardWarning, setPasteGuardWarning] = useState<string | null>(null);
+  const pasteGuardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nextPasteIdRef = useRef(0);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -544,10 +589,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const draftKeyRef = useRef(draftKey);
   const valueRef = useRef(value);
   const attachedImagesRef = useRef(attachedImages);
+  const pastedBlocksRef = useRef(pastedBlocks);
   const recalledRef = useRef<{ kind: "steer" | "followUp"; index: number; text: string; images?: ChatDraftImage[] } | null>(null);
   const [recalledVisible, setRecalledVisible] = useState(false);
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
+  pastedBlocksRef.current = pastedBlocks;
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -738,8 +785,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     setDraft(draftKey, {
       value,
       images: attachedImages.map(imageToDraftImage),
+      pastedBlocks: pastedBlocks.length ? pastedBlocks : undefined,
     });
-  }, [attachedImages, draftKey, value]);
+  }, [attachedImages, draftKey, value, pastedBlocks]);
 
   useEffect(() => {
     const previousDraftKey = draftKeyRef.current;
@@ -749,6 +797,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       setDraft(previousDraftKey, {
         value: valueRef.current,
         images: attachedImagesRef.current.map(imageToDraftImage),
+        pastedBlocks: pastedBlocksRef.current.length ? pastedBlocksRef.current : undefined,
       });
     }
 
@@ -756,6 +805,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     draftKeyRef.current = draftKey;
     setValue(draft?.value ?? "");
     setAtQuery(null);
+    setPastedBlocks(draft?.pastedBlocks ?? []);
+    setOpenPastedIds([]);
     setAttachedImages((prev) => {
       prev.forEach(revokeImagePreview);
       return draft?.images.map(draftImageToAttachedImage) ?? [];
@@ -785,16 +836,38 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     };
   }, []);
 
+  const findLeftoverPasteLabel = useCallback((expanded: string): string | null => {
+    const pattern = pasteLabelPattern;
+    if (!pattern) return null;
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(expanded)) !== null) {
+      const label = match[0];
+      // Known labels expand away above; a match equal to a known label can
+      // only mean expansion has not run for it yet. Text inside a block's raw
+      // content that merely looks like a label is not a leftover.
+      if (pastedBlocksRef.current.some((block) => block.label === label)) continue;
+      if (pastedBlocksRef.current.some((block) => block.text.includes(label))) continue;
+      return label;
+    }
+    return null;
+  }, [pasteLabelPattern]);
+
+  const showPasteGuardWarning = useCallback(() => {
+    setPasteGuardWarning(t("desktop.pastedMissingContent"));
+    if (pasteGuardTimerRef.current) clearTimeout(pasteGuardTimerRef.current);
+    pasteGuardTimerRef.current = setTimeout(() => setPasteGuardWarning(null), 5000);
+  }, [t]);
+
   const handleSend = useCallback(async () => {
     // Re-expand folded paste placeholders back into their full text.
-    let finalValue = value;
-    if (pastedBlocks.length > 0) {
-      for (const block of pastedBlocks) {
-        finalValue = finalValue.split(block.label).join(block.text);
-      }
-    }
+    const finalValue = expandPastedLabels(value, pastedBlocks);
     const msg = finalValue.trim();
     if (!msg && !attachedImages.length) return;
+    if (findLeftoverPasteLabel(finalValue)) {
+      showPasteGuardWarning();
+      return;
+    }
     if (isStreaming) return;
     onAudioUnlock?.();
     const recalled = recalledRef.current;
@@ -827,7 +900,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     }
     onSend(msg, attachedImages.length ? attachedImages : undefined);
     clearInput();
-  }, [value, pastedBlocks, attachedImages, isStreaming, onBash, onBuiltinCommand, onSend, clearInput, onAudioUnlock, onRequeueAt]);
+  }, [value, pastedBlocks, attachedImages, isStreaming, onBash, onBuiltinCommand, onSend, clearInput, onAudioUnlock, onRequeueAt, findLeftoverPasteLabel, showPasteGuardWarning]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -1167,7 +1240,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, []);
 
   const sendQueued = useCallback((mode: "steer" | "followup") => {
-    const msg = value.trim();
+    // Queued sends must expand folded pastes exactly like handleSend, or the
+    // literal placeholder label lands in the message instead of the code.
+    const expanded = expandPastedLabels(value, pastedBlocks);
+    if (findLeftoverPasteLabel(expanded)) {
+      showPasteGuardWarning();
+      return;
+    }
+    const msg = expanded.trim();
     if (!msg && !attachedImages.length) return;
     onAudioUnlock?.();
     const streamingBehavior = mode === "steer" ? "steer" : "followUp";
@@ -1182,7 +1262,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
     }
     clearInput();
-  }, [value, attachedImages, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock]);
+  }, [value, pastedBlocks, attachedImages, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, findLeftoverPasteLabel, showPasteGuardWarning]);
 
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = filteredSlashCommands.length - 1;
@@ -2242,6 +2322,22 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   <SortDescendingIcon size={15} />
                 </button>
               )}
+            </div>
+          )}
+          {pasteGuardWarning && (
+            <div
+              role="alert"
+              style={{
+                margin: "0 0 6px",
+                padding: "4px 8px",
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: "var(--error, #e5484d)",
+                border: "1px solid var(--error, #e5484d)",
+                borderRadius: 6,
+              }}
+            >
+              {pasteGuardWarning}
             </div>
           )}
           {pastedBlocks.length > 0 && (

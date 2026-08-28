@@ -643,10 +643,10 @@ class ChatController extends ChangeNotifier {
     unawaited(loadThinkingLevel());
     unawaited(refreshSessionStats());
     try {
-      // Fetch the session, model catalog, and skills in parallel; the latter
-      // two only need the cwd and do not depend on the message payload.
-      // Session fetch failures are reported but never block the model/skill
-      // catalogs from loading.
+      // Fetch the session, model catalog, skills, and a live run-state probe
+      // in parallel; the latter three only need the id/cwd and do not depend
+      // on the message payload. Session fetch failures are reported but never
+      // block the model/skill catalogs from loading.
       final results = await Future.wait<Object?>([
         api
             .getSession(session.id)
@@ -654,10 +654,27 @@ class ChatController extends ChangeNotifier {
             .catchError((Object cause) => _errorText(cause)),
         loadModels(session.cwd),
         loadSkills(session.cwd),
+        // 并行探测运行态：列表缓存可能滞后——会话可能在最近一次列表刷新
+        // 之后才开始运行，只信列表会让"打开正在运行的会话"停在 idle、
+        // 不连 SSE（对齐 web 端挂载时并行 /state 探测）。
+        api.getAgentState(session.id),
       ]);
       // 期间若有更新的 openSession/newChat，丢弃本次结果（防旧内容覆盖）
       if (openGen != _openGeneration) {
         return;
+      }
+      final probe = results[3];
+      if (probe is Map<String, dynamic> && probe['running'] is bool) {
+        final probeRunning = probe['running'] as bool;
+        if (probeRunning != running) {
+          running = probeRunning;
+          if (running) {
+            _lastEventAt = DateTime.now();
+            _startReconcileTimer();
+          } else {
+            _stopReconcileTimer();
+          }
+        }
       }
       final snapshot = results[0];
       if (snapshot is SessionSnapshot) {

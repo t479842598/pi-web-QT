@@ -105,7 +105,19 @@ class PiApi {
     }).toList();
   }
 
+  /// Full session fetch. Large sessions can hit the server during a cold
+  /// cache window (web-side list rescan / first open of a big jsonl); a single
+  /// timeout is treated as transient and retried once (mirrors the web
+  /// client's loadSession retry-on-abort).
   Future<SessionSnapshot> getSession(String sessionId) async {
+    try {
+      return await _getSessionOnce(sessionId);
+    } on TimeoutException {
+      return _getSessionOnce(sessionId);
+    }
+  }
+
+  Future<SessionSnapshot> _getSessionOnce(String sessionId) async {
     final response = await _client
         .get(
           _uri('/api/sessions/${Uri.encodeComponent(sessionId)}', {

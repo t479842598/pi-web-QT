@@ -1,0 +1,42 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - button "隐藏侧边栏" [ref=e5] [cursor=pointer]
+        - generic [ref=e10]:
+          - button "选择项目" [ref=e12] [cursor=pointer]:
+            - generic [ref=e13]: 选择项目…
+          - button "新增项目 tab" [ref=e17] [cursor=pointer]
+      - generic [ref=e21]:
+        - button "显示任务看板" [ref=e22] [cursor=pointer]
+        - button "显示文件面板" [ref=e25] [cursor=pointer]
+        - button "切换至浅色模式" [pressed] [ref=e28] [cursor=pointer]
+        - button "刷新会话" [ref=e31] [cursor=pointer]
+        - button "设置" [ref=e34] [cursor=pointer]
+    - generic [ref=e37]:
+      - generic [ref=e39]:
+        - generic [ref=e41]:
+          - button "会话" [ref=e42] [cursor=pointer]
+          - group "Session view" [ref=e45]:
+            - button "列表" [pressed] [ref=e46] [cursor=pointer]
+            - button "分组" [ref=e49] [cursor=pointer]
+          - button "新建" [disabled] [ref=e52]
+          - button "批量生成当前项目所有会话的标题" [disabled] [ref=e55] [cursor=pointer]
+          - button "刷新" [ref=e58] [cursor=pointer]
+        - generic [ref=e61]:
+          - textbox "搜索会话、分支..." [ref=e66]
+          - generic [ref=e67]: 正在加载…
+        - generic [ref=e68]:
+          - button "模型" [ref=e69] [cursor=pointer]
+          - button "技能" [ref=e73] [cursor=pointer]
+          - button "插件" [ref=e77] [cursor=pointer]
+      - separator "调整侧边栏宽度" [ref=e81]
+      - generic [ref=e83]:
+        - generic:
+          - generic:
+            - generic: 开始使用
+            - generic: 1.从侧边栏选择项目目录2.通过底部的“模型”按钮添加模型
+      - generic:
+        - button "子代理" [ref=e87] [cursor=pointer]
+        - generic [ref=e89]: No file open
+  - alert [ref=e91]

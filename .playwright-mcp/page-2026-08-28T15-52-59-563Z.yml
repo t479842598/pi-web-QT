@@ -1,0 +1,36 @@
+- generic [active] [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - generic [ref=f1e3]:
+      - generic [ref=f1e4]:
+        - button "隐藏侧边栏" [ref=f1e5] [cursor=pointer]
+        - generic [ref=f1e10]:
+          - button "选择项目" [ref=f1e12] [cursor=pointer]
+          - button "新增项目 tab" [ref=f1e16] [cursor=pointer]
+      - generic [ref=f1e20]:
+        - button "显示任务看板" [ref=f1e21] [cursor=pointer]
+        - button "显示文件面板" [ref=f1e24] [cursor=pointer]
+        - button "切换至浅色模式" [pressed] [ref=f1e27] [cursor=pointer]
+        - button "刷新会话" [ref=f1e30] [cursor=pointer]
+        - button "设置" [ref=f1e33] [cursor=pointer]
+    - generic [ref=f1e36]:
+      - generic [ref=f1e38]:
+        - generic [ref=f1e40]:
+          - button "会话" [ref=f1e41] [cursor=pointer]
+          - group "Session view" [ref=f1e44]:
+            - button "列表" [pressed] [ref=f1e45] [cursor=pointer]
+            - button "分组" [ref=f1e48] [cursor=pointer]
+          - button "新建" [disabled] [ref=f1e51]
+          - button "批量生成当前项目所有会话的标题" [disabled] [ref=f1e54] [cursor=pointer]
+          - button "刷新" [ref=f1e57] [cursor=pointer]
+        - generic [ref=f1e60]:
+          - textbox "搜索会话、分支..." [ref=f1e65]
+          - generic [ref=f1e66]: 正在加载…
+        - generic [ref=f1e67]:
+          - button "模型" [ref=f1e68] [cursor=pointer]
+          - button "技能" [ref=f1e72] [cursor=pointer]
+          - button "插件" [ref=f1e76] [cursor=pointer]
+      - separator "调整侧边栏宽度" [ref=f1e80]
+      - generic:
+        - button "子代理" [ref=f1e86] [cursor=pointer]
+        - generic [ref=f1e88]: No file open
+  - alert [ref=f1e90]

@@ -2277,6 +2277,17 @@ function withModelCallLogging(
 // 略短于客户端 ensureNewSession 的 30s 超时，让客户端优先收到明确的 500 而非自己 abort。
 const START_SESSION_TIMEOUT_MS = 25_000;
 
+// Hard bound for createAgentSessionFromServices (extension binding / MCP /
+// resource discovery): it does not observe the abort signal above, so a hang
+// there would leave the shared start promise unsettled forever and poison
+// __piStartLocks — every later request for the session would await a promise
+// that never resolves (the session becomes permanently unopenable).
+const CREATE_SERVICES_HARD_TIMEOUT_MS = 40_000;
+
+// Total bound for the whole start flow. When it fires, the lock is released so
+// the next request retries from scratch instead of queueing on the dead one.
+const START_SESSION_HARD_TIMEOUT_MS = 60_000;
+
 export async function startRpcSession(
   sessionId: string,
   sessionFile: string,
@@ -2324,6 +2335,16 @@ export async function startRpcSession(
   const finishStartingSession = trackStartingSession(sessionCwd);
   const startController = new AbortController();
   const startTimeout = setTimeout(() => startController.abort(), START_SESSION_TIMEOUT_MS);
+  // Hard-timeout guard state: the shared start promise must settle within
+  // START_SESSION_HARD_TIMEOUT_MS even if some step hangs forever.
+  let startAbandoned = false;
+  let hardTimer: ReturnType<typeof setTimeout> | undefined;
+  let startFinished = false;
+  const finishStartOnce = () => {
+    if (startFinished) return;
+    startFinished = true;
+    finishStartingSession();
+  };
   const starting = (async () => {
     // Some extensions access the SDK's global theme even outside the terminal UI.
     initTheme();
@@ -2400,7 +2421,12 @@ export async function startRpcSession(
           : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
       });
-    const { session: inner } = await createAgentSessionFromServices({
+    // Hard-timeout the create step: it ignores startController (extension
+    // binding / resource discovery can hang), and without this bound the
+    // shared start promise would never settle and poison __piStartLocks.
+    let createAbandoned = false;
+    let createTimer: ReturnType<typeof setTimeout> | undefined;
+    const createPromise = createAgentSessionFromServices({
       services,
       sessionManager,
       ...(initial.model ? { model: initial.model } : {}),
@@ -2409,6 +2435,29 @@ export async function startRpcSession(
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
       customTools: asyncBashTools,
     });
+    const { session: inner } = await Promise.race([
+      createPromise,
+      new Promise<never>((_, reject) => {
+        createTimer = setTimeout(() => {
+          createAbandoned = true;
+          // Best effort: cancel network work the create step may have spawned.
+          startController.abort();
+          reject(new Error(`Session startup timed out while binding extensions/resources (${CREATE_SERVICES_HARD_TIMEOUT_MS / 1000}s)`));
+        }, CREATE_SERVICES_HARD_TIMEOUT_MS);
+      }),
+    ]);
+    clearTimeout(createTimer);
+    // If the SDK finishes after the timeout already unwound this start, dispose
+    // the orphan session instead of leaking it. Its rejection needs no handling
+    // here: the race already surfaced it, or it is SDK-internal cleanup.
+    void createPromise.then(
+      ({ session: late }) => {
+        if (createAbandoned) {
+          try { late.dispose(); } catch { /* best effort */ }
+        }
+      },
+      () => { /* already handled via the race */ },
+    );
     // Kill any background processes this session spawned when the wrapper dies.
     const cleanupAsyncBash = asyncBashManager.cleanup.bind(asyncBashManager);
 
@@ -2457,6 +2506,15 @@ export async function startRpcSession(
         inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
       }
 
+      // The hard-timeout guard may have abandoned this start (lock already
+      // released so a fresh attempt could begin). Registering now would put a
+      // zombie wrapper into the registry over the fresh one — dispose and bail.
+      if (startAbandoned) {
+        try { inner.dispose(); } catch { /* best effort */ }
+        try { cleanupAsyncBash(); } catch { /* best effort */ }
+        throw new Error("Session startup abandoned after hard timeout");
+      }
+
       const wrapper = new AgentSessionWrapper(inner, sessionCwd);
       // When all tools are disabled, clear the system prompt entirely.
       // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
@@ -2485,7 +2543,9 @@ export async function startRpcSession(
 
       wrapper.onDestroy(() => {
         cleanupAsyncBash();
-        registry.delete(realSessionId);
+        // Only remove our own entry: after a hard-timeout abandon a fresh
+        // wrapper may already own this registry slot.
+        if (registry.get(realSessionId) === wrapper) registry.delete(realSessionId);
       });
       registry.set(realSessionId, wrapper);
       wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });      enforceRegistryCap();
@@ -2501,10 +2561,32 @@ export async function startRpcSession(
     }
   })().finally(() => {
     clearTimeout(startTimeout);
+    clearTimeout(hardTimer);
     locks.delete(sessionId);
-    finishStartingSession();
+    finishStartOnce();
   });
 
-  locks.set(sessionId, starting);
-  return starting;
+  // A hung start flow must still release the lock within a bounded time so the
+  // next request retries from scratch instead of awaiting a promise that never
+  // settles (which is how a session becomes permanently unopenable).
+  const guarded = Promise.race([
+    starting,
+    new Promise<never>((_, reject) => {
+      hardTimer = setTimeout(() => {
+        startAbandoned = true;
+        startController.abort();
+        locks.delete(sessionId);
+        finishStartOnce();
+        reject(new Error(`Session startup timed out after ${START_SESSION_HARD_TIMEOUT_MS / 1000}s (extension/resource binding may be hung); the start lock was released — retry the request to start over.`));
+      }, START_SESSION_HARD_TIMEOUT_MS);
+    }),
+  ]);
+  // Swallow the raw start's late settlement so it cannot surface as an
+  // unhandled rejection: after the guard rejects, a late success is harmless
+  // (the abandoned check keeps the zombie wrapper out of the registry) and a
+  // late failure was already reported through the guard.
+  void starting.then(() => { /* registered or abandoned-check bailed */ }, () => { /* already reported */ });
+
+  locks.set(sessionId, guarded);
+  return guarded;
 }

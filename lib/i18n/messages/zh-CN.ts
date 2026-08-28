@@ -695,6 +695,7 @@ export const zhCNLocale = {
     "desktop.pastedShowPreview": "预览粘贴文本",
     "desktop.pastedHidePreview": "收起粘贴文本预览",
     "desktop.pastedRemove": "删除粘贴文本",
+    "desktop.pastedMissingContent": "消息中残留未还原的粘贴占位符（原文已丢失），已阻止发送，请重新粘贴该段内容。",
     "desktop.generateTitle": "生成标题",
     "desktop.generateAllTitles": "批量生成当前项目所有会话的标题",
     "desktop.generatingTitlesProgress": "正在批量生成标题… {done}/{total}",

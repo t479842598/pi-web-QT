@@ -3,8 +3,10 @@ import {
   buildContextEntries as piBuildContextEntries,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { closeSync, fstatSync, openSync, readSync, statSync } from "fs";
-import { normalize as normalizePath } from "path";
+import { closeSync, createReadStream, existsSync, fstatSync, openSync, readSync, statSync, type Dirent } from "fs";
+import { readdir, stat } from "fs/promises";
+import { join, normalize as normalizePath } from "path";
+import { createInterface } from "readline";
 import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
@@ -48,8 +50,193 @@ export function mergeSessionLists(
   return [...byId.values()].sort((a, b) => b.modified.localeCompare(a.modified));
 }
 
+// ─── Incremental session info scan ──────────────────────────────────────────
+// SessionManager.listAll() streams and parses EVERY session file on every call
+// (today ~500 files / ~500MB), and the list cache is invalidated by every live
+// session's streaming events — so while any session runs, each cache miss paid
+// the full scan again and large session libraries made opening a session time
+// out. Key the scan by (mtimeMs, size) instead: unchanged files reuse the
+// cached info, only new or appended files are re-read. Field semantics mirror
+// the SDK's module-private buildSessionInfo() so list output stays identical.
+declare global {
+  var __piSessionFileInfoCache: Map<string, { mtimeMs: number; size: number; info: PiSessionInfo }> | undefined;
+}
+
+const SESSION_INFO_SCAN_CONCURRENCY = 10;
+
+interface SessionFileStats {
+  mtimeMs: number;
+  size: number;
+}
+
+function getFileInfoCache(): Map<string, { mtimeMs: number; size: number; info: PiSessionInfo }> {
+  if (!globalThis.__piSessionFileInfoCache) {
+    globalThis.__piSessionFileInfoCache = new Map();
+  }
+  return globalThis.__piSessionFileInfoCache;
+}
+
+function isMessageWithContentShape(
+  message: unknown,
+): message is { role: string; content: string | Array<{ type: string; text?: string }>; timestamp?: unknown } {
+  return typeof message === "object" && message !== null && "role" in message && "content" in message;
+}
+
+function extractInfoTextContent(message: { content: string | Array<{ type: string; text?: string }> }): string {
+  if (typeof message.content === "string") return message.content;
+  return message.content.filter((block) => block.type === "text").map((block) => block.text ?? "").join(" ");
+}
+
+function getMessageActivityTime(entry: { timestamp?: unknown; message?: unknown }): number | undefined {
+  const message = entry.message;
+  if (!isMessageWithContentShape(message)) return undefined;
+  if (message.role !== "user" && message.role !== "assistant") return undefined;
+  if (typeof message.timestamp === "number") return message.timestamp;
+  const t = new Date(typeof entry.timestamp === "string" ? entry.timestamp : "").getTime();
+  return Number.isNaN(t) ? undefined : t;
+}
+
+/** Stream one session file and extract the list metadata, mirroring the SDK's
+ *  buildSessionInfo(). Returns null for unreadable/non-session files so a
+ *  single corrupt file never blocks the rest of the scan. */
+async function readSessionInfoFromFile(filePath: string, stats: SessionFileStats): Promise<PiSessionInfo | null> {
+  try {
+    let header: { id?: unknown; cwd?: unknown; timestamp?: unknown; parentSession?: unknown } | null = null;
+    let messageCount = 0;
+    let firstMessage = "";
+    let name: string | undefined;
+    let lastActivityTime: number | undefined;
+    const rl = createInterface({
+      input: createReadStream(filePath, { encoding: "utf8" }),
+      crlfDelay: Infinity,
+    });
+    for await (const line of rl) {
+      let entry: Record<string, unknown>;
+      try {
+        entry = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (typeof entry !== "object" || entry === null) continue;
+      if (!header) {
+        if (entry.type !== "session") return null;
+        header = entry;
+        continue;
+      }
+      if (entry.type === "session_info") {
+        const raw = entry.name;
+        name = typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+      }
+      if (entry.type !== "message") continue;
+      messageCount++;
+      const activityTime = getMessageActivityTime(entry);
+      if (typeof activityTime === "number") {
+        lastActivityTime = Math.max(lastActivityTime ?? 0, activityTime);
+      }
+      const message = entry.message;
+      if (!isMessageWithContentShape(message)) continue;
+      if (message.role !== "user" && message.role !== "assistant") continue;
+      const textContent = extractInfoTextContent(message);
+      if (!textContent) continue;
+      if (!firstMessage && message.role === "user") {
+        firstMessage = textContent;
+      }
+    }
+    if (!header) return null;
+    const headerTime = typeof header.timestamp === "string" ? new Date(header.timestamp).getTime() : NaN;
+    const modified = typeof lastActivityTime === "number" && lastActivityTime > 0
+      ? new Date(lastActivityTime)
+      : !Number.isNaN(headerTime)
+        ? new Date(headerTime)
+        : new Date(stats.mtimeMs);
+    return {
+      path: filePath,
+      id: typeof header.id === "string" ? header.id : "",
+      cwd: typeof header.cwd === "string" ? header.cwd : "",
+      name,
+      parentSessionPath: typeof header.parentSession === "string" ? header.parentSession : undefined,
+      created: new Date(typeof header.timestamp === "string" ? header.timestamp : stats.mtimeMs),
+      modified,
+      messageCount,
+      firstMessage: firstMessage || "(no messages)",
+      // The SDK fills this with the joined text of every message; nothing in
+      // pi-web consumes it, and caching it would pin all message text in
+      // memory for the lifetime of the process.
+      allMessagesText: "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Directory listing (cheap) + re-parse of only new/changed files. Replaces
+ *  SessionManager.listAll() so the scan cost is O(changed files), not
+ *  O(all files). Output ordering matches listAll(): modified desc. */
+export async function scanSessionInfos(): Promise<PiSessionInfo[]> {
+  const sessionsDir = join(getAgentDir(), "sessions");
+  let dirEntries: Dirent[];
+  try {
+    if (!existsSync(sessionsDir)) return [];
+    dirEntries = await readdir(sessionsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const dirs = dirEntries
+    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+    .map((entry) => join(sessionsDir, entry.name));
+  const files: string[] = [];
+  for (const dir of dirs) {
+    try {
+      const names = await readdir(dir);
+      for (const fileName of names) {
+        if (fileName.endsWith(".jsonl")) files.push(join(dir, fileName));
+      }
+    } catch { /* unreadable directory */ }
+  }
+
+  const prevCache = getFileInfoCache();
+  const nextCache = new Map<string, { mtimeMs: number; size: number; info: PiSessionInfo }>();
+  const stats = new Map<string, SessionFileStats>();
+  const changed: string[] = [];
+  await Promise.all(files.map(async (file) => {
+    try {
+      const st = await stat(file);
+      stats.set(file, { mtimeMs: st.mtimeMs, size: st.size });
+    } catch { /* removed mid-scan */ }
+  }));
+  for (const [file, st] of stats) {
+    const cached = prevCache.get(file);
+    if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) {
+      nextCache.set(file, cached);
+    } else {
+      changed.push(file);
+    }
+  }
+
+  let cursor = 0;
+  const parseNext = async (): Promise<void> => {
+    while (cursor < changed.length) {
+      const file = changed[cursor++];
+      const st = stats.get(file);
+      if (!st) continue;
+      const info = await readSessionInfoFromFile(file, st);
+      if (info) nextCache.set(file, { ...st, info });
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(SESSION_INFO_SCAN_CONCURRENCY, changed.length) }, () => parseNext()),
+  );
+
+  // Replace wholesale: files that vanished are pruned, unchanged entries are
+  // carried over by reference.
+  globalThis.__piSessionFileInfoCache = nextCache;
+  const infos = [...nextCache.values()].map((cached) => cached.info);
+  infos.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+  return infos;
+}
+
 async function loadAllSessions(): Promise<SessionInfo[]> {
-  const piSessions: PiSessionInfo[] = await SessionManager.listAll();
+  const piSessions: PiSessionInfo[] = await scanSessionInfos();
   const pathToId = new Map<string, string>();
   for (const s of piSessions) pathToId.set(sessionPathKey(s.path), s.id);
 
@@ -393,6 +580,11 @@ declare global {
 }
 
 export function openSessionCached(filePath: string): SessionManager {
+  // Concurrency note: SessionManager.open() is fully synchronous, so concurrent
+  // requests are serialized by the event loop — the first request populates the
+  // cache and the rest hit it. Same-path concurrent opens therefore parse the
+  // file exactly once without an in-flight promise table; if this ever becomes
+  // async, add per-path in-flight dedupe here BEFORE restoring concurrency.
   const cache = (globalThis.__piSessionManagerCache ??= new Map());
   let mtimeMs = 0;
   let size = 0;

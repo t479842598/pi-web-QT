@@ -1,0 +1,42 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - button "隐藏侧边栏" [ref=e5] [cursor=pointer]
+        - generic [ref=e10]:
+          - button "选择项目" [ref=e12] [cursor=pointer]
+          - generic "/Volumes/1T 原装/项目研发/freebuff2api-go" [ref=e15] [cursor=pointer]:
+            - button "freebuff2api-go" [ref=e16]
+            - button "关闭" [ref=e18]
+          - generic "/Volumes/1T 原装/项目研发/u1s12api-go" [ref=e21] [cursor=pointer]:
+            - button "u1s12api-go" [ref=e22]
+            - button "关闭" [ref=e24]
+          - button "新增项目 tab" [ref=e28] [cursor=pointer]
+      - generic [ref=e32]:
+        - button "显示任务看板" [ref=e33] [cursor=pointer]
+        - button "显示文件面板" [ref=e36] [cursor=pointer]
+        - button "切换至浅色模式" [pressed] [ref=e39] [cursor=pointer]
+        - button "刷新会话" [ref=e42] [cursor=pointer]
+        - button "设置" [ref=e45] [cursor=pointer]
+    - generic [ref=e48]:
+      - generic [ref=e50]:
+        - generic [ref=e52]:
+          - button "会话" [ref=e53] [cursor=pointer]
+          - group "Session view" [ref=e56]:
+            - button "列表" [pressed] [ref=e57] [cursor=pointer]
+            - button "分组" [ref=e60] [cursor=pointer]
+          - button "新建" [disabled] [ref=e63]
+          - button "批量生成当前项目所有会话的标题" [disabled] [ref=e66] [cursor=pointer]
+          - button "刷新" [ref=e69] [cursor=pointer]
+        - generic [ref=e72]:
+          - textbox "搜索会话、分支..." [ref=e77]
+          - generic [ref=e78]: 正在加载…
+        - generic [ref=e79]:
+          - button "模型" [ref=e80] [cursor=pointer]
+          - button "技能" [ref=e84] [cursor=pointer]
+          - button "插件" [ref=e88] [cursor=pointer]
+      - separator "调整侧边栏宽度" [ref=e92]
+      - generic:
+        - button "子代理" [ref=e98] [cursor=pointer]
+        - generic [ref=e100]: No file open
+  - alert [ref=e102]
