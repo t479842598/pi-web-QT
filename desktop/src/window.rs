@@ -17,6 +17,62 @@ pub fn server_label(id: &str) -> String {
     format!("server-{id}")
 }
 
+/// 是否为服务器主窗口 label（红绿灯居中只对这类窗口生效）。
+#[cfg(target_os = "macos")]
+pub fn is_server_label(label: &str) -> bool {
+    label.starts_with("server-")
+}
+
+/// macOS：把原生红绿灯垂直居中进 48px 前端标题栏。
+///
+/// tauri 2.11 的 `WebviewWindowBuilder::traffic_light_position` 把 inset 存到
+/// webview 侧，而红绿灯按钮挂在 window 侧的 titlebar 容器上——该 builder
+/// 方法形同虚设。这里按 tao `inset_traffic_lights` 的做法直接用 AppKit 移动
+/// titlebar 容器与三个按钮：容器高度压到 (按钮高 + Y)，AppKit 坐标原点在
+/// 左下，容器 y = 窗口高 - 容器高，按钮随容器下移；x 再逐个排布。全屏/
+/// 还原后 macOS 会重置按钮位置，lib.rs 在 WindowEvent::Resized 重新调用。
+#[cfg(target_os = "macos")]
+pub fn center_traffic_lights(win: &WebviewWindow) {
+    use objc2::{msg_send, runtime::AnyObject};
+    use objc2_core_foundation::CGRect;
+
+    const X: f64 = 12.0;
+    const Y: f64 = 18.0; // 48px 标题栏垂直居中：(48 - 按钮 12px) / 2
+    let Ok(ns_window) = win.ns_window() else {
+        return;
+    };
+    unsafe {
+        let window = ns_window as *const AnyObject;
+        // NSWindowButton 枚举值：Close=0 / Miniaturize=1 / Zoom=2
+        let close: *const AnyObject = msg_send![window, standardWindowButton: 0_usize];
+        let miniaturize: *const AnyObject = msg_send![window, standardWindowButton: 1_usize];
+        let zoom: *const AnyObject = msg_send![window, standardWindowButton: 2_usize];
+        if close.is_null() || miniaturize.is_null() || zoom.is_null() {
+            return;
+        }
+        let superview: *const AnyObject = msg_send![close, superview];
+        let title_bar_container: *const AnyObject = msg_send![superview, superview];
+        if title_bar_container.is_null() {
+            return;
+        }
+        let close_rect: CGRect = msg_send![close, frame];
+        let title_bar_frame_height = close_rect.size.height + Y;
+        let mut title_bar_rect: CGRect = msg_send![title_bar_container, frame];
+        title_bar_rect.size.height = title_bar_frame_height;
+        let window_frame: CGRect = msg_send![window, frame];
+        title_bar_rect.origin.y = window_frame.size.height - title_bar_frame_height;
+        let _: () = msg_send![title_bar_container, setFrame: title_bar_rect];
+
+        let miniaturize_rect: CGRect = msg_send![miniaturize, frame];
+        let space_between = miniaturize_rect.origin.x - close_rect.origin.x;
+        for (i, button) in [close, miniaturize, zoom].into_iter().enumerate() {
+            let mut rect: CGRect = msg_send![button, frame];
+            rect.origin.x = X + (i as f64 * space_between);
+            let _: () = msg_send![button, setFrameOrigin: rect.origin];
+        }
+    }
+}
+
 /// 拼装服务器直连 URL：附加 ?piweb_connected=1 标识桌面壳环境（网页端据此显示设置入口）。
 /// 凭据不放入 URL（fetch 规范禁止子资源 URL 携带 userinfo）。
 /// 带凭据的服务器请用 [`window_url`]（经本地代理注入 Basic Auth）。
@@ -150,6 +206,9 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
     }
     // 无边框：macOS 保留原生 traffic lights（title_bar_style Overlay + hidden_title，
     // 前端标题栏内缩让出红绿灯）；Windows/Linux 完全无边框，窗口控制由前端绘制。
+    // 注意：tauri 2.11 的 WebviewWindowBuilder::traffic_light_position 把 inset
+    // 存到 webview 侧而红绿灯归 window 侧管理（形同虚设），因此位置在 build
+    // 之后由 center_traffic_lights 直接调整。
     #[cfg(target_os = "macos")]
     {
         builder = builder
@@ -209,6 +268,8 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
             }
         });
     let win = builder.build()?;
+    #[cfg(target_os = "macos")]
+    center_traffic_lights(&win);
     app.state::<AppState>()
         .server_windows
         .lock()

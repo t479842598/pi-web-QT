@@ -193,6 +193,20 @@ pub fn run() {
             tauri::RunEvent::ExitRequested { code: None, api, .. } => {
                 api.prevent_exit();
             }
+            // macOS：全屏/还原等操作会重置红绿灯到系统默认位置，resize 时
+            // 对服务器窗口重新居中（见 window::center_traffic_lights）。
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Resized(_),
+                ..
+            } => {
+                if window::is_server_label(&label) {
+                    if let Some(w) = app_handle.get_webview_window(&label) {
+                        window::center_traffic_lights(&w);
+                    }
+                }
+            }
             _ => {}
         }
         #[cfg(mobile)]
