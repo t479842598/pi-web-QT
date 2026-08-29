@@ -34,10 +34,10 @@ pub fn is_server_label(label: &str) -> bool {
 #[cfg(target_os = "macos")]
 pub fn center_traffic_lights(win: &WebviewWindow) {
     use objc2::{msg_send, runtime::AnyObject};
-    use objc2_core_foundation::CGRect;
+    use objc2_core_foundation::{CGPoint, CGRect};
 
     const X: f64 = 12.0;
-    const Y: f64 = 18.0; // 48px 标题栏垂直居中：(48 - 按钮 12px) / 2
+    const Y: f64 = 18.0; // 48px 标题栏垂直居中：(48 - 按钮 12px) / 2 = 按钮顶边距 18
     let Ok(ns_window) = win.ns_window() else {
         return;
     };
@@ -56,19 +56,23 @@ pub fn center_traffic_lights(win: &WebviewWindow) {
             return;
         }
         let close_rect: CGRect = msg_send![close, frame];
-        let title_bar_frame_height = close_rect.size.height + Y;
-        let mut title_bar_rect: CGRect = msg_send![title_bar_container, frame];
-        title_bar_rect.size.height = title_bar_frame_height;
-        let window_frame: CGRect = msg_send![window, frame];
-        title_bar_rect.origin.y = window_frame.size.height - title_bar_frame_height;
-        let _: () = msg_send![title_bar_container, setFrame: title_bar_rect];
-
+        let button_height = close_rect.size.height;
         let miniaturize_rect: CGRect = msg_send![miniaturize, frame];
         let space_between = miniaturize_rect.origin.x - close_rect.origin.x;
+        // 容器顶边贴窗口顶边，高度 = 按钮高 + Y；按钮显式钉在容器底
+        // （origin.y = 容器高 - 按钮高 - Y），使按钮顶边距窗口顶恰为 Y，
+        // 中心落在 48px 标题栏的垂直中点。容器与按钮 x/y 全部显式设置，
+        // 不依赖 AppKit 布局继承，避免被异步布局覆盖后残留偏移。
+        let container_height = button_height + Y;
+        let mut title_bar_rect: CGRect = msg_send![title_bar_container, frame];
+        title_bar_rect.size.height = container_height;
+        let window_frame: CGRect = msg_send![window, frame];
+        title_bar_rect.origin.y = window_frame.size.height - container_height;
+        let _: () = msg_send![title_bar_container, setFrame: title_bar_rect];
+        let button_y = container_height - button_height - Y;
         for (i, button) in [close, miniaturize, zoom].into_iter().enumerate() {
-            let mut rect: CGRect = msg_send![button, frame];
-            rect.origin.x = X + (i as f64 * space_between);
-            let _: () = msg_send![button, setFrameOrigin: rect.origin];
+            let origin = CGPoint::new(X + (i as f64 * space_between), button_y);
+            let _: () = msg_send![button, setFrameOrigin: origin];
         }
     }
 }
@@ -269,7 +273,26 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
         });
     let win = builder.build()?;
     #[cfg(target_os = "macos")]
-    center_traffic_lights(&win);
+    {
+        center_traffic_lights(&win);
+        // AppKit 会在 webview 挂载/导航后异步重排 titlebar，一次性设置会被
+        // 覆盖：创建后分几次延迟重贴，直到布局稳定。
+        let handle = app.clone();
+        let label = label.clone();
+        std::thread::spawn(move || {
+            for delay_ms in [400u64, 1100, 2500, 4000] {
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                let runner = handle.clone();
+                let h = handle.clone();
+                let l = label.clone();
+                runner.run_on_main_thread(move || {
+                    if let Some(w) = h.get_webview_window(&l) {
+                        center_traffic_lights(&w);
+                    }
+                });
+            }
+        });
+    }
     app.state::<AppState>()
         .server_windows
         .lock()

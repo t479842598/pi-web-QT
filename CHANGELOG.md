@@ -2,6 +2,15 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.14.5 — 2026-08-29（macOS 红绿灯垂直居中 + 桌面端标题栏观感修复）
+
+### 修复（desktop / macOS）
+- **原生红绿灯垂直居中**：48px 前端标题栏下，红绿灯沿用系统 28pt 标准位置、视觉偏上。根因：Tauri 2.11 的 `WebviewWindowBuilder::traffic_light_position` 把 inset 写进 webview 侧，而红绿灯按钮挂在 window 侧的 titlebar 容器上，该 API 实际不生效。改为窗口创建后用 AppKit 直接把 titlebar 容器与三个按钮钉到居中坐标（x/y 显式设置），并在窗口 resize/全屏还原、以及创建后 0.4s/1.5s/4s/8s 多次重贴，防止异步布局覆盖。
+- **标题栏右侧功能区按钮间距**：任务看板 / 文件面板 / 主题 / 设置四个按钮此前零间距挤在一起，加 3px 间隔。
+
+### 变更
+- 版本号同步：desktop（tauri.conf.json / package.json / Cargo.toml）与 mobile2（pubspec.yaml）随 web 一并 bump 到 0.14.5。
+
 ## v0.14.4 — 2026-08-29（四端联动修复：会话打开可靠性、折叠代码、运行状态即时显示、长会话落底、过程显示误切换）
 
 ### 修复（web / 服务端）
