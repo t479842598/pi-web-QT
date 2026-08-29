@@ -48,6 +48,12 @@ const { port, hostname, openBrowser } = parseLaunchOptions();
 const { mergedNodeOptions } = require("./with-memory-limit");
 process.env.NODE_OPTIONS = mergedNodeOptions(process.env.NODE_OPTIONS);
 
+// Idle memory watchdog, loaded only into the next-server process. Injected as
+// a node CLI arg (not NODE_OPTIONS) so agent-spawned child processes never
+// inherit it. Disabled with PI_WEB_RSS_RESTART_MB=0; the module itself also
+// refuses to run when it doesn't know the port to ask about running sessions.
+const watchdogPreload = path.join(__dirname, "watchdog-preload.js");
+
 if (!fs.existsSync(nextDir)) {
   console.error("Build artifacts not found. Please report this issue.");
   process.exit(1);
@@ -71,10 +77,10 @@ const nextArgs = ["start", "-p", port, "-H", hostname];
 
 // Always run next's JS entry with node directly — avoids .bin symlink issues
 // and path-with-spaces problems on Windows when shell: true is used.
-const child = spawn(process.execPath, [nextBin, ...nextArgs], {
+const child = spawn(process.execPath, ["--require", watchdogPreload, nextBin, ...nextArgs], {
   cwd: pkgDir,
   stdio: ["inherit", "pipe", "inherit"],
-  env: { ...process.env, PI_WEB_HOSTNAME: hostname },
+  env: { ...process.env, PI_WEB_HOSTNAME: hostname, PI_WEB_PORT: String(port) },
 });
 wireChildProcessLifecycle(child);
 

@@ -2,6 +2,18 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.14.6 — 2026-08-30（内存看门狗：空闲自动重启回收 V8 不归还的内存）
+
+### 新增（web / 服务端）
+- **空闲内存看门狗**：next-server 长期运行后 RSS 停在高水位（实测 938MB、峰值 1.5GB）——根因是 V8 GC 回收后不把内存还给操作系统，只有重启才能真正归还。`bin/pi-web.js` 现在在 next-server 进程内启动看门狗：RSS ≥ 1229MB（`PI_WEB_RSS_RESTART_MB` 可调，0=禁用）且连续 2 次确认 `/api/agent/running` 无运行会话时打日志后自退，由 launchd `com.piweb.server` KeepAlive 秒级重拉（隧道域名只闪断几秒）。启动后 3 个检查周期宽限；有会话运行或探测失败绝不重启，运行中的任务零感知。
+- **Windows 整体禁用**看门狗：无 launchd 类守护进程负责重拉，且明确不需要自动重启方案。
+
+### 实现
+- `bin/memory-watchdog.js`（主循环）+ `bin/watchdog-preload.js`（3 秒延迟启动，任何异常只 warn 不影响服务启动）；经 node `--require` 注入 next-server 进程而非 `NODE_OPTIONS`（避免传染 agent 拉起的子进程）；进程内探测 `/api/agent/running` 复用进程自身持有的 `PI_WEB_PASSWORD` 带 Basic 认证（生产 `.env` 密码使 `/api` 全量 401，不带凭证的探测永远失败）。
+
+### 变更
+- 版本号同步：desktop（tauri.conf.json / package.json / Cargo.toml）与 mobile2（pubspec.yaml）随 web 一并 bump 到 0.14.6。
+
 ## v0.14.5 — 2026-08-29（macOS 红绿灯垂直居中 + 桌面端标题栏观感修复）
 
 ### 修复（desktop / macOS）
