@@ -207,6 +207,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          # Runner image no longer ships libfuse2; without it the AppImage
+          # toolchain (linuxdeploy) fails with "failed to run linuxdeploy".
+          sudo apt-get install -y libfuse2
       - name: Inject updater capability (release build)
         shell: bash
         run: |
