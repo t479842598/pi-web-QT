@@ -225,6 +225,11 @@ jobs:
           NODE_ENV: production
           HOME: "${{ runner.temp }}/piweb-fakehome"
           USERPROFILE: "${{ runner.temp }}/piweb-fakehome"
+          # GitHub runner containers have no /dev/fuse, so the AppImage toolchain
+          # (linuxdeploy) cannot mount its own runtime even with libfuse2 installed
+          # — it fails with "failed to run linuxdeploy". Extract-and-run unpacks the
+          # AppImages to a temp dir and executes them without FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         with:
           projectPath: ./desktop
           tagName: v__VERSION__
