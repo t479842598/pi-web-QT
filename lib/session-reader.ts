@@ -15,6 +15,7 @@ import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
 import { readSettingsJsonUnlocked } from "./settings-lock";
+import { readSessionArchive } from "./session-archive";
 import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
 
 export { getAgentDir };
@@ -245,6 +246,9 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
   const rawPins = Array.isArray(settings.sessionPins) ? (settings.sessionPins as unknown[]) : [];
   const pinSet = new Set(rawPins.filter((p): p is string => typeof p === "string"));
 
+  // Archived session ids come from the agent-dir sidecar (session-archive.json).
+  const archive = readSessionArchive(getAgentDir());
+
   // Project resolution (projectRoot/projectKey/worktreeBranch) is attached
   // downstream by attachSessionProjectInfo(), shared with other callers.
   const sessions = piSessions.map((s) => {
@@ -273,6 +277,8 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
           : {}),
       transient: false,
       pinned: pinSet.has(s.id),
+      archived: Boolean(archive[s.id]),
+      ...(archive[s.id] ? { archivedAt: archive[s.id].archivedAt } : {}),
       importedFrom: (s as unknown as { importedFrom?: string }).importedFrom,
     };
   });

@@ -17,6 +17,9 @@ import {
 } from "@/lib/session-reader";
 import { getRpcSession, broadcastSessionBusEvent } from "@/lib/rpc-manager";
 import { mutateSettingsJson } from "@/lib/settings-lock";
+import { getAgentDir } from "@/lib/session-reader";
+import { setSessionArchived, dropSessionArchiveEntry } from "@/lib/session-archive";
+import { removeQueue } from "@/lib/queue-store";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import { computeSessionStats } from "@/lib/session-stats";
 import type { SessionEntry } from "@/lib/types";
@@ -201,16 +204,16 @@ export async function GET(
   }
 }
 
-// PATCH /api/sessions/[id]  body: { name?: string, pinned?: boolean }
+// PATCH /api/sessions/[id]  body: { name?: string, pinned?: boolean, archived?: boolean }
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   try {
-    const { name, pinned } = await req.json() as { name?: string; pinned?: boolean };
-    if (typeof name !== "string" && typeof pinned !== "boolean") {
-      return NextResponse.json({ error: "name or pinned required" }, { status: 400 });
+    const { name, pinned, archived } = await req.json() as { name?: string; pinned?: boolean; archived?: boolean };
+    if (typeof name !== "string" && typeof pinned !== "boolean" && typeof archived !== "boolean") {
+      return NextResponse.json({ error: "name, pinned or archived required" }, { status: 400 });
     }
     if (typeof name === "string") {
       const filePath = await resolveSessionPath(id);
@@ -234,6 +237,10 @@ export async function PATCH(
       // Broadcast to all connected clients so other windows / devices refresh
       // their session lists immediately.
       broadcastSessionBusEvent("session_pin_changed", id, { pinned });
+    }
+    if (typeof archived === "boolean") {
+      await setSessionArchived(getAgentDir(), id, archived);
+      broadcastSessionBusEvent("session_archive_changed", id, { archived });
     }
     invalidateSessionListCache();
     return NextResponse.json({ ok: true });
@@ -318,6 +325,10 @@ export async function DELETE(
     // delete (the wrapper is destroyed in shutdown's finally regardless).
     await getRpcSession(id)?.shutdown().catch(() => undefined);
     unlinkSync(filePath);
+    // Drop the queue sidecar and the archive entry so a hard delete leaves no
+    // orphan state behind (both are best-effort: the session is already gone).
+    try { removeQueue(filePath); } catch { /* sidecar absent */ }
+    await dropSessionArchiveEntry(getAgentDir(), id).catch(() => undefined);
     invalidateOpenSessionCache(filePath);
     invalidateSessionPathCache(id);
     invalidateSessionListCache();

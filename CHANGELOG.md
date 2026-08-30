@@ -2,7 +2,37 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.15.0 — 2026-08-30（侧边栏「全部项目」面板 + 可逆归档，对齐 ZCode 任务列表）
+
+### 新增（web / 侧边栏）
+- **项目面板模式**：侧边栏头部新增列表切换按钮，在「当前项目下拉」与「全部项目面板」两种模式间切换（偏好持久化）。面板把会话按项目文件夹分组展示，支持折叠/展开、每文件夹默认 5 条 +「显示更多」分页、折叠文件夹内有会话运行时文件夹图标显示加载 spinner、一键「展开全部 / 收起全部」。
+- **分组 / 项目 / 时间线三视图 + 排序**：顶部「# 分组 / 📁 项目」气泡切换组织方式；筛选菜单提供视图（按项目 / 时间线）与排序（更新时间 / 创建时间），偏好存 localStorage。
+- **可逆归档替代删除**：侧边栏（新旧两种模式）会话行的删除按钮改为归档（行内两步确认），会话文件不删除；归档视图列出已归档会话（标题 + 相对时间 + 所属文件夹），可取消归档或彻底删除（红色垃圾桶 + 确认，走原 DELETE 级联 reparent）。
+- **移除项目（隐藏）**：文件夹行 hover 的 ⋯ 菜单可「移除项目」——仅从侧边栏隐藏（不删磁盘文件），运行中会话先二次确认；筛选菜单底部「已隐藏项目」列表可恢复，重新用「选择文件夹」添加也会自动取消隐藏。
+- **项目文件树面板**：文件夹行「查看文件」按钮在侧边栏内挂载该项目 FileExplorer（头部「返回会话」+ 项目名），复用 /api/files 白名单。
+- **标题栏搜索 + 新建任务**：面板模式下，原标签页/下拉所在的标题栏条改为大搜索框（实时检索）+「新建任务」按钮；新建任务打开空项目（显示「选择项目…」让用户自选），文件夹行「+」则带上对应项目。全新安装默认仍为下拉模式，首次显示一次性引导气泡提示两种展示方式。
+- **对话标题居中**：会话标题在「侧边栏以外的右侧区域」水平居中（CSS 变量 `--pi-titlebar-sidebar-offset` 扣除侧边栏宽度）。
+
+### 新增（服务端存储 / API）
+- `lib/session-archive.ts`：`<agentDir>/session-archive.json` 归档标记（proper-lockfile 加锁 + 原子写，损坏自愈）；`PATCH /api/sessions/[id]` 接受 `archived`，广播 `session_archive_changed`；`SessionInfo` 增 `archived/archivedAt`，列表合并。
+- `lib/project-visibility.ts` + `app/api/projects/visibility`（GET/POST）：`<agentDir>/project-visibility.json` 隐藏项目黑名单（key=projectIdentityKey），变更广播 `project_visibility_changed`。
+- 彻底删除时顺带清理 queue sidecar（修复既有泄漏）。
+
+### 变更
+- **composer 精简**：移除输入框工具栏的「运行档位」「工具权限」控件，仅保留任务模式（常规/计划/目标）；档位与权限默认值统一在系统设置（功能页）配置，新会话继承。
+- **移动端设置弹窗**：输入框/select 字号 16px→14px、select 可收缩，标题生成模型下拉不再截断。
+- **侧边栏图标对齐 ZCode**：引入 `lucide-react`，面板图标全部换成 ZCode 同款 lucide（folder-closed/folder-open、list-tree、circle-plus、ellipsis、hash、maximize-2/minimize-2、list-filter、archive、archive-restore、loader 转圈等）；侧边栏开关改纯图标；图标按钮统一透明底 + 字色。
+- 版本号同步：desktop（tauri.conf.json / package.json / Cargo.toml）与 mobile2（pubspec.yaml）随 web 一并 bump 到 0.15.0。
+
+### 修复
+- ⋯ 菜单二次点击无法收起（外部点击监听误把触发按钮算作外部）；二次点击关菜单后文件夹操作按钮消失（hover 由命令式 style 改为 React 状态单一数据源）。
+- 引导气泡锚定按钮导致向左溢出侧边栏，改锚侧边栏根容器全宽显示。
+
+### 测试
+- 新增单测：`lib/session-archive` / `lib/project-visibility` / `lib/sidebar-projects-view`（共 29 例）；全量 `npm test` 864/864 通过；tsc / eslint 干净；浏览器全流程（归档/取消/移除/恢复/文件树/分组/时间线/持久化/移动端/图标）回归通过。
+
 ## v0.14.6 — 2026-08-30（内存看门狗：空闲自动重启回收 V8 不归还的内存）
+
 
 ### 新增（web / 服务端）
 - **空闲内存看门狗**：next-server 长期运行后 RSS 停在高水位（实测 938MB、峰值 1.5GB）——根因是 V8 GC 回收后不把内存还给操作系统，只有重启才能真正归还。`bin/pi-web.js` 现在在 next-server 进程内启动看门狗：RSS ≥ 1229MB（`PI_WEB_RSS_RESTART_MB` 可调，0=禁用）且连续 2 次确认 `/api/agent/running` 无运行会话时打日志后自退，由 launchd `com.piweb.server` KeepAlive 秒级重拉（隧道域名只闪断几秒）。启动后 3 个检查周期宽限；有会话运行或探测失败绝不重启，运行中的任务零感知。

@@ -817,7 +817,7 @@ export function AppShell() {
         }
       }
     `}</style>
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "var(--bg)" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "var(--bg)", "--pi-titlebar-sidebar-offset": `${isMobile || !sidebarOpen ? 0 : sidebarPanel.width}px` } as React.CSSProperties}>
       <AppTitleBar
         topBarRef={topBarRef}
         sidebarOpen={sidebarOpen}

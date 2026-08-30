@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, memo, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, GitFork, Lightning, List, MagnifyingGlass, PencilSimple, Plug, Plus, PushPin, Sparkle, Stack, StackSimple, Trash, UploadSimple, X } from "@phosphor-icons/react";
+import { ArrowClockwise, Archive, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, GitFork, Lightning, List, ListBullets, MagnifyingGlass, PencilSimple, Plug, Plus, PushPin, Sparkle, Stack, StackSimple, Trash, UploadSimple, X } from "@phosphor-icons/react";
 import type { SessionInfo } from "@/lib/types";
 import { sameIdSet } from "@/lib/id-set";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -11,6 +11,17 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { QuickChangesPanel } from "./QuickChangesPanel";
+import { ProjectsPanel, type HiddenProjectEntry } from "./sidebar/ProjectsPanel";
+import { formatRelativeTime, RunningSessionIndicator, UnreadSessionIndicator } from "./sidebar/session-indicators";
+import {
+  buildSessionGroups,
+  GROUP_LABEL_KEYS,
+  loadSidebarMode,
+  saveSidebarMode,
+  type GroupKey,
+  type SessionGroupRow,
+  type SidebarMode,
+} from "@/lib/sidebar-projects-view";
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { samePath } from "@/lib/paths";
 import { stripModeInstructionBlocks } from "@/lib/modes";
@@ -85,20 +96,6 @@ function saveUnreadSessionIds(ids: Set<string>): void {
   } catch {
     // ignore storage quota / privacy-mode errors
   }
-}
-
-function formatRelativeTime(dateStr: string, t: (key: string, params?: Record<string, string | number>) => string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const mins = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-  if (mins < 1) return t("desktop.justNow");
-  if (mins < 60) return t("desktop.minutesAgo", { count: mins });
-  if (hours < 24) return t("desktop.hoursAgo", { count: hours });
-  if (days < 7) return t("desktop.daysAgo", { count: days });
-  return date.toLocaleDateString();
 }
 
 /**
@@ -282,126 +279,11 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 }
 
 // ── Session grouped-accordion view ──────────────────────────────────────────
+// GroupKey / SessionGroup / buildSessionGroups / orderGroupRows live in
+// lib/sidebar-projects-view.ts (shared with the projects panel).
 
 type SessionViewStyle = "list" | "groups";
 const SESSION_VIEW_STYLE_KEY = "pi-web:session-view-style";
-
-type GroupKey = "pinned" | "today" | "yesterday" | "older";
-
-/** One row in a grouped session view — session plus its fork depth. */
-interface SessionGroupRow {
-  session: SessionInfo;
-  /** Fork depth: 0 = not a fork (or flat group); 1 = direct fork of a listed session, etc. */
-  forkDepth: number;
-}
-
-interface SessionGroup {
-  key: GroupKey;
-  rows: SessionGroupRow[];
-}
-
-const GROUP_LABEL_KEYS: Record<GroupKey, string> = {
-  pinned: "desktop.pinned",
-  today: "desktop.today",
-  yesterday: "desktop.yesterday",
-  older: "desktop.older",
-};
-
-/** Local-timezone YYYY-MM-DD key for a Date. */
-function toLocalDayKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-/**
- * Partition sessions into Pinned / Today / Yesterday / Older accordion groups.
- * Pinned sessions are shown BOTH in the pinned group and in their original
- * time-based group (double display).
- *
- * Within each group, fork children are ordered right below their parent
- * (depth-first), and every row carries its fork depth so the compact row can
- * indent forks the way the tree view does. The pinned group is rendered flat
- * (forkDepth forced to 0 — no indent there).
- */
-function buildSessionGroups(sessions: SessionInfo[], allSessions: SessionInfo[]): SessionGroup[] {
-  const now = new Date();
-  const todayKey = toLocalDayKey(now);
-  const yesterdayKey = toLocalDayKey(new Date(now.getTime() - 86400000));
-
-  const groups: Record<GroupKey, SessionInfo[]> = { pinned: [], today: [], yesterday: [], older: [] };
-  for (const s of sessions) {
-    const day = toLocalDayKey(new Date(s.modified));
-    if (s.pinned) groups.pinned.push(s);
-    if (day === todayKey) groups.today.push(s);
-    else if (day === yesterdayKey) groups.yesterday.push(s);
-    else groups.older.push(s);
-  }
-
-  const order: GroupKey[] = ["pinned", "today", "yesterday", "older"];
-  return order
-    .map((key) => ({
-      key,
-      rows: orderGroupRows(groups[key], allSessions, key === "pinned"),
-    }))
-    .filter((g) => g.rows.length > 0);
-}
-
-/**
- * Order one group's sessions so fork children sit immediately below their
- * parent (depth-first, roots sorted by modified desc, children of one parent
- * sorted the same way). Computes each row's fork depth by walking the
- * parentSessionId chain in the FULL session list (parents may live in another
- * group). `flat` (pinned group) keeps the ordering but forces forkDepth to 0.
- */
-function orderGroupRows(sessions: SessionInfo[], allSessions: SessionInfo[], flat: boolean): SessionGroupRow[] {
-  if (sessions.length === 0) return [];
-  const byId = new Map(allSessions.map((s) => [s.id, s]));
-
-  const forkDepthOf = (session: SessionInfo): number => {
-    let depth = 0;
-    let cur: SessionInfo | undefined = session;
-    const visited = new Set<string>();
-    while (cur?.parentSessionId && !visited.has(cur.id)) {
-      visited.add(cur.id);
-      const parent = byId.get(cur.parentSessionId);
-      if (!parent) break;
-      cur = parent;
-      depth++;
-    }
-    return depth;
-  };
-
-  // Map of in-group parent id → its fork children.
-  const inGroup = new Set(sessions.map((s) => s.id));
-  const children = new Map<string, SessionInfo[]>();
-  for (const s of sessions) {
-    if (s.parentSessionId && inGroup.has(s.parentSessionId)) {
-      const arr = children.get(s.parentSessionId) ?? [];
-      arr.push(s);
-      children.set(s.parentSessionId, arr);
-    }
-  }
-  const byModifiedDesc = (a: SessionInfo, b: SessionInfo) => b.modified.localeCompare(a.modified);
-  const roots = sessions.filter((s) => !(s.parentSessionId && inGroup.has(s.parentSessionId))).sort(byModifiedDesc);
-  for (const arr of children.values()) arr.sort(byModifiedDesc);
-
-  const rows: SessionGroupRow[] = [];
-  const emitted = new Set<string>();
-  const visit = (s: SessionInfo) => {
-    if (emitted.has(s.id)) return;
-    emitted.add(s.id);
-    rows.push({ session: s, forkDepth: flat ? 0 : forkDepthOf(s) });
-    for (const child of children.get(s.id) ?? []) visit(child);
-  };
-  for (const root of roots) visit(root);
-  // Safety net for cyclic parent chains — never drop a row.
-  for (const s of sessions) visit(s);
-  return rows;
-}
-
-
 
 export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onFileCreated, onFileDeleted, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
   const { t } = useI18n();
@@ -610,6 +492,70 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       // ignore storage errors
     }
   }, []);
+
+  // ── Projects panel (all-projects sidebar mode) ────────────────────────────
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => loadSidebarMode());
+  const switchSidebarMode = useCallback((mode: SidebarMode) => {
+    setSidebarMode(mode);
+    saveSidebarMode(mode);
+    // Entering the panel is itself the discovery action — retire the hint.
+    if (mode === "projects") dismissModeHintRef.current?.();
+  }, []);
+  // One-time onboarding hint: fresh installs keep the dropdown default, but
+  // the toggle button explains the second (projects panel) layout once.
+  const MODE_HINT_KEY = "pi-web:sidebar-mode-hint-seen";
+  const [modeHintVisible, setModeHintVisible] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try { return !window.localStorage.getItem(MODE_HINT_KEY); } catch { return false; }
+  });
+  const dismissModeHint = useCallback(() => {
+    setModeHintVisible(false);
+    try { window.localStorage.setItem(MODE_HINT_KEY, "1"); } catch { /* best-effort */ }
+  }, []);
+  const dismissModeHintRef = useRef<(() => void) | null>(null);
+  useEffect(() => { dismissModeHintRef.current = dismissModeHint; }, [dismissModeHint]);
+  const [hiddenProjects, setHiddenProjects] = useState<HiddenProjectEntry[]>([]);
+  const loadHiddenProjects = useCallback(async () => {
+    try {
+      const res = await fetch("/api/projects/visibility");
+      if (!res.ok) return;
+      const data = await res.json() as { hidden?: HiddenProjectEntry[] };
+      setHiddenProjects(Array.isArray(data.hidden) ? data.hidden : []);
+    } catch {
+      // Offline — keep the last known list.
+    }
+  }, []);
+  useEffect(() => { void loadHiddenProjects(); }, [loadHiddenProjects]);
+  const handleRemoveProject = useCallback(async (projectRoot: string, name: string) => {
+    try {
+      const res = await fetch("/api/projects/visibility", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "hide", projectRoot, name }),
+      });
+      if (res.ok) {
+        const data = await res.json() as { hidden?: HiddenProjectEntry[] };
+        setHiddenProjects(Array.isArray(data.hidden) ? data.hidden : []);
+      }
+    } catch {
+      // Offline — the panel keeps showing the project until the next sync.
+    }
+  }, []);
+  const handleUnhideProject = useCallback(async (entry: HiddenProjectEntry) => {
+    try {
+      const res = await fetch("/api/projects/visibility", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unhide", projectRoot: entry.path }),
+      });
+      if (res.ok) {
+        const data = await res.json() as { hidden?: HiddenProjectEntry[] };
+        setHiddenProjects(Array.isArray(data.hidden) ? data.hidden : []);
+      }
+    } catch {
+      // Offline — retry on the next event/refetch.
+    }
+  }, []);
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [explorerKey, setExplorerKey] = useState(0);
   const [explorerUploadBusy, setExplorerUploadBusy] = useState(false);
@@ -782,6 +728,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       "agent_settled",
       "auto_compaction_end",
       "session_pin_changed",
+      "session_archive_changed",
     ]);
     let throttleTimer: ReturnType<typeof setTimeout> | null = null;
     let scheduled = false;
@@ -806,6 +753,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           // Project tab / dropdown-pin edits in another window or device apply
           // immediately (and switch the current project when the pin changed).
           void syncProjectStateFromServer({ adoptSelection: true });
+        } else if (data && data.type === "project_visibility_changed") {
+          // Project hide/restore in another window/device: refresh the hidden
+          // list so the projects panel follows immediately.
+          void loadHiddenProjects();
         }
       } catch {
         // EventSource reconnects; a malformed frame must not alter state.
@@ -815,7 +766,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       source.close();
       if (throttleTimer) clearTimeout(throttleTimer);
     };
-  }, [loadSessions, loadProjectAliases, syncProjectStateFromServer]);
+  }, [loadSessions, loadProjectAliases, syncProjectStateFromServer, loadHiddenProjects]);
 
   useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;
@@ -1004,12 +955,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setDirectoryPickerOpen(false);
       setDropdownOpen(false);
       setWorkspaceProjectDropdownOpen(null);
+      // Re-adding a hidden project via the folder picker restores it.
+      const resolved = data.cwd ?? path;
+      const hiddenEntry = hiddenProjects.find((h) => samePath(h.path, resolved));
+      if (hiddenEntry) void handleUnhideProject(hiddenEntry);
     } catch (e) {
       setCustomPathError(e instanceof Error ? e.message : String(e));
     } finally {
       setCustomPathValidating(false);
     }
-  }, [customPathValidating]);
+  }, [customPathValidating, hiddenProjects, handleUnhideProject]);
 
   const handleCustomPathClick = useCallback(() => {
     setCustomPathError(null);
@@ -1159,6 +1114,65 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     });
   }, [loadSessions]);
 
+  /**
+   * Optimistic archive/unarchive (归档): flip the row locally, persist via
+   * PATCH, roll back on failure. Archiving the open session closes the chat
+   * exactly like a delete would — but the session file stays on disk and the
+   * archive view can restore it.
+   */
+  const handleArchive = useCallback((session: SessionInfo, archived: boolean) => {
+    setAllSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, archived } : s)));
+    void fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    }).then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (archived) handleSessionDeleted(session.id);
+    }).catch(() => {
+      setAllSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, archived: !archived } : s)));
+      void loadSessions(false);
+    });
+  }, [handleSessionDeleted, loadSessions]);
+
+  /** Permanent delete from the archive view (the file really goes away). */
+  const handleDeleteForever = useCallback(async (session: SessionInfo) => {
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      if (!res.ok) return;
+      handleSessionDeleted(session.id);
+      void loadSessions(false);
+    } catch {
+      // ignore — the next refresh reconciles
+    }
+  }, [handleSessionDeleted, loadSessions]);
+
+  /** New session inside a specific project folder (panel hover + button). */
+  const handleNewSessionInProject = useCallback((projectRoot: string) => {
+    const tempId = typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    setSelectedCwd(projectRoot);
+    rememberPickedProject(projectRoot);
+    onNewSession?.(tempId, projectRoot);
+  }, [onNewSession, rememberPickedProject]);
+
+  /** 新建任务 from the title bar: open the composer with NO project preset,
+   *  so the welcome page shows the "选择项目" picker and the user chooses
+   *  (or switches via the dropdown above the composer). "" (not null) is
+   *  deliberate: the mount fallback auto-selects the most-recent project only
+   *  while selectedCwd is strictly null. */
+  const handleNewTaskBlank = useCallback(() => {
+    const tempId = typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    setSelectedCwd("");
+    // The welcome project button falls back to the dropdown pin when no cwd
+    // is selected — clear it too so the "选择项目…" placeholder shows.
+    setDropdownPinnedProject(null);
+    onNewSession?.(tempId, "");
+  }, [onNewSession]);
+
   const handleNewSession = useCallback(() => {
     if (!selectedCwd) return;
     // Generate a temporary UUID client-side — no backend call needed.
@@ -1229,12 +1243,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     : recentProjects;
 
   // Sessions of every worktree in the selected project are shown together.
-  // Memoized: the session-tree memo downstream keys on these identities — an
-  // inline filter would rebuild the tree on every render and defeat it.
+  // Archived sessions are hidden from all normal lists (restorable from the
+  // archive view). Memoized: the session-tree memo downstream keys on these
+  // identities — an inline filter would rebuild the tree on every render.
   const filteredSessions = useMemo(
     () => selectedProject
-      ? allSessions.filter((s) => (s.projectRoot ?? s.cwd) === selectedProject)
-      : allSessions,
+      ? allSessions.filter((s) => !s.archived && (s.projectRoot ?? s.cwd) === selectedProject)
+      : allSessions.filter((s) => !s.archived),
     [allSessions, selectedProject],
   );
 
@@ -1988,8 +2003,62 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           onSelect={(path) => void commitCustomPath(path)}
         />
       )}
+      {/* Panel mode (desktop only): the title-bar strip where the project
+          tabs/dropdown live in dropdown mode becomes a big search box +
+          新建任务 button. On mobile the panel renders its own compact row,
+          since the title bar is too narrow there. */}
+      {sidebarMode === "projects" && !isMobile && workspaceControlsHosts?.title && createPortal(
+        <div className="app-no-drag" style={{ display: "flex", alignItems: "center", gap: 6, height: "100%", minWidth: 0, width: "100%" }}>
+          <div style={{ flex: "1 1 240px", minWidth: 120, maxWidth: 460, marginLeft: 8, display: "flex", alignItems: "center", gap: 6, background: "var(--bg-hover)", borderRadius: 0, padding: "0 10px", height: 32 }}>
+            <MagnifyingGlass size={13} color="var(--text-dim)" style={{ flexShrink: 0 }} aria-hidden="true" />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t("desktop.searchSessions")}
+              aria-label={t("desktop.searchSessions")}
+              style={{ flex: 1, minWidth: 0, background: "none", border: "none", outline: "none", color: "var(--text)", fontSize: 12.5, fontFamily: "var(--font-mono)" }}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                aria-label={t("i18n.close")}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, padding: 0, background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", borderRadius: 4, flexShrink: 0 }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-selected)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+              >
+                <X size={11} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={handleNewTaskBlank}
+            title={t("desktop.newTask")}
+            aria-label={t("desktop.newTask")}
+            style={{
+              display: "flex", alignItems: "center", gap: 5, flexShrink: 0,
+              height: 32, padding: "0 12px",
+              background: "var(--bg-selected)", border: "1px solid var(--border)", borderRadius: 5,
+              color: "var(--text)", fontSize: 12, fontWeight: 500, whiteSpace: "nowrap",
+              cursor: "pointer",
+              transition: "color 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+          >
+            <Plus size={13} weight="regular" aria-hidden="true" />
+            {t("desktop.newTask")}
+          </button>
+        </div>,
+        workspaceControlsHosts.title,
+        "panel-title",
+      )}
+      {/* Dropdown mode: the title-bar workspace controls (project tabs +
+          dropdown switcher). Panel mode replaces that strip with the search +
+          新建任务 portal above. The welcome-page project picker renders in
+          BOTH modes — a new session always shows the project name above the
+          composer and supports switching via dropdown. */}
       {(Object.entries(workspaceControlsHosts ?? {}) as Array<[string, HTMLElement | null | undefined]>)
-        .filter(([location]) => location === "title" || location === "welcome")
+        .filter(([location]) => location === "welcome" || (location === "title" && sidebarMode !== "projects"))
         .map(([location, host]) => host && createPortal(
         <div ref={(node) => { workspaceDropdownRefs.current[location as "title" | "welcome"] = node; }} style={{ height: "100%", display: "flex" }}>
           {location === "title" && projectTabBar}
@@ -2006,7 +2075,79 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         workspaceControlsHosts.titleRight,
         "titleRight",
       )}
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}>
+      {/* One-time onboarding hint for the two sidebar layouts. Anchored to the
+          sidebar root (not the toggle button) so its full width always stays
+          inside the panel instead of overflowing the left edge. */}
+      {modeHintVisible && sidebarMode === "dropdown" && (
+        <div
+          role="dialog"
+          aria-label={t("desktop.sidebarModeHintTitle")}
+          style={{
+            position: "absolute", top: 40, left: 8, right: 8, zIndex: 60,
+            background: "var(--bg-panel)", border: "1px solid var(--border)",
+            borderRadius: 10, boxShadow: "0 10px 28px rgba(0,0,0,0.4)", padding: 10,
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{t("desktop.sidebarModeHintTitle")}</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.55 }}>{t("desktop.sidebarModeHintDesc")}</div>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+            <button
+              onClick={dismissModeHint}
+              style={{
+                height: 24, padding: "0 10px", background: "var(--bg-selected)",
+                border: "1px solid var(--border)", borderRadius: 5,
+                color: "var(--text)", fontSize: 11.5, fontWeight: 500, cursor: "pointer",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+            >
+              {t("desktop.sidebarModeHintOk")}
+            </button>
+          </div>
+        </div>
+      )}
+      {sidebarMode === "projects" ? (
+        <ProjectsPanel
+          sessions={allSessions}
+          loading={loading}
+          runningIds={runningSessionIds}
+          unreadIds={unreadSessionIds}
+          aliases={projectAliases}
+          selectedSessionId={selectedSessionId}
+          selectedProjectRoot={selectedProject}
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          onSelectSession={handleSelectSessionFromList}
+          onNewSessionInProject={handleNewSessionInProject}
+          onArchive={handleArchive}
+          onDeleteForever={handleDeleteForever}
+          onRemoveProject={handleRemoveProject}
+          hiddenProjects={hiddenProjects}
+          onUnhideProject={handleUnhideProject}
+          onPickFolder={() => setDirectoryPickerOpen(true)}
+          onExitPanel={() => switchSidebarMode("dropdown")}
+          onRefresh={() => void loadSessions(false)}
+          onNewTask={handleNewTaskBlank}
+          renderFileTree={(cwd) => (
+            <FileExplorer
+              ref={fileExplorerRef}
+              cwd={cwd}
+              onOpenFile={onOpenFile ?? (() => {})}
+              refreshKey={explorerKey}
+              onAtMention={onAtMention}
+              onAtMentions={onAtMentions}
+              onUploadBusyChange={setExplorerUploadBusy}
+              fileSearchOpen={explorerFileSearchOpen}
+              onFileSearchOpenChange={setExplorerFileSearchOpen}
+              onFileCreated={onFileCreated}
+              onFileDeleted={onFileDeleted}
+            />
+          )}
+          isMobile={isMobile}
+        />
+      ) : (
+        <>
       {/* Header */}
       <div style={{ flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center" }}>
@@ -2031,6 +2172,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           >
             <CaretRight size={9} weight="regular" style={{ transform: sessionsOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} aria-hidden="true" />
             {t("desktop.sessions")}
+          </button>
+          {/* Sidebar mode switch — dropdown mode (current project) ⇄ projects panel */}
+          <button
+            onClick={() => switchSidebarMode("projects")}
+            title={t("desktop.showAllProjects")}
+            aria-label={t("desktop.showAllProjects")}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 22, height: 22, padding: 0, flexShrink: 0,
+              background: "none", border: "none", borderRadius: 5,
+              color: "var(--text-dim)", cursor: "pointer",
+              transition: "color 0.12s, background 0.12s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+          >
+            <ListBullets size={12} weight="regular" aria-hidden="true" />
           </button>
           {/* View style switcher — list / grouped accordion */}
           <div style={{ display: "flex", gap: 2, flexShrink: 0, marginRight: 2 }} role="group" aria-label="Session view">
@@ -2754,6 +2912,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           )}
         </div>
       )}
+        </>
+      )}
 
       {(selectedCwdProp || selectedCwd) && (
         <QuickChangesPanel
@@ -2869,71 +3029,6 @@ const SessionTreeItem = memo(function SessionTreeItem({
     </div>
   );
 });
-
-function RunningSessionIndicator() {
-  const { t } = useI18n();
-
-  return (
-    <span
-      title={t("desktop.agentRunning")}
-      aria-label={t("desktop.agentRunningLabel")}
-      style={{
-        width: 14,
-        height: 14,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        color: "var(--accent)",
-      }}
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ display: "block" }}>
-        <g>
-          <path
-            d="M21 12a9 9 0 1 1-3.8-7.4"
-            stroke="currentColor"
-            strokeWidth="2.8"
-            strokeLinecap="round"
-          />
-          <animateTransform
-            attributeName="transform"
-            type="rotate"
-            from="0 12 12"
-            to="360 12 12"
-            dur="0.9s"
-            repeatCount="indefinite"
-          />
-        </g>
-      </svg>
-    </span>
-  );
-}
-
-function UnreadSessionIndicator() {
-  const { t } = useI18n();
-
-  return (
-    <span
-      title={t("desktop.newActivity")}
-      aria-label={t("desktop.newSessionActivity")}
-      style={{
-        width: 14,
-        height: 14,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        color: "var(--accent)",
-      }}
-    >
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ display: "block" }}>
-        <circle cx="7" cy="7" r="3" fill="currentColor">
-          <animate attributeName="opacity" values="1;0.25;1" dur="1.6s" repeatCount="indefinite" />
-        </circle>
-      </svg>
-    </span>
-  );
-}
 
 const SessionItem = memo(function SessionItem({
   session,
@@ -3100,10 +3195,14 @@ const SessionItem = memo(function SessionItem({
     }
   }, [session.id, onRenamed]);
 
-  const performDelete = useCallback(async () => {
+  const performArchive = useCallback(async () => {
     setDeleting(true);
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: true }),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       onDeleted?.(session.id);
     } catch {
@@ -3114,17 +3213,17 @@ const SessionItem = memo(function SessionItem({
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (e.shiftKey) {
-      void performDelete();
+      void performArchive();
     } else {
       setConfirmDelete(true);
     }
-  }, [performDelete]);
+  }, [performArchive]);
 
   const handleDeleteConfirm = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setConfirmDelete(false);
-    void performDelete();
-  }, [performDelete]);
+    void performArchive();
+  }, [performArchive]);
 
   const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -3148,10 +3247,10 @@ const SessionItem = memo(function SessionItem({
         paddingRight: 8,
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
-          ? "rgba(239,68,68,0.06)"
+          ? "var(--bg-selected)"
           : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
         borderLeft: confirmDelete
-          ? "2px solid #ef4444"
+          ? "2px solid var(--accent)"
           : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
         transition: "background 0.1s",
         opacity: deleting ? 0.5 : 1,
@@ -3160,10 +3259,10 @@ const SessionItem = memo(function SessionItem({
       }}
     >
       {confirmDelete ? (
-        /* ── Delete confirmation: same height, two flat buttons ── */
+        /* ── Archive confirmation: same height, two flat buttons ── */
         <>
           <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {t("desktop.deleteSession", { title: `“${title.slice(0, 22)}${title.length > 22 ? "…" : ""}”` })}
+            {t("desktop.archiveSessionConfirm", { title: `“${title.slice(0, 22)}${title.length > 22 ? "…" : ""}”` })}
           </div>
           <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
             <button
@@ -3171,14 +3270,14 @@ const SessionItem = memo(function SessionItem({
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
                 height: 30, padding: "0 11px",
-                background: "#ef4444", border: "none",
+                background: "var(--accent)", border: "none",
                 borderRadius: 6, color: "#fff",
                 cursor: "pointer", fontSize: 12, fontWeight: 600,
                 whiteSpace: "nowrap",
               }}
             >
-              <Trash size={12} weight="regular" aria-hidden="true" />
-              {t("desktop.delete")}
+              <Archive size={12} weight="regular" aria-hidden="true" />
+              {t("desktop.archiveSession")}
             </button>
             <button
               onClick={handleDeleteCancel}
@@ -3387,7 +3486,8 @@ const SessionItem = memo(function SessionItem({
                 </button>
                 <button
                   onClick={handleDeleteClick}
-                  title={t("desktop.deleteWithShift")}
+                  title={t("desktop.archiveSession")}
+                  aria-label={t("desktop.archiveSession")}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center",
                     width: 20, height: 20, padding: 0,
@@ -3397,13 +3497,13 @@ const SessionItem = memo(function SessionItem({
                     transition: "color 0.12s",
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.color = "#ef4444";
+                    e.currentTarget.style.color = "var(--accent)";
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.color = "var(--text-dim)";
                   }}
                 >
-                  <Trash size={13} weight="regular" aria-hidden="true" />
+                  <Archive size={13} weight="regular" aria-hidden="true" />
                 </button>
                 </div>
               )}
@@ -3757,14 +3857,18 @@ function SessionCompactRow({
 
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (e.shiftKey) void performDelete();
+    if (e.shiftKey) void performArchive();
     else setConfirmDelete(true);
   };
 
-  const performDelete = async () => {
+  const performArchive = async () => {
     setDeleting(true);
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: true }),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       onDeleted?.(session.id);
     } catch {
@@ -3792,10 +3896,10 @@ function SessionCompactRow({
         position: "relative",
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
-          ? "rgba(239,68,68,0.06)"
+          ? "var(--bg-selected)"
           : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
         borderLeft: confirmDelete
-          ? "2px solid #ef4444"
+          ? "2px solid var(--accent)"
           : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
         borderRadius: 6,
         transition: "background 0.1s",
@@ -3810,12 +3914,12 @@ function SessionCompactRow({
       {confirmDelete ? (
         <>
           <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {t("desktop.deleteSession", { title: `"${title.slice(0, 22)}${title.length > 22 ? "…" : ""}"` })}
+            {t("desktop.archiveSessionConfirm", { title: `“${title.slice(0, 22)}${title.length > 22 ? "…" : ""}”` })}
           </div>
           <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-            <button onClick={(e) => { e.stopPropagation(); void performDelete(); }} style={{ display: "flex", alignItems: "center", gap: 4, height: 28, padding: "0 11px", background: "#ef4444", border: "none", borderRadius: 6, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
-              <Trash size={12} weight="regular" aria-hidden="true" />
-              {t("desktop.delete")}
+            <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); void performArchive(); }} style={{ display: "flex", alignItems: "center", gap: 4, height: 28, padding: "0 11px", background: "var(--accent)", border: "none", borderRadius: 6, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+              <Archive size={12} weight="regular" aria-hidden="true" />
+              {t("desktop.archiveSession")}
             </button>
             <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }} style={{ height: 28, padding: "0 11px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
               {t("desktop.cancel")}
@@ -3884,12 +3988,13 @@ function SessionCompactRow({
                 </button>
                 <button
                   onClick={handleDeleteClick}
-                  title={t("desktop.deleteWithShift")}
+                  title={t("desktop.archiveSession")}
+                  aria-label={t("desktop.archiveSession")}
                   style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--text-dim)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
                 >
-                  <Trash size={12} weight="regular" aria-hidden="true" />
+                  <Archive size={12} weight="regular" aria-hidden="true" />
                 </button>
               </div>
             )}

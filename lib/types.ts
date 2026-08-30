@@ -358,6 +358,11 @@ export interface SessionInfo {
       };
   /** Whether this session is pinned to the top of the session list (stored in settings.json sessionPins). */
   pinned?: boolean;
+  /** Whether this session is archived (soft-hidden from sidebar lists; stored in
+   *  agentDir session-archive.json). The .jsonl file stays on disk. */
+  archived?: boolean;
+  /** ISO timestamp of when the session was archived (undefined when not archived). */
+  archivedAt?: string;
   /** Main repo root shared by all worktrees of this cwd (cwd itself for non-git dirs).
    *  Always set by the server; optional because the client builds transient
    *  SessionInfo objects before the first refresh. Fall back to cwd. */

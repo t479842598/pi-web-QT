@@ -175,8 +175,10 @@ export function AppTitleBar({
         }}
       >
         {/* Left zone: sidebar toggle + workspace controls (project picker +
-            tabs). Takes its content width; shrinks before the title does. */}
-        <div style={{ display: "flex", alignItems: "center", minWidth: 0, height: "100%", flex: "0 1 auto" }}>
+            tabs). Takes its content width; shrinks before the title does.
+            Positioned above the absolute center zone so its controls stay
+            clickable. */}
+        <div style={{ display: "flex", alignItems: "center", minWidth: 0, height: "100%", flex: "0 1 auto", position: "relative", zIndex: 1 }}>
           <button
             className="app-no-drag"
             onClick={onSidebarToggle}
@@ -185,11 +187,12 @@ export function AppTitleBar({
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               width: 36, height: 36, padding: 0, flexShrink: 0,
-              background: sidebarOpen ? "var(--bg-selected)" : "none", border: "none",
-              color: sidebarOpen ? "var(--text)" : "var(--text-muted)", cursor: "pointer", transition: "background 0.12s, color 0.12s",
+              // ZCode-style plain icon: no background box, glyph in text color.
+              background: "none", border: "none",
+              color: "var(--text-muted)", cursor: "pointer", transition: "color 0.12s",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = sidebarOpen ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = sidebarOpen ? "var(--text)" : "var(--text-muted)"; }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
           >
             {sidebarOpen ? <SidebarSimple size={16} aria-hidden="true" /> : <List size={16} aria-hidden="true" />}
           </button>
@@ -211,17 +214,22 @@ export function AppTitleBar({
         </div>
 
         {/* Center zone: active session title + branch chip + worktree switcher.
-            flex:1 takes the remaining space; the title stays centered in that
-            space (shifting right as tabs grow) and never overlaps the tabs. */}
+            Absolutely positioned over the area right of the sidebar (the
+            sidebar width is excluded via --pi-titlebar-sidebar-offset), so the
+            title is centered in the chat region itself, not the whole window.
+            maxWidth keeps it clear of the right-zone buttons. */}
         <div
           className="app-title-drag"
           style={{
-            flex: 1,
+            position: "absolute",
+            left: "var(--pi-titlebar-sidebar-offset, 0px)",
+            right: 0,
+            top: 0,
+            bottom: 0,
             minWidth: 0,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            height: "100%",
             padding: "0 12px",
             overflow: "hidden",
             userSelect: "none",
@@ -236,6 +244,7 @@ export function AppTitleBar({
                 display: "block",
                 flex: "0 1 auto",
                 minWidth: 0,
+                maxWidth: "calc(100% - 320px)",
                 fontSize: 12,
                 fontWeight: 500,
                 color: "var(--text-muted)",
@@ -266,8 +275,9 @@ export function AppTitleBar({
         {/* Right zone: task board / file panel / theme / settings buttons.
             窗口控制已由悬浮灵动岛（DynamicIsland）承担，不再占用本行宽度；
             窄窗口时本区收缩、overflow:hidden 从左侧裁掉功能钮，功能区最末
-            的「设置」始终保留。 */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, minWidth: 0, height: "100%", flexShrink: 1, overflow: "hidden" }}>
+            的「设置」始终保留。marginLeft:auto 把它钉在右缘（中区已改为绝对
+            定位不再撑开），position/zIndex 保证按钮浮在中区拖拽层之上可点击。 */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, minWidth: 0, height: "100%", flexShrink: 1, overflow: "hidden", marginLeft: "auto", position: "relative", zIndex: 1 }}>
 
         {/* Task board toggle — desktop only, hidden when the feature is off */}
         {!isMobile && tasksBoardEnabled && (

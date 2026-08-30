@@ -2307,15 +2307,22 @@ span.token.table {
   }
 }
 
-/* iOS Safari zooms into any input/select/textarea whose font-size is below
-   16px when it receives focus. Inside the settings dialog every input is
-   styled inline with 11–13px fonts, so on mobile force 16px to keep the page
-   from zooming; desktop layout is untouched (media query is mobile-only). */
+/* Mobile settings inputs previously forced 16px to stop iOS Safari zooming on
+   focus, but that made every field look oversized next to the 11–13px labels
+   and truncated the title-model select. The primary mobile target is the
+   Android Tauri APK (no focus-zoom), so drop to 14px for a readable, compact
+   form; allow selects to shrink and ellipsize instead of overflowing. iOS
+   Safari may still nudge zoom on focus — an accepted tradeoff for correct
+   layout. Desktop is untouched (media query is mobile-only). */
 @media (max-width: 767px) {
   .settings-modal input,
   .settings-modal select,
   .settings-modal textarea {
-    font-size: 16px !important;
+    font-size: 14px !important;
+  }
+  .settings-modal select {
+    min-width: 0 !important;
+    max-width: 100% !important;
   }
 }
 

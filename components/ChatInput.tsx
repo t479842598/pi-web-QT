@@ -84,13 +84,12 @@ interface Props {
   /** Plan mode: read-only analysis mode toggled from the attach menu. */
   planMode?: boolean;
   onPlanModeChange?: (enabled: boolean) => void;
-  // Chat modes (Reasonix port)
+  // Chat modes (Reasonix port). The composer only exposes the collaboration
+  // mode; run tier and tool approval come from the system settings defaults
+  // (toolApprovalMode is kept read-only here for the is-yolo shell accent).
   collaborationMode?: "normal" | "plan" | "goal";
-  tokenMode?: "full" | "economy" | "delivery";
   toolApprovalMode?: "ask" | "auto" | "yolo";
   onCollaborationModeChange?: (mode: "normal" | "plan" | "goal") => void;
-  onTokenModeChange?: (mode: "full" | "economy" | "delivery") => void;
-  onToolApprovalModeChange?: (mode: "ask" | "auto" | "yolo") => void;
   goalState?: import("@/hooks/useAgentSession").GoalRuntimeState;
   onGoalStart?: (text: string) => void;
   onGoalPause?: () => void;
@@ -464,8 +463,8 @@ function QueuedMessageRow({ kind, text, label, index, total, onMove, onRecall, o
 export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, modelScopeWarnings, modelsError, onRetryModels, onModelChange,
   compactResult, toolPreset, onToolPresetChange, planMode = false, onPlanModeChange,
-  collaborationMode = "normal", tokenMode = "full", toolApprovalMode = "auto",
-  onCollaborationModeChange, onTokenModeChange, onToolApprovalModeChange,
+  collaborationMode = "normal", toolApprovalMode = "auto",
+  onCollaborationModeChange,
   goalState, onGoalStart, onGoalPause, onGoalResume, onGoalStop,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue, onMoveQueue, onRecallOne, onRequeueAt, onRemoveQueueItem,
@@ -2656,14 +2655,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             })()}
           </div>
           <div className="chat-input-toolbar-left" style={{ flex: "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
-            {!isMobile && onCollaborationModeChange && onTokenModeChange && onToolApprovalModeChange && (
+            {!isMobile && onCollaborationModeChange && (
               <ModeControls
                 collaborationMode={collaborationMode}
-                tokenMode={tokenMode}
-                toolApprovalMode={toolApprovalMode}
                 onCollaborationModeChange={onCollaborationModeChange}
-                onTokenModeChange={onTokenModeChange}
-                onToolApprovalModeChange={onToolApprovalModeChange}
                 disabled={isStreaming}
               />
             )}
@@ -2673,10 +2668,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           {/* spacer */}
           {!isMobile && <div className="chat-input-toolbar-spacer" style={{ flex: 1 }} />}
 
-          {/* RIGHT: thinking + tools preset + compact + sound (idle) | Stop + sound (streaming) */}
+          {/* RIGHT: thinking + tools preset + compact + sound (idle) | Stop + sound (streaming)
+              0 1 auto + minWidth 0 lets the group shrink at mid widths; the
+              actions row wraps instead of clipping the model selector. */}
           <div ref={controlsMenuRef} className="chat-input-toolbar-controls" style={{
-            flex: isMobile ? "1 1 auto" : "0 0 auto",
-            minWidth: isMobile ? 0 : undefined,
+            flex: isMobile ? "1 1 auto" : "0 1 auto",
+            minWidth: 0,
             display: "flex",
             alignItems: "center",
             justifyContent: "flex-end",
@@ -2687,10 +2684,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               display: "flex",
               alignItems: "center",
               gap: isMobile ? 1 : 2,
+              flexWrap: "wrap",
+              justifyContent: "flex-end",
               ...(isMobile ? {
                 flex: "1 1 auto",
                 minWidth: 0,
-                justifyContent: "flex-end",
               } : null),
             }}>
             {onThinkingLevelChange && (
