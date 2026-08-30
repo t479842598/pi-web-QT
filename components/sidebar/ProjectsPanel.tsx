@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 // ZCode uses the lucide icon set; mirror its sidebar icon choices exactly.
 import {
   Archive, ArchiveRestore, ArrowLeft, Check, ChevronRight, CirclePlus, Clock, Ellipsis,
-  Folder, FolderClosed, FolderOpen, FolderPlus, Hash, List, ListFilter, ListTree, Maximize2,
-  Minimize2, Plus, RefreshCw, Search, Sparkles, Trash2, X,
+  Folder, FolderClosed, FolderOpen, FolderPlus, Hash, LayoutList, List, ListFilter, ListTree, Maximize2,
+  Minimize2, Plus, Search, Sparkles, Trash2, X,
 } from "lucide-react";
 import type { SessionInfo } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
@@ -47,8 +47,9 @@ interface Props {
   onPickFolder: () => void;
   /** Switch back to the legacy dropdown mode. */
   onExitPanel: () => void;
-  /** Reload the session list (top-bar refresh). */
-  onRefresh: () => void;
+  /** Cycle button in panel form → back to the dropdown 列表 form (keeps the
+   *  button at the same top-left position across all three sidebar forms). */
+  onCycleToList: () => void;
   /** Refresh after a session's title was (re)generated. */
   onRenamed: () => void;
   /** 新建任务 — on mobile the panel renders its own search row + button,
@@ -78,7 +79,7 @@ export function ProjectsPanel({
   searchQuery, onSearchQueryChange,
   onSelectSession, onNewSessionInProject, onArchive, onDeleteForever,
   onRemoveProject, hiddenProjects, onUnhideProject,
-  onPickFolder, onExitPanel, onRefresh, onRenamed, onNewTask, renderFileTree, isMobile,
+  onPickFolder, onExitPanel, onCycleToList, onRenamed, onNewTask, renderFileTree, isMobile,
 }: Props) {
   const { t } = useI18n();
 
@@ -93,6 +94,8 @@ export function ProjectsPanel({
   // still hovering must not blank the buttons out.
   const [hoveredProjectKey, setHoveredProjectKey] = useState<string | null>(null);
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
+  // Rows render in the ZCode two-line style (title / folder + time).
+  const rowStyle = "detailed" as const;
   const filterRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -198,6 +201,11 @@ export function ProjectsPanel({
 
   // ─── Row renderers ────────────────────────────────────────────────────────
 
+  const folderNameFor = (session: SessionInfo): string => {
+    const root = session.projectRoot ?? session.cwd ?? "";
+    return aliases[root]?.trim() || root.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() || root || "?";
+  };
+
   const renderSessionRow = (session: SessionInfo, indent = false) => (
     <PanelSessionRow
       key={session.id}
@@ -207,6 +215,8 @@ export function ProjectsPanel({
       isUnread={unreadIds.has(session.id)}
       indent={indent}
       forceActionsVisible={isMobile}
+      rowStyle={rowStyle}
+      folderName={folderNameFor(session)}
       onSelect={() => onSelectSession(session)}
       onArchive={() => onArchive(session, true)}
       onRenamed={onRenamed}
@@ -447,6 +457,8 @@ export function ProjectsPanel({
     <div style={{ display: "flex", flexDirection: "column", flex: "1 1 0", minHeight: 0, overflow: "hidden" }}>
       {/* Panel top bar */}
       <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "6px 6px", flexShrink: 0 }}>
+        {/* Panel's own view bubbles (分组/项目); the sidebar-form cycle button
+            lives in the dropdown-mode header. */}
         <div style={{ display: "flex", alignItems: "center", gap: 1, background: "var(--bg-hover)", borderRadius: 12, padding: 2 }}>
           <button style={bubbleStyle(prefs.organizeBy === "grouped")} onClick={() => setBubble("grouped")} aria-pressed={prefs.organizeBy === "grouped"}>
             <Hash size={11} style={{ opacity: 0.7 }} aria-hidden="true" />
@@ -469,17 +481,18 @@ export function ProjectsPanel({
             ? <Maximize2 size={13} aria-hidden="true" />
             : <Minimize2 size={13} aria-hidden="true" />}
         </button>
-        <div style={{ flex: 1 }} />
+        {/* Cycle button (icon-only, fixed slot right of expand-all): panel → 列表 form. */}
         <button
-          onClick={onRefresh}
-          title={t("desktop.refresh")}
-          aria-label={t("desktop.refresh")}
-          style={iconButtonStyle(false)}
+          onClick={onCycleToList}
+          title={`${t("desktop.sidebarModeCycle")}：${t("desktop.sessionViewList")}`}
+          aria-label={t("desktop.sidebarModeCycle")}
+          style={{ ...iconButtonStyle(false), marginLeft: 2 }}
           onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
         >
-          <RefreshCw size={13} aria-hidden="true" />
+          <LayoutList size={13} aria-hidden="true" />
         </button>
+        <div style={{ flex: 1 }} />
         <div ref={filterRef} style={{ position: "relative" }}>
           <button
             onClick={() => setFilterOpen((v) => !v)}
@@ -637,7 +650,7 @@ export function ProjectsPanel({
 // ─── Rows ───────────────────────────────────────────────────────────────────
 
 function PanelSessionRow({
-  session, isSelected, isRunning, isUnread, indent, forceActionsVisible, onSelect, onArchive, onRenamed,
+  session, isSelected, isRunning, isUnread, indent, forceActionsVisible, rowStyle, folderName, onSelect, onArchive, onRenamed,
 }: {
   session: SessionInfo;
   isSelected: boolean;
@@ -645,6 +658,8 @@ function PanelSessionRow({
   isUnread: boolean;
   indent: boolean;
   forceActionsVisible: boolean;
+  rowStyle: "detailed" | "compact";
+  folderName: string;
   onSelect: () => void;
   onArchive: () => void;
   onRenamed: () => void;
@@ -699,6 +714,41 @@ function PanelSessionRow({
     );
   }
 
+  const actions = (
+    <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+      <button
+        onClick={handleAutoName}
+        disabled={autoNaming || !hasMessages}
+        title={autoNameError ?? (!hasMessages ? t("desktop.titleNeedsMessages") : autoNaming ? t("desktop.generatingTitle") : t("desktop.generateTitle"))}
+        aria-label={t("desktop.generateTitle")}
+        style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: autoNameError ? "#ef4444" : "var(--text-dim)", cursor: autoNaming || !hasMessages ? "default" : "pointer", flexShrink: 0, opacity: autoNaming ? 0.7 : !hasMessages ? 0.35 : 1, transition: "color 0.12s" }}
+        onMouseEnter={(e) => { if (!autoNaming && hasMessages) e.currentTarget.style.color = "var(--accent)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = autoNameError ? "#ef4444" : "var(--text-dim)"; }}
+      >
+        {autoNaming ? (
+          <svg style={{ animation: "spin 1s linear infinite" }} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        ) : (
+          <Sparkles size={13} aria-hidden="true" />
+        )}
+      </button>
+      <button
+        onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+        title={t("desktop.archiveSession")}
+        aria-label={t("desktop.archiveSession")}
+        style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--text-dim)", cursor: "pointer", flexShrink: 0 }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+      >
+        <Archive size={13} aria-hidden="true" />
+      </button>
+    </div>
+  );
+
+  const showActions = hovered || forceActionsVisible;
+
   return (
     <div
       onClick={onSelect}
@@ -706,8 +756,9 @@ function PanelSessionRow({
       onMouseLeave={() => setHovered(false)}
       style={{
         position: "relative",
-        display: "flex", alignItems: "center", gap: 6, height: 30,
-        paddingLeft: indent ? 34 : 18, paddingRight: 6,
+        padding: `${rowStyle === "detailed" ? 5 : 0}px 6px ${rowStyle === "detailed" ? 5 : 0}px ${indent ? 34 : 18}px`,
+        height: rowStyle === "detailed" ? 46 : 30,
+        display: "flex", flexDirection: "column", justifyContent: "center",
         cursor: "pointer", borderRadius: 6,
         background: isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
         borderLeft: isSelected ? "2px solid var(--accent)" : "2px solid transparent",
@@ -721,44 +772,25 @@ function PanelSessionRow({
           {isRunning ? <RunningSessionIndicator /> : <UnreadSessionIndicator />}
         </span>
       )}
-      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, color: "var(--text)", fontWeight: isSelected ? 500 : 400 }}>
-        {title}
-      </span>
-      {(hovered || forceActionsVisible) ? (
-        <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
-          <button
-            onClick={handleAutoName}
-            disabled={autoNaming || !hasMessages}
-            title={autoNameError ?? (!hasMessages ? t("desktop.titleNeedsMessages") : autoNaming ? t("desktop.generatingTitle") : t("desktop.generateTitle"))}
-            aria-label={t("desktop.generateTitle")}
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: autoNameError ? "#ef4444" : "var(--text-dim)", cursor: autoNaming || !hasMessages ? "default" : "pointer", flexShrink: 0, opacity: autoNaming ? 0.7 : !hasMessages ? 0.35 : 1, transition: "color 0.12s" }}
-            onMouseEnter={(e) => { if (!autoNaming && hasMessages) e.currentTarget.style.color = "var(--accent)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = autoNameError ? "#ef4444" : "var(--text-dim)"; }}
-          >
-            {autoNaming ? (
-              <svg style={{ animation: "spin 1s linear infinite" }} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
-                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-            ) : (
-              <Sparkles size={13} aria-hidden="true" />
-            )}
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-            title={t("desktop.archiveSession")}
-            aria-label={t("desktop.archiveSession")}
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--text-dim)", cursor: "pointer", flexShrink: 0 }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
-          >
-            <Archive size={13} aria-hidden="true" />
-          </button>
-        </div>
-      ) : (
-        <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
-          {formatRelativeTime(session.modified, t)}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, color: "var(--text)", fontWeight: isSelected ? 500 : 400 }}>
+          {title}
         </span>
+        {showActions ? actions : rowStyle === "compact" ? (
+          <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
+            {formatRelativeTime(session.modified, t)}
+          </span>
+        ) : null}
+      </div>
+      {rowStyle === "detailed" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, minWidth: 0 }}>
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, color: "var(--text-dim)" }} title={session.projectRoot ?? session.cwd}>
+            {folderName}
+          </span>
+          <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
+            {formatRelativeTime(session.modified, t)}
+          </span>
+        </div>
       )}
     </div>
   );

@@ -2250,7 +2250,9 @@ span.token.table {
   }
   .sidebar-container {
     position: fixed !important;
-    top: 36px;
+    /* Sit below the 48px title bar (AppTitleBar height was raised 36→48 in
+       v0.14.5; the drawer offset must match or its header hides behind it). */
+    top: 48px;
     left: 0;
     bottom: 0;
     width: 280px;

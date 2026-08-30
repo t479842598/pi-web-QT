@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, memo, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, Archive, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, GitFork, Lightning, List, ListBullets, MagnifyingGlass, PencilSimple, Plug, Plus, PushPin, Sparkle, Stack, StackSimple, Trash, UploadSimple, X } from "@phosphor-icons/react";
+import { ArrowClockwise, Archive, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, GitFork, Lightning, List, MagnifyingGlass, PencilSimple, Plug, Plus, PushPin, Sparkle, Stack, StackSimple, Trash, UploadSimple, X } from "@phosphor-icons/react";
 import type { SessionInfo } from "@/lib/types";
 import { sameIdSet } from "@/lib/id-set";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -2127,7 +2127,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           onUnhideProject={handleUnhideProject}
           onPickFolder={() => setDirectoryPickerOpen(true)}
           onExitPanel={() => switchSidebarMode("dropdown")}
-          onRefresh={() => void loadSessions(false)}
+          onCycleToList={() => { setViewStyleAndPersist("list"); switchSidebarMode("dropdown"); }}
           onRenamed={() => void loadSessions(false)}
           onNewTask={handleNewTaskBlank}
           renderFileTree={(cwd) => (
@@ -2174,64 +2174,27 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             <CaretRight size={9} weight="regular" style={{ transform: sessionsOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} aria-hidden="true" />
             {t("desktop.sessions")}
           </button>
-          {/* Sidebar mode switch — dropdown mode (current project) ⇄ projects panel */}
+          {/* One button cycles the three sidebar forms: 普通列表 → 手风琴 → ZCode 全部项目面板.
+              Icon-only so it never crowds the right-side controls. */}
           <button
-            onClick={() => switchSidebarMode("projects")}
-            title={t("desktop.showAllProjects")}
-            aria-label={t("desktop.showAllProjects")}
+            onClick={() => {
+              if (viewStyle === "list") setViewStyleAndPersist("groups");
+              else switchSidebarMode("projects");
+            }}
+            title={`${t("desktop.sidebarModeCycle")}：${viewStyle === "list" ? t("desktop.sessionViewGroups") : t("desktop.showAllProjects")}`}
+            aria-label={t("desktop.sidebarModeCycle")}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
-              width: 22, height: 22, padding: 0, flexShrink: 0,
+              width: 22, height: 22, padding: 0, marginRight: 2, flexShrink: 0,
               background: "none", border: "none", borderRadius: 5,
               color: "var(--text-dim)", cursor: "pointer",
               transition: "color 0.12s, background 0.12s",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
           >
-            <ListBullets size={12} weight="regular" aria-hidden="true" />
+            {viewStyle === "list" ? <List size={12} weight="regular" aria-hidden="true" /> : <StackSimple size={12} weight="regular" aria-hidden="true" />}
           </button>
-          {/* View style switcher — list / grouped accordion */}
-          <div style={{ display: "flex", gap: 2, flexShrink: 0, marginRight: 2 }} role="group" aria-label="Session view">
-            <button
-              onClick={() => setViewStyleAndPersist("list")}
-              title={t("desktop.sessionViewList")}
-              aria-label={t("desktop.sessionViewList")}
-              aria-pressed={viewStyle === "list"}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 22, height: 22, padding: 0,
-                background: viewStyle === "list" ? "var(--bg-selected)" : "none",
-                border: "none", borderRadius: 5, flexShrink: 0,
-                color: viewStyle === "list" ? "var(--accent)" : "var(--text-dim)",
-                cursor: "pointer",
-                transition: "color 0.12s, background 0.12s",
-              }}
-              onMouseEnter={(e) => { if (viewStyle !== "list") { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text-muted)"; } }}
-              onMouseLeave={(e) => { if (viewStyle !== "list") { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-dim)"; } }}
-            >
-              <List size={12} weight="regular" aria-hidden="true" />
-            </button>
-            <button
-              onClick={() => setViewStyleAndPersist("groups")}
-              title={t("desktop.sessionViewGroups")}
-              aria-label={t("desktop.sessionViewGroups")}
-              aria-pressed={viewStyle === "groups"}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 22, height: 22, padding: 0,
-                background: viewStyle === "groups" ? "var(--bg-selected)" : "none",
-                border: "none", borderRadius: 5, flexShrink: 0,
-                color: viewStyle === "groups" ? "var(--accent)" : "var(--text-dim)",
-                cursor: "pointer",
-                transition: "color 0.12s, background 0.12s",
-              }}
-              onMouseEnter={(e) => { if (viewStyle !== "groups") { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text-muted)"; } }}
-              onMouseLeave={(e) => { if (viewStyle !== "groups") { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-dim)"; } }}
-            >
-              <StackSimple size={12} weight="regular" aria-hidden="true" />
-            </button>
-          </div>
           <button
             onClick={handleNewSession}
             disabled={!selectedCwd}
