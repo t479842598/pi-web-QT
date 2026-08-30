@@ -2128,6 +2128,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           onPickFolder={() => setDirectoryPickerOpen(true)}
           onExitPanel={() => switchSidebarMode("dropdown")}
           onRefresh={() => void loadSessions(false)}
+          onRenamed={() => void loadSessions(false)}
           onNewTask={handleNewTaskBlank}
           renderFileTree={(cwd) => (
             <FileExplorer

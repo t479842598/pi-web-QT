@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import {
   Archive, ArchiveRestore, ArrowLeft, Check, ChevronRight, CirclePlus, Clock, Ellipsis,
   Folder, FolderClosed, FolderOpen, FolderPlus, Hash, List, ListFilter, ListTree, Maximize2,
-  Minimize2, Plus, RefreshCw, Search, Trash2, X,
+  Minimize2, Plus, RefreshCw, Search, Sparkles, Trash2, X,
 } from "lucide-react";
 import type { SessionInfo } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
@@ -49,6 +49,8 @@ interface Props {
   onExitPanel: () => void;
   /** Reload the session list (top-bar refresh). */
   onRefresh: () => void;
+  /** Refresh after a session's title was (re)generated. */
+  onRenamed: () => void;
   /** 新建任务 — on mobile the panel renders its own search row + button,
    *  because the title-bar strip (desktop) is too narrow there. */
   onNewTask: () => void;
@@ -76,7 +78,7 @@ export function ProjectsPanel({
   searchQuery, onSearchQueryChange,
   onSelectSession, onNewSessionInProject, onArchive, onDeleteForever,
   onRemoveProject, hiddenProjects, onUnhideProject,
-  onPickFolder, onExitPanel, onRefresh, onNewTask, renderFileTree, isMobile,
+  onPickFolder, onExitPanel, onRefresh, onRenamed, onNewTask, renderFileTree, isMobile,
 }: Props) {
   const { t } = useI18n();
 
@@ -207,6 +209,7 @@ export function ProjectsPanel({
       forceActionsVisible={isMobile}
       onSelect={() => onSelectSession(session)}
       onArchive={() => onArchive(session, true)}
+      onRenamed={onRenamed}
     />
   );
 
@@ -634,7 +637,7 @@ export function ProjectsPanel({
 // ─── Rows ───────────────────────────────────────────────────────────────────
 
 function PanelSessionRow({
-  session, isSelected, isRunning, isUnread, indent, forceActionsVisible, onSelect, onArchive,
+  session, isSelected, isRunning, isUnread, indent, forceActionsVisible, onSelect, onArchive, onRenamed,
 }: {
   session: SessionInfo;
   isSelected: boolean;
@@ -644,11 +647,34 @@ function PanelSessionRow({
   forceActionsVisible: boolean;
   onSelect: () => void;
   onArchive: () => void;
+  onRenamed: () => void;
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [autoNaming, setAutoNaming] = useState(false);
+  const [autoNameError, setAutoNameError] = useState<string | null>(null);
   const title = session.name || session.firstMessage?.slice(0, 50) || session.id;
+  const hasMessages = session.messageCount > 0;
+
+  // 生成标题 — calls the model via the auto-name endpoint, which uses the
+  // title-generation model configured in 设置 → 模型 → 标题生成模型.
+  const handleAutoName = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (autoNaming || !hasMessages) return;
+    setAutoNaming(true);
+    setAutoNameError(null);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/auto-name`, { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as { title?: string; error?: string };
+      if (!res.ok || !body.title) throw new Error(body.error || `HTTP ${res.status}`);
+      onRenamed();
+    } catch (err) {
+      setAutoNameError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAutoNaming(false);
+    }
+  }, [autoNaming, hasMessages, session.id, onRenamed]);
 
   if (confirming) {
     return (
@@ -679,29 +705,56 @@ function PanelSessionRow({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
+        position: "relative",
         display: "flex", alignItems: "center", gap: 6, height: 30,
-        paddingLeft: indent ? 34 : 10, paddingRight: 6,
+        paddingLeft: indent ? 34 : 18, paddingRight: 6,
         cursor: "pointer", borderRadius: 6,
         background: isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
         borderLeft: isSelected ? "2px solid var(--accent)" : "2px solid transparent",
       }}
       title={title}
     >
-      {isRunning ? <RunningSessionIndicator /> : isUnread ? <UnreadSessionIndicator /> : null}
+      {/* Running/unread animation lives in the left gutter (absolute) so it
+          never shifts the title — running and idle rows keep the same text start. */}
+      {(isRunning || isUnread) && (
+        <span style={{ position: "absolute", left: 2, top: 0, bottom: 0, display: "flex", alignItems: "center" }}>
+          {isRunning ? <RunningSessionIndicator /> : <UnreadSessionIndicator />}
+        </span>
+      )}
       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, color: "var(--text)", fontWeight: isSelected ? 500 : 400 }}>
         {title}
       </span>
       {(hovered || forceActionsVisible) ? (
-        <button
-          onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-          title={t("desktop.archiveSession")}
-          aria-label={t("desktop.archiveSession")}
-          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--text-dim)", cursor: "pointer", flexShrink: 0 }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
-        >
-          <Archive size={13} aria-hidden="true" />
-        </button>
+        <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+          <button
+            onClick={handleAutoName}
+            disabled={autoNaming || !hasMessages}
+            title={autoNameError ?? (!hasMessages ? t("desktop.titleNeedsMessages") : autoNaming ? t("desktop.generatingTitle") : t("desktop.generateTitle"))}
+            aria-label={t("desktop.generateTitle")}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: autoNameError ? "#ef4444" : "var(--text-dim)", cursor: autoNaming || !hasMessages ? "default" : "pointer", flexShrink: 0, opacity: autoNaming ? 0.7 : !hasMessages ? 0.35 : 1, transition: "color 0.12s" }}
+            onMouseEnter={(e) => { if (!autoNaming && hasMessages) e.currentTarget.style.color = "var(--accent)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = autoNameError ? "#ef4444" : "var(--text-dim)"; }}
+          >
+            {autoNaming ? (
+              <svg style={{ animation: "spin 1s linear infinite" }} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <Sparkles size={13} aria-hidden="true" />
+            )}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+            title={t("desktop.archiveSession")}
+            aria-label={t("desktop.archiveSession")}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--text-dim)", cursor: "pointer", flexShrink: 0 }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+          >
+            <Archive size={13} aria-hidden="true" />
+          </button>
+        </div>
       ) : (
         <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
           {formatRelativeTime(session.modified, t)}
