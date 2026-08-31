@@ -2876,7 +2876,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
             {/* Model selector — visible always, disabled during streaming */}
             {modelOptions.length > 0 && onModelChange && (
-                <div ref={dropdownRef} className="chat-input-toolbar-model" style={{ position: "relative", flex: isMobile ? "1 1 auto" : undefined, minWidth: 0 }}>
+                <div ref={dropdownRef} className="chat-input-toolbar-model" style={{ position: "relative", flex: isMobile ? "0 1 auto" : undefined, minWidth: 0 }}>
                   <button
                     onClick={(e) => {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -2885,13 +2885,17 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                       setModelDropdownOpen((v) => !v);
                     }}
                     disabled={isStreaming}
+                    title={currentName ?? undefined}
                     style={{
                       display: "flex", alignItems: "center", gap: 6,
                       justifyContent: isMobile ? "flex-start" : undefined,
                       padding: isMobile ? "4px 6px" : "3px 7px",
                       height: 24,
-                      width: isMobile ? "100%" : undefined,
-                      maxWidth: isMobile ? "100%" : "min(220px, 34vw)",
+                      // Long model names must never crowd the toolbar: cap the
+                      // button at a fixed width and ellipsize the label (the
+                      // span below carries the overflow). Mobile gets a tighter
+                      // cap so thinking/tools/send stay on the same row.
+                      maxWidth: isMobile ? "min(150px, 42vw)" : "min(220px, 34vw)",
                       overflow: "hidden",
                       background: modelDropdownOpen ? "var(--bg-hover)" : "none",
                       border: "none",

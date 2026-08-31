@@ -92,7 +92,9 @@ export function ProjectsPanel({
   // still hovering must not blank the buttons out.
   const [hoveredProjectKey, setHoveredProjectKey] = useState<string | null>(null);
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
-  // Rows render in the ZCode two-line style (title / folder + time).
+  // Default row style for the time-based views (grouped / timeline): ZCode
+  // two-line rows (title / folder + time). The project view overrides to
+  // "compact" single-line rows — see renderProjectGroup.
   const rowStyle = "detailed" as const;
   const filterRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -204,7 +206,7 @@ export function ProjectsPanel({
     return aliases[root]?.trim() || root.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() || root || "?";
   };
 
-  const renderSessionRow = (session: SessionInfo, indent = false) => (
+  const renderSessionRow = (session: SessionInfo, indent = false, style: "detailed" | "compact" = rowStyle) => (
     <PanelSessionRow
       key={session.id}
       session={session}
@@ -213,7 +215,7 @@ export function ProjectsPanel({
       isUnread={unreadIds.has(session.id)}
       indent={indent}
       forceActionsVisible={isMobile}
-      rowStyle={rowStyle}
+      rowStyle={style}
       folderName={folderNameFor(session)}
       onSelect={() => onSelectSession(session)}
       onArchive={() => onArchive(session, true)}
@@ -327,12 +329,17 @@ export function ProjectsPanel({
         </div>
         {!group.collapsed && (
           <div>
-            {shown.map((s) => renderSessionRow(s, true))}
+            {/* Project view rows are single-line (title + time): the project is
+                already the group header, so repeating its name under every
+                session is redundant (ZCode parity, user-confirmed 2026-08-31).
+                Grouped/timeline views keep the two-line detailed style since
+                they have no per-project header. */}
+            {shown.map((s) => renderSessionRow(s, true, "compact"))}
             {remaining > 0 && (
               <button
                 onClick={() => setVisibleCounts((prev) => ({ ...prev, [group.projectKey]: visibleCountFor(group.projectKey) + PROJECT_PAGE_SIZE }))}
                 style={{
-                  display: "block", width: "100%", padding: "5px 8px 5px 34px",
+                  display: "block", width: "100%", padding: "5px 8px 5px 42px",
                   background: "none", border: "none", borderRadius: 6,
                   color: "var(--text-dim)", fontSize: 11, cursor: "pointer", textAlign: "left",
                 }}
@@ -681,7 +688,7 @@ function PanelSessionRow({
 
   if (confirming) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 6, height: 30, paddingLeft: indent ? 34 : 10, paddingRight: 6, background: "rgba(239,68,68,0.06)", borderRadius: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, height: 30, paddingLeft: indent ? 42 : 10, paddingRight: 6, background: "rgba(239,68,68,0.06)", borderRadius: 6 }}>
         <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {t("desktop.archiveSessionConfirm", { title: `“${title.slice(0, 18)}${title.length > 18 ? "…" : ""}”` })}
         </span>
@@ -736,6 +743,7 @@ function PanelSessionRow({
   );
 
   const showActions = hovered || forceActionsVisible;
+  const indicator = isRunning ? <RunningSessionIndicator /> : isUnread ? <UnreadSessionIndicator /> : null;
 
   return (
     <div
@@ -744,7 +752,7 @@ function PanelSessionRow({
       onMouseLeave={() => setHovered(false)}
       style={{
         position: "relative",
-        padding: `${rowStyle === "detailed" ? 5 : 0}px 6px ${rowStyle === "detailed" ? 5 : 0}px ${indent ? 34 : 18}px`,
+        padding: `${rowStyle === "detailed" ? 5 : 0}px 6px ${rowStyle === "detailed" ? 5 : 0}px ${indent ? 42 : 18}px`,
         height: rowStyle === "detailed" ? 46 : 30,
         display: "flex", flexDirection: "column", justifyContent: "center",
         cursor: "pointer", borderRadius: 6,
@@ -753,15 +761,21 @@ function PanelSessionRow({
       }}
       title={title}
     >
-      {/* Status indicator absolutely positioned into the folder-icon column
-          (left ≈ chevron+gap+icon offset) so it lines up with the folder row's
-          icon/spinner WITHOUT moving the title text. */}
-      {(isRunning || isUnread) && (
+      {/* Indented (project-panel) rows: status indicator absolutely positioned
+          into the folder-icon column (left ≈ chevron+gap+icon offset) so it
+          lines up with the folder row's icon/spinner. The title text starts at
+          the project-title column (4+2+42 = 48px = chevron+folder+gaps), which
+          also leaves a 6px gap between the 14px indicator and the text.
+          Non-indented rows (timeline / grouped top level) have no folder
+          column, so the indicator renders inline before the title instead —
+          an absolute gutter there would overlap the 18px-padded text. */}
+      {indicator && indent && (
         <span style={{ position: "absolute", left: 22, top: 0, bottom: 0, display: "flex", alignItems: "center" }}>
-          {isRunning ? <RunningSessionIndicator /> : <UnreadSessionIndicator />}
+          {indicator}
         </span>
       )}
       <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+        {indicator && !indent && indicator}
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, color: "var(--text)", fontWeight: isSelected ? 500 : 400 }}>
           {title}
         </span>

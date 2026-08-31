@@ -549,6 +549,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [hasEarlierMessages, setHasEarlierMessages] = useState(false);
   const [streamState, dispatch] = useReducer(streamReducer, { isStreaming: false, streamingMessage: null });
+  // Mirror for the reconcile net: the live tail renders while
+  // agentRunning || isStreaming, so a stuck isStreaming with agentRunning
+  // already false must keep the server poll alive (reconcileAgentState below).
+  const streamActiveRef = useRef(false);
+  streamActiveRef.current = streamState.isStreaming;
 
   // ── Live token rate (tokens/sec) during streaming ────────────────────────
   // Approximated from streamed text length: every message_update event carries
@@ -1160,6 +1165,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setActiveLeafId(d.leafId);
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
+      // The completion reload (prompt_done / agent_settled) swaps the expanded
+      // streaming tail for the collapsed final turn: the virtual list's total
+      // height drops and the browser CLAMPS scrollTop up to the new end. That
+      // clamp is our own DOM change, not a user gesture — arm the programmatic
+      // ignore window so handleScrollPositionChange does not read it as a
+      // scroll-away and revoke the auto-scroll authority. Without this the
+      // clamp (and the load-earlier restore it can trigger on a short tail
+      // window) stranded the viewport mid-conversation right after the run.
+      if (!agentRunningRef.current) {
+        ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
+      }
       setHistoryCursor(d.context.oldestEntryId);
       setHasEarlierMessages(d.context.hasMore);
       // A model_change entry can lag the live set_model result during a reload.
@@ -1764,7 +1780,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // If the server reports idle while we still think it's running, finish
   // through the same path as prompt_done.
   const reconcileAgentState = useCallback(async (sid: string) => {
-    if (!agentRunningRef.current) return;
+    if (!agentRunningRef.current && !streamActiveRef.current) return;
     const runId = promptRunIdRef.current;
     try {
       const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
@@ -1788,7 +1804,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setPendingRecovery(state?.pendingRecovery ?? []);
       const busy = data.running && state
         && (state.isStreaming || state.isPromptRunning || state.isBashRunning || state.isCompacting);
-      if (busy || !agentRunningRef.current) return;
+      if (busy || (!agentRunningRef.current && !streamActiveRef.current)) return;
       if (state) {
         if (state.contextUsage !== undefined) setContextUsage(state.contextUsage ?? null);
         if (state.systemPrompt !== undefined) setSystemPrompt(state.systemPrompt ?? null);
@@ -1812,7 +1828,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // against the server periodically and whenever the tab returns to the
   // foreground or the network comes back.
   useEffect(() => {
-    if (!agentRunning) return;
+    if (!agentRunning && !streamState.isStreaming) return;
     const reconcile = () => {
       // Read the ref on every tick: for brand-new sessions the id is
       // assigned only after ensure_session returns.
@@ -1830,7 +1846,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("online", reconcile);
     };
-  }, [agentRunning, reconcileAgentState]);
+  }, [agentRunning, streamState.isStreaming, reconcileAgentState]);
 
   useEffect(() => {
     agentRunningRef.current = agentRunning;
@@ -2801,9 +2817,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // fall through to the settlement path below
     }
     if (serverConfirmedIdle) {
-      agentRunningRef.current = false;
-      setAgentRunning(false);
-      setAgentPhase(null);
+      // settleUiStage — not a bare agentRunning drop. The steer can fail while
+      // the run's stream is still rendering; clearing only the flag unmounts
+      // the reconcile net below and leaves streamState.isStreaming true, so
+      // the live tail keeps rendering expanded and never collapses back into
+      // the final turn's ProcessGroup.
+      settleUiStage();
       return;
     }
     // Server unreachable / unclear: do NOT blindly drop the flag — SSE may
@@ -2811,7 +2830,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // effect unmounts with it. waitForPromptSettlement polls unconditionally
     // until the run settles or the outage is surfaced to the user.
     void waitForPromptSettlement(sid);
-  }, [waitForPromptSettlement]);
+  }, [waitForPromptSettlement, settleUiStage]);
 
   // Queued (undelivered) messages live in the queue panel only; the chat gets
   // the real user message when pi delivers it (user message_end event). An
@@ -3567,6 +3586,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         scrollToBottom("instant");
       } else if (!agentRunningRef.current && (completionScrollAllowedRef.current || isNearBottomRef.current)) {
         scrollToBottom("smooth");
+        // Re-arm the growth-driven settle landing (the same poll that anchors
+        // an opened session). The completion reload collapses the streaming
+        // tail and rows keep re-measuring after this one-shot smooth scroll
+        // was computed; without re-anchoring, a late clamp or a load-earlier
+        // prepend leaves the viewport stranded above the true bottom.
+        setSettleNonce((v) => v + 1);
       }
     }
   }, [messages.length, loading, agentRunning, scrollToBottom, scrollUserMsgToTop]);
@@ -3597,7 +3622,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // incoming message mid-landing re-runs this effect (cleanup cancels the
   // running poll), and the session key would then block a re-arm.
   const settleStartedForRef = useRef<string | null>(null);
-  const settleKey = session?.id ?? null;
+  // Bumped when an idle message-set (completion reload, multi-client append)
+  // should re-anchor to the bottom; part of the settle key so the landing
+  // poll below re-arms for the same session.
+  const [settleNonce, setSettleNonce] = useState(0);
+  const settleKey = `${session?.id ?? null}#${settleNonce}`;
   useEffect(() => {
     if (loading) {
       settleStartedForRef.current = null;
