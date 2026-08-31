@@ -2126,7 +2126,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           hiddenProjects={hiddenProjects}
           onUnhideProject={handleUnhideProject}
           onPickFolder={() => setDirectoryPickerOpen(true)}
-          onExitPanel={() => switchSidebarMode("dropdown")}
           onCycleToList={() => { setViewStyleAndPersist("list"); switchSidebarMode("dropdown"); }}
           onRenamed={() => void loadSessions(false)}
           onNewTask={handleNewTaskBlank}

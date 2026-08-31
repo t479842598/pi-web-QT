@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 // ZCode uses the lucide icon set; mirror its sidebar icon choices exactly.
 import {
   Archive, ArchiveRestore, ArrowLeft, Check, ChevronRight, CirclePlus, Clock, Ellipsis,
-  Folder, FolderClosed, FolderOpen, FolderPlus, Hash, LayoutList, List, ListFilter, ListTree, Maximize2,
+  Folder, FolderClosed, FolderOpen, FolderPlus, Hash, LayoutList, ListFilter, ListTree, Maximize2,
   Minimize2, Plus, Search, Sparkles, Trash2, X,
 } from "lucide-react";
 import type { SessionInfo } from "@/lib/types";
@@ -45,8 +45,6 @@ interface Props {
   hiddenProjects: HiddenProjectEntry[];
   onUnhideProject: (entry: HiddenProjectEntry) => void;
   onPickFolder: () => void;
-  /** Switch back to the legacy dropdown mode. */
-  onExitPanel: () => void;
   /** Cycle button in panel form → back to the dropdown 列表 form (keeps the
    *  button at the same top-left position across all three sidebar forms). */
   onCycleToList: () => void;
@@ -79,7 +77,7 @@ export function ProjectsPanel({
   searchQuery, onSearchQueryChange,
   onSelectSession, onNewSessionInProject, onArchive, onDeleteForever,
   onRemoveProject, hiddenProjects, onUnhideProject,
-  onPickFolder, onExitPanel, onCycleToList, onRenamed, onNewTask, renderFileTree, isMobile,
+  onPickFolder, onCycleToList, onRenamed, onNewTask, renderFileTree, isMobile,
 }: Props) {
   const { t } = useI18n();
 
@@ -579,21 +577,11 @@ export function ProjectsPanel({
           onClick={onPickFolder}
           title={t("desktop.selectFolder")}
           aria-label={t("desktop.selectFolder")}
-          style={iconButtonStyle(false)}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
-        >
-          <FolderPlus size={13} aria-hidden="true" />
-        </button>
-        <button
-          onClick={onExitPanel}
-          title={t("desktop.showCurrentProject")}
-          aria-label={t("desktop.showCurrentProject")}
           style={{ ...iconButtonStyle(false), marginRight: 2 }}
           onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
         >
-          <List size={13} aria-hidden="true" />
+          <FolderPlus size={13} aria-hidden="true" />
         </button>
       </div>
 
@@ -765,10 +753,11 @@ function PanelSessionRow({
       }}
       title={title}
     >
-      {/* Running/unread animation lives in the left gutter (absolute) so it
-          never shifts the title — running and idle rows keep the same text start. */}
+      {/* Status indicator absolutely positioned into the folder-icon column
+          (left ≈ chevron+gap+icon offset) so it lines up with the folder row's
+          icon/spinner WITHOUT moving the title text. */}
       {(isRunning || isUnread) && (
-        <span style={{ position: "absolute", left: 2, top: 0, bottom: 0, display: "flex", alignItems: "center" }}>
+        <span style={{ position: "absolute", left: 22, top: 0, bottom: 0, display: "flex", alignItems: "center" }}>
           {isRunning ? <RunningSessionIndicator /> : <UnreadSessionIndicator />}
         </span>
       )}
@@ -776,20 +765,22 @@ function PanelSessionRow({
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, color: "var(--text)", fontWeight: isSelected ? 500 : 400 }}>
           {title}
         </span>
-        {showActions ? actions : rowStyle === "compact" ? (
+        {showActions ? actions : (
           <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
             {formatRelativeTime(session.modified, t)}
           </span>
-        ) : null}
+        )}
       </div>
       {rowStyle === "detailed" && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, minWidth: 0 }}>
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, color: "var(--text-dim)" }} title={session.projectRoot ?? session.cwd}>
             {folderName}
           </span>
-          <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
-            {formatRelativeTime(session.modified, t)}
-          </span>
+          {showActions && (
+            <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
+              {formatRelativeTime(session.modified, t)}
+            </span>
+          )}
         </div>
       )}
     </div>
