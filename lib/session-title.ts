@@ -9,6 +9,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { stripModeInstructionBlocks } from "./modes";
 
 const TITLE_TIMEOUT_MS = 80_000;
+const TITLE_ABORT_SETTLE_MS = 5_000;
 /** Max time to wait for the source session to become idle before snapshotting.
  *  The app is frequently deployed behind Cloudflare (100s gateway timeout), so
  *  idle-wait + model call must stay comfortably under that ceiling. */
@@ -259,59 +260,78 @@ const MAX_TITLE_TOTAL_TEXT = 8_000;
 /** Trim oversized text blocks in the title input so the title model's context
  *  is never exceeded (GLM code=10040 "model response context exceeded"). */
 function truncateTitleMessages(messages: AgentMessage[]): AgentMessage[] {
-  let total = 0;
-  return messages.map((message) => {
+  let remaining = Math.max(0, MAX_TITLE_TOTAL_TEXT - TITLE_PROMPT.length - 32);
+  const reversed = [...messages].reverse().map((message) => {
     const content = (message as { content?: unknown }).content;
+    if (typeof content === "string") {
+      const kept = remaining > 0 ? content.slice(Math.max(0, content.length - remaining)) : "";
+      remaining = Math.max(0, remaining - kept.length);
+      return kept === content ? message : { ...message, content: kept } as AgentMessage;
+    }
     if (!Array.isArray(content)) return message;
     let changed = false;
-    const next = content.map((block) => {
-      if (block && typeof block === "object" && (block as { type?: unknown }).type === "text") {
-        const textBlock = block as { text?: string };
-        const text = typeof textBlock.text === "string" ? textBlock.text : "";
-        if (text.length > MAX_TITLE_TEXT_BLOCK) {
-          changed = true;
-          const trimmed = text.slice(0, MAX_TITLE_TEXT_BLOCK) + "\n…[truncated]";
-          total += trimmed.length;
-          return { ...textBlock, text: trimmed };
-        }
-        total += text.length;
-      }
-      return block;
-    });
-    return changed ? { ...message, content: next } as AgentMessage : message;
-  }).map((message) => {
-    // Second pass: if the total is still over the cap, hard-cut the tail.
-    if (total <= MAX_TITLE_TOTAL_TEXT) return message;
-    const content = (message as { content?: unknown }).content;
-    if (!Array.isArray(content)) return message;
-    let remaining = MAX_TITLE_TOTAL_TEXT;
-    let changed = false;
-    const next = content.map((block) => {
-      if (block && typeof block === "object" && (block as { type?: unknown }).type === "text") {
-        const textBlock = block as { text?: string };
-        const text = typeof textBlock.text === "string" ? textBlock.text : "";
-        if (text.length <= remaining) {
-          remaining -= text.length;
-          return block;
-        }
-        if (remaining <= 0) {
-          changed = true;
-          return { ...textBlock, text: "" };
-        }
-        changed = true;
-        const cut = text.slice(0, remaining);
-        remaining = 0;
-        return { ...textBlock, text: cut };
-      }
-      return block;
-    });
+    const next = [...content].reverse().map((block) => {
+      if (!block || typeof block !== "object" || (block as { type?: unknown }).type !== "text") return block;
+      const textBlock = block as { text?: string };
+      const raw = typeof textBlock.text === "string" ? textBlock.text : "";
+      const perBlock = raw.length > MAX_TITLE_TEXT_BLOCK
+        ? `${raw.slice(0, MAX_TITLE_TEXT_BLOCK)}\n…[truncated]`
+        : raw;
+      const kept = remaining > 0 ? perBlock.slice(Math.max(0, perBlock.length - remaining)) : "";
+      remaining = Math.max(0, remaining - kept.length);
+      if (kept !== raw) changed = true;
+      return changed || kept !== raw ? { ...textBlock, text: kept } : block;
+    }).reverse();
     return changed ? { ...message, content: next } as AgentMessage : message;
   });
+  return reversed.reverse();
+}
+
+function selectTitleMessages(messages: AgentMessage[]): AgentMessage[] {
+  if (messages.length <= MAX_TITLE_MESSAGES) return messages;
+  const tailStart = messages.length - MAX_TITLE_MESSAGES;
+  const tail = messages.slice(tailStart);
+  if (tail.some((message) => message.role === "user" || (message.role === "custom" && message.customType === "compaction"))) {
+    return tail;
+  }
+  for (let index = tailStart - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role === "user" || (message.role === "custom" && message.customType === "compaction")) {
+      return [message, ...tail.slice(1)];
+    }
+  }
+  return tail;
+}
+
+function abortError(): Error {
+  const error = new Error("Session title generation was cancelled");
+  error.name = "AbortError";
+  return error;
+}
+
+async function waitForIdleOrTimeout(sourceAgent: Agent, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw abortError();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    await Promise.race([
+      sourceAgent.waitForIdle(),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, TITLE_IDLE_WAIT_TIMEOUT_MS); }),
+      ...(signal ? [new Promise<never>((_, reject) => {
+        onAbort = () => reject(abortError());
+        signal.addEventListener("abort", onAbort!, { once: true });
+      })] : []),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 export async function generateSessionTitle(
   source: AgentSession,
   modelOverride?: Model<Api>,
+  signal?: AbortSignal,
 ): Promise<GeneratedSessionTitle> {
   const sourceAgent = source.agent;
   // The source session may still be running (e.g. the user just sent a
@@ -319,10 +339,7 @@ export async function generateSessionTitle(
   // timeout (HTTP 524) whenever the session takes longer than that to finish.
   // Wait a bounded amount of time, then snapshot the current messages — the
   // title is derived from the conversation tail, which is already complete.
-  await Promise.race([
-    sourceAgent.waitForIdle(),
-    new Promise((resolve) => setTimeout(resolve, TITLE_IDLE_WAIT_TIMEOUT_MS)),
-  ]);
+  await waitForIdleOrTimeout(sourceAgent, signal);
 
   // Keep only the tail of long conversations: imported sessions can contain
   // thousands of toolResult messages that bloat the context and slow or time
@@ -330,12 +347,7 @@ export async function generateSessionTitle(
   // If the tail happens to be all tool messages, fall back to the full
   // transcript so we never claim the session has no user messages.
   const rawMessages = sourceAgent.state.messages;
-  let candidate = rawMessages.length > MAX_TITLE_MESSAGES
-    ? rawMessages.slice(rawMessages.length - MAX_TITLE_MESSAGES)
-    : rawMessages;
-  if (!candidate.some((message) => message.role === "user")) {
-    candidate = rawMessages;
-  }
+  const candidate = selectTitleMessages(rawMessages);
   const sanitizedMessages = truncateTitleMessages(sanitizeTitleMessages(candidate));
   const historyLength = sanitizedMessages.length;
   const hasTitleSource = sanitizedMessages.some((message) => (
@@ -361,23 +373,30 @@ export async function generateSessionTitle(
     ? temporaryAgent.continue()
     : temporaryAgent.prompt(TITLE_PROMPT);
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
 
   try {
     await Promise.race([
       runPromise,
       new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => {
-          temporaryAgent.abort();
-          reject(new Error("Session title generation timed out"));
-        }, TITLE_TIMEOUT_MS);
+        timeout = setTimeout(() => reject(new Error("Session title generation timed out")), TITLE_TIMEOUT_MS);
       }),
+      ...(signal ? [new Promise<never>((_, reject) => {
+        onAbort = () => reject(abortError());
+        signal.addEventListener("abort", onAbort!, { once: true });
+      })] : []),
     ]);
   } catch (error) {
     temporaryAgent.abort();
-    await runPromise.catch(() => {});
+    runPromise.catch(() => {});
+    await Promise.race([
+      runPromise.catch(() => {}),
+      new Promise<void>((resolve) => setTimeout(resolve, TITLE_ABORT_SETTLE_MS)),
+    ]);
     throw error;
   } finally {
     if (timeout) clearTimeout(timeout);
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
   }
 
   return getAssistantResult(temporaryAgent, historyLength);

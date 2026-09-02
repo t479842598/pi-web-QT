@@ -829,6 +829,10 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
               const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean; writtenFiles?: WrittenFile[] } = {}): ReactNode => {
                 const msg = options.messageOverride ?? messages[idx];
+                // Defensive: an out-of-range idx (e.g. the orphaned-prefix turn
+                // sentinel userIdx=-1) must degrade to a missing row instead of
+                // crashing the whole page through the error boundary.
+                if (!msg) return null;
                 const prevAssistantEntryId =
                   msg.role === "user" && idx > 0 && messages[idx - 1].role === "assistant"
                     ? entryIds[idx - 1]
@@ -903,7 +907,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   && (userIdx === lastUserIdx || startsCompactionTurn);
 
                 if (isLiveTail) {
-                  pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx));
+                  // An orphaned-prefix turn (user message paged out of the tail
+                  // window) carries userIdx=-1; there is no user row to render.
+                  // Mirror the `userIdx >= 0` guard from the historical branch.
+                  if (userIdx >= 0) {
+                    pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx));
+                  }
                   const hasStreamingAssistant = streamState.streamingMessage?.role === "assistant";
                   const liveProcessIndices: number[] = [];
                   const existingProcessEnd = !hasStreamingAssistant && finalAssistantIdx >= 0 ? finalAssistantIdx : endIdx;
@@ -979,14 +988,16 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   continue;
                 }
 
-                if (finalAssistantIdx === -1) {
-                  for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
+                if (finalAssistantIdx === -1 && item.processBlocks.length === 0) {
+                  for (let renderIdx = Math.max(0, userIdx); renderIdx < endIdx; renderIdx++) {
                     pushRendered(renderMessage(renderIdx), visibleRefIndexByMessage.get(renderIdx));
                   }
                   continue;
                 }
 
-                pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx));
+                if (userIdx >= 0) {
+                  pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx));
+                }
 
                 const { processBlocks, finalAnswerMessage, writtenFiles, visibleProcessIndices } = item;
                 if (processBlocks.length > 0) {
@@ -1002,7 +1013,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                       <ProcessGroup
                         blocks={processBlocks}
                         isStreaming={false}
-                        defaultExpanded={!finalAnswerMessage}
+                        // Historical processing is always compact after a run;
+                        // the user can expand it explicitly from the summary.
+                        defaultExpanded={false}
                         onAutoExpanded={undefined}
                         cwd={messageCwd}
                         onOpenFile={onOpenFile}
@@ -1025,8 +1038,17 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               // visible (user/assistant) message ref (mirroring the old DOM-ref
               // semantics where a ProcessGroup node carried a single ref).
               const refToItem: Array<number | undefined> = [];
-              itemStartRefs.forEach((startRef, itemIdx) => {
-                if (startRef !== undefined) refToItem[startRef] = itemIdx;
+              const starts = itemStartRefs
+                .map((startRef, itemIdx) => ({ startRef, itemIdx }))
+                .filter((item): item is { startRef: number; itemIdx: number } => item.startRef !== undefined);
+              starts.forEach((item, index) => {
+                const nextStart = starts[index + 1]?.startRef ?? visibleMessages.length;
+                // One rendered ProcessGroup can represent dozens of raw assistant
+                // messages. Map the whole ref range to that item; ChatMinimap
+                // deduplicates by item index so the group gets one landmark.
+                for (let refIndex = item.startRef; refIndex < nextStart; refIndex++) {
+                  refToItem[refIndex] = item.itemIdx;
+                }
               });
               refToItemIndexRef.current = refToItem;
               return (

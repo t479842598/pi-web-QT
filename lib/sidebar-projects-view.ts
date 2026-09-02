@@ -55,13 +55,21 @@ export function isSortBy(value: unknown): value is SortBy {
   return value === "updated" || value === "created";
 }
 
+/**
+ * 默认侧边栏形态：ZCode 风格「全部项目」面板。
+ *
+ * 用户指定（2026-09-02）：面板形态是主推布局，新装/无记录时直接进面板，
+ * 不再从普通列表开始。已手动切过形态的用户仍按 localStorage 里的选择走。
+ */
+export const DEFAULT_SIDEBAR_MODE: SidebarMode = "projects";
+
 export function loadSidebarMode(storage: StorageLike | null = getBrowserStorage()): SidebarMode {
-  if (!storage) return "dropdown";
+  if (!storage) return DEFAULT_SIDEBAR_MODE;
   try {
     const value = storage.getItem(SIDEBAR_MODE_KEY);
-    return isSidebarMode(value) ? value : "dropdown";
+    return isSidebarMode(value) ? value : DEFAULT_SIDEBAR_MODE;
   } catch {
-    return "dropdown";
+    return DEFAULT_SIDEBAR_MODE;
   }
 }
 

@@ -14,11 +14,11 @@ test("loadSession retries the message fetch once after a timeout abort", () => {
   const loadSessionSource = source.slice(start, end);
 
   assert.match(loadSessionSource, /const fetchSessionData = async/);
-  assert.match(loadSessionSource, /setTimeout\(\(\) => controller\.abort\(\), 30000\)/);
+  assert.match(loadSessionSource, /setTimeout\(\(\) => \w+Controller\.abort\(\), 30000\)/);
   // First attempt's AbortError is swallowed and retried exactly once.
   assert.match(
     loadSessionSource,
-    /if \(!\(e instanceof DOMException && e\.name === "AbortError"\)\) throw e;\s*\n\s*res = await fetchSessionData\(\);/,
+    /if \(!\(e instanceof DOMException && e\.name === "AbortError"\)\) throw e;[\s\S]*?res = await fetchSessionData\(\);/,
   );
   // The retry must not loop: only one re-call of fetchSessionData exists.
   const retryCalls = loadSessionSource.match(/await fetchSessionData\(\)/g) ?? [];
@@ -50,4 +50,14 @@ test("idle fallback retries are bounded (5 attempts, 2s apart)", () => {
   assert.match(fallbackSource, /setTimeout\(resolve, 2000\)/);
   assert.match(fallbackSource, /if \(agentRunningRef\.current\) return;/, "stop as soon as running");
   assert.match(fallbackSource, /restoreRunning\(snapshot\.state\)/);
+});
+
+test("loading mask has a hard finite watchdog independent of auxiliary state", () => {
+  const start = source.indexOf("// Hard UI safety net");
+  const end = source.indexOf("const loadContext = useCallback", start);
+  const block = source.slice(start, end);
+  assert.match(block, /setTimeout\(\(\) =>/);
+  assert.match(block, /setLoading\(false\)/);
+  assert.match(block, /Timed out loading this conversation/);
+  assert.match(block, /sessionDetailsControllerRef\.current\?\.abort/);
 });

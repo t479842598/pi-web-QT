@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
 
-import { ArrowClockwise } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowsClockwise } from "@phosphor-icons/react";
 
 import { isTauriDesktop } from "@/lib/desktop-updater";
 import {
   closeWindow,
   isWindowMaximized,
   minimizeWindow,
+  preloadWindowApi,
   toggleMaximizeWindow,
 } from "@/lib/desktop-window";
 import { useI18n } from "@/hooks/useI18n";
@@ -22,9 +23,15 @@ const STORAGE_KEY = "pi-web-island-pos";
 const DEFAULT_TOP = 100;
 /** 默认位置：右侧留白 14px。 */
 const DEFAULT_RIGHT = 14;
-/** 胶囊整体尺寸（与渲染一致，用于位置 clamp）。 */
+/**
+ * 胶囊整体尺寸（必须与实际渲染一致，用于位置 clamp 与错误提示定位）。
+ *
+ * 高度从 42 收到 34：按钮 26 + 上下 padding 3×2 + 边框 1×2 = 34，
+ * 对齐 dsh-desktop 灵动岛的紧凑观感（用户反馈原胶囊偏高）。
+ * 宽度不变：5 个 26px 按钮 + 4×1 gap + 左右 padding 5×2 + 分隔线 7 ≈ 152。
+ */
 const ISLAND_W = 152;
-const ISLAND_H = 42;
+const ISLAND_H = 34;
 
 export interface IslandPosition {
   x: number;
@@ -50,15 +57,15 @@ const CONTROL_BTN_STYLE: CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  width: 32,
-  height: 32,
+  width: 26,
+  height: 26,
   padding: 0,
   flexShrink: 0,
   background: "none",
   border: "none",
   color: "var(--text-muted)",
   cursor: "pointer",
-  borderRadius: 8,
+  borderRadius: 7,
   transition: "background 0.12s, color 0.12s",
 };
 
@@ -70,7 +77,16 @@ const CONTROL_BTN_STYLE: CSSProperties = {
  * 位置持久化到 localStorage；双击空白区域复位到默认位置。macOS 保留原生
  * 红绿灯，浏览器端整个组件渲染为空。
  */
-export function DynamicIsland() {
+export interface DynamicIslandProps {
+  /**
+   * 软刷新当前会话（重拉消息、不重载页面）。桌面壳标题栏里的刷新按钮此前被
+   * 隐藏并注释为「由灵动岛承担」，但灵动岛当时只有整页 reload —— 这里补上真正的
+   * 会话刷新入口。未传时该按钮不渲染。
+   */
+  onRefreshSession?: () => void;
+}
+
+export function DynamicIsland({ onRefreshSession }: DynamicIslandProps = {}) {
   const { t: translate } = useI18n();
   const { isDark } = useTheme();
   const { isDesktop, isMacOS } = useDesktopChrome();
@@ -84,6 +100,15 @@ export function DynamicIsland() {
   const islandRef = useRef<HTMLDivElement | null>(null);
   const dragState = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
 
+  // 挂载即预热窗口 API：把 @tauri-apps/api/window 的加载开销从「第一次点击」
+  // 移到「组件出现」，避免用户首点无响应（详见 lib/desktop-window 缓存说明）。
+  useEffect(() => {
+    if (!drawsOwnControls) return;
+    void preloadWindowApi().catch((e) => {
+      console.error("[DynamicIsland] window API preload failed:", e);
+    });
+  }, [drawsOwnControls]);
+
   // 统一执行窗口命令并捕获失败：失败信息短暂显示在胶囊下方。
   const runWindowCmd = useCallback((fn: () => Promise<void>) => {
     fn().catch((e) => {
@@ -93,9 +118,9 @@ export function DynamicIsland() {
     });
   }, []);
 
-  // 刷新 = 整页重载：欢迎页与会话页都有明确效果（会话页 URL 带 ?session=
-  // 参数，重载后自动恢复当前会话并重连 SSE）。
-  const handleRefresh = useCallback(() => {
+  // 整页重载：欢迎页与会话页都有明确效果（会话页 URL 带 ?session= 参数，
+  // 重载后自动恢复当前会话并重连 SSE）。与会话软刷新分两个按钮，语义不混。
+  const handleReloadPage = useCallback(() => {
     window.location.reload();
   }, []);
 
@@ -189,11 +214,15 @@ export function DynamicIsland() {
     }
   }, []);
 
-  // 切换最大化/还原：乐观取反本地图标状态（toggle 后立即查询可能拿到
-  // 旧值——Windows 上窗口尺寸变化是异步落地的），下次 resize 再校正。
+  // 切换最大化/还原：等 IPC 真正成功后再翻转图标状态。
+  // 旧实现先乐观取反再发命令，一旦命令失败（权限/IPC 异常）图标就与窗口实际
+  // 状态相反，用户看到的是「按钮画成了还原、点下去却什么都没发生」。
+  // 命令成功后不重新查询 isMaximized —— Windows 上尺寸变化是异步落地的，
+  // 立即查询会拿到旧值，交给下面的 resize 监听校正。
   const handleToggleMaximize = useCallback(() => {
-    setMaximized((m) => !m);
-    return toggleMaximizeWindow();
+    return toggleMaximizeWindow().then(() => {
+      setMaximized((m) => !m);
+    });
   }, []);
 
   // 双击胶囊空白区域复位默认位置（按钮上的双击不触发复位）。
@@ -239,8 +268,8 @@ export function DynamicIsland() {
         zIndex: 700,
         display: "flex",
         alignItems: "center",
-        gap: 2,
-        padding: "4px 6px",
+        gap: 1,
+        padding: "3px 5px",
         borderRadius: 999,
         // 背景与边框直接用主题变量 → 明暗主题自动跟随；阴影按 isDark 调整浓度。
         // 不用 backdropFilter：桌面壳禁 GPU 软件渲染下 blur 每帧全页重绘，
@@ -255,13 +284,41 @@ export function DynamicIsland() {
         touchAction: "none",
       }}
     >
-      {/* 刷新会话 */}
+      {/* 刷新会话（软刷新：重拉当前会话，不重载页面） */}
+      {onRefreshSession && (
+        <button
+          type="button"
+          data-island-btn
+          aria-label={translate("desktop.refreshSession")}
+          title={translate("desktop.refreshSession")}
+          onClick={() => {
+            try {
+              onRefreshSession();
+            } catch (e) {
+              console.error("[DynamicIsland] refresh session failed:", e);
+            }
+          }}
+          style={CONTROL_BTN_STYLE}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "var(--bg-hover)";
+            e.currentTarget.style.color = "var(--text)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "none";
+            e.currentTarget.style.color = "var(--text-muted)";
+          }}
+        >
+          <ArrowsClockwise size={13} aria-hidden="true" />
+        </button>
+      )}
+
+      {/* 重新加载页面（整页 reload） */}
       <button
         type="button"
         data-island-btn
-        aria-label={translate("desktop.refreshSession")}
-        title={translate("desktop.refreshSession")}
-        onClick={handleRefresh}
+        aria-label={translate("desktop.reloadPage")}
+        title={translate("desktop.reloadPage")}
+        onClick={handleReloadPage}
         style={CONTROL_BTN_STYLE}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = "var(--bg-hover)";
@@ -272,7 +329,7 @@ export function DynamicIsland() {
           e.currentTarget.style.color = "var(--text-muted)";
         }}
       >
-        <ArrowClockwise size={14} aria-hidden="true" />
+        <ArrowClockwise size={13} aria-hidden="true" />
       </button>
 
       {/* 分隔线 */}
@@ -299,7 +356,7 @@ export function DynamicIsland() {
         }}
       >
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1">
-          <line x1="0" y1="5" x2="10" y2="5" />
+          <line x1="1" y1="5" x2="9" y2="5" />
         </svg>
       </button>
 

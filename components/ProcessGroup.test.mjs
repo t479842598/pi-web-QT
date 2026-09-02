@@ -54,3 +54,9 @@ test("step narrative keeps its dimmed styling while streaming", () => {
   // isStreaming must not bypass the existing narrative presentation.
   assert.match(source, /className="!text-text-dim" isStreaming=\{isStreaming\}/);
 });
+
+test("manual collapse during streaming is not immediately forced open again", () => {
+  assert.match(source, /userCollapsedDuringStreamRef/);
+  assert.match(source, /if \(!userCollapsedDuringStreamRef\.current\) setAreaExpanded\(true\)/);
+  assert.match(source, /userCollapsedDuringStreamRef\.current = isStreaming && !next/);
+});

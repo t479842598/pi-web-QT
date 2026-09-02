@@ -102,6 +102,7 @@ pub fn run() {
             commands::set_local_domain,
             commands::connect_server,
             commands::open_connect,
+            commands::retry_startup,
             commands::quit_app,
             commands::stop_local,
             theme::set_ui_theme,

@@ -375,7 +375,6 @@ const SESSION_PATH_CACHE_MAX = 4096;
 
 function evictSessionPathCache(): void {
   const pathCache = getPathCache();
-  const reverseCache = getPathToIdCache();
   // Drop the oldest entries (Map preserves insertion order) when over budget.
   while (pathCache.size > SESSION_PATH_CACHE_MAX) {
     const oldestId = pathCache.keys().next().value;
@@ -668,7 +667,8 @@ export function buildSessionContext(
   const { tail, excludeLeaf } = options;
   // Restrict SDK conversion and the response payload to the requested page.
   const sliced = tail && tail > 0 ? sliceActiveBranch(entries, leafId ?? null, tail, excludeLeaf) : entries;
-  const hasMore = Boolean(tail && tail > 0 && sliced[0]?.parentId);
+  const firstSliced = sliced[0];
+  const hasMore = Boolean(tail && tail > 0 && firstSliced?.parentId);
   const byId = new Map<string, SessionEntry>();
   for (const e of sliced) byId.set(e.id, e);
 
@@ -715,19 +715,22 @@ export function sliceActiveBranch(
   excludeLeaf = false,
 ): SessionEntry[] {
   if (tail <= 0) return entries;
-  const byId = new Map<string, SessionEntry>();
-  for (const e of entries) byId.set(e.id, e);
-
-  let leaf = leafId ? byId.get(leafId) : entries[entries.length - 1];
-  // Pagination: `before` is the oldest entry already loaded, so the next page
-  // must start at its parent to avoid duplicating `before` when prepended.
-  if (excludeLeaf) leaf = leaf?.parentId ? byId.get(leaf.parentId) : undefined;
-  if (!leaf) return [];
+  let targetId = leafId ?? entries[entries.length - 1]?.id;
+  if (!targetId) return [];
+  let skipFirst = excludeLeaf;
   const chain: SessionEntry[] = [];
-  let current: SessionEntry | undefined = leaf;
-  while (current && chain.length < tail) {
-    chain.push(current);
-    current = current.parentId ? byId.get(current.parentId) : undefined;
+  // Parent entries always precede children in the append-only JSONL. Walk the
+  // file once from newest to oldest and follow just the requested parent chain;
+  // this avoids allocating an O(total entries) id Map to return a 50-entry page.
+  for (let index = entries.length - 1; index >= 0 && targetId && chain.length < tail; index--) {
+    const entry = entries[index];
+    if (entry.id !== targetId) continue;
+    targetId = entry.parentId ?? "";
+    if (skipFirst) {
+      skipFirst = false;
+      continue;
+    }
+    chain.push(entry);
   }
   chain.reverse();
   return chain;

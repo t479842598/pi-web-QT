@@ -23,15 +23,16 @@
     </header>
 
     <main>
-      <!-- 首次启动 · 设置本机密码（本地未设置密码时显示；设置后隐藏） -->
-      <section class="card setup-card" id="setup-card" hidden>
+      <!-- 远程访问（可选）。打开即用后这张卡不再是必须完成的引导：
+           默认仅本机可访问、无需密码；只有要用手机/其他设备连时才在这里开启对外访问。 -->
+      <section class="card setup-card" id="setup-card">
         <div class="card-head">
-          <h2 id="setup-title">首次启动 · 设置本机密码</h2>
-          <span class="badge warn">需设置</span>
+          <h2 id="setup-title">远程访问（可选）</h2>
+          <span class="badge probing" id="setup-badge">未开启</span>
         </div>
-        <p class="desc">本机 Pi Web 服务默认对局域网开放，需设置访问密码保护。设置后将自动启动并连接本机服务，此后每次启动免密连接。</p>
+        <p class="desc" id="setup-desc">默认仅本机可访问（127.0.0.1:30141），无需密码、打开即用。需要用手机或其他设备连接时再设置访问密码，设置后服务将对局域网开放。</p>
         <div class="field">
-          <label for="inp-setup-pass">设置密码（至少 6 位）</label>
+          <label for="inp-setup-pass">访问密码（至少 6 位，可选）</label>
           <input id="inp-setup-pass" type="password" placeholder="用于本机 Pi Web 访问" autocomplete="new-password" />
         </div>
         <div class="field">
@@ -39,9 +40,9 @@
           <input id="inp-setup-pass2" type="password" placeholder="再次输入确认" autocomplete="new-password" />
         </div>
         <div class="form-foot">
-          <button id="btn-setup-clear" class="ghost danger" hidden>清除本机密码</button>
+          <button id="btn-setup-clear" class="ghost danger" hidden>关闭对外访问（仅本机）</button>
           <span id="setup-hint" class="hint"></span>
-          <button id="btn-setup" class="primary">设置并启动本机</button>
+          <button id="btn-setup" class="primary">保存并开启对外访问</button>
         </div>
       </section>
 
@@ -56,7 +57,7 @@
           <button id="btn-start-local" class="primary" disabled>
             <span class="dot"></span>启动本机 Pi Web
           </button>
-          <button id="btn-change-local-pass" class="ghost mini" hidden title="修改或清除本机访问密码">修改本机密码</button>
+          <button id="btn-change-local-pass" class="ghost mini" hidden title="跳到远程访问设置">远程访问设置</button>
           <button id="btn-stop-local" class="ghost mini" disabled title="停止本机 Pi Web 服务（含外部启动的进程）">关闭本机服务</button>
         </div>
         <div class="field local-domain-field">
@@ -110,7 +111,7 @@
     <footer class="foot">
       <span id="foot-version">Pi Web Desktop</span>
       <span class="sep">·</span>
-      <span>用户名/密码仅保存在本机配置中，输入一次后免密连接</span>
+      <span>默认仅本机可访问；服务器与密码只保存在本机配置中</span>
     </footer>
   </div>
 

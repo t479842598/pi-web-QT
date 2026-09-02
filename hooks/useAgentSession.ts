@@ -55,13 +55,9 @@ function localizeExtensionNotice(message: string): string {
   return message;
 }
 
-export interface SessionData {
+export interface SessionInitialData {
   sessionId: string;
   filePath: string;
-  totalActiveMs: number;
-  /** Cumulative usage over ALL session-file entries (incl. compacted history). */
-  stats?: SessionFileStats;
-  tree: SessionTreeNode[];
   leafId: string | null;
   context: {
     messages: AgentMessage[];
@@ -72,6 +68,14 @@ export interface SessionData {
     model: { provider: string; modelId: string } | null;
   };
 }
+
+export interface SessionDetailsData {
+  totalActiveMs: number;
+  stats: SessionFileStats;
+  tree: SessionTreeNode[];
+}
+
+type SessionData = SessionInitialData & Partial<SessionDetailsData>;
 
 interface StreamingState {
   isStreaming: boolean;
@@ -541,6 +545,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const modelContextKey = `${session?.id ?? "new"}\0${newSessionCwd ?? session?.cwd ?? ""}`;
 
   const [data, setData] = useState<SessionData | null>(null);
+  const sessionLoadControllerRef = useRef<AbortController | null>(null);
+  const sessionLoadGenerationRef = useRef(0);
+  const sessionDetailsControllerRef = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
@@ -1047,6 +1054,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (sessionStatsOverride) {
       return { ...sessionStatsOverride, totalActiveMs: data?.totalActiveMs };
     }
+    if (session && data && data.stats === undefined) return null;
     const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
     let cost = 0;
     // Split spend by pricing currency: deepseek-v4-flash/pro (any provider)
@@ -1120,22 +1128,31 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [messages, sessionStatsOverride, contextUsage, data?.filePath, data?.totalActiveMs, data?.stats, session?.id, session?.name]);
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
+    let loadGeneration = sessionLoadGenerationRef.current;
     let messagesLoaded = false;
     try {
       if (showLoading) setLoading(true);
-      const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
+      sessionLoadControllerRef.current?.abort();
+      loadGeneration = sessionLoadGenerationRef.current + 1;
+      sessionLoadGenerationRef.current = loadGeneration;
+      const loadController = new AbortController();
+      sessionLoadControllerRef.current = loadController;
+      const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1", view: "initial" });
       // 超时兜底：服务端异常/大会话卡住时结束 loading，避免"永远加载中"。
       // 大会话冷启动可能超过 15s，放宽到 30s；超时视为偶发慢，自动重试一次，
       // 两次都超时才向用户给出可读提示（不暴露 "AbortError: Fetch is aborted"）。
       const fetchSessionData = async (): Promise<Response> => {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 30000);
+        const timeoutController = new AbortController();
+        const timer = setTimeout(() => timeoutController.abort(), 30000);
+        const abort = () => timeoutController.abort();
+        loadController.signal.addEventListener("abort", abort, { once: true });
         try {
           return await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`, {
-            signal: controller.signal,
+            signal: timeoutController.signal,
           });
         } finally {
           clearTimeout(timer);
+          loadController.signal.removeEventListener("abort", abort);
         }
       };
       let res: Response;
@@ -1143,6 +1160,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         res = await fetchSessionData();
       } catch (e) {
         if (!(e instanceof DOMException && e.name === "AbortError")) throw e;
+        if (loadController.signal.aborted) return null;
         res = await fetchSessionData();
       }
       if (res.status === 404) {
@@ -1159,9 +1177,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return null;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as SessionData;
-      if (sessionIdRef.current !== sid) return null;
+      const d = await res.json() as SessionInitialData;
+      if (sessionIdRef.current !== sid || sessionLoadGenerationRef.current !== loadGeneration) return null;
       setData(d);
+      sessionDetailsControllerRef.current?.abort();
+      const detailsController = new AbortController();
+      sessionDetailsControllerRef.current = detailsController;
+      void fetch(`/api/sessions/${encodeURIComponent(sid)}/details`, { signal: detailsController.signal })
+        .then(async (detailsResponse) => {
+          if (!detailsResponse.ok) throw new Error(`HTTP ${detailsResponse.status}`);
+          return await detailsResponse.json() as SessionDetailsData;
+        })
+        .then((details) => {
+          if (sessionIdRef.current !== sid || sessionLoadGenerationRef.current !== loadGeneration || detailsController.signal.aborted) return;
+          setData((current) => current?.sessionId === sid ? { ...current, ...details } : current);
+        })
+        .catch((error) => {
+          if ((error as DOMException).name !== "AbortError") console.warn("Failed to load session details", error);
+        });
       setActiveLeafId(d.leafId);
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
@@ -1194,6 +1227,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
 
       messagesLoaded = true;
+      // The initial message payload is the loading boundary. State/details are
+      // auxiliary and must never keep the whole chat behind the loading mask.
       if (showLoading) setLoading(false);
       if (!includeState) return null;
 
@@ -1210,7 +1245,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
         const agentState = await stateRes.json() as { running: boolean; state?: AgentStateResponse };
-        if (sessionIdRef.current !== sid) return null;
+        if (sessionIdRef.current !== sid || sessionLoadGenerationRef.current !== loadGeneration) return null;
 
         const liveState = agentState.state;
         if (liveState) {
@@ -1240,14 +1275,33 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // 超时中止不是致命错误：保留上次已加载的会话，给出可读提示即可，
       // 而不是把 "AbortError: Fetch is aborted" 原样甩到界面上。
       const aborted = e instanceof DOMException && e.name === "AbortError";
+      if (messagesLoaded) {
+        console.warn("Failed to load auxiliary session state", e);
+        return null;
+      }
       setError(aborted
         ? "Timed out loading this conversation. Please try again."
         : String(e));
       return null;
     } finally {
-      if (showLoading && !messagesLoaded) setLoading(false);
+      if (showLoading && !messagesLoaded && sessionLoadGenerationRef.current === loadGeneration) setLoading(false);
     }
   }, [applySubagents, setPendingRecovery, setQueuedMessages]);
+
+  // Hard UI safety net: auxiliary startup races must never leave the whole
+  // conversation behind an infinite loading mask. The initial request already
+  // has its own 30s retry budget; after 35s expose the existing readable error.
+  useEffect(() => {
+    if (!session || !loading) return;
+    const timer = window.setTimeout(() => {
+      if (!mountedRef.current || !sessionIdRef.current || !loading) return;
+      sessionLoadControllerRef.current?.abort();
+      sessionDetailsControllerRef.current?.abort();
+      setLoading(false);
+      setError("Timed out loading this conversation. Please try again.");
+    }, 35_000);
+    return () => window.clearTimeout(timer);
+  }, [loading, session]);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null) => {
     try {
@@ -3529,6 +3583,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // cleanup once during development before mounting the real effect.
       // Resetting still prevents an unmounted session from committing stale UI.
       mountedRef.current = false;
+      sessionLoadControllerRef.current?.abort();
+      sessionDetailsControllerRef.current?.abort();
       resetStreamUpdates();
       clearQueueReconcile();
       cancelEventStreamGrace();

@@ -570,3 +570,82 @@ fn proxy_fixed_port_falls_back_when_taken() {
     let got = proxy::spawn_proxy_on(Some(port), move || Some(srv.clone())).unwrap();
     assert_ne!(got, port, "被占用的端口应回退随机");
 }
+
+/* ==================== 打开即用（02-01 desktop-open-and-use） ==================== */
+
+#[test]
+fn bind_host_stays_loopback_without_password() {
+    // 免密是打开即用的默认状态：必须只绑回环，否则同网段任意设备都能免认证
+    // 读会话并驱动 agent 执行命令（内置后端绕过 bin/pi-web.js 的 refuse 保护）。
+    assert_eq!(probe::bind_host(None), "127.0.0.1");
+    assert_eq!(probe::bind_host(Some("")), "127.0.0.1");
+    assert_eq!(probe::bind_host(Some("   ")), "127.0.0.1");
+}
+
+#[test]
+fn bind_host_opens_up_only_with_password() {
+    // 只有用户主动设置访问密码（明确要对外/手机/隧道访问）才开 0.0.0.0。
+    assert_eq!(probe::bind_host(Some("secret")), "0.0.0.0");
+    assert_eq!(probe::bind_host(Some("  secret  ")), "0.0.0.0");
+}
+
+fn cfg_with(srvs: Vec<Server>, last: Option<&str>) -> Config {
+    let mut c = Config {
+        servers: srvs,
+        last_server_id: last.map(|s| s.to_string()),
+    };
+    if let Some(id) = last {
+        c.touch(id);
+    }
+    c
+}
+
+#[test]
+fn startup_defaults_to_local_auto() {
+    // 全新安装（空配置）与只有本机条目的配置，都必须走本机自动连接 —— 这是
+    // 「打开即用」的主路径，绝不能落回连接页。
+    assert_eq!(window::decide_startup(&Config::default()), window::StartupTarget::LocalAuto);
+
+    let local = server(DEFAULT_LOCAL_URL, None, true);
+    let cfg = cfg_with(vec![local], Some("local"));
+    assert_eq!(window::decide_startup(&cfg), window::StartupTarget::LocalAuto);
+}
+
+#[test]
+fn startup_respects_last_remote_server() {
+    // F-06：老用户上次用的是远程服务器 → 尊重偏好直连，不弹连接页。
+    let remote = server("https://pi.example.com", Some("pw"), false);
+    let cfg = cfg_with(vec![remote], Some("t1"));
+    assert_eq!(
+        window::decide_startup(&cfg),
+        window::StartupTarget::Remote("t1".to_string())
+    );
+}
+
+#[test]
+fn startup_treats_loopback_entry_as_local() {
+    // 一条 base_url 指向回环、但 is_local=false 的条目（用户手动填的
+    // http://127.0.0.1:30141）不算「远程偏好」，仍走本机自动连接。
+    let lan_like = server("http://127.0.0.1:30141", None, false);
+    let cfg = cfg_with(vec![lan_like], Some("t1"));
+    assert_eq!(window::decide_startup(&cfg), window::StartupTarget::LocalAuto);
+}
+
+#[test]
+fn startup_survives_unknown_last_id() {
+    // last_server_id 指向不存在的条目（手改配置/删库竞态）必须回退本机，不能 panic。
+    let cfg = cfg_with(vec![], Some("ghost"));
+    assert_eq!(window::decide_startup(&cfg), window::StartupTarget::LocalAuto);
+}
+
+#[test]
+fn local_entry_has_no_password_by_default() {
+    // ensure_local 建出的条目必须免密：一旦默认带密码就等于回到「必须先设密码」。
+    let mut cfg = Config::default();
+    let srv = cfg.ensure_local().clone();
+    assert_eq!(srv.id, crate::config::LOCAL_SERVER_ID);
+    assert!(srv.is_local);
+    assert!(!srv.has_password);
+    assert_eq!(srv.password(), None);
+    assert_eq!(cfg.local_password(), None);
+}

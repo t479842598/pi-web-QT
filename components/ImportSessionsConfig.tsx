@@ -1,6 +1,7 @@
 "use client";
+import { cancelSessionTitleRequest, generateSessionTitleRequest } from "@/lib/session-title-client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DownloadSimple, Spinner, CheckCircle, Warning, X, ArrowCounterClockwise } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -120,6 +121,8 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
   // ── 标题生成 ──
   const [generatingTitles, setGeneratingTitles] = useState(false);
   const [titleProgress, setTitleProgress] = useState({ done: 0, total: 0 });
+  const titleControllersRef = useRef(new Map<string, AbortController>());
+  const stopTitlesRef = useRef(false);
 
   // ── 状态 ──
   const [loading, setLoading] = useState(false);
@@ -233,30 +236,44 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
   // 并发上限：同时跑太多标题请求会挤占资源、拖慢整体并容易超时。
   // 用并发池并行 + 单条失败跳过，互不牵连（修复"一个在生成其他就 500"）。
   const generateTitles = useCallback(async () => {
+    if (generatingTitles) {
+      stopTitlesRef.current = true;
+      for (const [id, controller] of titleControllersRef.current) {
+        controller.abort();
+        void cancelSessionTitleRequest(id);
+      }
+      return;
+    }
     if (importedIds.length === 0) return;
+    stopTitlesRef.current = false;
     setGeneratingTitles(true);
     setTitleProgress({ done: 0, total: importedIds.length });
 
-    const CONCURRENCY = 4;
     let nextIndex = 0;
+    let completed = 0;
     const worker = async () => {
-      while (nextIndex < importedIds.length) {
+      while (!stopTitlesRef.current) {
         const index = nextIndex++;
         const id = importedIds[index];
-        if (!id) continue;
+        if (!id) return;
+        const controller = new AbortController();
+        titleControllersRef.current.set(id, controller);
         try {
-          await fetch(`/api/sessions/${encodeURIComponent(id)}/auto-name`, { method: "POST" });
-        } catch { /* skip errors */ }
-        setTitleProgress({ done: index + 1, total: importedIds.length });
+          await generateSessionTitleRequest(id, controller.signal);
+        } catch {
+          // Continue the batch after one session fails or is cancelled.
+        } finally {
+          titleControllersRef.current.delete(id);
+          completed += 1;
+          setTitleProgress({ done: completed, total: importedIds.length });
+        }
       }
     };
-    const workers = Array.from({ length: Math.min(CONCURRENCY, importedIds.length) }, worker);
-    await Promise.all(workers);
-
+    await Promise.all(Array.from({ length: Math.min(2, importedIds.length) }, worker));
+    titleControllersRef.current.clear();
     setGeneratingTitles(false);
     onSessionsChanged?.();
-  }, [importedIds, onSessionsChanged]);
-
+  }, [generatingTitles, importedIds, onSessionsChanged]);
   // ========================================================================
   // 选择/取消
   // ========================================================================
@@ -312,27 +329,23 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
           )}
         </div>
 
-        {generatingTitles ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-muted)" }}>
-            <Spinner size={14} style={{ animation: "spin 1s linear infinite" }} />
-            {t("desktop.importGeneratingTitles") ?? "正在生成标题…"}
-            {" "}({titleProgress.done}/{titleProgress.total})
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={generateTitles}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 7,
-              padding: "8px 14px", background: "var(--accent)", border: "none",
-              borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 600,
-              cursor: "pointer", alignSelf: "flex-start",
-            }}
-          >
-            <ArrowCounterClockwise size={15} />
-            {t("desktop.importGenerateTitles") ?? "为导入的会话生成标题"}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={generateTitles}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 7,
+            padding: "8px 14px", background: "var(--accent)", border: "none",
+            borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 600,
+            cursor: "pointer", alignSelf: "flex-start",
+          }}
+        >
+          {generatingTitles
+            ? <Spinner size={14} style={{ animation: "spin 1s linear infinite" }} />
+            : <ArrowCounterClockwise size={15} />}
+          {generatingTitles
+            ? `${t("desktop.importGeneratingTitles") ?? "正在生成标题…"} (${titleProgress.done}/${titleProgress.total}) — ${t("desktop.stop") ?? "停止"}`
+            : t("desktop.importGenerateTitles") ?? "为导入的会话生成标题"}
+        </button>
 
         <button
           type="button"

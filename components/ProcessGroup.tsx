@@ -710,6 +710,7 @@ export function ProcessGroup({
   const [showBottomShadow, setShowBottomShadow] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasStreamingRef = useRef(false);
+  const userCollapsedDuringStreamRef = useRef(false);
   const hasUserSelectedTabRef = useRef(false);
   const hasAppliedDefaultExpansionRef = useRef(false);
   const userScrolledUpRef = useRef(false);
@@ -718,12 +719,17 @@ export function ProcessGroup({
   useEffect(() => {
     if (isStreaming) {
       wasStreamingRef.current = true;
-      setAreaExpanded(true);
+      if (!userCollapsedDuringStreamRef.current) setAreaExpanded(true);
       return;
     }
     if (!wasStreamingRef.current) return;
     userScrolledUpRef.current = false;
+    userCollapsedDuringStreamRef.current = false;
     setStepStates({});
+    // A stopped run must always return to the compact summary. The previous
+    // delayed collapse could be cancelled by a remount or a late state update,
+    // leaving every historical tool step expanded.
+    setAreaExpanded(false);
     const timer = window.setTimeout(() => setAreaExpanded(false), 300);
     wasStreamingRef.current = false;
     return () => window.clearTimeout(timer);
@@ -883,7 +889,11 @@ export function ProcessGroup({
       <div className="group/summary-row flex items-center justify-between">
         <button
           type="button"
-          onClick={() => setAreaExpanded((v) => !v)}
+          onClick={() => setAreaExpanded((current) => {
+            const next = !current;
+            userCollapsedDuringStreamRef.current = isStreaming && !next;
+            return next;
+          })}
           className="group/summary flex min-w-0 items-center gap-1.5 text-left text-sm leading-relaxed text-text-muted transition-colors hover:text-text"
           aria-expanded={areaExpanded}
         >

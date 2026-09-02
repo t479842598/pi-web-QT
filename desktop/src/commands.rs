@@ -173,7 +173,8 @@ pub async fn probe_local(app: AppHandle, state: State<'_, AppState>) -> Result<p
 
 /// 拉起本机 pi-web 并立即返回（不阻塞等待就绪）；
 /// 就绪状态由前端轮询 probe_local 判断。成功后前端自行打开连接表单/服务器窗口。
-/// 无本机密码时拒绝启动：先设密码再拉起，避免 0.0.0.0:30141 无认证暴露。
+/// 无本机密码时不再拒绝启动：免密拉起时监听由 bind_host 收敛到 127.0.0.1
+/// （仅本机可访问），因此不存在 0.0.0.0:30141 无认证暴露的问题。
 #[cfg(not(mobile))]
 #[tauri::command]
 pub async fn start_local(app: AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
@@ -191,19 +192,19 @@ pub async fn start_local(app: AppHandle, state: State<'_, AppState>) -> Result<b
         let cfg = state.config.lock().unwrap();
         (cfg.local_password(), cfg.local_trusted_domain())
     };
-    let spawned = match password {
-        Some(pw) => {
-            let app = app.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                let child = probe::spawn_local(&app, Some(pw.as_str()), trusted_domain.as_deref());
-                // 区分「已在跑」（返回 None 但服务在线）与「无可用后端」
-                let fallback_alive = probe::alive(crate::config::DEFAULT_LOCAL_URL);
-                (child, fallback_alive)
-            })
-            .await
-            .map_err(|e| e.to_string())
-        }
-        None => Err("请先设置本机访问密码".to_string()),
+    let spawned = {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            // 免密（password 为 None）不再被拒绝：spawn_local 内部经 bind_host
+            // 把监听收敛到 127.0.0.1，仅本机可访问，无对外暴露风险。
+            let child =
+                probe::spawn_local(&app, password.as_deref(), trusted_domain.as_deref());
+            // 区分「已在跑」（返回 None 但服务在线）与「无可用后端」
+            let fallback_alive = probe::alive(crate::config::DEFAULT_LOCAL_URL);
+            (child, fallback_alive)
+        })
+        .await
+        .map_err(|e| e.to_string())
     };
     *state.starting_local.lock().unwrap() = false;
 
@@ -236,7 +237,8 @@ pub fn ensure_local_server(app: AppHandle) -> Result<ServerInfo, String> {
 
 /// 设置（或清除）本机默认服务器的访问密码。
 /// 密码用于拉起本机 pi-web 时注入 PI_WEB_PASSWORD，并经本地反向代理注入
-/// Basic Auth；空字符串表示清除（下次启动回到「设置密码」引导）。
+/// Basic Auth；空字符串表示清除，回到「仅本机可访问」的免密默认模式
+/// （不再是「必须先设密码才能用」）。
 /// 密码变化且本机后端在跑时：壳拉起的进程会被 kill 并用新密码重启；
 /// 外部启动的进程无法 kill，返回 warning 提示手动重启。
 #[tauri::command]
@@ -281,11 +283,15 @@ pub fn set_local_password(app: AppHandle, password: String) -> Result<SetPasswor
         if let Some(mut child) = owned {
             // 整组 kill（Unix 杀 PGID / Windows taskkill /T），连带 next 孙进程
             probe::kill_child_tree(&mut child);
-            // 用新密码重新拉起（沿用旧域名）；清空密码则不拉起（避免 0.0.0.0 无认证暴露）
-            if let Some(pw) = new_password.as_deref() {
-                if let Some(ch) = probe::spawn_local_force(&app, Some(pw), old_domain.as_deref()) {
-                    *state.local_child.lock().unwrap() = Some(ch);
-                }
+            // 无论设密还是清密都重新拉起（沿用旧域名）：清密时传 None，
+            // spawn_local_force 以免密模式起并把监听收敛到 127.0.0.1。
+            // 旧行为是「清密则不拉起」，会让用户清除密码后本机服务直接停摆。
+            if let Some(ch) = probe::spawn_local_force(
+                &app,
+                new_password.as_deref(),
+                old_domain.as_deref(),
+            ) {
+                *state.local_child.lock().unwrap() = Some(ch);
             }
             return Ok(SetPasswordResult {
                 server,
@@ -377,6 +383,27 @@ pub async fn connect_server(app: AppHandle, id: String) -> Result<(), String> {
     #[cfg(mobile)]
     window::navigate_main(&app, &window::build_url(&srv));
     Ok(())
+}
+
+/// 等待页「重试启动」：重跑本机自动连接分支（复用 route_startup 的同一条路径，
+/// 避免逻辑分叉）。窗口创建必须在主线程，因此经 run_on_main_thread 转发
+/// （同 connect_server 的 Windows WebView2 约束）。
+#[cfg(not(mobile))]
+#[tauri::command]
+pub fn retry_startup(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    let cfg = state.config.lock().unwrap().clone();
+    let app2 = app.clone();
+    app.run_on_main_thread(move || {
+        window::start_local_auto(&app2, &cfg);
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// 移动端无本机服务概念。
+#[cfg(mobile)]
+#[tauri::command]
+pub fn retry_startup(_app: AppHandle, _state: State<AppState>) -> Result<(), String> {
+    Err("仅桌面端支持重试启动".into())
 }
 
 #[tauri::command]

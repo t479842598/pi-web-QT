@@ -1960,7 +1960,7 @@ export class AgentSessionWrapper {
 
 declare global {
   var __piSessions: Map<string, AgentSessionWrapper> | undefined;
-  var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> | undefined;
+  var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string; created: boolean }>> | undefined;
   var __piStartingSessionCwds: Map<string, number> | undefined;
   var __piRunningListeners: Set<RunningListener> | undefined;
   var __piSessionBusListeners: Set<SessionBusListener> | undefined;
@@ -1982,7 +1982,7 @@ function getRegistry(): Map<string, AgentSessionWrapper> {
   return globalThis.__piSessions;
 }
 
-function getLocks(): Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> {
+function getLocks(): Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string; created: boolean }>> {
   if (!globalThis.__piStartLocks) globalThis.__piStartLocks = new Map();
   return globalThis.__piStartLocks;
 }
@@ -2293,13 +2293,13 @@ export async function startRpcSession(
   sessionFile: string,
   cwd: string | undefined,
   options: RpcSessionStartOptions = {},
-): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
+): Promise<{ session: AgentSessionWrapper; realSessionId: string; created: boolean }> {
   const { toolNames, initialModel, thinkingLevel } = options;
   const registry = getRegistry();
   const locks = getLocks();
 
   const existing = registry.get(sessionId);
-  if (existing?.isAlive() && !existing.isShuttingDown()) return { session: existing, realSessionId: sessionId };
+  if (existing?.isAlive() && !existing.isShuttingDown()) return { session: existing, realSessionId: sessionId, created: false };
   if (existing) {
     // A wrapper that is mid-shutdown (idle dispose / fork) must not be
     // reused: SSE subscribers would attach to a session about to be
@@ -2550,7 +2550,7 @@ export async function startRpcSession(
       registry.set(realSessionId, wrapper);
       wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });      enforceRegistryCap();
 
-      return { session: wrapper, realSessionId };
+      return { session: wrapper, realSessionId, created: true };
     } catch (error) {
       // The wrapper was never registered, so nothing else will ever dispose
       // it — clean up the half-started session and its bash processes here or

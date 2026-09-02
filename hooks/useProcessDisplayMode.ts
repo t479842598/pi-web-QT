@@ -4,28 +4,26 @@ import { useCallback, useSyncExternalStore } from "react";
 
 export type ProcessDisplayMode = "timeline" | "tabs";
 
-const STORAGE_KEY = "pi-process-display-mode";
+// Per-tab preference: a display-mode click in another browser window must not
+// silently flip the active conversation. The v2 key intentionally ignores the
+// old cross-window localStorage value that could strand users in timeline mode.
+const STORAGE_KEY = "pi-process-display-mode-v2";
 const DEFAULT_MODE: ProcessDisplayMode = "tabs";
 const CHANGE_EVENT = "pi-process-display-mode-change";
 
 function getStoredMode(): ProcessDisplayMode {
   if (typeof window === "undefined") return DEFAULT_MODE;
-
-  const storedMode = window.localStorage.getItem(STORAGE_KEY);
-  return storedMode === "timeline" || storedMode === "tabs" ? storedMode : DEFAULT_MODE;
+  try {
+    const storedMode = window.sessionStorage.getItem(STORAGE_KEY);
+    return storedMode === "timeline" || storedMode === "tabs" ? storedMode : DEFAULT_MODE;
+  } catch {
+    return DEFAULT_MODE;
+  }
 }
 
 function subscribe(onStoreChange: () => void) {
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key === STORAGE_KEY) onStoreChange();
-  };
-
   window.addEventListener(CHANGE_EVENT, onStoreChange);
-  window.addEventListener("storage", handleStorage);
-  return () => {
-    window.removeEventListener(CHANGE_EVENT, onStoreChange);
-    window.removeEventListener("storage", handleStorage);
-  };
+  return () => window.removeEventListener(CHANGE_EVENT, onStoreChange);
 }
 
 function getServerSnapshot(): ProcessDisplayMode {
@@ -36,7 +34,7 @@ export function useProcessDisplayMode() {
   const displayMode = useSyncExternalStore(subscribe, getStoredMode, getServerSnapshot);
 
   const setDisplayMode = useCallback((mode: ProcessDisplayMode) => {
-    window.localStorage.setItem(STORAGE_KEY, mode);
+    try { window.sessionStorage.setItem(STORAGE_KEY, mode); } catch { /* display still updates in-memory */ }
     window.dispatchEvent(new Event(CHANGE_EVENT));
   }, []);
 

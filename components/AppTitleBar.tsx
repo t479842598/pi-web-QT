@@ -18,6 +18,7 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionInfo } from "@/lib/types";
 import { DynamicIsland } from "./desktop";
 import type { DesktopChrome } from "./desktop/useDesktopChrome";
+import { DesktopServerHint } from "./DesktopServerHint";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
 
@@ -154,6 +155,9 @@ export function AppTitleBar({
 
   return (
     <>
+      {/* 桌面壳一次性引导：打开即用后，远程切换/访问密码入口需要指一次路（F-04）。
+          fixed 定位挂在标题栏之后，不影响布局。 */}
+      {desktopShell && <DesktopServerHint />}
       <div
         ref={topBarRef}
         className="app-title-bar"
@@ -391,7 +395,7 @@ export function AppTitleBar({
       {/* 悬浮灵动岛窗口控制（最小化/最大化/关闭 + 刷新）— 仅 Windows/Linux
           桌面壳显示。渲染在标题栏 div 之外：标题栏的窗口拖动 mousedown 处理
           不再拦截胶囊的按下/双击动作（按胶囊=拖胶囊，不=拖窗口）。 */}
-      <DynamicIsland />
+      <DynamicIsland onRefreshSession={onRefreshSession} />
 
       {/* Dropdown panel — fixed position, full width below title bar */}
       {activeTopPanel && topPanelPos && (

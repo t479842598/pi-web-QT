@@ -18,6 +18,24 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const MEMORY_LIMIT_MB: u32 = 3072;
 const SEMI_SPACE_MB: u32 = 128;
 
+/// 本机后端监听地址：由「是否设置了访问密码」派生，是打开即用（F-02/D-02）的
+/// 安全支点。
+///
+/// 为什么不能像以前那样一律绑 0.0.0.0：内置后端由 `node server.js` 直接拉起，
+/// **绕过了 `bin/pi-web.js` 里 `assessLanExposure` 的「无密码即拒绝启动」保护**；
+/// 而 `proxy.ts` 在 `PI_WEB_PASSWORD` 为空时直接放行所有请求。两者叠加意味着
+/// 「免密 + 0.0.0.0」= 同网段任意设备都能读全部会话并驱动 agent 执行命令。
+/// 因此免密时收敛到回环（仅本机，天然安全，对应 u1s1 式「双击打开就能用」），
+/// 只有用户主动设置访问密码（即明确要对外/手机/隧道访问）才开 0.0.0.0 + Basic Auth。
+///
+/// 监听地址不落盘、始终由此函数派生，避免配置与实际绑定漂移。
+pub fn bind_host(password: Option<&str>) -> &'static str {
+    match password {
+        Some(pw) if !pw.trim().is_empty() => "0.0.0.0",
+        _ => "127.0.0.1",
+    }
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct ProbeResult {
     pub local_alive: bool,
@@ -89,9 +107,13 @@ pub fn alive(base: &str) -> bool {
     }
 }
 
-/// 探测本机服务是否「在线但未启用认证」：无凭据 GET /api/home 若返回 200
-/// 说明 PI_WEB_PASSWORD 未生效（0.0.0.0 无认证暴露），连接页据此警告。
+/// 探测本机服务是否「对外可达且未启用认证」：无凭据 GET /api/home 若返回 200
+/// 说明 PI_WEB_PASSWORD 未生效。连接页据此提示。
 /// 返回 401/403（已启用认证）或连接失败（不在线）均视为 false。
+///
+/// 注意（F-02 后语义收敛）：打开即用模式下后端默认只绑 127.0.0.1，此时
+/// 「无凭据 200」是预期行为（仅本机可访问，不构成暴露），因此连接页文案
+/// 不再把它当作安全告警，而是中性描述当前为「仅本机可访问」。
 pub fn local_unauthenticated(base: &str) -> bool {
     let url = format!("{}/api/home", base.trim_end_matches('/'));
     match ureq::get(&url).timeout(PROBE_TIMEOUT).call() {
@@ -108,6 +130,14 @@ pub fn probe_alive(cfg: &Config) -> Option<String> {
         }
     }
     None
+}
+
+/// 本机是否存在可用后端：随包内置（Node + standalone）或已装 pi-web CLI。
+///
+/// 启动路由（打开即用）用它决定「自动拉起」还是「回退连接页」——两者都没有时
+/// 绝不能静默卡在等待页，必须把用户交给可操作的连接页（F-01 兜底要求）。
+pub fn local_backend_available(app: &AppHandle) -> bool {
+    bundled_available(app) || find_cli().is_some()
 }
 
 pub fn probe(app: &AppHandle, cfg: &Config) -> ProbeResult {
@@ -316,18 +346,17 @@ fn spawn_bundled(
     trusted_domain: Option<&str>,
 ) -> Option<std::process::Child> {
     let bundled = locate_bundled(app)?;
+    // 监听地址随认证状态派生（见 bind_host）：免密仅回环，设密才对外。
+    let host = bind_host(password);
     let mut cmd = Command::new(&bundled.node);
     cmd.arg(&bundled.server_js)
         // 命令行参数与 env 双保险：新版 standalone 读 PORT/HOSTNAME，旧版读参数。
-        // 绑 0.0.0.0：允许局域网/远程直连 30141 + Cloudflare 隧道（cloudflared 连
-        // localhost:30141）。代价是 Windows 首启会弹防火墙授权；本机访问密码
-        // （PI_WEB_PASSWORD）已保护对外访问。
         .arg("-H")
-        .arg("0.0.0.0")
+        .arg(host)
         .arg("-p")
         .arg("30141")
         .current_dir(&bundled.backend_dir)
-        .env("HOSTNAME", "0.0.0.0")
+        .env("HOSTNAME", host)
         .env("PORT", "30141")
         // 启动器看门狗依赖父进程 PID：GUI 崩溃/强杀时自动退出，防孤儿 node
         .env("PI_WEB_PARENT_PID", std::process::id().to_string())
@@ -337,19 +366,28 @@ fn spawn_bundled(
         )
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    // 注入本机访问密码（Next.js middleware 据此启用 HTTP Basic Auth）
-    if let Some(pw) = password {
-        if !pw.is_empty() {
+    // 注入本机访问密码（Next.js middleware 据此启用 HTTP Basic Auth）。
+    // 免密时必须**显式清除** PI_WEB_PASSWORD：Command 默认继承父进程环境，
+    // 若用户 shell / launchd / 系统环境里残留该变量，壳以为免密不注入凭据、
+    // 后端却启用 Basic Auth，结果首屏直接 401 —— 「打开即用」当场失效。
+    match password {
+        Some(pw) if !pw.is_empty() => {
             cmd.env("PI_WEB_PASSWORD", pw);
         }
-    }
-    // 注入可信域名（Cloudflare 隧道等外部访问时后端放行的 Host）
-    if let Some(domain) = trusted_domain {
-        let d = domain.trim();
-        if !d.is_empty() {
-            cmd.env("PI_WEB_ALLOWED_HOSTS", d);
+        _ => {
+            cmd.env_remove("PI_WEB_PASSWORD");
         }
     }
+    // 可信域名同理：未配置时清除，避免继承值把 Host 校验放宽到意外域名。
+    let domain_set = trusted_domain.map(|d| !d.trim().is_empty()).unwrap_or(false);
+    if domain_set {
+        cmd.env("PI_WEB_ALLOWED_HOSTS", trusted_domain.unwrap().trim());
+    } else {
+        cmd.env_remove("PI_WEB_ALLOWED_HOSTS");
+    }
+    // 免密回环模式下绝不允许继承「局域网免密豁免」开关，否则监听地址被
+    // 环境变量层面的配置绕过（bind_host 已收敛 127.0.0.1，这里再堵掉旁路）。
+    cmd.env_remove("PI_WEB_ALLOW_INSECURE_LAN");
     // 独立进程组：改密/退出时可整组 kill（连带 next 孙进程），避免残留占用 30141
     #[cfg(unix)]
     {
@@ -382,24 +420,35 @@ pub(crate) fn spawn_cli(
 ) -> Option<std::process::Child> {
     let cli = find_cli()?;
     eprintln!("[desktop] 拉起 pi-web: {:?}", cli);
+    // 回退路径同样按认证状态决定监听地址。这里必须显式传 -H：CLI 默认绑
+    // 0.0.0.0，而 bin/pi-web.js 在「0.0.0.0 且无 PI_WEB_PASSWORD」时会直接拒绝
+    // 启动（assessLanExposure 返回 refuse）——免密不传 -H 会导致回退路径永远起不来。
+    let host = bind_host(password);
     let mut cmd = Command::new(&cli);
     cmd.arg("--no-open")
+        .arg("-H")
+        .arg(host)
         // 重定向子进程输出，避免继承管道阻塞
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    // 注入本机访问密码（bin/pi-web.js 透传 process.env 给 Next.js）
-    if let Some(pw) = password {
-        if !pw.is_empty() {
+    // 与 spawn_bundled 一致：有密码才注入，无密码显式清除继承值。
+    // CLI 路径尤其重要——它通常就在用户 shell 的环境里被拉起，残留
+    // PI_WEB_PASSWORD 会让免密模式变成 401。
+    match password {
+        Some(pw) if !pw.is_empty() => {
             cmd.env("PI_WEB_PASSWORD", pw);
         }
-    }
-    // 注入可信域名（Cloudflare 隧道等外部访问时后端放行的 Host）
-    if let Some(domain) = trusted_domain {
-        let d = domain.trim();
-        if !d.is_empty() {
-            cmd.env("PI_WEB_ALLOWED_HOSTS", d);
+        _ => {
+            cmd.env_remove("PI_WEB_PASSWORD");
         }
     }
+    let domain_set = trusted_domain.map(|d| !d.trim().is_empty()).unwrap_or(false);
+    if domain_set {
+        cmd.env("PI_WEB_ALLOWED_HOSTS", trusted_domain.unwrap().trim());
+    } else {
+        cmd.env_remove("PI_WEB_ALLOWED_HOSTS");
+    }
+    cmd.env_remove("PI_WEB_ALLOW_INSECURE_LAN");
     // 注入父进程 PID（供诊断；进程保持策略下后端不再随父进程退出）。
     cmd.env("PI_WEB_PARENT_PID", std::process::id().to_string());
     // 独立进程组：改密/退出时可整组 kill（连带 next 孙进程），避免残留占用 30141
@@ -486,8 +535,9 @@ pub(crate) fn spawn_local_force(
 /// 回退本机已装的 pi-web CLI。仅负责启动进程并立即返回（不等待就绪，避免阻塞
 /// 主线程/命令线程）；就绪探测由前端轮询 probe_local 完成。
 /// 返回 Some(child) = 本次新拉起的子进程；None = 已在跑 / 无可用后端。
-/// `password`：本机访问密码，非空时作为 PI_WEB_PASSWORD 注入（先设密码再拉起，
-/// 避免 0.0.0.0:30141 无认证暴露）。
+/// `password`：本机访问密码。非空时作为 PI_WEB_PASSWORD 注入并绑 0.0.0.0（对外
+/// 访问 + Basic Auth）；为空时不注入密码并绑 127.0.0.1（仅本机，打开即用）。
+/// 绑定地址由 [`bind_host`] 统一派生，调用方无需也不应自行决定。
 #[cfg(not(mobile))]
 pub fn spawn_local(
     app: &AppHandle,

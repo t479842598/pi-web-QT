@@ -58,11 +58,24 @@ function escapeHtml(s) {
 /* ---------- 首次启动 · 设置本机密码 ---------- */
 function updateSetupUI() {
   const hasPass = localServer && localServer.has_password;
-  $("setup-card").hidden = hasPass;
-  $("btn-change-local-pass").hidden = !hasPass;
-  $("setup-title").textContent = hasPass ? "修改本机密码" : "首次启动 · 设置本机密码";
-  $("btn-setup").textContent = hasPass ? "保存并连接本机" : "设置并启动本机";
+  // 打开即用（F-05）：这张卡不再按「是否设过密码」隐藏，而是常驻并作为可选设置，
+  // 标题/徽章/说明随当前状态变化，用户能一眼看清服务现在只对本机开放还是对局域网开放。
+  $("setup-card").hidden = false;
+  $("setup-title").textContent = hasPass ? "远程访问 · 已开启" : "远程访问（可选）";
+  const badge = $("setup-badge");
+  if (badge) {
+    badge.className = "badge " + (hasPass ? "online" : "probing");
+    badge.textContent = hasPass ? "已开启" : "未开启";
+  }
+  const desc = $("setup-desc");
+  if (desc) {
+    desc.textContent = hasPass
+      ? "本机服务当前对局域网开放（0.0.0.0:30141）并要求 Basic Auth，手机/其他设备可用用户名 pi 加密码连接。"
+      : "默认仅本机可访问（127.0.0.1:30141），无需密码、打开即用。需要用手机或其他设备连接时再设置访问密码，设置后服务将对局域网开放。";
+  }
+  $("btn-setup").textContent = hasPass ? "保存并重启服务" : "保存并开启对外访问";
   $("btn-setup-clear").hidden = !hasPass;
+  $("btn-change-local-pass").hidden = true;
   $("inp-setup-pass").value = "";
   $("inp-setup-pass2").value = "";
   $("setup-hint").textContent = "";
@@ -83,7 +96,8 @@ async function connect(id) {
   const srv = servers.find((s) => s.id === id);
   if (!srv) return;
   // 本地条目：点击「连接」需先拉起内置后端再连接（startLocal 内部处理
-  // 无密码引导 → 拉起 → 等待就绪 → 连接，避免后端未起时直接开窗命中 502）
+  // 拉起 → 等待就绪 → 连接，避免后端未起时直接开窗命中 502）。
+  // 免密是打开即用的默认状态，这里不再要求先设置密码。
   if (srv.is_local) {
     await startLocal();
     return;
@@ -142,9 +156,10 @@ async function probe() {
     if (r.local_alive) {
       $("btn-stop-local").disabled = false;
       if (r.unauthenticated_local) {
-        setLocalBadge("warn", "未认证");
+        // 打开即用模式下这是预期状态（后端只绑 127.0.0.1），因此不再当安全告警
+        setLocalBadge("online", "仅本机");
         $("local-desc").textContent =
-          "检测到本机 Pi Web 服务，但未启用密码认证（对局域网开放）。建议设置本机访问密码以保护数据。";
+          "检测到本机 Pi Web 服务，当前仅本机可访问、无需密码。需要用其他设备连接时，在上方「远程访问」里设置密码。";
       } else {
         setLocalBadge("online", "服务在线");
         $("local-desc").textContent = "检测到本机 Pi Web 服务，可直接连接。";
@@ -166,14 +181,8 @@ async function probe() {
 }
 
 async function startLocal() {
-  // 先设密码再拉起：无密码时引导设置，避免 0.0.0.0:30141 无认证暴露
-  if (localServer && !localServer.has_password) {
-    $("setup-card").hidden = false;
-    $("setup-card").scrollIntoView({ behavior: "smooth" });
-    $("inp-setup-pass").focus();
-    toast("请先设置本机访问密码", "err");
-    return;
-  }
+  // 无密码不再阻塞启动：壳会把内置后端绑到 127.0.0.1（仅本机），
+  // 因此「免密」等价于「安全地打开即用」，不需要先设密码。
   const btn = $("btn-start-local");
   btn.disabled = true;
   btn.textContent = "正在启动本机 Pi Web…";
@@ -201,15 +210,10 @@ async function startLocal() {
       return;
     }
     toast("本机 Pi Web 已就绪", "ok");
-    // 获取/创建本机条目：有密码直接连接；无密码填表单让用户输入
+    // 就绪后直接连接本机条目：免密（仅本机）与有密码（经本地代理注入凭据）
+    // 两条路径都不需要用户再输入任何东西。
     const local = await invoke("ensure_local_server");
-    if (local.has_password) {
-      await invoke("connect_server", { id: local.id });
-    } else {
-      openFormFor(local);
-      $("form-hint").textContent =
-        "本机服务已就绪，请输入本机 Pi Web 账号密码后连接（输入一次即保存，下次免输入）。";
-    }
+    await invoke("connect_server", { id: local.id });
     refresh();
     probe();
   } catch (e) {
@@ -284,7 +288,7 @@ $("btn-setup").addEventListener("click", async () => {
       toast(r.warning, "err");
       probe();
     } else {
-      toast("本机密码已保存，正在启动本机服务…", "ok");
+      toast("已开启对外访问，正在以密码保护重启本机服务…", "ok");
       await startLocal();
     }
   } catch (e) {
@@ -299,7 +303,7 @@ $("btn-setup-clear").addEventListener("click", async () => {
   try {
     const r = await invoke("set_local_password", { password: "" });
     localServer = r.server;
-    toast(r.warning ? r.warning : "已清除本机密码", r.warning ? "err" : "ok");
+    toast(r.warning ? r.warning : "已关闭对外访问，服务回到仅本机可访问", r.warning ? "err" : "ok");
     updateSetupUI();
     refresh();
   } catch (e) {

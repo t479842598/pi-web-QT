@@ -1,4 +1,5 @@
 "use client";
+import { cancelSessionTitleRequest, generateSessionTitleRequest } from "@/lib/session-title-client";
 
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, memo, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -501,8 +502,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     // Entering the panel is itself the discovery action — retire the hint.
     if (mode === "projects") dismissModeHintRef.current?.();
   }, []);
-  // One-time onboarding hint: fresh installs keep the dropdown default, but
-  // the toggle button explains the second (projects panel) layout once.
+  // One-time onboarding hint for the *dropdown* layout. Fresh installs now
+  // default to the projects panel (DEFAULT_SIDEBAR_MODE), so this no longer
+  // fires on first run — it only surfaces when a user switches back to the
+  // list view without having visited the panel, pointing them back at it.
   const MODE_HINT_KEY = "pi-web:sidebar-mode-hint-seen";
   const [modeHintVisible, setModeHintVisible] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -1256,36 +1259,46 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // 批量生成当前项目所有会话的标题（并发池并行，单条失败跳过）
   const [batchNaming, setBatchNaming] = useState(false);
   const [batchNameProgress, setBatchNameProgress] = useState({ done: 0, total: 0 });
+  const batchTitleControllersRef = useRef(new Map<string, AbortController>());
+  const batchTitleStopRef = useRef(false);
 
   const handleBatchAutoName = useCallback(async () => {
-    if (batchNaming) return;
-    const ids = filteredSessions
-      .filter((s) => s.messageCount > 0)
-      .map((s) => s.id);
+    if (batchNaming) {
+      batchTitleStopRef.current = true;
+      for (const [id, controller] of batchTitleControllersRef.current) {
+        controller.abort();
+        void cancelSessionTitleRequest(id);
+      }
+      return;
+    }
+    const ids = filteredSessions.filter((item) => item.messageCount > 0).map((item) => item.id);
     if (ids.length === 0) return;
 
+    batchTitleStopRef.current = false;
     setBatchNaming(true);
     setBatchNameProgress({ done: 0, total: ids.length });
-
-    // Conservative concurrency: title generation is a full model call per
-    // session; 4 parallel runs frequently tripped provider rate limits /
-    // context errors and stalled the UI. 2 keeps progress steady.
-    const CONCURRENCY = 2;
     let nextIndex = 0;
+    let completed = 0;
     const worker = async () => {
-      while (nextIndex < ids.length) {
+      while (!batchTitleStopRef.current) {
         const index = nextIndex++;
         const id = ids[index];
-        if (!id) continue;
+        if (!id) return;
+        const controller = new AbortController();
+        batchTitleControllersRef.current.set(id, controller);
         try {
-          await fetch(`/api/sessions/${encodeURIComponent(id)}/auto-name`, { method: "POST" });
-        } catch { /* skip errors */ }
-        setBatchNameProgress({ done: index + 1, total: ids.length });
+          await generateSessionTitleRequest(id, controller.signal);
+        } catch {
+          // Per-session failures do not stop the rest of the batch.
+        } finally {
+          batchTitleControllersRef.current.delete(id);
+          completed += 1;
+          setBatchNameProgress({ done: completed, total: ids.length });
+        }
       }
     };
-    const workers = Array.from({ length: Math.min(CONCURRENCY, ids.length) }, worker);
-    await Promise.all(workers);
-
+    await Promise.all(Array.from({ length: Math.min(2, ids.length) }, worker));
+    batchTitleControllersRef.current.clear();
     setBatchNaming(false);
     void loadSessions(false);
   }, [batchNaming, filteredSessions, loadSessions]);
@@ -2218,7 +2231,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </button>
           <button
             onClick={() => void handleBatchAutoName()}
-            disabled={batchNaming || !selectedCwd || filteredSessions.filter((s) => s.messageCount > 0).length === 0}
+            disabled={!selectedCwd || filteredSessions.filter((s) => s.messageCount > 0).length === 0}
             title={batchNaming
               ? `${t("desktop.generatingTitlesProgress", { done: batchNameProgress.done, total: batchNameProgress.total })}`
               : t("desktop.generateAllTitles")}
@@ -2229,7 +2242,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               background: "none",
               border: "none",
               color: "var(--text-dim)",
-              cursor: batchNaming ? "default" : "pointer",
+              cursor: "pointer",
               borderRadius: 5,
               flexShrink: 0,
               opacity: (!selectedCwd || filteredSessions.filter((s) => s.messageCount > 0).length === 0) ? 0.5 : 1,
@@ -3032,6 +3045,7 @@ const SessionItem = memo(function SessionItem({
   const [deleting, setDeleting] = useState(false);
   const [autoNaming, setAutoNaming] = useState(false);
   const [autoNameError, setAutoNameError] = useState<string | null>(null);
+  const autoNameControllerRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const renameMeasureRef = useRef<HTMLSpanElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -3087,21 +3101,23 @@ const SessionItem = memo(function SessionItem({
 
   const handleAutoName = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (autoNaming || !hasMessages) return;
+    if (autoNaming) {
+      autoNameControllerRef.current?.abort();
+      void cancelSessionTitleRequest(session.id);
+      return;
+    }
+    if (!hasMessages) return;
+    const controller = new AbortController();
+    autoNameControllerRef.current = controller;
     setAutoNaming(true);
     setAutoNameError(null);
     try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/auto-name`, {
-        method: "POST",
-      });
-      const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string };
-      if (!response.ok || !body.title) {
-        throw new Error(body.error || `HTTP ${response.status}`);
-      }
+      await generateSessionTitleRequest(session.id, controller.signal);
       onRenamed?.();
     } catch (error) {
-      setAutoNameError(error instanceof Error ? error.message : String(error));
+      if (!controller.signal.aborted) setAutoNameError(error instanceof Error ? error.message : String(error));
     } finally {
+      if (autoNameControllerRef.current === controller) autoNameControllerRef.current = null;
       setAutoNaming(false);
     }
   }, [autoNaming, hasMessages, session.id, onRenamed]);
@@ -3142,9 +3158,7 @@ const SessionItem = memo(function SessionItem({
       // Retry immediately with the new model.
       setAutoNaming(true);
       try {
-        const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/auto-name`, { method: "POST" });
-        const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string };
-        if (!response.ok || !body.title) throw new Error(body.error || `HTTP ${response.status}`);
+        await generateSessionTitleRequest(session.id);
         onRenamed?.();
       } catch (error) {
         setAutoNameError(error instanceof Error ? error.message : String(error));
@@ -3386,7 +3400,7 @@ const SessionItem = memo(function SessionItem({
                 <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
                 <button
                   onClick={handleAutoName}
-                  disabled={autoNaming || !hasMessages}
+                  disabled={!hasMessages}
                   title={
                     autoNameError ??
                     (!hasMessages
@@ -3402,7 +3416,7 @@ const SessionItem = memo(function SessionItem({
                     background: "none", border: "none",
                     borderRadius: 4,
                     color: autoNameError ? "#ef4444" : "var(--text-dim)",
-                    cursor: autoNaming || !hasMessages ? "default" : "pointer",
+                    cursor: !hasMessages ? "default" : "pointer",
                     flexShrink: 0,
                     opacity: autoNaming ? 0.7 : !hasMessages ? 0.35 : 1,
                     transition: "color 0.12s",
@@ -3766,6 +3780,7 @@ function SessionCompactRow({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [autoNaming, setAutoNaming] = useState(false);
+  const autoNameControllerRef = useRef<AbortController | null>(null);
   const [forkTooltip, setForkTooltip] = useState(false);
   const [forkTooltipPos, setForkTooltipPos] = useState<{ top: number; left: number } | null>(null);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -3797,16 +3812,22 @@ function SessionCompactRow({
 
   const handleAutoName = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (autoNaming || session.messageCount === 0) return;
+    if (autoNaming) {
+      autoNameControllerRef.current?.abort();
+      void cancelSessionTitleRequest(session.id);
+      return;
+    }
+    if (session.messageCount === 0) return;
+    const controller = new AbortController();
+    autoNameControllerRef.current = controller;
     setAutoNaming(true);
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/auto-name`, { method: "POST" });
-      const body = (await res.json().catch(() => ({}))) as { title?: string; error?: string };
-      if (!res.ok || !body.title) throw new Error(body.error || `HTTP ${res.status}`);
+      await generateSessionTitleRequest(session.id, controller.signal);
       onRenamed?.();
     } catch {
-      // ignore
+      // The compact archive row intentionally keeps failures silent.
     } finally {
+      if (autoNameControllerRef.current === controller) autoNameControllerRef.current = null;
       setAutoNaming(false);
     }
   };
@@ -3925,9 +3946,9 @@ function SessionCompactRow({
                 </button>
                 <button
                   onClick={handleAutoName}
-                  disabled={autoNaming || session.messageCount === 0}
+                  disabled={session.messageCount === 0}
                   title={session.messageCount === 0 ? t("desktop.titleNeedsMessages") : autoNaming ? t("desktop.generatingTitle") : t("desktop.generateTitle")}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--text-dim)", cursor: autoNaming || session.messageCount === 0 ? "default" : "pointer", flexShrink: 0, opacity: autoNaming ? 0.7 : session.messageCount === 0 ? 0.35 : 1, transition: "color 0.12s" }}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--text-dim)", cursor: session.messageCount === 0 ? "default" : "pointer", flexShrink: 0, opacity: autoNaming ? 0.7 : session.messageCount === 0 ? 0.35 : 1, transition: "color 0.12s" }}
                   onMouseEnter={(e) => { if (autoNaming || session.messageCount === 0) return; e.currentTarget.style.color = "var(--accent)"; }}
                   onMouseLeave={(e) => { if (autoNaming || session.messageCount === 0) return; e.currentTarget.style.color = "var(--text-dim)"; }}
                 >

@@ -122,11 +122,11 @@ function getNodeLayer(msg: AgentMessage | Partial<AgentMessage>): number {
   return 2;
 }
 
-function hasTextContent(msg: AgentMessage | Partial<AgentMessage>): boolean {
+function hasMinimapContent(msg: AgentMessage | Partial<AgentMessage>): boolean {
   if (msg.role === "user") return true;
   if (msg.role === "assistant") {
     const blocks = (msg as Partial<AssistantMessage>).content ?? [];
-    return blocks.some((b) => b.type === "text");
+    return blocks.some((block) => block.type === "text" || block.type === "thinking" || block.type === "toolCall");
   }
   return false;
 }
@@ -157,6 +157,9 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
   allMessagesRef.current = allMessages;
 
   // --- 仅更新视口比例，不读取 DOM ---
+  // React Compiler cannot infer ref.current dependencies for these stable DOM
+  // callbacks; their ref objects are intentionally the dependency boundary.
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const updateScroll = useCallback(() => {
     const scrollEl = scrollContainer.current;
     if (!scrollEl) return;
@@ -180,6 +183,7 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
   // stable regardless of prop identity (it changes when the minimap remounts).
   const virtualizerRef = useRef(virtualizer);
   virtualizerRef.current = virtualizer;
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const measureNodes = useCallback(() => {
     // 节流：150ms 内忽略重复调用
     if (measureThrottleRef.current) return;
@@ -205,13 +209,14 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
         // virtualizer offsets themselves exclude the spacer.
         if (v.totalHeight() <= 0) return;
         let refIndex = 0;
+        const seenItems = new Set<number>();
         for (let i = 0; i < allMessages.length; i++) {
           const msg = allMessages[i];
           if (msg.role !== "user" && msg.role !== "assistant") continue;
-          if (!hasTextContent(msg)) { refIndex += 1; continue; }
           const itemIndex = v.refToItemIndex(refIndex);
           refIndex += 1;
-          if (itemIndex === undefined) continue;
+          if (itemIndex === undefined || seenItems.has(itemIndex) || !hasMinimapContent(msg)) continue;
+          seenItems.add(itemIndex);
           const top = v.getOffsetForIndex(itemIndex);
           const size = v.sizeFor(itemIndex);
           newNodes.push({
@@ -229,7 +234,7 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
           if (msg.role !== "user" && msg.role !== "assistant") continue;
           const el = refs?.[refIndex];
           refIndex++;
-          if (!hasTextContent(msg)) continue;
+          if (!hasMinimapContent(msg)) continue;
           if (el) {
             const elRect = el.getBoundingClientRect();
             const containerRect = scrollEl.getBoundingClientRect();
@@ -303,6 +308,7 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
     return () => clearTimeout(t);
   }, [messages.length, measureNodes, updateScroll]);
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const scrollToMinimapRatio = useCallback((viewportTopRatio: number) => {
     const el = scrollContainer.current;
     if (!el) return;

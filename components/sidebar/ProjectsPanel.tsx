@@ -1,4 +1,5 @@
 "use client";
+import { cancelSessionTitleRequest, generateSessionTitleRequest } from "@/lib/session-title-client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 // ZCode uses the lucide icon set; mirror its sidebar icon choices exactly.
@@ -664,6 +665,7 @@ function PanelSessionRow({
   const [confirming, setConfirming] = useState(false);
   const [autoNaming, setAutoNaming] = useState(false);
   const [autoNameError, setAutoNameError] = useState<string | null>(null);
+  const autoNameControllerRef = useRef<AbortController | null>(null);
   const title = session.name || session.firstMessage?.slice(0, 50) || session.id;
   const hasMessages = session.messageCount > 0;
 
@@ -671,17 +673,23 @@ function PanelSessionRow({
   // title-generation model configured in 设置 → 模型 → 标题生成模型.
   const handleAutoName = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (autoNaming || !hasMessages) return;
+    if (autoNaming) {
+      autoNameControllerRef.current?.abort();
+      void cancelSessionTitleRequest(session.id);
+      return;
+    }
+    if (!hasMessages) return;
+    const controller = new AbortController();
+    autoNameControllerRef.current = controller;
     setAutoNaming(true);
     setAutoNameError(null);
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/auto-name`, { method: "POST" });
-      const body = (await res.json().catch(() => ({}))) as { title?: string; error?: string };
-      if (!res.ok || !body.title) throw new Error(body.error || `HTTP ${res.status}`);
+      await generateSessionTitleRequest(session.id, controller.signal);
       onRenamed();
     } catch (err) {
-      setAutoNameError(err instanceof Error ? err.message : String(err));
+      if (!controller.signal.aborted) setAutoNameError(err instanceof Error ? err.message : String(err));
     } finally {
+      if (autoNameControllerRef.current === controller) autoNameControllerRef.current = null;
       setAutoNaming(false);
     }
   }, [autoNaming, hasMessages, session.id, onRenamed]);
@@ -713,10 +721,10 @@ function PanelSessionRow({
     <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
       <button
         onClick={handleAutoName}
-        disabled={autoNaming || !hasMessages}
+        disabled={!hasMessages}
         title={autoNameError ?? (!hasMessages ? t("desktop.titleNeedsMessages") : autoNaming ? t("desktop.generatingTitle") : t("desktop.generateTitle"))}
         aria-label={t("desktop.generateTitle")}
-        style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: autoNameError ? "#ef4444" : "var(--text-dim)", cursor: autoNaming || !hasMessages ? "default" : "pointer", flexShrink: 0, opacity: autoNaming ? 0.7 : !hasMessages ? 0.35 : 1, transition: "color 0.12s" }}
+        style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: autoNameError ? "#ef4444" : "var(--text-dim)", cursor: !hasMessages ? "default" : "pointer", flexShrink: 0, opacity: autoNaming ? 0.7 : !hasMessages ? 0.35 : 1, transition: "color 0.12s" }}
         onMouseEnter={(e) => { if (!autoNaming && hasMessages) e.currentTarget.style.color = "var(--accent)"; }}
         onMouseLeave={(e) => { e.currentTarget.style.color = autoNameError ? "#ef4444" : "var(--text-dim)"; }}
       >

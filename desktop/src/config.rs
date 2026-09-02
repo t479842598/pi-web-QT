@@ -5,6 +5,9 @@ use tauri::{AppHandle, Manager};
 
 pub const DEFAULT_LOCAL_URL: &str = "http://127.0.0.1:30141";
 pub const DEFAULT_USERNAME: &str = "pi";
+/// 本机默认服务器的固定 id。启动路由（打开即用）、等待窗口 label、
+/// 失败回写都引用它，避免各处硬编码 "local" 漂移。
+pub const LOCAL_SERVER_ID: &str = "local";
 const CONFIG_FILE: &str = "config.json";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -147,7 +150,7 @@ impl Config {
             return &mut self.servers[idx];
         }
         let srv = Server {
-            id: "local".to_string(),
+            id: LOCAL_SERVER_ID.to_string(),
             name: "本机 Pi Web".to_string(),
             base_url: DEFAULT_LOCAL_URL.to_string(),
             username: DEFAULT_USERNAME.to_string(),

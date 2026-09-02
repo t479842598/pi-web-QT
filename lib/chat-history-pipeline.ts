@@ -105,6 +105,22 @@ export function buildHistoryPipeline(
   for (let idx = 0; idx < messages.length;) {
     const msg = messages[idx];
     const startsCompactionTurn = isCompactionBoundary(msg);
+    // A bounded tail can begin in the middle of a turn, after its user message
+    // was paged out. Treat the orphaned assistant/tool messages as a synthetic
+    // turn so stopped sessions still collapse into one ProcessGroup.
+    const orphanedPrefix = idx === 0 && msg.role !== "user" && !startsCompactionTurn;
+    if (orphanedPrefix) {
+      let endIdx = 1;
+      while (endIdx < messages.length && messages[endIdx].role !== "user") endIdx += 1;
+      const processIndices = Array.from({ length: endIdx }, (_, offset) => offset)
+        .filter((processIdx) => hasDisplayableProcessMessage(messages[processIdx]));
+      const processBlocks = collectProcessContentBlocks(messages, entryIds, processIndices, toolResultsMap);
+      if (processBlocks.length > 0) {
+        items.push({ kind: "turn", userIdx: -1, endIdx, startsCompactionTurn: false, finalAssistantIdx: -1, visibleProcessIndices: processIndices, processBlocks, finalAnswerMessage: null, writtenFiles: undefined });
+        idx = endIdx;
+        continue;
+      }
+    }
     // Non-turn-starting messages render as singles (mirrors the JSX loop).
     if (msg.role !== "user" && !startsCompactionTurn) {
       items.push({ kind: "single", idx });
@@ -119,8 +135,10 @@ export function buildHistoryPipeline(
     const finalAssistantIdx = findFinalAssistantIndex(messages, userIdx, endIdx);
 
     if (finalAssistantIdx === -1) {
-      // No assistant answer in this turn — every message renders as a single.
-      items.push({ kind: "turn", userIdx, endIdx, startsCompactionTurn, finalAssistantIdx, visibleProcessIndices: [], processBlocks: [], finalAnswerMessage: null, writtenFiles: undefined });
+      const processIndices = Array.from({ length: endIdx - userIdx - 1 }, (_, offset) => userIdx + 1 + offset)
+        .filter((processIdx) => hasDisplayableProcessMessage(messages[processIdx]));
+      const processBlocks = collectProcessContentBlocks(messages, entryIds, processIndices, toolResultsMap);
+      items.push({ kind: "turn", userIdx, endIdx, startsCompactionTurn, finalAssistantIdx, visibleProcessIndices: processIndices, processBlocks, finalAnswerMessage: null, writtenFiles: undefined });
       idx = endIdx;
       continue;
     }
