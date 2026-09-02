@@ -5,8 +5,6 @@
 // resources/backend/desktop-server.cjs，Rust 侧（probe::spawn_bundled）
 // 优先以它作为入口拉起内置 Node + Next.js。
 
-const expectedParentPid = Number.parseInt(process.env.PI_WEB_PARENT_PID ?? "", 10);
-
 // 进程保持策略：客户端（GUI 壳）退出后，本机后端继续常驻运行，下次启动 /
 // 其他客户端 / 浏览器可直接复用 30141。不再随父进程退出；需要停止时用
 // 连接页「关闭本机服务」按钮（Rust 侧 stop_local 命令会杀本进程）。

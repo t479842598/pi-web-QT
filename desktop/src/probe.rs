@@ -358,8 +358,8 @@ fn spawn_bundled(
         .current_dir(&bundled.backend_dir)
         .env("HOSTNAME", host)
         .env("PORT", "30141")
-        // 启动器看门狗依赖父进程 PID：GUI 崩溃/强杀时自动退出，防孤儿 node
-        .env("PI_WEB_PARENT_PID", std::process::id().to_string())
+        // 进程保持：不注入 PI_WEB_PARENT_PID —— 客户端 GUI 退出后后端常驻
+        // 30141（复用），需要停止时由「关闭本机服务」（stop_local）显式处理。
         .env(
             "NODE_OPTIONS",
             format!("--max-old-space-size={MEMORY_LIMIT_MB} --max-semi-space-size={SEMI_SPACE_MB}"),
@@ -449,8 +449,7 @@ pub(crate) fn spawn_cli(
         cmd.env_remove("PI_WEB_ALLOWED_HOSTS");
     }
     cmd.env_remove("PI_WEB_ALLOW_INSECURE_LAN");
-    // 注入父进程 PID（供诊断；进程保持策略下后端不再随父进程退出）。
-    cmd.env("PI_WEB_PARENT_PID", std::process::id().to_string());
+    // 进程保持：不注入 PI_WEB_PARENT_PID，客户端退出后后端常驻 30141 复用。
     // 独立进程组：改密/退出时可整组 kill（连带 next 孙进程），避免残留占用 30141
     #[cfg(unix)]
     {
@@ -567,7 +566,6 @@ pub fn spawn_local(
 }
 
 /// Windows-only：查询占用指定端口的进程 ID（如存在）。
-#[cfg(all(not(mobile), windows))]
 #[cfg(all(not(mobile), windows))]
 fn port_owner_pid(port: u16) -> Option<u32> {
     use std::process::Command;
