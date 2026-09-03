@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "server-window",
-  "description": "服务器主窗口：无边框壳，可最小化/最大化/拖动窗口；仅对本机直连与本地反向代理 URL 开放。",
+  "description": "服务器主窗口：无边框壳，可最小化/最大化/拖动窗口；仅对本机直连与本地反向代理 URL 开放。授权连接管理气泡所需的自定义命令。",
   "windows": ["server-*"],
   "remote": {
     "urls": ["http://127.0.0.1:*/*", "http://localhost:*/*", "https://*/*", "http://*/*"]
@@ -15,6 +15,20 @@
     "core:window:allow-is-maximized",
     "core:window:allow-start-dragging",
     "core:window:allow-close",
-    "core:window:allow-set-focus"
+    "core:window:allow-set-focus",
+    "allow-list-servers",
+    "allow-save-server",
+    "allow-remove-server",
+    "allow-probe-local",
+    "allow-start-local",
+    "allow-ensure-local-server",
+    "allow-set-local-password",
+    "allow-set-local-domain",
+    "allow-connect-server",
+    "allow-open-connect",
+    "allow-retry-startup",
+    "allow-quit-app",
+    "allow-stop-local",
+    "allow-set-ui-theme"
   ]
 }

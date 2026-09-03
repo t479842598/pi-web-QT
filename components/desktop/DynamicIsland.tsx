@@ -30,7 +30,7 @@ const DEFAULT_RIGHT = 14;
  * 对齐 dsh-desktop 灵动岛的紧凑观感（用户反馈原胶囊偏高）。
  * 宽度不变：5 个 26px 按钮 + 4×1 gap + 左右 padding 5×2 + 分隔线 7 ≈ 152。
  */
-const ISLAND_W = 152;
+const ISLAND_W = 168;
 const ISLAND_H = 34;
 
 export interface IslandPosition {
@@ -284,6 +284,32 @@ export function DynamicIsland({ onRefreshSession }: DynamicIslandProps = {}) {
         touchAction: "none",
       }}
     >
+      {/* 拖动把手：左侧 grip 点阵，明确的可拖动区域（按住即可移动整个胶囊） */}
+      <span
+        data-island-grip
+        aria-hidden="true"
+        title={translate("desktop.islandDrag")}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 12,
+          height: 26,
+          flexShrink: 0,
+          marginRight: 2,
+          color: "var(--text-dim)",
+          cursor: "grab",
+        }}
+      >
+        <svg width="6" height="14" viewBox="0 0 6 14" fill="currentColor" aria-hidden="true">
+          <circle cx="1.5" cy="2" r="1.2" />
+          <circle cx="4.5" cy="2" r="1.2" />
+          <circle cx="1.5" cy="7" r="1.2" />
+          <circle cx="4.5" cy="7" r="1.2" />
+          <circle cx="1.5" cy="12" r="1.2" />
+          <circle cx="4.5" cy="12" r="1.2" />
+        </svg>
+      </span>
       {/* 刷新会话（软刷新：重拉当前会话，不重载页面） */}
       {onRefreshSession && (
         <button

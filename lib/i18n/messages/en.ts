@@ -314,6 +314,7 @@ export const enLocale = {
     "desktop.restore": "Restore",
     "desktop.islandLabel": "Window controls",
     "desktop.islandResetHint": "Drag to move, double-click to reset",
+    "desktop.islandDrag": "Drag to move",
     "desktop.close": "Close",
     "desktop.viewFullHistory": "View full history",
     "desktop.fullHistoryAvailableAfterSave": "Full history is available after the session is saved",

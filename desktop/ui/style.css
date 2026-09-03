@@ -23,11 +23,7 @@ html, body { height: 100%; }
 body {
   font-family: var(--font);
   color: var(--text);
-  background:
-    radial-gradient(1200px 600px at 15% -10%, rgba(108, 140, 255, 0.14), transparent 55%),
-    radial-gradient(900px 500px at 110% 10%, rgba(138, 92, 255, 0.12), transparent 55%),
-    radial-gradient(800px 600px at 50% 120%, rgba(61, 220, 132, 0.05), transparent 55%),
-    var(--bg-0);
+  background: var(--bg-0);
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
@@ -70,8 +66,6 @@ main { display: flex; flex-direction: column; gap: 14px; flex: 1; }
   border: 1px solid var(--card-border);
   border-radius: var(--radius);
   padding: 18px 20px;
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.35);
 }
 .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }

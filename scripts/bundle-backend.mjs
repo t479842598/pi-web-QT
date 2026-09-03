@@ -81,6 +81,19 @@ if (existsSync(staticDir)) {
 if (existsSync(publicDir)) {
   cpSync(publicDir, join(standalone, "public"), { recursive: true });
 }
+// 连接页（壳内静态页）改由本机后端 http:// 托管：Windows + WebView2 软渲染
+//（--disable-gpu）下 tauri:// 内嵌资产渲染为白屏，而 http:// 始终正常，因此把
+// desktop/ui（index.html/style.css/app.js）收进 standalone/public/connect，
+// Rust 侧连接窗口导航到 {base}/connect/index.html 加载。
+const shellUiDir = join(root, "desktop", "ui");
+if (existsSync(shellUiDir)) {
+  cpSync(shellUiDir, join(standalone, "public", "connect"), { recursive: true });
+
+if (existsSync(join(root, "desktop", "ui", "manager"))) {
+  cpSync(join(root, "desktop", "ui", "manager"), join(standalone, "public", "manager"), { recursive: true });
+  console.log("[bundle-backend] 连接管理气泡 desktop/ui/manager -> standalone/public/manager");
+}
+}
 
 // 4. standalone → desktop/resources/backend
 //    排除所有 .env* 文件：next build 会把仓库根 .env（含真实 PI_WEB_PASSWORD）

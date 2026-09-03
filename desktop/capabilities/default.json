@@ -3,11 +3,28 @@
   "identifier": "connect-window",
   "description": "连接页窗口：壳内静态页，可访问全部自定义命令与更新检查",
   "windows": ["connect"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*/*", "http://localhost:*/*"]
+  },
   "permissions": [
     "core:default",
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:window:allow-close",
-    "core:window:allow-set-focus"
+    "core:window:allow-set-focus",
+    "allow-list-servers",
+    "allow-save-server",
+    "allow-remove-server",
+    "allow-probe-local",
+    "allow-start-local",
+    "allow-ensure-local-server",
+    "allow-set-local-password",
+    "allow-set-local-domain",
+    "allow-connect-server",
+    "allow-open-connect",
+    "allow-retry-startup",
+    "allow-quit-app",
+    "allow-stop-local",
+    "allow-set-ui-theme"
   ]
 }

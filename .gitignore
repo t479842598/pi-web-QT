@@ -93,6 +93,7 @@ ref-repos
 
 # desktop (Tauri)
 /desktop/target/
+/desktop/target-win/
 /desktop/gen/
 /desktop/.tauri/
 

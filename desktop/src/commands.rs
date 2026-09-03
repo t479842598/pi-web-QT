@@ -407,9 +407,21 @@ pub fn retry_startup(_app: AppHandle, _state: State<AppState>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn open_connect(app: AppHandle) -> Result<(), String> {
+pub async fn open_connect(app: AppHandle) -> Result<(), String> {
     #[cfg(not(mobile))]
-    window::open_connect_window(&app).map_err(|e| e.to_string())?;
+    {
+        let app2 = app.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        app.run_on_main_thread(move || {
+            let result = window::open_connect_window(&app2)
+                .map(|_| ())
+                .map_err(|e| e.to_string());
+            let _ = tx.send(result);
+        })
+        .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(15))
+            .map_err(|e| format!("创建连接管理窗口超时: {e}"))??;
+    }
     #[cfg(mobile)]
     window::navigate_main(&app, "tauri://localhost/index.html");
     Ok(())

@@ -1,5 +1,7 @@
 /* Pi Web Desktop — 连接页逻辑（Tauri IPC） */
-const invoke = window.__TAURI__.core.invoke;
+// 防御缺省：在 Tauri 壳内 withGlobalTauri 会注入 window.__TAURI__；
+// 普通浏览器/未注入时置空，避免整段脚本因 window.__TAURI__.core 崩溃而白屏。
+const invoke = window.__TAURI__ && window.__TAURI__.core ? window.__TAURI__.core.invoke : null;
 
 const $ = (id) => document.getElementById(id);
 

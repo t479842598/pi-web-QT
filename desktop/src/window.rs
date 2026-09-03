@@ -12,6 +12,10 @@ use crate::AppState;
 
 pub const CONNECT_LABEL: &str = "connect";
 
+/// 连接管理气泡脚本源码：编译期内嵌，点击时直接 eval 进当前窗口，
+/// 省去 `<script src>` 的一次 HTTP 往返（点击即弹）。
+const MANAGER_JS: &str = include_str!("../ui/manager/manager.js");
+
 /// 服务器窗口 label。
 pub fn server_label(id: &str) -> String {
     format!("server-{id}")
@@ -213,7 +217,15 @@ fn create_shell_window(
     // 白屏。禁用 GPU 强制软件渲染，实测可稳定加载远程页面。
     #[cfg(windows)]
     {
-        builder = builder.additional_browser_args("--disable-gpu");
+        let mut args = String::from("--disable-gpu");
+        // 仅当显式设置 PI_WEB_WEBVIEW_DEBUG_PORT 时开启 WebView2 远程调试端口，
+        // 便于本地验证；默认不注入，生产行为不变。
+        if let Ok(port) = std::env::var("PI_WEB_WEBVIEW_DEBUG_PORT") {
+            if !port.is_empty() {
+                args.push_str(&format!(" --remote-debugging-port={port}"));
+            }
+        }
+        builder = builder.additional_browser_args(&args);
     }
     // 远程凭据注入由本地反向代理完成（见 window_url）：Tauri 的
     // on_web_resource_request 只作用于 tauri:// 资源，无法拦截外部 http(s)，
@@ -229,7 +241,21 @@ fn create_shell_window(
             let s = url.as_str();
             if let Some(rest) = s.strip_prefix("piweb-switch://") {
                 if rest == "manage" {
-                    let _ = open_connect_window(&app_handle);
+                    // 连接管理改为当前窗口内的气泡浮层，不再创建第二个 WebView2 窗口
+                    // （Windows 上第二窗口的 controller 创建/渲染在本机环境不稳定）。
+                    // 往当前服务器窗口注入 /manager/manager.js（本机后端静态托管），
+                    // 由它在已就绪的页面里叠加弹层并直连 Tauri 命令。
+                    let app_for_main = app_handle.clone();
+                    let label_for_main = label_owner.clone();
+                    let app_inner = app_for_main.clone();
+                    if let Err(e) = app_for_main.run_on_main_thread(move || {
+                        if let Some(w) = app_inner.get_webview_window(&label_for_main) {
+                            // 直接 eval 内嵌脚本；脚本自带「已打开则复用」守卫，重复点击安全。
+                            let _ = w.eval(MANAGER_JS);
+                        }
+                    }) {
+                        eprintln!("[desktop] 注入连接管理气泡失败: {e}");
+                    }
                 } else if !rest.is_empty() {
                     let state = app_handle.state::<AppState>();
                     let cfg = state.config.lock().unwrap().clone();
@@ -361,6 +387,9 @@ pub fn open_connect_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let win = win_builder.build()?;
     let _ = win.show();
     let _ = win.set_focus();
+    // 主界面右上角「连接远程」已改为当前窗口内气泡（/manager/manager.js），
+    // 此连接窗口仅保留给托盘/启动回退等路径；页面为壳内 index.html（连接页），
+    // 不导航到后端，避免 Windows 第二 WebView2 窗口的不稳定。
     Ok(win)
 }
 
