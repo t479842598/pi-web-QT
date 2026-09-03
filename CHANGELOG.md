@@ -2,6 +2,36 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.16.0 — 2026-09-04（桌面端打开即用 + Windows 连接管理气泡化 + 自定义命令权限 + 灵动岛拖动把手）
+
+### 新增（web / 会话）
+- **会话语义增强**：新增会话标题协调器/客户端（`session-title-coordinator` / `session-title-client`），多端同步标题与详情；`/api/sessions/[id]` 拆出详情路由，会话加载、项目树响应、会话重命名一致性提升；新增一批会话标题/详情测试。
+- 会话消息流修复：结束滚动锚定、长会话落底、折叠区与过程分组健壮性（承接 v0.15.4 修复方向的补充）。
+
+### 变更（web / 桌面）
+- **桌面端打开即用**：启动跳过连接页/强制设密码，自动连接本机内置后端——`bind_host` 免密仅绑 `127.0.0.1`、设密绑 `0.0.0.0`；免密路径显式 `env_remove` 防继承污染；连接页降级为可选「远程访问」设置页，进入后右上角一次性引导提示可切换远程。
+- **窗口控制胶囊（Windows/Linux）**：修复「放大/缩小首次不生效」（缓存 `currentWindow` 实例 + 挂载预热，去掉点击路径动态 import）；新增会话软刷新 + 保留整页重载；胶囊高度 42→34px 对齐 dsh-desktop；最大化图标改为 IPC 成功后翻转。
+- **侧边栏默认形态**：ZCode「全部项目」面板设为默认（`DEFAULT_SIDEBAR_MODE=projects`）。
+- 桌面壳加载页 `loading.html` 完善，本机连接初始化提示更清晰。
+
+### 桌面端（Tauri，macOS/Windows 共用）
+- **pi SDK 0.84.3 → 0.84.4**（对齐 u1s1 项目）。
+- **移除父进程看门狗**：客户端（GUI 壳）退出后本机后端 30141 保持常驻，下次启动/其他客户端/浏览器直接复用；需停止时用连接页「关闭本机服务」。删除 `lib/process-alive` 及看门狗逻辑，`probe.rs` 不再注入 `PI_WEB_PARENT_PID`。
+
+### 桌面端（Windows）
+- **连接管理气泡化**：连接管理改为当前窗口内气泡浮层（内嵌 `manager.js`，eval 注入），不再新建第二个 WebView2 窗口（Windows 上第二窗口 controller 创建/渲染不稳定）。
+- **自定义命令权限体系**：`build.rs` 用 `AppManifest::commands` 声明全部自定义命令并自动生成 `allow-*` 权限；capabilities 为 connect/server 窗口显式授权（Tauri 2.11 远程源要求），新窗口权限按需放行。
+- **open_connect 改 async**：`run_on_main_thread` + 15s 超时，避免主线程死等。
+- 连接页静态资源改由本机后端 http 托管（bundle 进 `public/connect`），`app.js` 对缺失 `__TAURI__` 做防御，避免白屏。
+- WebView2 远程调试端口仅在 `PI_WEB_WEBVIEW_DEBUG_PORT` 设置时注入；`.gitignore` 忽略 `desktop/target-win` 构建产物。
+
+### 桌面端（灵动岛）
+- **左侧拖动把手**：灵动岛新增左侧 grip 拖动把手（按住即拖），配合胶囊空白区域拖动/双击复位；`ISLAND_W` 152→168。
+- `style.css` 去除 backdrop-filter/渐变背景（桌面壳软渲染下 blur 每帧全页重绘，拖动卡顿）。
+
+### 变更
+- 版本号同步：web `package.json` 0.15.4 → 0.16.0；desktop（tauri.conf.json / package.json / Cargo.toml / Cargo.lock）与 mobile2（pubspec.yaml）随 web 一并 bump 到 0.16.0。
+
 ## v0.15.4 — 2026-08-31（侧边栏列对齐与单行式 + 手机端抽屉/模型名修复 + 对话结束滚动与流式态修复）
 
 ### 变更（web / 侧边栏面板）
