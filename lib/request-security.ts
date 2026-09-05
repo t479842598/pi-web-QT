@@ -169,8 +169,18 @@ export function isApiRequestAllowed(
   if (!isApiRequestHostAllowed(request, configuredHostnames)) return false;
   if (isUserInitiatedSessionExportNavigation(request)) return true;
   if (!shouldCheckApiRequestOrigin(request)) {
-    // Non-browser client: reads are fine, writes require a same-origin page.
-    return !WRITE_METHODS.has((request.method ?? "GET").toUpperCase());
+    // Non-browser client: loopback writes are local-user territory (upstream
+    // semantics); plain writes to non-loopback listeners stay rejected so a
+    // LAN-visible instance cannot be reconfigured by any device (fork).
+    if (WRITE_METHODS.has((request.method ?? "GET").toUpperCase())) {
+      const host = request.headers.get("host");
+      const hostname = host ? hostnameFromAuthority(host) : null;
+      if (hostname === null) return false;
+      if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+      if (/^127\./.test(hostname) || hostname === "::1" || hostname === "[::1]") return true;
+      return false;
+    }
+    return true;
   }
   return isApiRequestOriginAllowed(request);
 }

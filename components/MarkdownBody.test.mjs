@@ -51,8 +51,10 @@ test("keeps local file markdown links in the app", () => {
   const relativeHtml = renderMarkdown("[file](components/MarkdownBody.tsx)");
   const fileUrlHtml = renderMarkdown("[report](file:///home/me/project/report.html)");
 
-  assert.match(html, /<a (?=[^>]*href="components\/MarkdownBody\.tsx")[^>]*>file<\/a>/);
-  assert.doesNotMatch(html, /target=|rel=|\snode=/);
+  assert.match(relativeHtml, /<a href="components\/MarkdownBody\.tsx"[^>]*>file<\/a>/);
+  assert.doesNotMatch(relativeHtml, /target=|rel=|\snode=/);
+  assert.match(fileUrlHtml, /<a href="file:\/\/\/home\/me\/project\/report\.html"[^>]*>report<\/a>/);
+  assert.doesNotMatch(fileUrlHtml, /target=|rel=|\snode=/);
 });
 
 test("renders quoteable table rows without inline elements under tr", async () => {
@@ -124,7 +126,7 @@ test("previews completed Mermaid diagrams by default", () => {
   const html = renderMarkdown("```mermaid\ngraph TD\n  A --> B\n```");
 
   assert.match(html, /mermaid-block-loading/);
-  assert.match(html, />Source</);
+  assert.match(html, /title="desktop\.source"/);
   assert.doesNotMatch(html, /A --&gt; B/);
 });
 
@@ -132,6 +134,6 @@ test("keeps Mermaid source visible while the response is streaming", () => {
   const html = renderMarkdown("```mermaid\ngraph TD\n  A --> B\n```", { isStreaming: true });
 
   assert.doesNotMatch(html, /mermaid-block-loading/);
-  assert.match(html, />Preview</);
+  assert.match(html, /title="desktop\.markdownPreviewAvailableAfterStreaming"/);
   assert.match(html, /A --&gt; B/);
 });

@@ -9,6 +9,7 @@ const CLI_OPTIONS = {
   port: { type: "string", short: "p" },
   hostname: { type: "string", short: "H" },
   "no-open": { type: "boolean" },
+  open: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 };
 
@@ -52,28 +53,62 @@ function assessLanExposure(hostname, env = process.env) {
   return "refuse";
 }
 
+module.exports = { parseLaunchOptions, assessLanExposure };
+
+function getHelpText() {
+  return `Usage: pi-web [options]
+
+Start the Pi Web UI server.
+
+Options:
+  -p, --port <port>          Server port (default: 30141, or PORT)
+  -H, --hostname <host>      Bind hostname (default: 0.0.0.0 LAN, or PI_WEB_HOSTNAME)
+      --open                 Open a browser automatically (off by default)
+  -h, --help                 Show this help message and exit
+
+Environment:
+  PORT                       Default port when --port is omitted
+  PI_WEB_HOSTNAME            Default hostname when --hostname is omitted
+  PI_WEB_NO_OPEN             Set to 1/true/yes/on to disable browser open
+  PI_WEB_PASSWORD            Enable HTTP Basic Auth (username is always "pi")
+  PI_WEB_ALLOWED_HOSTS       Extra exact proxy/custom hostnames, comma-separated
+`;
+}
 function parseLaunchOptions(args = process.argv.slice(2), env = process.env) {
-  const { values: cliArgs } = parseArgs({
-    args,
-    options: {
-      port:      { type: "string", short: "p" },
-      hostname:  { type: "string", short: "H" },
-      open:      { type: "boolean" },
-      "no-open": { type: "boolean" },
-    },
-    strict: false,
-  });
+  let values;
+  let positionals;
+  try {
+    ({ values, positionals } = parseArgs({
+      args,
+      options: CLI_OPTIONS,
+      strict: true,
+      allowPositionals: true,
+    }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const err = new Error(`${message}\nUse --help to see available options.`);
+    err.code = "ERR_PARSE_ARGS_UNKNOWN_OPTION";
+    throw err;
+  }
+
+  if (values.help) {
+    return { help: true };
+  }
+
+  if (positionals.length > 0) {
+    throw new Error(
+      `Unexpected argument(s): ${positionals.join(" ")}\nUse --help to see available options.`,
+    );
+  }
 
   return {
-    port: normalizePort(cliArgs.port ?? env.PORT ?? "30141"),
-    // Default to 0.0.0.0 so phones/other devices on the LAN can reach the
-    // web UI (the app is protected by HTTP Basic Auth when PI_WEB_PASSWORD
-    // is set). Use -H 127.0.0.1 to restrict to this machine only.
-    hostname: cliArgs.hostname ?? env.PI_WEB_HOSTNAME ?? "0.0.0.0",
-    // Do NOT auto-open the browser by default (server-style usage). Opt in
-    // with --open; PI_WEB_NO_OPEN always wins.
-    openBrowser: cliArgs.open === true && !isEnabled(env.PI_WEB_NO_OPEN),
+    help: false,
+    port: normalizePort(values.port ?? env.PORT ?? "30141"),
+    // Fork：默认 0.0.0.0 供局域网/手机访问（配合 assessLanExposure 的安全门槛）。
+    hostname: values.hostname ?? env.PI_WEB_HOSTNAME ?? "0.0.0.0",
+    // Fork：默认不自动开浏览器（常驻服务/launchd 场景），--open 显式开启。
+    openBrowser: values.open === true && !isEnabled(env.PI_WEB_NO_OPEN),
   };
 }
 
-module.exports = { parseLaunchOptions, assessLanExposure };
+module.exports = { parseLaunchOptions, assessLanExposure, getHelpText };

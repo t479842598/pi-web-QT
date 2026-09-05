@@ -10,7 +10,7 @@ import { copyText } from "@/lib/clipboard";
 import { resolveLocalFileHref } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { splitStableParts } from "@/lib/markdown-incremental";
-import { headingId, markdownRehypePlugins, markdownRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
+import { headingId, markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { prismTheme } from "@/lib/prism-theme";
 import { QuoteReplyPopover } from "./QuoteReplyPopover";
 import { parseParagraph, type ParsedSegment } from "@/lib/quote-reply";
@@ -117,8 +117,9 @@ function buildMarkdownComponents({ isStreaming, cwd, onOpenFile, onQuoteReply, q
       const filePath = onOpenFile ? resolveLocalFileHref(href, cwd) : null;
       const openFile = onOpenFile;
       if (!filePath || !openFile) {
+        const isLocalLink = typeof href === "string" && (href.startsWith("file:") || (!/^https?:/i.test(href) && !href.startsWith("#")));
         return (
-          <a href={href} {...props} className={linkClass} target="_blank" rel="noopener noreferrer">
+          <a href={href} {...props} className={linkClass} {...(isLocalLink ? {} : { target: "_blank", rel: "noopener noreferrer" })}>
             {children}
           </a>
         );
@@ -236,6 +237,7 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
           <ReactMarkdown
             remarkPlugins={markdownRemarkPlugins}
             rehypePlugins={markdownRehypePlugins}
+            urlTransform={onOpenFile ? markdownUrlTransform : undefined}
             components={components}
           >
             {normalizedMarkdown}
@@ -255,12 +257,17 @@ function QuoteReplyScope({ children }: { children: ReactNode }) {
 export function MermaidBlock({ code, isStreaming }: { code: string; isStreaming?: boolean }) {
   const { t } = useI18n();
   const { isDark } = useTheme();
-  const [showPreview, setShowPreview] = useState(false);
+  // 上游行为：完成的 Mermaid 图默认进入预览；流式期间保持源码。
+  const [showPreview, setShowPreview] = useState(!isStreaming);
   const [svg, setSvg] = useState<string | null>(null);
   const [renderedKey, setRenderedKey] = useState("");
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
   const currentKey = `${isDark ? "dark" : "light"}\n${code}`;
+
+  useEffect(() => {
+    if (!isStreaming) setShowPreview(true);
+  }, [isStreaming]);
 
   useEffect(() => {
     if (!showPreview || isStreaming) return;

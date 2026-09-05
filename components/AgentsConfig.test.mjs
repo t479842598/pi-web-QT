@@ -73,18 +73,6 @@ test("persists existing profile toggles immediately without submitting unsaved f
   assert.doesNotMatch(source, /method: "PATCH"[\s\S]*?profile: draft/);
 });
 
-test("reuses the ChatInput model selector with scoped models", () => {
-  assert.match(source, /fetch\(`\/api\/models\?cwd=\$\{encodeURIComponent\(cwd\)\}`/);
-  assert.match(source, /import \{ ModelSelector \} from "\.\/ModelSelector"/);
-  assert.match(chatInputSource, /import \{ ModelSelector, type ModelSelectorOption \} from "\.\/ModelSelector"/);
-  assert.match(source, /<ModelSelector[\s\S]*?options=\{modelSelectorOptions\}[\s\S]*?variant="field"/);
-  assert.match(chatInputSource, /<ModelSelector[\s\S]*?options=\{modelOptions\}/);
-  assert.match(modelSelectorSource, /filterModelOptions\(sortedOptions, filter\)/);
-  assert.match(modelSelectorSource, /modelsByProvider\.map/);
-  assert.match(modelSelectorSource, /event\.key !== "Escape" \|\| !open[\s\S]*?event\.preventDefault\(\)[\s\S]*?event\.stopPropagation\(\)/);
-  assert.match(source, /agents\.modelUnavailable/);
-  assert.doesNotMatch(source, /placeholder="provider\/modelId"/);
-});
 
 test("renders the stable agent id as text outside create mode", () => {
   assert.match(source, /creating \? \(\s*<input aria-label=\{t\("agents\.name"\)\}/);

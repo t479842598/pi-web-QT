@@ -37,3 +37,7 @@ export function resolveBrowserLocale(languages: readonly string[]): Locale {
   }
   return "en";
 }
+
+// 内置语言随模块加载自注册（fork 双语架构）。
+registerLocale(enLocale);
+registerLocale(zhCNLocale);

@@ -41,7 +41,19 @@ try {
   }
 }
 
-const { port, hostname, openBrowser } = parseLaunchOptions();
+let launchOptions;
+try {
+  launchOptions = parseLaunchOptions();
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(1);
+}
+if (launchOptions.help) {
+  const { getHelpText } = require("./pi-web-options");
+  process.stdout.write(getHelpText());
+  process.exit(0);
+}
+const { port, hostname, openBrowser } = launchOptions;
 
 // Apply the same heap cap as the npm scripts so `pi-web` (production entry)
 // never lets the V8 heap balloon to Next.js's auto 50%-of-RAM default.
