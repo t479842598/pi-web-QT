@@ -205,44 +205,12 @@ export async function DELETE(
       for (const file of files) {
         const childPath = join(dir, file);
         try {
-          const content = readFileSync(childPath, "utf8");
-          const lines = content.split("\n");
-          const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
-          if (
-            header.type === "session" &&
-            header.parentSession &&
-            sessionPathKey(header.parentSession) === targetPathKey
-          ) {
-            // Rewrite header with new parentSession
-            header.parentSession = parentSessionPath;
-            lines[0] = JSON.stringify(header);
-            if (parentSessionPath && parentSessionId) {
-              for (let index = 1; index < lines.length; index += 1) {
-                let entry: { type?: string; customType?: string; data?: unknown };
-                try {
-                  entry = JSON.parse(lines[index]);
-                } catch {
-                  continue;
-                }
-                if (
-                  entry.type !== "custom"
-                  || entry.customType !== SUBAGENT_META_TYPE
-                  || typeof entry.data !== "object"
-                  || entry.data === null
-                  || Array.isArray(entry.data)
-                ) continue;
-                entry.data = {
-                  ...entry.data,
-                  parentSessionId,
-                  parentSessionPath,
-                };
-                lines[index] = JSON.stringify(entry);
-                break;
-              }
-            }
-            writeFileSync(childPath, lines.join("\n"));
+          const header = readSessionHeader(childPath);
+          if (header?.type === "session" && header.parentSession && sessionPathKey(header.parentSession) === targetPathKey) {
+            // Rewrite happens below in one pass (wrapper shutdown first).
+            childPaths.add(childPath);
           }
-        } catch { /* skip malformed */ }
+        } catch { /* skip malformed / unreadable child */ }
       }
     } catch { /* skip if dir unreadable */ }
     try {

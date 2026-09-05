@@ -20,6 +20,9 @@ import { readSessionArchive } from "./session-archive";
 import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
 import { listSessionsIncremental } from "./session-list-scanner";
 
+/** Test seam: the listing implementation (incremental scanner by default). */
+export let listSessions: typeof listSessionsIncremental = listSessionsIncremental;
+
 export { getAgentDir };
 
 const SESSION_HEADER_MAX_BYTES = 64 * 1024;
@@ -344,7 +347,9 @@ export async function scanSessionInfos(): Promise<PiSessionInfo[]> {
 }
 
 async function loadAllSessions(): Promise<SessionInfo[]> {
-  const scanned = await listSessionsIncremental();
+  // 测试可经 globalThis.__piListSessionsOverride 覆盖列表来源。
+  const list = (globalThis as { __piListSessionsOverride?: typeof listSessions }).__piListSessionsOverride ?? listSessions;
+  const scanned = await list();
   const pathToId = new Map<string, string>();
   for (const s of scanned) pathToId.set(sessionPathKey(s.path), s.id);
 
@@ -442,6 +447,11 @@ declare global {
   var __piSessionListCache: { data: SessionInfo[]; ts: number } | undefined;
 }
 
+
+/** Test seam: reset the in-memory list cache (alias of invalidateSessionListCache). */
+export function resetSessionListState(): void {
+  invalidateSessionListCache();
+}
 
 export function invalidateSessionListCache(): void {
   if (invalidateDebounceTimer) return;
