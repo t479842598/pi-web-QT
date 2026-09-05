@@ -1,3 +1,4 @@
+@import "@xterm/xterm/css/xterm.css";
 @import "tailwindcss";
 
 @theme {
@@ -184,6 +185,17 @@ html.dark {
   --hatch-color: rgba(100, 193, 182, 0.16);
 }
 
+/* WebKit reports dvh/innerHeight without the status-bar strip for installed
+   home-screen apps even though the layout still starts at the screen's top.
+   In standalone mode there is no browser toolbar to make vh unstable, and vh
+   includes that missing strip. The keyboard hook temporarily overrides this
+   custom property with visualViewport.height while an editor is focused. */
+@media (display-mode: standalone) {
+  :root {
+    --app-viewport-height: 100vh;
+  }
+}
+
 .catppuccin-file-icon {
   display: block;
   flex-shrink: 0;
@@ -305,6 +317,7 @@ body {
   border-radius: 2px;
 }
 
+
 .extension-status-shelf {
   display: flex;
   flex-shrink: 0;
@@ -364,7 +377,7 @@ body {
 }
 
 .extension-status-shelf.has-widgets.has-status .extension-widget-triggers {
-  flex: 0 1 70%;
+  flex: 0 0 auto;
   max-width: 70%;
   border-right: 1px solid var(--border);
 }
@@ -490,20 +503,25 @@ button.extension-widget-trigger:focus-visible {
 .extension-status-line {
   display: flex;
   flex: 1 1 0;
-  align-items: center;
+  align-items: flex-start;
   min-width: 0;
-  height: 35px;
-  padding: 0 12px;
+  min-height: 35px;
+  max-height: min(144px, 18dvh);
+  padding: 8px 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .extension-status-text {
+  flex: 1;
   min-width: 0;
-  overflow: hidden;
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  white-space: pre;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
@@ -1319,6 +1337,8 @@ pre, code {
 }
 .mermaid-preview-button {
   width: 100%;
+  max-height: min(600px, 60dvh);
+  overflow: auto;
   border: 0;
   color: inherit;
   cursor: zoom-in;
@@ -2400,5 +2420,8 @@ span.token.table {
   .image-preview-close {
     width: 44px;
     height: 44px;
+  }
+  .chat-input-textarea {
+    font-size: max(16px, var(--chat-content-font-size, 14px)) !important;
   }
 }

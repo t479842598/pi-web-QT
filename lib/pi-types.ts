@@ -43,6 +43,10 @@ export interface AgentHookLike {
     context: BeforeToolCallContext,
     signal?: AbortSignal,
   ) => Promise<BeforeToolCallResult | undefined>;
+  prepareNextTurnWithContext?: (
+    context: PrepareNextTurnContext,
+    signal?: AbortSignal,
+  ) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
 }
 
 export interface ToolInfo {

@@ -20,6 +20,20 @@ function hostnameFromAuthority(value: string): string | null {
   }
 }
 
+function normalizeAuthority(value: string): string | null {
+  if (!value || /[\s/@\\]/.test(value)) return null;
+  try {
+    const parsed = new URL(`http://${value}`);
+    if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+      return null;
+    }
+    const hostname = normalizeHostname(parsed.hostname);
+    return parsed.port ? `${hostname}:${parsed.port}` : hostname;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeConfiguredHostname(value: string | undefined): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
@@ -99,6 +113,33 @@ function originMatchesRequest(origin: string, requestOrigin: string): boolean {
   return originUrl.port === requestPort;
 }
 
+/**
+ * A relay can report the external scheme in `x-forwarded-proto` while rewriting
+ * `Origin` onto the backend authority, so the two disagree on the scheme alone
+ * for a request that really is same-origin (Azure Dev Tunnels does this). Accept
+ * that pairing only when the Origin's authority still equals the Host header,
+ * a proxy is in front, and Fetch Metadata still reports a same-origin request.
+ */
+function isProxyRewrittenSameOrigin(request: Request, origin: string): boolean {
+  if (
+    request.headers.get("sec-fetch-site") !== "same-origin"
+    || !request.headers.get("x-forwarded-proto")
+  ) return false;
+
+  const host = request.headers.get("host");
+  if (!host) return false;
+
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return false;
+  }
+
+  const originAuthority = normalizeAuthority(originHost);
+  return originAuthority !== null && originAuthority === normalizeAuthority(host);
+}
+
 /** Reject browser cross-site API requests while preserving non-browser clients. */
 export function isApiRequestOriginAllowed(request: Request): boolean {
   if (request.headers.get("sec-fetch-site") === "cross-site") return false;
@@ -106,8 +147,9 @@ export function isApiRequestOriginAllowed(request: Request): boolean {
   if (!origin) return true;
 
   const requestOrigin = getRequestOrigin(request);
-  if (!requestOrigin) return false;
-  return originMatchesRequest(origin, requestOrigin);
+  if (requestOrigin !== null && (canonicalOrigin(origin) === requestOrigin || originMatchesRequest(origin, requestOrigin))) return true;
+
+  return isProxyRewrittenSameOrigin(request, origin);
 }
 
 export function shouldCheckApiRequestOrigin(request: Request): boolean {

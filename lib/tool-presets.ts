@@ -2,6 +2,8 @@ export interface ToolEntry {
   name: string;
   description: string;
   active: boolean;
+  parameters?: Record<string, unknown>;
+  promptGuidelines?: string[];
 }
 
 // Upstream names the analysis-only preset "read-only"; this fork exposes the
@@ -24,10 +26,13 @@ export function isToolPreset(value: unknown): value is ToolPreset {
 
 export function getPresetFromTools(tools: ToolEntry[]): ToolPreset {
   const activeTools = tools.filter((t) => t.active);
-  if (activeTools.length === 0) return "none";
+  return getPresetFromToolNames(activeTools.map((tool) => tool.name));
+}
 
-  const active = activeTools
-    .map((t) => t.name)
+export function getPresetFromToolNames(toolNames: readonly string[]): ToolPreset {
+  if (toolNames.length === 0) return "none";
+
+  const active = toolNames
     .map((name) => name === "powershell" ? "bash" : name)
     .filter((name) => BUILTIN_TOOL_NAMES.has(name))
     .sort()

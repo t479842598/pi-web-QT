@@ -5,6 +5,13 @@ const { parseArgs } = require("util");
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 
+const CLI_OPTIONS = {
+  port: { type: "string", short: "p" },
+  hostname: { type: "string", short: "H" },
+  "no-open": { type: "boolean" },
+  help: { type: "boolean", short: "h" },
+};
+
 function isEnabled(value) {
   return typeof value === "string" && TRUE_VALUES.has(value.trim().toLowerCase());
 }

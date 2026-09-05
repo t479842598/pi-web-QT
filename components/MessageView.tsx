@@ -1,19 +1,19 @@
 "use client";
 
 import { memo, useState, useRef, useEffect, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
 import { MarkdownBody } from "./MarkdownBody";
 import { copyText, markdownToPlainText } from "@/lib/clipboard";
 import { resolveSlashDisplayText } from "@/lib/slash-display";
 import { ImagePreview } from "./ImagePreview";
 
-import { isEmptyThinkingBlock } from "@/lib/message-display";
+import { getThinkingPreview, isEmptyThinkingBlock } from "@/lib/message-display";
 import { CompactionSummary } from "./CompactionSummary";
 import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
+import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
 import { getToolResultImages } from "@/lib/tool-result-images";
 import type { WrittenFile } from "@/lib/turn-written-files";
-import { SubagentCard } from "./SubagentCard";
-import type { SubagentStatus } from "@/lib/types";
 import { ArrowBendDownRightIcon } from "@phosphor-icons/react/ArrowBendDownRight";
 import { ArrowDownIcon } from "@phosphor-icons/react/ArrowDown";
 import { ArrowUpIcon } from "@phosphor-icons/react/ArrowUp";
@@ -27,6 +27,8 @@ import { WarningCircleIcon } from "@phosphor-icons/react/WarningCircle";
 import { GitForkIcon } from "@phosphor-icons/react/GitFork";
 import { useI18n } from "@/hooks/useI18n";
 import { cnyCost, matchesDeepSeekCNY, formatCNY } from "@/lib/deepseek-pricing";
+import { skillExpansionToCommand } from "@/lib/slash-display";
+import type { SubagentToolDetails } from "@/lib/subagent-extension";
 import type {
   AgentMessage,
   UserMessage,
@@ -84,7 +86,9 @@ interface Props {
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
   onQuoteReply?: (quote: string) => void;
+  onOpenSession?: (sessionId: string) => void;
   entryId?: string;
+  searchBlock?: AssistantContentBlock;
   onFork?: (entryId: string) => void;
   forking?: boolean;
   onNavigate?: (entryId: string) => void;
@@ -102,10 +106,6 @@ interface Props {
   writtenFiles?: WrittenFile[];
   /** "Turn this message into a work task" — user messages only. */
   onCreateTask?: (text: string, cwd: string | undefined) => void;
-  /** Live subagent fleet — lets Agent/Task tool calls render as subagent cards. */
-  subagents?: SubagentStatus[];
-  /** Open the fullscreen subagent conversation view for a spawned agent. */
-  onOpenSubagent?: (agentId: string) => void;
 }
 
 function formatTime(ts?: number): string | null {  if (!ts) return null;
@@ -134,12 +134,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onQuoteReply, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, onCreateTask, writtenFiles, subagents, onOpenSubagent }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onQuoteReply, onOpenSession, entryId, searchBlock, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId, onCreateTask, writtenFiles }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} onCreateTask={onCreateTask} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} onFork={onFork} forking={forking} writtenFiles={writtenFiles} subagents={subagents} onOpenSubagent={onOpenSubagent} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} onOpenSession={onOpenSession} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} onFork={onFork} forking={forking} searchBlock={searchBlock} writtenFiles={writtenFiles} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -163,7 +163,9 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.cwd === next.cwd
     && prev.onOpenFile === next.onOpenFile
     && prev.onQuoteReply === next.onQuoteReply
+    && prev.onOpenSession === next.onOpenSession
     && prev.entryId === next.entryId
+    && prev.searchBlock === next.searchBlock
     && prev.onFork === next.onFork
     && prev.forking === next.forking
     && prev.onNavigate === next.onNavigate
@@ -173,9 +175,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.showTimestamp === next.showTimestamp
     && prev.prevTimestamp === next.prevTimestamp
     && prev.sessionId === next.sessionId
-    && prev.writtenFiles === next.writtenFiles
-    && prev.subagents === next.subagents
-    && prev.onOpenSubagent === next.onOpenSubagent;
+    && prev.writtenFiles === next.writtenFiles;
 });
 
 /**
@@ -393,15 +393,15 @@ function AssistantMessageView({
   cwd,
   onOpenFile,
   onQuoteReply,
+  onOpenSession,
   showTimestamp,
   prevTimestamp,
   sessionId,
   entryId,
   onFork,
   forking,
+  searchBlock,
   writtenFiles,
-  subagents,
-  onOpenSubagent,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -410,15 +410,15 @@ function AssistantMessageView({
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
   onQuoteReply?: (quote: string) => void;
+  onOpenSession?: (sessionId: string) => void;
   showTimestamp?: boolean;
   prevTimestamp?: number;
   sessionId?: string;
   entryId?: string;
   onFork?: (entryId: string) => void;
   forking?: boolean;
+  searchBlock?: AssistantContentBlock;
   writtenFiles?: WrittenFile[];
-  subagents?: SubagentStatus[];
-  onOpenSubagent?: (agentId: string) => void;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -546,6 +546,8 @@ function AssistantMessageView({
 
   return (
     <div
+      data-message-role="assistant"
+      data-entry-id={entryId}
       className={["chat-assistant-message chat-msg-in", isStreaming ? "is-streaming" : ""].filter(Boolean).join(" ")}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -593,7 +595,7 @@ function AssistantMessageView({
           </div>
         )}
         {blockItems.map(({ block, originalIndex }) => (
-          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} subagents={subagents} onOpenSubagent={onOpenSubagent} />
+          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} searchTarget={block === searchBlock} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} onOpenSession={onOpenSession} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
         ))}
       </div>
 
@@ -787,66 +789,20 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, onQuoteReply, sessionId, entryId, blockIndex, subagents, onOpenSubagent }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string) => void; onQuoteReply?: (quote: string) => void; sessionId?: string; entryId?: string; blockIndex: number; subagents?: SubagentStatus[]; onOpenSubagent?: (agentId: string) => void }) {
+function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, onQuoteReply, onOpenSession, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; searchTarget?: boolean; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string) => void; onQuoteReply?: (quote: string) => void; onOpenSession?: (sessionId: string) => void; sessionId?: string; entryId?: string; blockIndex: number }) {
   if (block.type === "text") {
-    return <TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} />;
+    return <div data-message-text data-search-target={searchTarget || undefined}><TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} /></div>;
   }
   if (block.type === "thinking") {
     return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
   }
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
-    // Subagent spawn (Agent/Task tool): render a dedicated interactive card
-    // instead of the generic folding tool-call block.
-    if (SUBAGENT_TOOL_NAMES.has(tc.toolName)) {
-      const result = toolResults?.get(tc.toolCallId);
-      const agent = subagents?.find((s) => s.id === tc.toolCallId)
-        ?? makeFallbackSubagentFromToolCall(tc, result);
-      return <SubagentCard agent={agent} cwd={cwd} onOpen={onOpenSubagent} />;
-    }
     const result = toolResults?.get(tc.toolCallId);
     const duration = toolCallDurations?.get(tc.toolCallId);
-    return <ToolCallBlock block={tc} result={result} duration={duration} />;
+    return <ToolCallBlock block={tc} result={result} duration={duration} onOpenSession={onOpenSession} />;
   }
   return null;
-}
-
-/** Tool names that spawn a subagent — mirrors useAgentSession.SUBAGENT_TOOL_NAMES. */
-const SUBAGENT_TOOL_NAMES = new Set(["Agent", "Task"]);
-
-/**
- * Fallback subagent entry used when the live fleet has no row for this
- * toolCallId (page refresh, or the fleet evicted old rows). The terminal
- * status is derived from the session's own tool result: a historical Agent
- * call whose toolCallId already has a result finished — showing it as
- * permanently "running" would freeze a spinner on every reloaded message.
- */
-function makeFallbackSubagentFromToolCall(
-  block: ToolCallContent,
-  result?: ToolResultMessage,
-): SubagentStatus {
-  const input = block.input ?? {};
-  const description =
-    typeof input.description === "string" && input.description.trim()
-      ? input.description.trim()
-      : typeof input.prompt === "string"
-        ? input.prompt.slice(0, 80)
-        : "";
-  const agentType = typeof input.subagent_type === "string" && input.subagent_type ? input.subagent_type : block.toolName;
-  const base = { id: block.toolCallId, agentType, description };
-  if (result) {
-    // The result exists in the session file — the run is over. Only mark it
-    // "running" while the stream is still live and the result has not landed.
-    const now = Date.now();
-    return {
-      ...base,
-      status: result.isError ? "failed" : "completed",
-      startedAt: now,
-      completedAt: now,
-      error: result.isError ? "Subagent returned an error" : undefined,
-    };
-  }
-  return { ...base, status: "running", startedAt: Date.now() };
 }
 
 function TextBlock({ block, isStreaming, cwd, onOpenFile, onQuoteReply }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string) => void; onQuoteReply?: (quote: string) => void }) {
@@ -866,15 +822,27 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
   className?: string;
 }) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(isThinkingExpandedByDefault);
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const tRef = useRef(t);
+  tRef.current = t;
+  const preview = getThinkingPreview(block.thinking);
 
-  const toggle = async () => {
-    const nextExpanded = !expanded;
-    setExpanded(nextExpanded);
-    if (!nextExpanded || !block.deferred || content !== null) return;
+  // Keep already-mounted blocks in sync when the preference changes.
+  useEffect(() => {
+    const onChange = () => setExpanded(isThinkingExpandedByDefault());
+    window.addEventListener(THINKING_EXPANDED_EVENT, onChange);
+    return () => window.removeEventListener(THINKING_EXPANDED_EVENT, onChange);
+  }, []);
+
+  // Load deferred history content whenever the block is expanded.
+  // loadThinkingContent() memoizes in-flight promises and drops failed ones
+  // from its cache, so re-running this effect is cheap and a failed load can
+  // be retried by collapsing and expanding the block again.
+  useEffect(() => {
+    if (!expanded || !block.deferred || content !== null) return;
     if (!sessionId || !entryId) {
       setError(t("desktop.thinkingContentUnavailable"));
       return;
@@ -899,7 +867,7 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
         });
     };
     load();
-  };
+  }, [expanded, block.deferred, content, sessionId, entryId, blockIndex, t]);
 
   if (contentOnly) {
     return (
@@ -919,7 +887,7 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
   return (
     <div className="thinking-block">
       <button
-        onClick={() => void toggle()}
+        onClick={() => setExpanded((v) => !v)}
         className="thinking-block-trigger"
         aria-expanded={expanded}
       >
@@ -935,8 +903,17 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
           {loading ? t("desktop.loadingThinking") : error ?? (block.deferred ? content : block.thinking)}
         </div>
       )}
+      {duration !== undefined && (
+        <span style={{ flexShrink: 0, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+      )}
     </div>
   );
+}
+
+function isSubagentToolDetails(value: unknown): value is SubagentToolDetails {
+  if (!value || typeof value !== "object") return false;
+  const details = value as Partial<SubagentToolDetails>;
+  return details.kind === "pi-web-subagent" && typeof details.sessionId === "string";
 }
 
 function ThinkingContentBody({ block, sessionId, entryId, blockIndex, isStreaming, cwd, onOpenFile, className }: {
@@ -1004,7 +981,8 @@ function ThinkingContentBody({ block, sessionId, entryId, blockIndex, isStreamin
 // let the user opt into the full payload so expanding a 45K result stays snappy.
 const RESULT_PREVIEW_CHARS = 8000;
 
-export const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, processStyle = false }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; processStyle?: boolean }) {
+export const ToolCallBlock = memo(function ToolCallBlock({ block, result, duration, processStyle = false, onOpenSession }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; processStyle?: boolean; onOpenSession?: (sessionId: string) => void }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const inputStr = useMemo(() => JSON.stringify(block.input, null, 2), [block.input]);
   const isEditTool = isEditToolName(block.toolName);
@@ -1020,30 +998,45 @@ export const ToolCallBlock = memo(function ToolCallBlock({ block, result, durati
   const resultImages = getToolResultImages(result);
   const resultIsEmpty = resultText === null ? false : (resultText.trim() === "(no output)" || resultText.trim() === "");
   const isError = result?.isError ?? false;
+  const subagent = isSubagentToolDetails(result?.details) ? result.details : null;
 
   return (
     <div
       className={`tool-call-block ${processStyle ? "is-process" : ""} ${isError ? "is-error" : ""}`}
     >
       {/* ── Tool call header ── */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="tool-call-trigger"
-        aria-expanded={expanded}
-      >
-        <span className="tool-call-name">
-          {block.toolName}
-        </span>
-        <span className="tool-call-preview">
-          {getToolPreview(block)}
-        </span>
-        {duration !== undefined && (
-          <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+      <div style={{ display: "flex", alignItems: "stretch", minWidth: 0 }}>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="tool-call-trigger"
+          aria-expanded={expanded}
+          style={{ flex: 1, minWidth: 0 }}
+        >
+          <span className="tool-call-name">
+            {block.toolName}
+          </span>
+          <span className="tool-call-preview">
+            {getToolPreview(block)}
+          </span>
+          {duration !== undefined && (
+            <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+          )}
+          <span className={`tool-call-caret ${expanded ? "is-expanded" : ""}`} aria-hidden="true">
+            <CaretRightIcon size={12} />
+          </span>
+        </button>
+        {subagent && onOpenSession && (
+          <button
+            type="button"
+            className="tool-call-open-session"
+            onClick={() => onOpenSession(subagent.sessionId)}
+            title={t("subagent.open")}
+            aria-label={t("subagent.open")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
+          </button>
         )}
-        <span className={`tool-call-caret ${expanded ? "is-expanded" : ""}`} aria-hidden="true">
-          <CaretRightIcon size={12} />
-        </span>
-      </button>
+      </div>
 
       {/* ── Expanded: input args ── */}
       {expanded && !isEditTool && (
@@ -1108,7 +1101,7 @@ function SplitPatchView({ text }: { text: string }) {
             minWidth: 0,
             borderTop: fileIndex === 0 ? "none" : "1px solid var(--border)",
             fontFamily: "var(--font-mono)",
-            fontSize: 12,
+            fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
             lineHeight: 1.55,
           }}
         >
@@ -1236,7 +1229,7 @@ function PatchTextView({ text }: { text: string }) {
   const lines = text.split(/\r?\n/);
 
   return (
-    <div style={{ maxHeight: 520, overflowY: "auto", overflowX: "hidden", fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.55, minWidth: 0 }}>
+    <div style={{ maxHeight: 520, overflowY: "auto", overflowX: "hidden", fontFamily: "var(--font-mono)", fontSize: "calc(12px + var(--chat-font-size-offset, 0px))", lineHeight: 1.55, minWidth: 0 }}>
       {lines.map((line, i) => {
         const kind =
           line.startsWith("@@") ? "hunk" :
@@ -1581,7 +1574,7 @@ function CustomMessageView({ message, isStreaming, cwd, onOpenFile }: { message:
               borderTop: "1px solid var(--border)",
               background: "var(--bg)",
               color: "var(--text-muted)",
-              fontSize: 12,
+              fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
               lineHeight: 1.5,
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",

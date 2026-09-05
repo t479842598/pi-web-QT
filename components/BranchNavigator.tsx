@@ -28,7 +28,7 @@ interface Props {
 // Iterative DFS: a linear session degrades into a chain whose depth equals the
 // entry count, so a recursive search overflows the call stack. Walk with an
 // explicit stack instead (paths accumulate depth, not the call stack).
-function buildActivePath(nodes: SessionTreeNode[], targetId: string | null): Set<string> {
+export function buildActivePath(nodes: SessionTreeNode[], targetId: string | null): Set<string> {
   if (!targetId) return new Set();
   const target = targetId;
   const stack: { node: SessionTreeNode; path: string[] }[] = nodes.map((n) => ({ node: n, path: [n.entry.id] }));
@@ -42,6 +42,10 @@ function buildActivePath(nodes: SessionTreeNode[], targetId: string | null): Set
     }
   }
   return new Set();
+}
+
+function isMessageEntry(entry: SessionEntry): boolean {
+  return entry.type === "message" && "message" in entry;
 }
 
 // Compress a visible linear chain into the first branching/leaf node.
@@ -78,7 +82,7 @@ function getLabel(entry: SessionEntry, assistantLabel: string): string {
 
 // Does the tree have any branching at all? Iterative: a linear chain has no
 // branching but recursing over it would overflow the stack, so walk with a stack.
-function hasBranch(nodes: SessionTreeNode[]): boolean {
+export function hasSessionBranches(nodes: SessionTreeNode[]): boolean {
   // Sessions branched from the very first message have multiple root nodes.
   if (nodes.length > 1) return true;
   const stack: SessionTreeNode[] = [...nodes];
@@ -260,7 +264,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
 
   const noBranchReason = !hasSession
     ? t("desktop.noActiveSession")
-    : !hasBranch(tree)
+    : !hasSessionBranches(tree)
       ? t("desktop.sessionHasNoBranches")
       : null;
 

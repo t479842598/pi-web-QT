@@ -18,6 +18,15 @@ export function convertWindowsPathToWsl(p: string): string {
   return p;
 }
 
+/** Rebuild an absolute filesystem path from Next.js catch-all route segments. */
+export function filePathFromApiSegments(segments: string[]): string {
+  const joined = segments.join("/");
+  const slashJoined = toSlashPath(joined);
+  if (/^[a-zA-Z]:$/.test(slashJoined)) return `${slashJoined}/`;
+  if (isWindowsAbsolutePath(slashJoined)) return slashJoined;
+  return "/" + joined.replace(/^\/+/, "");
+}
+
 /** Convert git's slash-separated Windows paths to native path separators. */
 export function toNativePath(filePath: string): string {
   if (!filePath || process.platform !== "win32") return filePath;

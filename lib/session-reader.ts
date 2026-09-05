@@ -1,24 +1,131 @@
 import {
   SessionManager,
-  buildContextEntries as piBuildContextEntries,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import { closeSync, createReadStream, existsSync, fstatSync, openSync, readSync, statSync, type Dirent } from "fs";
 import { readdir, stat } from "fs/promises";
-import { join, normalize as normalizePath } from "path";
+import { isAbsolute, join, normalize as normalizePath, relative, resolve as resolvePath, sep } from "path";
 import { createInterface } from "readline";
 import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 import { stripModeInstructionBlocks } from "./modes";
+import { getThinkingPreview } from "./message-display";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
+import { MAX_TOOL_RESULT_IMAGE_BYTES, TOOL_RESULT_IMAGE_MIMES } from "./tool-result-images";
 import { resolveProject, type ProjectInfo } from "./worktree";
 import { readSettingsJsonUnlocked } from "./settings-lock";
 import { readSessionArchive } from "./session-archive";
 import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
+import { listSessionsIncremental } from "./session-list-scanner";
 
 export { getAgentDir };
+
+const SESSION_HEADER_MAX_BYTES = 64 * 1024;
+
+const SESSION_RELATION_MAX_BYTES = 256 * 1024;
+const SESSION_RELATION_MAX_LINES = 400;
+const SESSION_RESULT_MAX_BYTES = 64 * 1024;
+
+const SESSION_LIST_CACHE_TTL_MS = 10_000;
+
+/** Upper bound on the firstMessage preview kept in the list cache snapshot. */
+const FIRST_MESSAGE_MAX_CHARS = 300;
+
+/** Coalescing window for invalidations: streaming emits session-info/message
+ *  events every few seconds; without debouncing each one forces a full
+ *  re-scan of every session file on the next list request. */
+const SESSION_LIST_INVALIDATE_DEBOUNCE_MS = 300;
+
+let invalidateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function readBoundedLines(filePath: string, maxBytes: number, maxLines: number): string[] {
+  const fd = openSync(filePath, "r");
+  try {
+    const chunks: Buffer[] = [];
+    let position = 0;
+    let newlineCount = 0;
+    let reachedEof = false;
+
+    while (position < maxBytes && newlineCount < maxLines) {
+      const buffer = Buffer.allocUnsafe(Math.min(4096, maxBytes - position));
+      const bytesRead = readSync(fd, buffer, 0, buffer.length, position);
+      if (bytesRead === 0) {
+        reachedEof = true;
+        break;
+      }
+      position += bytesRead;
+      const data = buffer.subarray(0, bytesRead);
+      let end = data.length;
+      for (let index = 0; index < data.length; index += 1) {
+        if (data[index] !== 0x0a) continue;
+        newlineCount += 1;
+        if (newlineCount === maxLines) {
+          end = index + 1;
+          break;
+        }
+      }
+      chunks.push(data.subarray(0, end));
+    }
+
+    const source = Buffer.concat(chunks).toString("utf8");
+    const lines = source.split("\n");
+    if (!reachedEof && !source.endsWith("\n")) lines.pop();
+    if (lines.at(-1) === "") lines.pop();
+    return lines.map((line) => line.endsWith("\r") ? line.slice(0, -1) : line);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readBoundedTailLines(filePath: string, maxBytes: number): string[] {
+  const fd = openSync(filePath, "r");
+  try {
+    const fileSize = fstatSync(fd).size;
+    const start = Math.max(0, fileSize - maxBytes);
+    const buffer = Buffer.allocUnsafe(fileSize - start);
+    const bytesRead = readSync(fd, buffer, 0, buffer.length, start);
+    if (bytesRead === 0) return [];
+
+    const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n");
+    if (start > 0) {
+      const previousByte = Buffer.allocUnsafe(1);
+      readSync(fd, previousByte, 0, 1, start - 1);
+      if (previousByte[0] !== 0x0a) lines.shift();
+    }
+    if (lines.at(-1) === "") lines.pop();
+    return lines.map((line) => line.endsWith("\r") ? line.slice(0, -1) : line);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function parseSessionEntries(lines: readonly string[]): SessionEntry[] {
+  return lines.flatMap((line) => {
+    try {
+      const entry = JSON.parse(line) as SessionEntry;
+      return [entry];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function readSessionRelationEntries(filePath: string): SessionEntry[] {
+  const prefixEntries = parseSessionEntries(
+    readBoundedLines(filePath, SESSION_RELATION_MAX_BYTES, SESSION_RELATION_MAX_LINES).slice(1),
+  );
+  const isSubagent = prefixEntries.some((entry) => (
+    entry.type === "custom" && entry.customType === SUBAGENT_META_TYPE
+  ));
+  if (!isSubagent) return prefixEntries;
+
+  return [
+    ...prefixEntries,
+    ...parseSessionEntries(readBoundedTailLines(filePath, SESSION_RESULT_MAX_BYTES)),
+  ];
+}
 
 export async function attachSessionProjectInfo(sessions: SessionInfo[]): Promise<SessionInfo[]> {
   const uniqueCwds = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
@@ -237,9 +344,9 @@ export async function scanSessionInfos(): Promise<PiSessionInfo[]> {
 }
 
 async function loadAllSessions(): Promise<SessionInfo[]> {
-  const piSessions: PiSessionInfo[] = await scanSessionInfos();
+  const scanned = await listSessionsIncremental();
   const pathToId = new Map<string, string>();
-  for (const s of piSessions) pathToId.set(sessionPathKey(s.path), s.id);
+  for (const s of scanned) pathToId.set(sessionPathKey(s.path), s.id);
 
   // Read pinned session ids from settings.json (sessionPins: string[])
   const settings = readSettingsJsonUnlocked();
@@ -251,7 +358,7 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
 
   // Project resolution (projectRoot/projectKey/worktreeBranch) is attached
   // downstream by attachSessionProjectInfo(), shared with other callers.
-  const sessions = piSessions.map((s) => {
+  const sessions = scanned.map((s) => {
     cacheSessionPath(s.id, s.path);
     const originSessionId = s.parentSessionPath ? pathToId.get(sessionPathKey(s.parentSessionPath)) : undefined;
     let subagent = null;
@@ -265,8 +372,8 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
       id: s.id,
       cwd: s.cwd,
       name: s.name,
-      created: s.created instanceof Date ? s.created.toISOString() : String(s.created),
-      modified: s.modified instanceof Date ? s.modified.toISOString() : String(s.modified),
+      created: s.created.toISOString(),
+      modified: s.modified.toISOString(),
       messageCount: s.messageCount,
       firstMessage: stripModeInstructionBlocks(s.firstMessage || "(no messages)").slice(0, FIRST_MESSAGE_MAX_CHARS),
       parentSessionId: originSessionId,
@@ -335,17 +442,6 @@ declare global {
   var __piSessionListCache: { data: SessionInfo[]; ts: number } | undefined;
 }
 
-const SESSION_LIST_CACHE_TTL_MS = 10_000;
-
-/** Upper bound on the firstMessage preview kept in the list cache snapshot. */
-const FIRST_MESSAGE_MAX_CHARS = 300;
-
-/** Coalescing window for invalidations: streaming emits session-info/message
- *  events every few seconds; without debouncing each one forces a full
- *  re-scan of every session file on the next list request. */
-const SESSION_LIST_INVALIDATE_DEBOUNCE_MS = 300;
-
-let invalidateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function invalidateSessionListCache(): void {
   if (invalidateDebounceTimer) return;
@@ -354,6 +450,10 @@ export function invalidateSessionListCache(): void {
     globalThis.__piSessionListGeneration = (globalThis.__piSessionListGeneration ?? 0) + 1;
     globalThis.__piSessionListCache = undefined;
   }, SESSION_LIST_INVALIDATE_DEBOUNCE_MS);
+}
+
+export function getSessionListVersion(): number {
+  return globalThis.__piSessionListGeneration ?? 0;
 }
 
 function getPathCache(): Map<string, string> {
@@ -387,7 +487,14 @@ export async function resolveSessionPath(sessionId: string): Promise<string | nu
   const cached = getPathCache().get(sessionId);
   if (cached) return cached;
 
-  // Cache miss: scan all sessions to populate cache, then retry
+  const targetedPath = await findSessionPathById(sessionId);
+  if (targetedPath) {
+    cacheSessionPath(sessionId, targetedPath);
+    return getPathCache().get(sessionId) ?? null;
+  }
+
+  // Unknown layouts, malformed candidates, and duplicate IDs retain the
+  // existing authoritative catalogue scan instead of negative-caching a miss.
   await listAllSessions();
   return getPathCache().get(sessionId) ?? null;
 }
@@ -397,8 +504,98 @@ export async function resolveSessionIdByPath(filePath: string): Promise<string |
   const cached = getPathToIdCache().get(pathKey);
   if (cached) return cached;
 
+  const targetedId = findSessionIdByPath(filePath);
+  if (targetedId) return targetedId;
+
   await listAllSessions();
   return getPathToIdCache().get(pathKey);
+}
+
+
+const SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
+
+function defaultSessionsDir(): string {
+  return join(getAgentDir(), "sessions");
+}
+
+function resolvePathWithinDefaultSessions(
+  filePath: string,
+  sessionsDir = resolvePath(defaultSessionsDir()),
+): string | null {
+  const candidatePath = resolvePath(filePath);
+  const relativePath = relative(sessionsDir, candidatePath);
+  return relativePath !== ""
+    && relativePath !== ".."
+    && !relativePath.startsWith(`..${sep}`)
+    && !isAbsolute(relativePath)
+    ? candidatePath
+    : null;
+}
+
+async function findSessionPathById(sessionId: string): Promise<string | null> {
+  // The filename is only a candidate hint; the bounded header check remains
+  // authoritative so future layouts and malformed files use the full fallback.
+  if (!SESSION_ID_PATTERN.test(sessionId)) return null;
+
+  let projectDirs: Dirent[];
+  const sessionsDir = resolvePath(defaultSessionsDir());
+  try {
+    projectDirs = await readdir(sessionsDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  const suffix = `_${sessionId}.jsonl`;
+  let match: string | undefined;
+  for (const projectDir of projectDirs) {
+    if (!projectDir.isDirectory() && !projectDir.isSymbolicLink()) continue;
+    const projectPath = resolvePathWithinDefaultSessions(
+      join(sessionsDir, projectDir.name),
+      sessionsDir,
+    );
+    if (!projectPath) continue;
+
+    let files: string[];
+    try {
+      files = await readdir(projectPath);
+    } catch {
+      continue;
+    }
+
+    for (const file of files) {
+      if (!file.endsWith(suffix)) continue;
+      const candidate = resolvePathWithinDefaultSessions(
+        join(projectPath, file),
+        sessionsDir,
+      );
+      if (!candidate) continue;
+      try {
+        if (readSessionHeader(candidate)?.id !== sessionId) continue;
+      } catch {
+        continue;
+      }
+      // Do not choose between duplicate candidates; retain the existing
+      // catalogue fallback for its current resolution semantics.
+      if (match && match !== candidate) return null;
+      match = candidate;
+    }
+  }
+
+  return match ?? null;
+}
+
+function findSessionIdByPath(filePath: string): string | undefined {
+  if (!filePath.endsWith(".jsonl")) return undefined;
+  const candidate = resolvePathWithinDefaultSessions(filePath);
+  if (!candidate) return undefined;
+  try {
+    const sessionId = readSessionHeader(candidate)?.id;
+    if (!sessionId) return undefined;
+    cacheSessionPath(sessionId, candidate);
+    return sessionId;
+  } catch {
+    return undefined;
+  }
 }
 
 export function cacheSessionPath(sessionId: string, filePath: string): void {
@@ -428,133 +625,14 @@ export function invalidateSessionPathCache(sessionId: string): void {
   }
 }
 
-const SESSION_RELATION_MAX_BYTES = 256 * 1024;
-const SESSION_RELATION_MAX_LINES = 2;
-const SESSION_RESULT_MAX_BYTES = 256 * 1024;
-
-function readBoundedLines(filePath: string, maxBytes: number, maxLines: number): string[] {
-  const fd = openSync(filePath, "r");
-  try {
-    const chunks: Buffer[] = [];
-    let position = 0;
-    let newlineCount = 0;
-    let reachedEof = false;
-
-    while (position < maxBytes && newlineCount < maxLines) {
-      const buffer = Buffer.allocUnsafe(Math.min(4096, maxBytes - position));
-      const bytesRead = readSync(fd, buffer, 0, buffer.length, position);
-      if (bytesRead === 0) {
-        reachedEof = true;
-        break;
-      }
-      position += bytesRead;
-      const data = buffer.subarray(0, bytesRead);
-      let end = data.length;
-      for (let index = 0; index < data.length; index += 1) {
-        if (data[index] !== 0x0a) continue;
-        newlineCount += 1;
-        if (newlineCount === maxLines) {
-          end = index + 1;
-          break;
-        }
-      }
-      chunks.push(data.subarray(0, end));
-    }
-
-    const source = Buffer.concat(chunks).toString("utf8");
-    const lines = source.split("\n");
-    if (!reachedEof && !source.endsWith("\n")) lines.pop();
-    if (lines.at(-1) === "") lines.pop();
-    return lines.map((line) => line.endsWith("\r") ? line.slice(0, -1) : line);
-  } finally {
-    closeSync(fd);
-  }
-}
-
-function readBoundedTailLines(filePath: string, maxBytes: number): string[] {
-  const fd = openSync(filePath, "r");
-  try {
-    const fileSize = fstatSync(fd).size;
-    const start = Math.max(0, fileSize - maxBytes);
-    const buffer = Buffer.allocUnsafe(fileSize - start);
-    const bytesRead = readSync(fd, buffer, 0, buffer.length, start);
-    if (bytesRead === 0) return [];
-
-    const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n");
-    if (start > 0) {
-      const previousByte = Buffer.allocUnsafe(1);
-      readSync(fd, previousByte, 0, 1, start - 1);
-      if (previousByte[0] !== 0x0a) lines.shift();
-    }
-    if (lines.at(-1) === "") lines.pop();
-    return lines.map((line) => line.endsWith("\r") ? line.slice(0, -1) : line);
-  } finally {
-    closeSync(fd);
-  }
-}
-
-function parseSessionEntries(lines: readonly string[]): SessionEntry[] {
-  return lines.flatMap((line) => {
-    try {
-      const entry = JSON.parse(line) as SessionEntry;
-      return [entry];
-    } catch {
-      return [];
-    }
-  });
-}
-
-/**
- * Read a session file's relation-relevant entries: the header-adjacent prefix
- * (session + subagent metadata) plus the tail result entry. Subagent sessions
- * persist SUBAGENT_META_TYPE near the top and SUBAGENT_RESULT_TYPE at the end;
- * bounded reads keep this cheap for large files.
- */
-function readSessionRelationEntries(filePath: string): SessionEntry[] {
-  const prefixEntries = parseSessionEntries(
-    readBoundedLines(filePath, SESSION_RELATION_MAX_BYTES, SESSION_RELATION_MAX_LINES).slice(1),
-  );
-  const isSubagent = prefixEntries.some((entry) => (
-    entry.type === "custom" && entry.customType === SUBAGENT_META_TYPE
-  ));
-  if (!isSubagent) return prefixEntries;
-
-  return [
-    ...prefixEntries,
-    ...parseSessionEntries(readBoundedTailLines(filePath, SESSION_RESULT_MAX_BYTES)),
-  ];
-}
-
 export function readSessionHeader(filePath: string): SessionHeader | null {
-  const fd = openSync(filePath, "r");
+  const firstLine = readBoundedLines(filePath, SESSION_HEADER_MAX_BYTES, 1)[0]?.trimEnd();
+  if (!firstLine) return null;
   try {
-    const chunks: Buffer[] = [];
-    const maxHeaderBytes = 64 * 1024;
-    let position = 0;
-    let foundNewline = false;
-
-    while (position < maxHeaderBytes && !foundNewline) {
-      const buffer = Buffer.allocUnsafe(Math.min(4096, maxHeaderBytes - position));
-      const bytesRead = readSync(fd, buffer, 0, buffer.length, position);
-      if (bytesRead === 0) break;
-      const data = buffer.subarray(0, bytesRead);
-      const newlineIndex = data.indexOf(0x0a);
-      chunks.push(newlineIndex === -1 ? data : data.subarray(0, newlineIndex));
-      position += bytesRead;
-      foundNewline = newlineIndex !== -1;
-    }
-
-    if (!foundNewline && position >= maxHeaderBytes) return null;
-    const firstLine = Buffer.concat(chunks).toString("utf8").trimEnd();
-    if (!firstLine) return null;
-    try {
-      const header = JSON.parse(firstLine) as SessionHeader;
-      return header.type === "session" ? header : null;
-    } catch {
-      return null;
-    }
-  } finally {
-    closeSync(fd);
+    const header = JSON.parse(firstLine) as SessionHeader;
+    return header.type === "session" ? header : null;
+  } catch {
+    return null;
   }
 }
 
@@ -665,30 +743,21 @@ export function buildSessionContext(
   options: BuildSessionContextOptions = {},
 ): SessionContext {
   const { tail, excludeLeaf } = options;
-  // Restrict SDK conversion and the response payload to the requested page.
-  const sliced = tail && tail > 0 ? sliceActiveBranch(entries, leafId ?? null, tail, excludeLeaf) : entries;
-  const firstSliced = sliced[0];
-  const hasMore = Boolean(tail && tail > 0 && firstSliced?.parentId);
-  const byId = new Map<string, SessionEntry>();
-  for (const e of sliced) byId.set(e.id, e);
-
-  const piEntries = sliced as unknown as PiSessionEntry[];
-  const contextEntries = piBuildContextEntries(
-    piEntries,
-    leafId,
-    byId as unknown as Map<string, PiSessionEntry>,
+  // History pages retain the original branch order, including compacted messages.
+  // SDK context filtering can drop a page's messages when firstKeptEntryId is outside it.
+  const sliced = leafId === null ? [] : sliceActiveBranch(
+    entries, leafId ?? null, tail && tail > 0 ? tail : entries.length, excludeLeaf,
   );
+  const hasMore = Boolean(tail && tail > 0 && sliced[0]?.parentId);
 
-  // Convert the SDK-selected context entries and their IDs together. This keeps
-  // fork/navigation targets aligned while preserving pi's compaction ordering.
+  // Convert messages and their IDs together to keep fork/navigation targets aligned.
   const messages: AgentMessage[] = [];
   const entryIds: string[] = [];
-  for (const entry of contextEntries) {
-    const localEntry = entry as unknown as SessionEntry;
-    const m = entryToUiMessage(localEntry, options);
+  for (const entry of sliced) {
+    const m = entryToUiMessage(entry, options);
     if (m) {
       messages.push(m);
-      entryIds.push(localEntry.id);
+      entryIds.push(entry.id);
     }
   }
 
@@ -777,12 +846,18 @@ function deferToolResultBase64Images(
     const image = base64ImageInfo(block);
     if (!image) return [block];
 
-    // 保持历史响应精简，但保留一个懒加载图片块：浏览器只在展开折叠的
-    // 工具结果时才取图。
-    if (sessionId) {
+    // Keep the initial history response small, but preserve an image block that
+    // the browser can load only when its collapsed tool result is expanded.
+    if (
+      sessionId &&
+      image.mime &&
+      TOOL_RESULT_IMAGE_MIMES.has(image.mime) &&
+      image.bytes > 0 &&
+      image.bytes <= MAX_TOOL_RESULT_IMAGE_BYTES
+    ) {
       const source: ImageContent["source"] = {
         type: "url",
-        ...(image.mime ? { media_type: image.mime } : {}),
+        media_type: image.mime,
         url: `/api/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/tool-result-image?blockIndex=${blockIndex}`,
       };
       return [{ type: "image", source } satisfies ImageContent];
@@ -825,7 +900,7 @@ function entryToUiMessage(
         ...message,
         content: content.map((block) => (
           block.type === "thinking" && block.thinking.trim() !== ""
-            ? { ...block, thinking: "", deferred: true }
+            ? { ...block, thinking: getThinkingPreview(block.thinking), deferred: true }
             : block
         )),
       };

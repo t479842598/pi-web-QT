@@ -48,7 +48,8 @@ test("opens non-file markdown links in a safe new tab", () => {
 });
 
 test("keeps local file markdown links in the app", () => {
-  const html = renderMarkdown("[file](components/MarkdownBody.tsx)");
+  const relativeHtml = renderMarkdown("[file](components/MarkdownBody.tsx)");
+  const fileUrlHtml = renderMarkdown("[report](file:///home/me/project/report.html)");
 
   assert.match(html, /<a (?=[^>]*href="components\/MarkdownBody\.tsx")[^>]*>file<\/a>/);
   assert.doesNotMatch(html, /target=|rel=|\snode=/);
@@ -117,4 +118,20 @@ test("Prism token colors follow theme CSS variables", async () => {
     assert.match(source, /style=\{prismTheme\}/);
     assert.doesNotMatch(source, /react-syntax-highlighter\/dist\/cjs\/styles\/prism/);
   }
+});
+
+test("previews completed Mermaid diagrams by default", () => {
+  const html = renderMarkdown("```mermaid\ngraph TD\n  A --> B\n```");
+
+  assert.match(html, /mermaid-block-loading/);
+  assert.match(html, />Source</);
+  assert.doesNotMatch(html, /A --&gt; B/);
+});
+
+test("keeps Mermaid source visible while the response is streaming", () => {
+  const html = renderMarkdown("```mermaid\ngraph TD\n  A --> B\n```", { isStreaming: true });
+
+  assert.doesNotMatch(html, /mermaid-block-loading/);
+  assert.match(html, />Preview</);
+  assert.match(html, /A --&gt; B/);
 });

@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { join } from "path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
+  attachSessionProjectInfo,
   resolveSessionPath,
   resolveSessionIdByPath,
   invalidateSessionPathCache,
@@ -11,7 +12,6 @@ import {
   invalidateOpenSessionCache,
   buildSessionContext,
   listAllSessions,
-  attachSessionProjectInfo,
   openSessionCached,
   readSessionHeader,
 } from "@/lib/session-reader";
@@ -25,6 +25,9 @@ import type { SessionEntry } from "@/lib/types";
 import { stripModeInstructionBlocks } from "@/lib/modes";
 
 import { projectTreeForResponse } from "@/lib/project-tree-response";
+import { sessionPathKey } from "@/lib/session-path";
+import { readSubagentRun, readSubagentSessionResources, SUBAGENT_META_TYPE } from "@/lib/subagents";
+import { readSessionToolSelection } from "@/lib/session-tool-selection";
 
 export async function GET(
   req: Request,
@@ -61,6 +64,7 @@ export async function GET(
     const details = initialView ? undefined : computeSessionDetails(entries as unknown as SessionEntry[]);
     const totalActiveMs = details?.totalActiveMs;
     const stats = details?.stats;
+    const sessionName = sm.getSessionName();
 
     if (initialView) {
       return NextResponse.json({ sessionId: id, filePath, leafId, context });
@@ -72,11 +76,16 @@ export async function GET(
     const parentSessionId = header?.parentSession
       ? await resolveSessionIdByPath(header.parentSession)
       : undefined;
+    const subagent = header
+      ? readSubagentRun(entries as never, header.id, filePath ?? "")
+      : null;
+    const toolNames = readSubagentSessionResources(entries as never)?.tools
+      ?? readSessionToolSelection(entries as never);
     const info = header ? (await attachSessionProjectInfo([{
       path: filePath ?? "",
       id: header.id,
       cwd: header.cwd ?? "",
-      name: sm.getSessionName(),
+      name: sessionName,
       created: header.timestamp,
       modified,
       // info aggregates span the WHOLE session file — derive them from the
@@ -91,6 +100,11 @@ export async function GET(
         return stripModeInstructionBlocks(raw) || "(no messages)";
       })(),
       parentSessionId,
+      ...(subagent
+        ? { relation: { kind: "subagent" as const, parentSessionId: subagent.parentSessionId, profile: subagent.profile, description: subagent.description, status: liveRpc?.isRunning() ? "running" as const : subagent.status } }
+        : header.parentSession
+          ? { relation: { kind: "fork" as const, ...(parentSessionId ? { originSessionId: parentSessionId } : {}) } }
+          : {}),
       transient: !filePath || !existsSync(filePath),
     }]))[0] : null;
 
@@ -103,6 +117,7 @@ export async function GET(
       context,
       totalActiveMs,
       stats,
+      ...(toolNames !== undefined ? { toolNames } : {}),
     });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
@@ -168,19 +183,65 @@ export async function DELETE(
 
     // Read only the bounded header before deleting.
     const parentSessionPath = readSessionHeader(filePath)?.parentSession;
+    let parentSessionId: string | undefined;
+    if (parentSessionPath) {
+      try {
+        // The parent may have been deleted or moved already; treat it as absent.
+        parentSessionId = readSessionHeader(parentSessionPath)?.id;
+      } catch {
+        parentSessionId = undefined;
+      }
+    }
 
     // Re-attach all direct children to this session's parent (cascade
     // re-parent). Two discovery sources: same-directory siblings (cheap,
     // catches fresh forks) and the cached session list (catches forks into
     // other project directories).
     const childPaths = new Set<string>();
+    const targetPathKey = sessionPathKey(filePath);
     const dir = filePath.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
     try {
       const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl") && join(dir, f) !== filePath);
       for (const file of files) {
         const childPath = join(dir, file);
         try {
-          if (readSessionHeader(childPath)?.parentSession === filePath) childPaths.add(childPath);
+          const content = readFileSync(childPath, "utf8");
+          const lines = content.split("\n");
+          const header = JSON.parse(lines[0]) as { type?: string; parentSession?: string };
+          if (
+            header.type === "session" &&
+            header.parentSession &&
+            sessionPathKey(header.parentSession) === targetPathKey
+          ) {
+            // Rewrite header with new parentSession
+            header.parentSession = parentSessionPath;
+            lines[0] = JSON.stringify(header);
+            if (parentSessionPath && parentSessionId) {
+              for (let index = 1; index < lines.length; index += 1) {
+                let entry: { type?: string; customType?: string; data?: unknown };
+                try {
+                  entry = JSON.parse(lines[index]);
+                } catch {
+                  continue;
+                }
+                if (
+                  entry.type !== "custom"
+                  || entry.customType !== SUBAGENT_META_TYPE
+                  || typeof entry.data !== "object"
+                  || entry.data === null
+                  || Array.isArray(entry.data)
+                ) continue;
+                entry.data = {
+                  ...entry.data,
+                  parentSessionId,
+                  parentSessionPath,
+                };
+                lines[index] = JSON.stringify(entry);
+                break;
+              }
+            }
+            writeFileSync(childPath, lines.join("\n"));
+          }
         } catch { /* skip malformed */ }
       }
     } catch { /* skip if dir unreadable */ }

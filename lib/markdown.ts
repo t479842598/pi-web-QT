@@ -1,4 +1,4 @@
-import type { Options as ReactMarkdownOptions } from "react-markdown";
+import { defaultUrlTransform, type Options as ReactMarkdownOptions } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkFrontmatter from "remark-frontmatter";
@@ -11,8 +11,16 @@ const markdownSanitizeSchema = {
     ...defaultSchema.attributes,
     code: [["className", /^language-./, "math-inline", "math-display"]],
   },
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "file"],
+  },
   strip: [...(defaultSchema.strip || []), "iframe", "object", "style", "form"],
 };
+
+export function markdownUrlTransform(value: string): string {
+  return /^file:/i.test(value) ? value : defaultUrlTransform(value);
+}
 
 export function headingId(children: unknown) {
   return String(children)
@@ -90,6 +98,19 @@ export function normalizeDisplayMath(markdown: string): string {
           `${bracketDisplayOneLine[1]}$$`,
           `${bracketDisplayOneLine[1]}${math}`,
           `${bracketDisplayOneLine[1]}$$`,
+        );
+        continue;
+      }
+    }
+
+    const looseBracketDisplayOneLine = line.match(/^([ ]{0,3})\[[ \t]*(.+?)[ \t]*\][ \t]*$/);
+    if (looseBracketDisplayOneLine) {
+      const math = looseBracketDisplayOneLine[2].trim();
+      if (isLikelyMathExpression(math)) {
+        normalized.push(
+          `${looseBracketDisplayOneLine[1]}$$`,
+          `${looseBracketDisplayOneLine[1]}${math}`,
+          `${looseBracketDisplayOneLine[1]}$$`,
         );
         continue;
       }
@@ -319,6 +340,10 @@ function normalizeInlineLatexMath(line: string): string {
     /(?<!\\)\\\(([^`\r\n$]+?)(?<!\\)\\\)/g,
     (match, math: string) => (math.trim() ? `$${math}$` : match),
   );
+}
+
+function isLikelyMathExpression(value: string): boolean {
+  return /\\[A-Za-z]+/.test(value) && !/\b(?:https?|file|mailto):|\b[A-Za-z]:\\|^\\\\/i.test(value);
 }
 
 // Parse YAML frontmatter into a `yaml` node before the math/GFM plugins run, so

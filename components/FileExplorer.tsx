@@ -300,7 +300,7 @@ function TreeNode({
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   expandedPaths: Set<string>;
   onToggleExpanded: (fullPath: string, open: boolean) => void;
-  refreshToken: string;
+  refreshToken?: string;
   highlightedPaths: Set<string>;
   ignoredPaths: Set<string>;
   changedFiles: Map<string, ExplorerGitStatus>;
@@ -336,7 +336,7 @@ function TreeNode({
 
   // Re-fetch children when the tree refreshes and the directory is open.
   useEffect(() => {
-    if (open && loaded) {
+    if (refreshToken !== undefined && open && loaded) {
       loadChildren(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

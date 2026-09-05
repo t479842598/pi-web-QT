@@ -4,7 +4,7 @@ import { getRpcSession } from "@/lib/rpc-manager";
 
 export async function GET(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
   const url = new URL(req.url);
@@ -32,6 +32,8 @@ export async function GET(
     if (!sm) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
+    // `before` is the oldest entry already on the client; fetch its ancestors
+    // only (excludeLeaf) so prepending the page does not duplicate `before`.
     const context = buildSessionContext(sm.getEntries() as never, before ?? leafId, {
       deferThinking,
       deferToolResultImages,
