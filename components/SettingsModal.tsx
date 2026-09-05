@@ -14,7 +14,7 @@ import { ProxyConfig } from "./ProxyConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { LogsConfig } from "./LogsConfig";
 import { SnippetsConfig } from "./SnippetsConfig";
-import { SubagentsConfig } from "./SubagentsConfig";
+import { AgentsConfig } from "./AgentsConfig";
 import { ToolsConfig } from "./ToolsConfig";
 import { UsageConfig } from "./UsageConfig";
 import { ServerSwitchConfig } from "./ServerSwitchConfig";
@@ -287,7 +287,7 @@ export function SettingsModal({
             <McpConfig sessionId={sessionId} />
           </div>
           <div style={{ display: activeTab === "subagents" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <SubagentsConfig cwd={cwd} sessionId={sessionId} />
+            <AgentsConfig cwd={cwd ?? ""} sessionId={sessionId} onClose={onCloseAction} />
           </div>
           <div style={{ display: activeTab === "tools" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <ToolsConfig sessionId={sessionId} onSessionReloaded={onSessionReloadedAction} />

@@ -17,7 +17,8 @@ import { appendSessionToolSelection, readSessionToolSelection, validateSessionTo
 
 const THINKING_LEVEL_NAMES = new Set<string>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 import { createSubagentController } from "./subagent-runtime";
-import { isBuiltInSubagentsEnabled } from "./subagent-settings";
+import { isBuiltInSubagentsEnabled, getSubagentSettingsPath } from "./subagent-settings";
+import { mkdirSync, existsSync as fileExistsSync, readFileSync as readFileFs, writeFileSync as writeFileFs } from "fs";
 import { resolveShellTools } from "./powershell-settings";
 import { createProjectCommandBashOperations } from "./project-command-env";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
@@ -2433,6 +2434,19 @@ const SUBAGENT_CONTROLLER = createSubagentController({
   notifyRunningChange,
   isBuiltInSubagentsEnabled,
 });
+
+// ADR-0009：内置子代理引擎默认开启 —— 首次启动 seed 配置文件（已存在则尊重用户设置）。
+function seedBuiltInSubagentsEnabled(): void {
+  try {
+    const settingsPath = getSubagentSettingsPath();
+    if (fileExistsSync(settingsPath)) return;
+    mkdirSync(settingsPath.slice(0, settingsPath.lastIndexOf("/")), { recursive: true });
+    writeFileFs(settingsPath, JSON.stringify({ builtInEnabled: true }, null, 2) + "\n");
+  } catch (error) {
+    console.warn("[pi-web] failed to seed agents/settings.json:", error instanceof Error ? error.message : error);
+  }
+}
+seedBuiltInSubagentsEnabled();
 
 export function getSubagentRun(sessionId: string) {
   return SUBAGENT_CONTROLLER.get(sessionId);

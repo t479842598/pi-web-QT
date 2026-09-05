@@ -1,7 +1,7 @@
 "use client";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { AgentMessage, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, SubagentStatus, UserMessage } from "@/lib/types";
+import type { AgentMessage, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { splitFinalAssistantBlocks, extractPlanText } from "@/lib/message-display";
 import { buildHistoryPipeline, hasDisplayableProcessMessage, withAssistantBlocks } from "@/lib/chat-history-pipeline";
@@ -45,11 +45,9 @@ interface Props {
   onSystemPromptChange?: (prompt: string | null) => void;
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
   /** Live subagent activity (Agent tool spawns/completions) forwarded to AppShell. */
-  onSubagentsChange?: (subagents: SubagentStatus[]) => void;
+  onOpenSession?: (sessionId: string) => void;
   /** Live subagent fleet — rendered as inline cards on Agent/Task tool calls. */
-  subagents?: SubagentStatus[];
   /** Open the fullscreen subagent conversation view (AppShell). */
-  onOpenSubagent?: (agentId: string) => void;
   onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string) => void;
@@ -87,7 +85,7 @@ function getUserInputText(message: AgentMessage): string | null {
   return trimmed || null;
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSubagentsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onWorkspaceControlsHostChange, onViewFullHistory, systemPrompt, tasksBoardEnabled, subagents, onOpenSubagent }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onWorkspaceControlsHostChange, onViewFullHistory, systemPrompt, tasksBoardEnabled, onOpenSession }: Props) {
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -158,7 +156,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
-    onSubagentsChange,
   });
 
   const [recoveryDismissed, setRecoveryDismissed] = useState(false);
@@ -502,7 +499,15 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     }
   }, [handleCollaborationModeChange, handlePlanModeChange, planMode]);
 
-  const chatInputElement = (
+  // 上游行为：子代理会话只读 —— 不渲染输入框（relation.kind === "subagent"）。
+  const isSubagentSession = session?.relation?.kind === "subagent";
+
+  const chatInputElement = isSubagentSession ? (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "14px 16px", borderTop: "1px solid var(--border)", color: "var(--text-dim)", fontSize: 12 }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg>
+      {t("subagent.readOnlyNotice")}
+    </div>
+  ) : (
     <ChatInput
       ref={chatInputRef}
       onSend={handleSend}
@@ -869,6 +874,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     prevAssistantEntryId={agentRunning ? undefined : prevAssistantEntryId}
                     onEditContent={handleEditContent}
                     onQuoteReply={handleQuoteReply}
+                    onOpenSession={onOpenSession}
                     onCreateTask={handleCreateTask}
                     showTimestamp={showTimestamp}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
@@ -979,6 +985,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                         cwd={messageCwd}
                         onOpenFile={onOpenFile}
                         onQuoteReply={handleQuoteReply}
+                    onOpenSession={onOpenSession}
                       />,
                       finalAssistantIdx >= 0 ? visibleRefIndexByMessage.get(finalAssistantIdx) : undefined,
                     );

@@ -139,7 +139,6 @@ export interface SubagentStatus {
 }
 
 export type { SubagentStatus as SubagentRecord };
-export type { SubagentTranscriptLine } from "@/lib/subagent-transcript";
 
 export type ExtensionUiRequest =
   | {

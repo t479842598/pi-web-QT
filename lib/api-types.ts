@@ -165,25 +165,3 @@ export interface McpConfigResponse {
   filePath: string;
 }
 
-/** Subagents config — whitelist of fields pi-subagents understands.
- *  All fields are optional; unknown keys are dropped on write. */
-export interface SubagentsConfig {
-  maxConcurrent?: number;
-  defaultMaxTurns?: number;
-  graceTurns?: number;
-  defaultJoinMode?: "async" | "group" | "smart";
-  schedulingEnabled?: boolean;
-  scopeModels?: boolean;
-  disableDefaultAgents?: boolean;
-  toolDescriptionMode?: "full" | "compact" | "custom";
-  fleetView?: boolean;
-  widgetMode?: "all" | "background" | "off";
-  outputTranscript?: boolean;
-}
-
-export interface SubagentsConfigResponse {
-  config: SubagentsConfig;
-  filePath: string;
-  /** Agents discovered in <agentDir>/agents/*.md (frontmatter only). */
-  agents: Array<{ name: string; displayName?: string; description?: string; model?: string }>;
-}

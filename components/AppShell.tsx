@@ -8,8 +8,6 @@ import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
-import { SubagentsPanel } from "./SubagentsPanel";
-import { SubagentDetail } from "./SubagentDetail";
 import { TabBar, type Tab } from "./TabBar";
 import { SettingsModal, type SettingsTab } from "./SettingsModal";
 import { TasksViewProvider } from "@/contexts/tasks-view-context";
@@ -35,7 +33,9 @@ import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
 import { samePath } from "@/lib/paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
-import type { SessionInfo, SubagentStatus } from "@/lib/types";
+import type { SessionInfo } from "@/lib/types";
+import { AgentSessionPanel } from "./AgentSessionPanel";
+import { getSessionFamily } from "@/lib/session-family";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { ProjectTrustStatus } from "@/lib/api-types";
@@ -100,12 +100,7 @@ export function AppShell() {
     setSessionStats(stats);
   }, []);
 
-  // Subagent fleet monitor — populated by ChatWindow, displayed in sidebar
-  const [subagents, setSubagents] = useState<SubagentStatus[]>([]);
-  const handleSubagentsChange = useCallback((list: SubagentStatus[]) => {
-    setSubagents(list);
-  }, []);
-  const runningSubagentCount = subagents.filter((s) => s.status === "running").length;
+  const agentsPanelSession = selectedSession;
   const [copiedSessionField, setCopiedSessionField] = useState<SessionCopyField | null>(null);
   const sessionCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopySessionField = useCallback((field: SessionCopyField, value: string) => {
@@ -155,46 +150,44 @@ export function AppShell() {
     return () => ro.disconnect();
   }, [activeTopPanel]);
 
-  // Right panel — file tabs only
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
-  // Right panel "subagent view": opened via the running bubble; shows the fleet
-  // list, clicking a row drills into the read-only conversation detail.
-  const [subagentViewOpen, setSubagentViewOpen] = useState(false);
-  const [subagentViewAgentId, setSubagentViewAgentId] = useState<string | null>(null);
-  const openSubagentView = useCallback((agentId?: string | null) => {
-    setSubagentViewAgentId(agentId ?? null);
-    setSubagentViewOpen(true);
-    setRightPanelOpen(true);
-    if (isMobile) setSidebarOpen(false);
-  }, [isMobile]);
-  const closeSubagentView = useCallback(() => {
-    setSubagentViewOpen(false);
-    setSubagentViewAgentId(null);
-  }, []);
-  // Fullscreen subagent page: replaces the main chat area (input hidden) with
-  // the subagent's running conversation; "Back" restores the main dialogue.
-  const [subagentPageAgentId, setSubagentPageAgentId] = useState<string | null>(null);
-  const openSubagentPage = useCallback((agentId: string) => setSubagentPageAgentId(agentId), []);
-  const closeSubagentPage = useCallback(() => setSubagentPageAgentId(null), []);
+  // Agents 面板（上游 AgentSessionPanel）：会话族谱 + 运行状态，右栏承载。
+  const [agentsPanelOpen, setAgentsPanelOpen] = useState(false);
+  const [agentsPanelSessions, setAgentsPanelSessions] = useState<SessionInfo[]>([]);
+  const [agentsPanelRunningIds, setAgentsPanelRunningIds] = useState<Set<string>>(() => new Set());
 
-  // While the fullscreen subagent overlay is open, Esc must close the overlay
-  // — NOT abort the main agent (the global Esc handler in useKeyboardShortcuts
-  // would otherwise stop the run underneath the overlay). Capture-phase
-  // listener stops the event before it reaches the bubble listener.
+  // 打开面板或切换会话时拉取会话目录（含 relation），并在面板打开期间每 3s 轮询运行状态。
   useEffect(() => {
-    if (!subagentPageAgentId) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopImmediatePropagation();
-        e.preventDefault();
-        setSubagentPageAgentId(null);
-      }
+    if (!agentsPanelOpen) return;
+    let cancelled = false;
+    const load = () => {
+      fetch("/api/sessions", { cache: "no-store" })
+        .then((r) => r.json() as Promise<{ sessions?: SessionInfo[]; runningSessionIds?: string[] }>)
+        .then((data) => {
+          if (cancelled) return;
+          setAgentsPanelSessions(data.sessions ?? []);
+          setAgentsPanelRunningIds(new Set(data.runningSessionIds ?? []));
+        })
+        .catch(() => {});
     };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [subagentPageAgentId]);
+    load();
+    const timer = setInterval(load, 3000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [agentsPanelOpen, selectedSession?.id, refreshKey]);
+
+  // 上游行为：Agent 工具调用的“进入会话”按钮 → 拉取会话信息并切换（子代理会话只读）。
+  const handleOpenSession = useCallback(async (sessionId: string) => {
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { cache: "no-store" });
+      const data = await response.json() as { info?: SessionInfo; error?: string };
+      if (!response.ok || !data.info) throw new Error(data.error ?? `HTTP ${response.status}`);
+      handleSelectSessionRef.current(data.info);
+    } catch (error) {
+      console.error("[pi-web] failed to open session:", error instanceof Error ? error.message : error);
+    }
+  }, []);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(getDefaultRightPanelWidth(1366));
   const getResponsiveRightPanelWidth = useCallback(
@@ -657,17 +650,6 @@ export function AppShell() {
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
   const showChat = !initialCwdPending && (selectedSession !== null || effectiveNewSessionCwd !== null);
 
-  // The fullscreen subagent overlay targets a fleet row that belongs to the
-  // current session. Switching sessions (or leaving the chat view entirely)
-  // empties that fleet; leaving the overlay open would pin it to a stale
-  // "ended" agent forever.
-  const overlaySessionId = selectedSession?.id;
-  useEffect(() => {
-    if (!subagentPageAgentId) return;
-    setSubagentPageAgentId(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlaySessionId, showChat]);
-
   const projectTrustCwd = selectedSession?.cwd ?? effectiveNewSessionCwd;
 
   // Task board view toggle (desktop only — the button is hidden on mobile).
@@ -948,9 +930,7 @@ export function AppShell() {
               tasksBoardEnabled={tasksBoardEnabled}
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
-              onSubagentsChange={handleSubagentsChange}
-              subagents={subagents}
-              onOpenSubagent={openSubagentPage}
+              onOpenSession={handleOpenSession}
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
@@ -998,77 +978,8 @@ export function AppShell() {
             )
           ) : null}
 
-          {/* Fullscreen subagent page — rendered as an overlay so ChatWindow
-              (and its live AgentSession/SSE) stays mounted underneath. */}
-          {subagentPageAgentId && (() => {
-            const agent = subagents.find((s) => s.id === subagentPageAgentId) ?? null;
-            return (
-              <div style={{ position: "absolute", inset: 0, zIndex: 30, background: "var(--bg)", display: "flex", flexDirection: "column" }}>
-                {agent ? (
-                  <SubagentDetail
-                    agent={agent}
-                    cwd={activeCwd ?? selectedSession?.cwd ?? undefined}
-                    onBack={closeSubagentPage}
-                  />
-                ) : (
-                  <>
-                    <div style={{ flexShrink: 0, borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", padding: "6px 8px" }}>
-                      <button
-                        type="button"
-                        onClick={closeSubagentPage}
-                        title={t("desktop.subagentsBack")}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 2, padding: "3px 6px", border: "none", borderRadius: 5, background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
-                      >
-                        <CaretLeft size={12} aria-hidden="true" />
-                        {t("desktop.subagentsBack")}
-                      </button>
-                    </div>
-                    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
-                      {t("desktop.subagentsNotFound")}
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })()}
         </div>
       </div>
-
-      {/* Subagent running bubble — top-right, appears while agents are running */}
-      {runningSubagentCount > 0 && (
-        <button
-          type="button"
-          onClick={() => openSubagentView()}
-          title={t("desktop.subagentsViewTitle")}
-          aria-label={t("desktop.subagentsViewTitle")}
-          style={{
-            position: "fixed",
-            top: 58,
-            right: isMobile ? 12 : rightPanelOpen && !subagentViewOpen ? `calc(${rightPanel.width}px + 16px)` : 16,
-            zIndex: 500,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 7,
-            padding: "6px 12px",
-            border: "1px solid color-mix(in srgb, var(--accent) 45%, var(--border))",
-            borderRadius: 999,
-            background: "color-mix(in srgb, var(--accent) 12%, var(--bg-panel))",
-            color: "var(--accent)",
-            boxShadow: "0 6px 20px rgba(0,0,0,0.14)",
-            cursor: "pointer",
-            fontSize: 12,
-            fontWeight: 600,
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 20%, var(--bg-panel))"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--accent) 12%, var(--bg-panel))"; }}
-        >
-          <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--accent)", boxShadow: "0 0 0 0 var(--accent)", animation: "subagent-pulse 1.4s ease-out infinite" }} />
-          {runningSubagentCount} {t("desktop.subagentsRunningBubble")}
-        </button>
-      )}
-
       {/* Right panel: file viewer — always mounted, width animated via CSS */}
       {rightPanelOpen && (
         <div
@@ -1096,43 +1007,40 @@ export function AppShell() {
               onCloseTab={handleCloseFileTab}
             />
           </div>
-          {/* Switch between file view and subagent view */}
+          {/* Agents 族谱面板开关 */}
           <button
             type="button"
-            onClick={() => subagentViewOpen ? closeSubagentView() : openSubagentView()}
-            title={subagentViewOpen ? t("desktop.subagentsBackToFiles") : t("desktop.subagentsViewTitle")}
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0, height: 28, marginRight: 6, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 6, background: subagentViewOpen ? "var(--bg-selected)" : "transparent", color: subagentViewOpen ? "var(--text)" : "var(--text-muted)", cursor: "pointer", fontSize: 11 }}
+            onClick={() => setAgentsPanelOpen((v) => !v)}
+            title={t("agentSwitcher.title")}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0, height: 28, marginRight: 6, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 6, background: agentsPanelOpen ? "var(--bg-selected)" : "transparent", color: agentsPanelOpen ? "var(--text)" : "var(--text-muted)", cursor: "pointer", fontSize: 11 }}
           >
-            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: runningSubagentCount > 0 ? "var(--accent)" : "var(--text-dim)", boxShadow: runningSubagentCount > 0 ? "0 0 0 0 var(--accent)" : "none", animation: runningSubagentCount > 0 ? "subagent-pulse 1.4s ease-out infinite" : "none" }} />
-            {subagentViewOpen ? t("desktop.subagentsBackToFiles") : t("desktop.subagentsViewTitle")}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg>
+            {t("agentSwitcher.title")}
           </button>
 
         </div>
 
-        {/* Content: subagent view OR file viewer */}
+        {/* Content: Agents 面板 OR file viewer */}
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
-          {subagentViewOpen ? (
-            subagentViewAgentId ? (() => {
-              const agent = subagents.find((s) => s.id === subagentViewAgentId) ?? null;
-              return agent ? (
-                <SubagentDetail
-                  agent={agent}
-                  cwd={activeCwd ?? selectedSession?.cwd ?? undefined}
-                  onBack={() => setSubagentViewAgentId(null)}
-                />
-              ) : (
+          {agentsPanelOpen ? (() => {
+            const family = getSessionFamily(agentsPanelSessions, selectedSession?.id);
+            if (!family) {
+              return (
                 <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
-                  {t("desktop.subagentsNotFound")}
+                  {t("agentSwitcher.noFamily")}
                 </div>
               );
-            })() : (
-              <SubagentsPanel
-                subagents={subagents}
-                selectedId={subagentViewAgentId}
-                onSelect={(agent) => setSubagentViewAgentId(agent.id)}
+            }
+            return (
+              <AgentSessionPanel
+                rootSession={family.root}
+                subagents={family.subagents}
+                selectedSessionId={selectedSession?.id ?? ""}
+                runningSessionIds={agentsPanelRunningIds}
+                onSelectSession={(session) => { setAgentsPanelOpen(false); handleSelectSessionRef.current(session); }}
               />
-            )
-          ) : activeFileTab?.filePath ? (
+            );
+          })() : activeFileTab?.filePath ? (
             <FileViewer
               filePath={activeFileTab.filePath}
               cwd={activeCwd ?? undefined}

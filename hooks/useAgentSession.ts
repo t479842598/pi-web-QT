@@ -8,7 +8,6 @@ import type {
   ExtensionWidgetItem,
   SessionInfo,
   SessionTreeNode,
-  SubagentStatus,
   UserMessage,
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
@@ -261,7 +260,6 @@ export interface UseAgentSessionOptions {
   onSystemPromptChange?: (prompt: string | null) => void;
   onSessionStatsPanelOpen?: () => void;
   /** Live subagent activity for this session (Agent tool spawns + completions). */
-  onSubagentsChange?: (subagents: SubagentStatus[]) => void;
   setToolPreset?: (preset: "none" | "default" | "full" | "plan") => void;
 }
 
@@ -538,7 +536,7 @@ function cacheGlobalModeSettings(settings: ModeSettings): void {
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
-    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen, onSubagentsChange,
+    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
   } = opts;
 
   const isNew = session === null && newSessionCwd !== null;
@@ -818,135 +816,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
   const [recoveryIsImport, setRecoveryIsImport] = useState(false);
 
-  // ── Subagent fleet monitor ────────────────────────────────────────────────
-  // Tracks Agent tool spawns (tool_execution_start) and completions
-  // (entry_appended → customType "subagents:record") for the current session.
-  const [subagents, setSubagents] = useState<SubagentStatus[]>([]);
-  const subagentsRef = useRef<SubagentStatus[]>([]);
-  const SUBAGENT_TOOL_NAMES = useMemo(() => new Set(["Agent", "Task"]), []);
-  const MAX_SUBAGENT_ROWS = 20;
-
-  const applySubagents = useCallback((updater: (prev: SubagentStatus[]) => SubagentStatus[]) => {
-    setSubagents((prev) => {
-      const next = updater(prev);
-      subagentsRef.current = next;
-      return next;
-    });
-  }, []);
-
-  /** Register an Agent tool spawn as a running subagent row. */
-  const addRunningSubagent = useCallback((id: string, args: Record<string, unknown>) => {
-    applySubagents((prev) => {
-      if (prev.some((s) => s.id === id)) return prev;
-      const description =
-        typeof args.description === "string" && args.description.trim()
-          ? args.description.trim()
-          : typeof args.prompt === "string"
-            ? args.prompt.slice(0, 80)
-            : "Agent";
-      const agentType = typeof args.subagent_type === "string" && args.subagent_type ? args.subagent_type : "Agent";
-      const next = [...prev, {
-        id, agentType, description,
-        status: "running" as const,
-        startedAt: Date.now(),
-      }];
-      return next.slice(-MAX_SUBAGENT_ROWS);
-    });
-  }, [applySubagents]);
-
-  /** Upsert a completed subagent from a subagents:record transcript entry. */
-  const upsertSubagentRecord = useCallback((record: Record<string, unknown>) => {
-    const recordId = typeof record.id === "string" ? record.id : "";
-    const type = typeof record.type === "string" ? record.type : "Agent";
-    const description = typeof record.description === "string" ? record.description : "";
-    const statusRaw = typeof record.status === "string" ? record.status : "";
-    const status: SubagentStatus["status"] =
-      statusRaw === "stopped" ? "stopped"
-        : statusRaw === "completed" || statusRaw === "success" || statusRaw === "ok" || statusRaw === "done"
-          ? "completed"
-          : "failed"; // unknown / cancelled / timeout / interrupted → not "completed"
-    const startedAt = typeof record.startedAt === "number" ? record.startedAt : Date.now();
-    const completedAt = typeof record.completedAt === "number" ? record.completedAt : Date.now();
-    const tokens = typeof record.tokens === "object" && record.tokens !== null
-      ? { input: (record.tokens as Record<string, unknown>).input as number | undefined,
-          output: (record.tokens as Record<string, unknown>).output as number | undefined,
-          total: (record.tokens as Record<string, unknown>).total as number | undefined }
-      : undefined;
-    const toolUses = typeof record.toolUses === "number" ? record.toolUses : undefined;
-    const error = typeof record.error === "string" && record.error ? record.error : undefined;
-
-    applySubagents((prev) => {
-      // Match by record.id first, else by (type + description) so a completion
-      // lands on the running row spawned from the same Agent tool call.
-      const idx = prev.findIndex((s) => s.id === recordId || (s.agentType === type && s.description === description));
-      const entry: SubagentStatus = {
-        id: recordId || prev[idx]?.id || `${type}-${startedAt}`,
-        agentType: type,
-        description,
-        status,
-        startedAt,
-        completedAt,
-        tokens,
-        toolUses,
-        error,
-      };
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = entry;
-        return next;
-      }
-      return [...prev, entry].slice(-MAX_SUBAGENT_ROWS);
-    });
-  }, [applySubagents]);
-
-  /** Mark a running Agent tool call finished when it ends without a record. */
-  const finishRunningSubagent = useCallback((id: string) => {
-    applySubagents((prev) => prev.map((s) => {
-      if (s.id !== id || s.status !== "running") return s;
-      return { ...s, status: "completed" as const, completedAt: Date.now() };
-    }));
-  }, [applySubagents]);
-
-  /** Bridge the upstream engine's completion notification into a fleet row.
-   *  The engine emits customType "pi-web:subagent-notification" with `details`
-   *  (SubagentToolDetails) once a background subagent finishes; foreground
-   *  subagents report through the tool result instead. */
-  const upsertSubagentNotification = useCallback((details: Record<string, unknown>) => {
-    const id = typeof details.sessionId === "string" ? details.sessionId : "";
-    const type = typeof details.profile === "string" ? details.profile : "Agent";
-    const description = typeof details.description === "string" ? details.description : "";
-    const statusRaw = typeof details.status === "string" ? details.status : "";
-    const status: SubagentStatus["status"] =
-      statusRaw === "completed"
-        ? "completed"
-        : statusRaw === "aborted" || statusRaw === "interrupted" || statusRaw === "stopped"
-          ? "stopped"
-          : "failed";
-    const startedAt = typeof details.createdAt === "string" ? Date.parse(details.createdAt) : Date.now();
-    const completedAt = typeof details.completedAt === "string" ? Date.parse(details.completedAt) : Date.now();
-    const error = typeof details.error === "string" && details.error ? details.error : undefined;
-
-    applySubagents((prev) => {
-      const idx = prev.findIndex((s) => s.id === id || (s.agentType === type && s.description === description));
-      const entry: SubagentStatus = {
-        id: id || prev[idx]?.id || `${type}-${startedAt}`,
-        agentType: type,
-        description,
-        status,
-        startedAt,
-        completedAt,
-        error,
-      };
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = entry;
-        return next;
-      }
-      return [...prev, entry].slice(-MAX_SUBAGENT_ROWS);
-    });
-  }, [applySubagents]);
-
-
   // Queue reconciliation: the empty queue_update can be lost during an SSE
   // drop/reconnect window (the bus does not replay history), which leaves
   // stale "queued" chips on a device that never saw the drain. After a non-empty
@@ -1172,7 +1041,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setHistoryCursor(null);
           setHasEarlierMessages(false);
           setError(null);
-          applySubagents(() => []);
         }
         return null;
       }
@@ -1286,7 +1154,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (showLoading && !messagesLoaded && sessionLoadGenerationRef.current === loadGeneration) setLoading(false);
     }
-  }, [applySubagents, setPendingRecovery, setQueuedMessages]);
+  }, [setPendingRecovery, setQueuedMessages]);
 
   // Hard UI safety net: auxiliary startup races must never leave the whole
   // conversation behind an infinite loading mask. The initial request already
@@ -2205,10 +2073,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "tool_execution_start": {
         const id = event.toolCallId as string;
         const name = event.toolName as string;
-        if (SUBAGENT_TOOL_NAMES.has(name)) {
-          const args = (event as { args?: unknown }).args;
-          addRunningSubagent(id, typeof args === "object" && args !== null ? args as Record<string, unknown> : {});
-        }
         setAgentPhase((prev) => {
           const tools = prev?.kind === "running_tools" ? [...prev.tools] : [];
           if (!tools.some((t) => t.id === id)) tools.push({ id, name });
@@ -2218,9 +2082,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       case "tool_execution_end": {
         const id = event.toolCallId as string;
-        if (SUBAGENT_TOOL_NAMES.has(event.toolName as string)) {
-          finishRunningSubagent(id);
-        }
         setAgentPhase((prev) => {
           if (prev?.kind !== "running_tools") return prev;
           const tools = prev.tools.filter((t) => t.id !== id);
@@ -2230,12 +2091,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       }
       case "entry_appended": {
-        const entry = (event as { entry?: { customType?: string; data?: unknown; details?: unknown } }).entry;
-        if (entry?.customType === "subagents:record" && typeof entry.data === "object" && entry.data !== null) {
-          upsertSubagentRecord(entry.data as Record<string, unknown>);
-        } else if (entry?.customType === "pi-web:subagent-notification" && typeof entry.details === "object" && entry.details !== null) {
-          upsertSubagentNotification(entry.details as Record<string, unknown>);
-        }
         break;
       }
       case "queue_update":
@@ -2336,11 +2191,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     resetStreamUpdates,
     scheduleQueueReconcile,
     clearQueueReconcile,
-    addRunningSubagent,
-    upsertSubagentRecord,
-    upsertSubagentNotification,
-    finishRunningSubagent,
-    SUBAGENT_TOOL_NAMES,
     trackTokenRate,
     resetTokenRate,
     setPendingRecovery,
@@ -3414,19 +3264,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
 
-  // ── Subagent fleet monitor: push live status up + reset on session switch ──
-  const subagentsKey = subagents.map((s) => `${s.id}:${s.status}:${s.completedAt ?? ""}`).join("|");
-  const subagentsRef2 = useRef(subagents);
-  subagentsRef2.current = subagents;
-  useEffect(() => {
-    onSubagentsChange?.(subagentsRef2.current);
-  }, [subagentsKey, onSubagentsChange]);
-  useEffect(() => () => { onSubagentsChange?.([]); }, [onSubagentsChange]);
-  useEffect(() => {
-    applySubagents(() => []);
-    // Reset whenever the active session (or its cwd) changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.id, newSessionCwd ?? session?.cwd]);
 
   const scrollUserMsgToTop = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -3804,7 +3641,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
     tokenRate,
     planMode,
-    subagents,
     // Chat modes (Reasonix port)
     collaborationMode, tokenMode, toolApprovalMode, permissionRules, modeSettings,
     approvalRequests,
