@@ -2,6 +2,31 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.17.0 — 2026-09-06（合并上游 v0.9.0 + 子代理显示层上游化）
+
+### 上游合并（agegr/pi-web v0.8.11..v0.9.0，约 49 提交，SDK 0.84.4 → 0.85.1）
+- **文件面板工作区终端标签页**：xterm + node-pty，支持恢复/重连/重启/可靠进程清理（上游 9290c27）。
+- **会话全文搜索**：命中片段、跳转具体消息、跨窗口同步（上游 1cbd96f）。
+- **插件更新**：版本检查、单项与批量更新（上游 #611）。
+- **`PI_WEB_IDLE_TIMEOUT_MS`**：可调整或关闭会话空闲回收（上游 #665）。
+- **修复批**：压缩/分页后历史与最新回复丢失、minimap 导航失效；宽 Markdown 表格横向滚动；模型选择器加载失败不消失；Windows 盘符根目录访问；子路径部署导航；编码文件链接 Ctrl/Cmd 打开；缺父会话文件可删除；扩展对话框折叠/键盘导航/截止倒计时；扩展后台任务防误回收；技能 frontmatter 围栏变体；重复完成通知等（上游 cd6032b/0ddb21f/07dd093/18923e6/0c525c8/5de2d9a/5f8056d/9cf8d4d/7c5f4e6/2356904/f57b565/ff63346/edf574a 等）。
+- **性能**：会话元数据增量扫描缓存（约 2000 会话冷加载 70s → 约 200ms，上游 #625）；文件面板语法高亮树缓存（上游 #653）。
+- **CLI**：`pi-web --help`/严格参数解析（上游 #574；fork 保留默认 0.0.0.0 与不自动开浏览器）。
+- **安全**：同源校验并入上游代理改写判定（x-forwarded-proto + sec-fetch-site 证据），非浏览器写入采用混合策略——回环放行（上游语义）、LAN 保持 fork 硬化拒绝。
+
+### 子代理显示层上游化（ADR-0009，整体切换、废弃 fork 舰队显示）
+- **聊天内联**：Agent 工具调用头部新增“进入会话”按钮（`details.kind=pi-web-subagent`），点击即切换到子代理的真实会话页（只读、实时流）。
+- **Agents 族谱面板**：右栏承载上游 `AgentSessionPanel`（主会话 + 子代理列表、状态图标、运行计数、搜索），数据来自 `session-family` + `/api/sessions` relation。
+- **子代理会话只读**：`relation.kind=subagent` 会话不渲染输入框、完成通知/提示音抑制（`completionNotificationSuppressedSessionIds`）。
+- **Agents 设置页**：Settings > 子代理改为上游 `AgentsConfig`（profile 增删改、模型/工具/资源策略、运行时开关），`/api/subagents/{settings,profiles,[id]}` 三路由到位。
+- **引擎默认开启**：首次启动 seed `builtInEnabled=true`（已存在配置则尊重现状）；引擎文件保持与上游逐字节一致。
+- **移除 fork 旧显示**：SubagentCard/SubagentsPanel/SubagentDetail/SubagentsConfig、`subagent-transcript` 与三个 legacy `/api/subagents` 路由、useAgentSession 舰队状态机与 `subagents:record`/`pi-web:subagent-notification` 两座桥、相关 i18n 残留。
+- 侧栏保持 fork 版不嵌套（沿用 ADR-0008/v3 迁移决策）；Mermaid 完成后默认预览（上游行为，fork 组件实现）。
+
+### 其他
+- Markdown 链接：`file:` 协议与相对路径链接保留在应用内（上游 #708），外链仍新窗口。
+- 依赖：`@earendil-works/*` 0.85.1、`@xterm/*` 6.0.0、`node-pty` 1.1.0、`semver` 7.8.0。
+
 ## v0.16.0 — 2026-09-04（桌面端打开即用 + Windows 连接管理气泡化 + 自定义命令权限 + 灵动岛拖动把手）
 
 ### 新增（web / 会话）
