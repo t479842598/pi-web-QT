@@ -21,6 +21,7 @@ import { getAgentDir } from "@/lib/session-reader";
 import { setSessionArchived, dropSessionArchiveEntry } from "@/lib/session-archive";
 import { removeQueue } from "@/lib/queue-store";
 import { computeSessionDetails } from "@/lib/session-details";
+import { computeSessionStats } from "@/lib/session-stats";
 import type { SessionEntry } from "@/lib/types";
 import { stripModeInstructionBlocks } from "@/lib/modes";
 
@@ -60,10 +61,10 @@ export async function GET(
     const deferToolResultImages = searchParams.has("deferMedia");
     const rawTail = Number(searchParams.get("tail"));
     const tail = Number.isFinite(rawTail) && rawTail > 0 ? Math.min(rawTail, 1000) : 50;
-    const context = buildSessionContext(entries, leafId, { deferThinking, deferToolResultImages, tail, sessionId: id });
+    const context = buildSessionContext(entries as never, leafId, { deferThinking, deferToolResultImages, tail, sessionId: id });
     const details = initialView ? undefined : computeSessionDetails(entries as unknown as SessionEntry[]);
     const totalActiveMs = details?.totalActiveMs;
-    const stats = details?.stats;
+    const stats = computeSessionStats(entries as unknown as SessionEntry[]);
     const sessionName = sm.getSessionName();
 
     if (initialView) {
@@ -91,7 +92,7 @@ export async function GET(
       // info aggregates span the WHOLE session file — derive them from the
       // full entries, not the tail-windowed context (long sessions would
       // otherwise report messageCount ≤ tail and a wrong firstMessage).
-      messageCount: allEntries.filter((entry) => entry.type === "message" && (entry.message.role === "user" || entry.message.role === "assistant")).length,
+      messageCount: stats.totalMessages,
       firstMessage: (() => {
         const firstUserEntry = allEntries.find((entry) => entry.type === "message" && entry.message.role === "user") as { message: { content: unknown } } | undefined;
         if (!firstUserEntry) return "(no messages)";

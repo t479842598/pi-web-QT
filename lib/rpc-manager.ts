@@ -14,6 +14,7 @@ import { cacheSessionPath, invalidateSessionListCache, resolveSessionPath } from
 import { createSubagentExtension, preferPiWebSubagentExtension } from "./subagent-extension";
 import { listSubagentProfiles, readSubagentRun, readSubagentSessionResources } from "./subagents";
 import { appendSessionToolSelection, readSessionToolSelection, validateSessionToolSelection } from "./session-tool-selection";
+import { hasActiveSessionLivenessProvider } from "./session-liveness";
 
 const THINKING_LEVEL_NAMES = new Set<string>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 import { createSubagentController } from "./subagent-runtime";
@@ -317,6 +318,9 @@ export class AgentSessionWrapper {
   private exactSystemPrompt: string | null = null;
   private pendingPromptCount = 0;
   private activeMutatingCommands = 0;
+  private agentRunNeedsCompletion = false;
+  private onAgentRunComplete?: AgentRunCompleteListener;
+  private promptAdmissionTail: Promise<void> = Promise.resolve();
   private sessionReplacement: "fork" | "clone" | null = null;
   private forceShutdownOnIdle = false;
   private unsubscribe: (() => void) | null = null;
@@ -454,9 +458,11 @@ export class AgentSessionWrapper {
       }
       if (event.type === "agent_start") {
         this.goalEngine.onAgentStart();
+        this.agentRunNeedsCompletion = true;
       }
       if (event.type === "agent_settled") {
         this.handleGoalSettled();
+        this.notifyAgentRunCompleteIfIdle();
       }
       if (event.type === "queue_update") {
         this.reconcileQueue(event.steering as string[] | undefined, event.followUp as string[] | undefined);
@@ -923,6 +929,27 @@ export class AgentSessionWrapper {
     this.applyExactSystemPrompt();
   }
 
+  private async acquirePromptAdmission(): Promise<() => void> {
+    const previous = this.promptAdmissionTail;
+    let release!: () => void;
+    this.promptAdmissionTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    return release;
+  }
+
+  private notifyAgentRunCompleteIfIdle(): void {
+    if (!this.agentRunNeedsCompletion || this.isRunning()) return;
+    this.agentRunNeedsCompletion = false;
+    if (this.wrapperSuppressNotifications) return;
+    try {
+      this.onAgentRunComplete?.(this.sessionId);
+    } catch (error) {
+      console.error("[pi-web] completion listener failed:", error instanceof Error ? error.message : error);
+    }
+  }
+
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (!this._alive) return;
@@ -930,18 +957,17 @@ export class AgentSessionWrapper {
     if (SESSION_IDLE_TIMEOUT_MS === 0) return;
     if (!this.isRunning()) this.forceShutdownOnIdle = false;
     this.idleTimer = setTimeout(() => {
-      // 即使 isRunning() 卡在 true，也照常 shutdown，让扩展收到
-      // session_shutdown 并回收子进程；先中止 bash/agent 再走关闭。
-      if (this.isRunning()) {
-        if (this.inner.isBashRunning) this.inner.abortBash();
-        void this.inner.abort().catch(() => {
-          // 忽略中止失败；shutdown 仍会发出 session_shutdown。
-        });
+      if (!this.forceShutdownOnIdle && (this.isRunning() || hasActiveSessionLivenessProvider({
+        sessionId: this.sessionId,
+        sessionFile: this.sessionFile || undefined,
+      }))) {
+        this.resetIdleTimer();
+        return;
       }
       void this.shutdown().catch((error) => {
         console.error("[pi-web] failed to shut down idle session:", error instanceof Error ? error.message : error);
       });
-    }, 30 * 60 * 1000);
+    }, SESSION_IDLE_TIMEOUT_MS);
   }
 
   /** Any activity (send, new listener) cancels a pending idle disposal. */
@@ -1112,45 +1138,119 @@ export class AgentSessionWrapper {
 
       switch (type) {
       case "prompt": {
-        if (this.inner.isBashRunning) {
-          throw new Error("Cannot send a prompt while a shell command is running");
-        }
-        // Fire and forget — events come via subscribe
-        const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
-        if (streamingBehavior && this.inner.isStreaming) {
-          this.hintQueueImages(streamingBehavior === "followUp" ? "followUp" : "steer", promptImages);
-        }
-        this.promptRunning = true;
-        this.promptPhase = String(command.message ?? "").trimStart().startsWith("/") ? "running_command" : "waiting_model";
-        notifyRunningChange();
-        this.inner.prompt(command.message as string, {
-          ...(promptImages?.length ? { images: promptImages } : {}),
-          ...(streamingBehavior ? { streamingBehavior } : {}),
-          source: "rpc",
-        }).then(() => {
-          this.promptRunning = false;
-          this.promptPhase = null;
-          this.resetIdleTimer();
-          if (!streamingBehavior) this.emit({ type: "prompt_done" });
-          notifyRunningChange();
-        }).catch((error) => {
-          this.promptRunning = false;
-          this.promptPhase = null;
-          this.resetIdleTimer();
-          invalidateSessionListCache();
-          this.emit({
-            type: "prompt_error",
-            errorMessage: error instanceof Error ? error.message : String(error),
+        // Serialize only admission. Once the preceding prompt has either
+        // passed or failed preflight, the SDK can atomically decide whether
+        // this submission starts a run or joins its streaming queue.
+        const releaseAdmission = await this.acquirePromptAdmission();
+        try {
+          if (this.inner.isBashRunning) {
+            throw new Error("Cannot send a prompt while a shell command is running");
+          }
+          if (this.extensionUiAbortController.signal.aborted) {
+            this.extensionUiAbortController = new AbortController();
+          }
+          const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
+          const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
+          if (streamingBehavior && this.inner.isStreaming) {
+            this.hintQueueImages(streamingBehavior === "followUp" ? "followUp" : "steer", promptImages);
+          }
+          let preflightAccepted = false;
+          let preflightSettled = false;
+          let promptSettled = false;
+          let acceptPreflight!: () => void;
+          let rejectPreflight!: (error: unknown) => void;
+          const preflight = new Promise<void>((resolve, reject) => {
+            acceptPreflight = () => {
+              preflightAccepted = true;
+              this.agentRunNeedsCompletion = true;
+              if (preflightSettled) return;
+              preflightSettled = true;
+              resolve();
+            };
+            rejectPreflight = (error) => {
+              if (preflightSettled) return;
+              preflightSettled = true;
+              reject(error);
+            };
           });
-          if (!streamingBehavior) this.emit({ type: "prompt_done" });
+          const finishPrompt = () => {
+            if (promptSettled) return;
+            promptSettled = true;
+            this.pendingPromptCount = Math.max(0, this.pendingPromptCount - 1);
+            this.resetIdleTimer();
+            this.notifyAgentRunCompleteIfIdle();
+          };
+
+          this.pendingPromptCount += 1;
+          this.promptRunning = true;
+          this.promptPhase = String(command.message ?? "").trimStart().startsWith("/") ? "running_command" : "waiting_model";
           notifyRunningChange();
-        });
-        return null;
+          let prompt: Promise<void>;
+          try {
+            prompt = this.inner.prompt(command.message as string, {
+              ...(promptImages?.length ? { images: promptImages } : {}),
+              ...(streamingBehavior ? { streamingBehavior } : {}),
+              source: "rpc",
+              // Match pi's RPC contract: acknowledge only after synchronous prompt
+              // validation and extension preflight have accepted the submission.
+              preflightResult: (success: boolean) => {
+                if (success) {
+                  this.applyExactSystemPrompt();
+                  acceptPreflight();
+                }
+              },
+            } as never);
+          } catch (error) {
+            finishPrompt();
+            throw error;
+          }
+
+          void prompt.then(() => {
+            acceptPreflight();
+            finishPrompt();
+            this.promptRunning = false;
+            this.promptPhase = null;
+            if (!streamingBehavior) this.emit({ type: "prompt_done" });
+            notifyRunningChange();
+          }, (error) => {
+            rejectPreflight(error);
+            finishPrompt();
+            this.promptRunning = false;
+            this.promptPhase = null;
+            invalidateSessionListCache();
+            if (preflightAccepted) {
+              this.emit({
+                type: "prompt_error",
+                errorMessage: error instanceof Error ? error.message : String(error),
+              });
+              if (!streamingBehavior) this.emit({ type: "prompt_done" });
+            }
+            notifyRunningChange();
+          }).catch((error) => {
+            console.error(
+              "[pi-web] prompt completion handler failed:",
+              error instanceof Error ? error.message : error,
+            );
+          });
+
+          await preflight;
+          return null;
+        } finally {
+          releaseAdmission();
+        }
       }
 
       case "abort":
-        await this.inner.abort();
+        // Stop must unwind extension commands that have not started the agent yet.
+        this.forceShutdownOnIdle = true;
+        this.extensionUiAbortController.abort(new DOMException("Extension UI cancelled by Stop", "AbortError"));
+        this.extensionUiAbortController = new AbortController();
+        try {
+          await this.inner.abort();
+        } finally {
+          this.resetIdleTimer();
+          if (!this.isRunning()) this.forceShutdownOnIdle = false;
+        }
         return null;
 
       case "get_state": {
@@ -1713,9 +1813,8 @@ export class AgentSessionWrapper {
       finishDispose();
       return;
     }
-    void Promise.resolve(
-      emit.call(this.inner.extensionRunner, { type: "session_shutdown", reason: "dispose" }),
-    )
+    void Promise.resolve()
+      .then(() => emit.call(this.inner.extensionRunner, { type: "session_shutdown", reason: "quit" }))
       .catch((error) => {
         console.error(
           "[pi-web] session_shutdown before dispose failed:",
