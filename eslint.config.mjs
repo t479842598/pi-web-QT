@@ -17,7 +17,7 @@ const eslintConfig = [
   },
   // bin/*.js 是有意为之的 CommonJS 启动脚本
   {
-    files: ["bin/**/*.js"],
+    files: ["bin/**/*.js", "scripts/**/*.cjs", "scripts/**/*.js"],
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
 ];
