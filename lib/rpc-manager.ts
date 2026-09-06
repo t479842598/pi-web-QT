@@ -195,14 +195,17 @@ export interface RpcSessionStartOptions {
 
 const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
+/** setTimeout 的最大安全延迟（超出会钳制为 2^31-1）。 */
+const MAX_SESSION_IDLE_TIMEOUT_MS = 2_147_483_647;
+
 /** PI_WEB_IDLE_TIMEOUT_MS: unset/blank keeps the 10-minute default, 0 disables
- *  idle shutdown, a positive number is used in milliseconds; invalid values
- *  fall back to the default with a console warning. */
+ *  idle shutdown, a positive number is used in milliseconds; invalid or
+ *  out-of-range values fall back to the default with a console warning. */
 export function resolveSessionIdleTimeoutMs(raw = process.env.PI_WEB_IDLE_TIMEOUT_MS): number {
   const text = (raw ?? "").trim();
   if (text === "") return DEFAULT_SESSION_IDLE_TIMEOUT_MS;
   const value = Number(text);
-  if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+  if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value) || value > MAX_SESSION_IDLE_TIMEOUT_MS) {
     console.warn(`[pi-web] invalid PI_WEB_IDLE_TIMEOUT_MS "${raw}", falling back to ${DEFAULT_SESSION_IDLE_TIMEOUT_MS}ms`);
     return DEFAULT_SESSION_IDLE_TIMEOUT_MS;
   }
@@ -942,13 +945,16 @@ export class AgentSessionWrapper {
 
   private installExactSystemPromptContinuation(): void {
     if (!this.exactSystemPrompt) return;
-    const previous = this.inner.agent.prepareNextTurnWithContext;
-    this.inner.agent.prepareNextTurnWithContext = async (turn: unknown, signal?: AbortSignal) => {
+    const agent = this.inner.agent as {
+      prepareNextTurnWithContext?: (turn: { context?: unknown }, signal?: AbortSignal) => Promise<{ context?: unknown } | undefined> | { context?: unknown } | undefined;
+    };
+    const previous = agent.prepareNextTurnWithContext;
+    agent.prepareNextTurnWithContext = async (turn: { context?: unknown }, signal?: AbortSignal) => {
       const prepared = await previous?.(turn, signal);
       return {
-        ...prepared,
+        ...(prepared as object | undefined),
         context: {
-          ...((prepared?.context as Record<string, unknown> | undefined) ?? (turn as { context?: unknown }).context),
+          ...((prepared?.context as object | undefined) ?? (turn.context as object | undefined)),
           systemPrompt: this.exactSystemPrompt,
         },
       };
