@@ -74,7 +74,7 @@ export async function POST(req: Request) {
     if (!isRecord(body.provider)) return NextResponse.json({ error: "provider is required" }, { status: 400 });
 
     let baseUrl = typeof body.provider.baseUrl === "string" ? body.provider.baseUrl.trim() : "";
-    let api = typeof body.provider.api === "string" && body.provider.api
+    const api = typeof body.provider.api === "string" && body.provider.api
       ? body.provider.api
       : "openai-completions";
     if (!baseUrl) {

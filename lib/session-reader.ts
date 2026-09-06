@@ -20,8 +20,8 @@ import { readSessionArchive } from "./session-archive";
 import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
 import { listSessionsIncremental } from "./session-list-scanner";
 
-/** Test seam: the listing implementation (incremental scanner by default). */
-export let listSessions: typeof listSessionsIncremental = listSessionsIncremental;
+/** Listing implementation (overridable via globalThis.__piListSessionsOverride for tests). */
+export const listSessions: typeof listSessionsIncremental = listSessionsIncremental;
 
 export { getAgentDir };
 
