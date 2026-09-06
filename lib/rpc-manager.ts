@@ -353,7 +353,23 @@ export class AgentSessionWrapper {
   /** Set while a goal continuation follow_up is in flight to avoid double-drive. */
   private goalContinuationInFlight = false;
 
-  constructor(public readonly inner: AgentSessionLike, public readonly cwd: string) {
+  readonly cwd: string;
+
+  constructor(
+    public readonly inner: AgentSessionLike,
+    cwdOrOptions: string | AgentSessionWrapperOptions = "",
+  ) {
+    this.cwd = typeof cwdOrOptions === "string" ? cwdOrOptions : "";
+    const wrapperOptions = typeof cwdOrOptions === "string" ? {} : cwdOrOptions;
+    if (wrapperOptions.onAgentRunComplete) this.onAgentRunComplete = wrapperOptions.onAgentRunComplete;
+    if (wrapperOptions.suppressCompletionNotifications) this.setSuppressCompletionNotifications(true);
+    if (wrapperOptions.chatOnly) this.setChatOnly(true);
+    if (wrapperOptions.exactSystemPrompt) {
+      this.exactSystemPrompt = wrapperOptions.exactSystemPrompt();
+      this.installExactSystemPromptContinuation();
+      this.applyExactSystemPrompt();
+    }
+
     // Existing conversations keep their own approval mode/policy (per-session
     // override in settings.json `modesPerSession`); brand-new sessions fall
     // back to the global defaults.
@@ -395,7 +411,7 @@ export class AgentSessionWrapper {
   }
 
   isRunning(): boolean {
-    return this._alive && (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning);
+    return this._alive && (this.pendingPromptCount > 0 || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning);
   }
 
   runtimeSnapshot(): RunningSnapshot {
@@ -888,7 +904,7 @@ export class AgentSessionWrapper {
   }
 
   private shouldWaitForExtensions(type: string): boolean {
-    return type === "prompt" || type === "steer" || type === "follow_up" || type === "get_commands";
+    return type === "prompt" || type === "steer" || type === "follow_up" || type === "get_commands" || type === "get_state";
   }
 
   private applyForcedEmptySystemPrompt(): void {
@@ -922,6 +938,21 @@ export class AgentSessionWrapper {
         );
       }
     }
+  }
+
+  private installExactSystemPromptContinuation(): void {
+    if (!this.exactSystemPrompt) return;
+    const previous = this.inner.agent.prepareNextTurnWithContext;
+    this.inner.agent.prepareNextTurnWithContext = async (turn: unknown, signal?: AbortSignal) => {
+      const prepared = await previous?.(turn, signal);
+      return {
+        ...prepared,
+        context: {
+          ...((prepared?.context as Record<string, unknown> | undefined) ?? (turn as { context?: unknown }).context),
+          systemPrompt: this.exactSystemPrompt,
+        },
+      };
+    };
   }
 
   setActiveToolSelection(toolNames: string[]): void {
@@ -1242,9 +1273,9 @@ export class AgentSessionWrapper {
 
       case "abort":
         // Stop must unwind extension commands that have not started the agent yet.
+        // 控制器保持 aborted（下一次 prompt 才重建），Stop 后新的 UI 请求一律拒绝。
         this.forceShutdownOnIdle = true;
         this.extensionUiAbortController.abort(new DOMException("Extension UI cancelled by Stop", "AbortError"));
-        this.extensionUiAbortController = new AbortController();
         try {
           await this.inner.abort();
         } finally {
@@ -1260,7 +1291,7 @@ export class AgentSessionWrapper {
           sessionId: this.inner.sessionId,
           sessionFile: this.inner.sessionFile ?? "",
           isStreaming: this.inner.isStreaming,
-          isPromptRunning: this.promptRunning,
+          isPromptRunning: this.pendingPromptCount > 0,
           isBashRunning: this.inner.isBashRunning,
           isCompacting: this.inner.isCompacting,
           phase: this.runtimeSnapshot().phase,
