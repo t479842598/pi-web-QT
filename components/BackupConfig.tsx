@@ -87,8 +87,11 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
   useEffect(() => {
     fetch("/api/models")
       .then((r) => r.json())
-      .then((d: { models?: Array<{ id: string; name: string; provider: string }> }) => {
-        const models = d.models ?? [];
+      .then((d: { modelList?: Array<{ id: string; name: string; provider: string }> }) => {
+        // /api/models returns `models` as a "provider:id" → name record and
+        // `modelList` as the array. Reading `models` here crashed the preview
+        // render (map is not a function) whenever a backup had manual servers.
+        const models = Array.isArray(d.modelList) ? d.modelList : [];
         setAvailableModels(models);
         if (models.length > 0) {
           setInstallModel(`${models[0].provider}/${models[0].id}`);

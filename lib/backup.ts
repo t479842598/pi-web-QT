@@ -387,6 +387,15 @@ export function adaptMcpConfig(
     const command = typeof server.command === "string" ? server.command : "";
     const args = Array.isArray(server.args) ? server.args.map(String) : [];
     const original = { command, args };
+
+    // Remote servers (streamable-http / sse with only a `url`) have no command
+    // to adapt — keep the expanded config untouched. Injecting an empty
+    // command/args here would pollute mcp.json and break the transport.
+    if (!command) {
+      result.push({ name, original, adapted: null, action: "keep", platform });
+      continue;
+    }
+
     const action = classifyCommand(command, agentDir);
 
     let adapted: { command: string; args: string[] } | null = null;
