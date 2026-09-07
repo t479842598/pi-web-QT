@@ -34,10 +34,37 @@ if (require.main === module) {
     console.error("usage: node bin/with-memory-limit.js <cmd> [args...]");
     process.exit(1);
   }
-  const result = spawnSync(cmd, args, {
-    stdio: "inherit",
-    env: { ...process.env, NODE_OPTIONS: mergedNodeOptions(process.env.NODE_OPTIONS) },
-  });
+  const env = { ...process.env, NODE_OPTIONS: mergedNodeOptions(process.env.NODE_OPTIONS) };
+  let result;
+  if (process.platform === "win32") {
+    // spawnSync cannot execute npm's extensionless .bin shims on Windows
+    // (ENOENT), and .cmd shims need cmd.exe (EINVAL since the Node CVE fix).
+    // Prefer the .cmd/.bat sibling and run it through %ComSpec%.
+    const fs = require("fs");
+    let target = cmd;
+    if (!/\.(exe|cmd|bat)$/i.test(target)) {
+      for (const ext of [".cmd", ".bat"]) {
+        if (fs.existsSync(target + ext)) {
+          target += ext;
+          break;
+        }
+      }
+    }
+    if (/\.(cmd|bat)$/i.test(target)) {
+      // cmd.exe parses `/` as a switch character, so hand it a native path.
+      const native = require("path").win32.normalize(target);
+      const quote = (a) => (/["&<>^|()%!?\s]/.test(a) ? `"${a}"` : a);
+      const line = [native, ...args].map(quote).join(" ");
+      result = spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", line], {
+        stdio: "inherit",
+        env,
+      });
+    } else {
+      result = spawnSync(target, args, { stdio: "inherit", env });
+    }
+  } else {
+    result = spawnSync(cmd, args, { stdio: "inherit", env });
+  }
   if (result.error) {
     console.error(`with-memory-limit: ${result.error.message}`);
     process.exit(1);
