@@ -1880,7 +1880,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const sid = sessionIdRef.current;
         if (sid) {
           const runIdAtEnd = promptRunIdRef.current;
-          void loadSession(sid);
+          // A chained continuation (queued steer/follow-up drain, goal
+          // auto-continue, provider auto-retry) starts the next run right
+          // after this event. loadSession here would swap the whole message
+          // array for the bounded 50-entry tail window mid-conversation:
+          // earlier pages the user had paged in are discarded, the collapsed
+          // tail can shrink below the viewport (streaming follow then pins
+          // scrollTop at 0), and a tail starting mid-turn renders uncollapsed
+          // orphan prefixes. agent_settled / finishPromptWithoutStream own
+          // the completion reload instead.
+          if (!hasQueuedContinuation && event.willRetry !== true) void loadSession(sid);
           void fetch(`/api/agent/${encodeURIComponent(sid)}`)
             .then((response) => response.ok ? response.json() as Promise<{ state?: AgentStateResponse }> : undefined)
             .then((data) => {
@@ -1947,7 +1956,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (!promptWasPending && !firstNotification) break;
 
         const sid = sessionIdRef.current;
-        if (sid) void loadSession(sid);
+        // While an extension-driven run is still active the conversation
+        // continues; reload then (agent_settled), not here — a reload now
+        // would replace messages with the bounded tail window mid-run (see
+        // the agent_end comment for the damage chain).
+        if (sid && !sdkAgentActiveRef.current) void loadSession(sid);
         // An extension can start another agent run before this RPC prompt has
         // completed. Let its agent_settled event perform that next transition.
         if (!sdkAgentActiveRef.current) {
@@ -2167,7 +2180,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setCompactResult(null);
         } else if (!event.aborted) {
           setCompactResult(readCompactResult(event.result, (event.reason as string | undefined) ?? "auto"));
-          if (sessionIdRef.current) loadSession(sessionIdRef.current);
+          // A mid-run auto-compaction must not reload: agent_end/agent_settled
+          // own the completion reload, and reloading here would swap in the
+          // bounded tail window while the run is still streaming (history
+          // loss + pinned-viewport chain, see the agent_end comment).
+          if (sessionIdRef.current && !agentRunningRef.current) loadSession(sessionIdRef.current);
         }
         break;
       case "extension_ui_request":

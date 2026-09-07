@@ -369,6 +369,37 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     return () => container.removeEventListener("scroll", maybeLoadEarlier);
   }, [scrollContainerRef, historyCursor, hasEarlierMessages, loadContext, session?.id, branchActiveLeafId]);
 
+  // Deadlock guard for the scroll-event trigger above: when the tail window
+  // collapses into compact ProcessGroups the document can be SHORTER than the
+  // viewport. scrollTop is then already 0 and can never change, so no scroll
+  // event ever fires and the older pages are unreachable — the viewport shows
+  // just the live tail with blank space below ("cannot scroll up to history").
+  // Re-check on every message-set change and auto-load pages until real
+  // overflow exists (or hasMore runs out); the scroll listener takes over
+  // from there.
+  const autoFillRef = useRef(false);
+  useEffect(() => {
+    if (!hasEarlierMessages || !historyCursor) return;
+    const container = scrollContainerRef.current;
+    const sid = session?.id;
+    if (!container || !sid) return;
+    if (loadingOlderRef.current || autoFillRef.current) return;
+    if (loading) return;
+    if (container.scrollTop > 8) return;
+    if (container.scrollHeight > container.clientHeight + 50) return;
+    autoFillRef.current = true;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop;
+    void loadContext(sid, branchActiveLeafId, historyCursor).finally(() => {
+      autoFillRef.current = false;
+      requestAnimationFrame(() => {
+        const target = container.scrollHeight - distanceFromBottom;
+        if (Math.abs(container.scrollTop - target) > 1) {
+          container.scrollTo({ top: target, behavior: "auto" });
+        }
+      });
+    });
+  }, [scrollContainerRef, historyCursor, hasEarlierMessages, loadContext, session?.id, branchActiveLeafId, loading, messages.length]);
+
   // --- Virtualized message list ---
   // T-004 (方案 B): the full rendered array is the data source; the
   // VirtualizedMessageList mounts only the viewport window. The old
@@ -378,6 +409,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   // Rendered-item index per visible (user/assistant) message ref index. Built
   // alongside the rendered array in the JSX IIFE below (see refToItemIndexRef).
   const refToItemIndexRef = useRef<Array<number | undefined>>([]);
+  // Stable identity per rendered item (parallel to the rendered array), rebuilt
+  // during the same JSX IIFE; the virtualizer reads it through this stable
+  // callback so its measurement cache survives prepends / tail-window swaps.
+  const itemKeysRef = useRef<string[]>([]);
+  const getItemKey = useCallback((index: number) => itemKeysRef.current[index] ?? `idx-${index}`, []);
   // Stable adapter object for ChatMinimap (positions from the virtualizer
   // layout instead of DOM, which is virtualized). Object identity is stable
   // so the minimap's ResizeObserver wiring does not re-create on each render.
@@ -895,13 +931,24 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               // that each rendered item starts with, for the minimap virtualizer
               // adapter (item boundaries map back to message refs).
               const itemStartRefs: Array<number | undefined> = [];
-              const pushRendered = (node: ReactNode, refIndex: number | undefined) => {
+              // Parallel stable identity per item for the virtualizer's
+              // getItemKey: entryId when the item is anchored to one message,
+              // otherwise a structural id. Index-positioned keys/measurements
+              // go stale on prepend or full tail-window replacement.
+              const itemKeys: string[] = [];
+              let orphanGroupSeq = 0;
+              const pushRendered = (node: ReactNode, refIndex: number | undefined, key: string) => {
                 rendered.push(node);
                 itemStartRefs.push(refIndex);
+                itemKeys.push(key);
+              };
+              const messageItemKey = (idx: number, fallbackPrefix: string) => {
+                const entryId = entryIds[idx];
+                return entryId || `${fallbackPrefix}-${idx}`;
               };
               for (const item of items) {
                 if (item.kind === "single") {
-                  pushRendered(renderMessage(item.idx), visibleRefIndexByMessage.get(item.idx));
+                  pushRendered(renderMessage(item.idx), visibleRefIndexByMessage.get(item.idx), messageItemKey(item.idx, "single"));
                   continue;
                 }
 
@@ -915,7 +962,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   // window) carries userIdx=-1; there is no user row to render.
                   // Mirror the `userIdx >= 0` guard from the historical branch.
                   if (userIdx >= 0) {
-                    pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx));
+                    pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx), messageItemKey(userIdx, "user"));
                   }
                   const hasStreamingAssistant = streamState.streamingMessage?.role === "assistant";
                   const liveProcessIndices: number[] = [];
@@ -973,6 +1020,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                         />
                       </div>,
                       processRefIdx,
+                      `live-process-${userIdx}-${liveProcessIndices[0] ?? "none"}`,
                     );
                   }
                   if (liveAnswerMessage) {
@@ -988,20 +1036,30 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     onOpenSession={onOpenSession}
                       />,
                       finalAssistantIdx >= 0 ? visibleRefIndexByMessage.get(finalAssistantIdx) : undefined,
+                      finalAssistantIdx >= 0 ? `live-answer-${messageItemKey(finalAssistantIdx, "answer")}` : `live-answer-streaming-${userIdx}`,
                     );
                   }
                   continue;
                 }
 
                 if (finalAssistantIdx === -1 && item.processBlocks.length === 0) {
-                  for (let renderIdx = Math.max(0, userIdx); renderIdx < endIdx; renderIdx++) {
-                    pushRendered(renderMessage(renderIdx), visibleRefIndexByMessage.get(renderIdx));
+                  // Normal turn with nothing displayable: render raw singles.
+                  // An ORPHANED-PREFIX turn (userIdx < 0) must not fall through
+                  // to raw singles: its messages carry no user anchor, so they
+                  // would all render as expanded MessageViews with inline tool
+                  // cards and usage footers (the uncollapsed-turn report).
+                  // Their toolResults-only messages are invisible anyway, so
+                  // skipping them loses nothing.
+                  if (userIdx >= 0) {
+                    for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
+                      pushRendered(renderMessage(renderIdx), visibleRefIndexByMessage.get(renderIdx), messageItemKey(renderIdx, "raw"));
+                    }
                   }
                   continue;
                 }
 
                 if (userIdx >= 0) {
-                  pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx));
+                  pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx), messageItemKey(userIdx, "user"));
                 }
 
                 const { processBlocks, finalAnswerMessage, writtenFiles, visibleProcessIndices } = item;
@@ -1010,6 +1068,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     .map((processIdx) => visibleRefIndexByMessage.get(processIdx))
                     .find((value): value is number => typeof value === "number")
                     ?? (finalAnswerMessage ? undefined : visibleRefIndexByMessage.get(finalAssistantIdx));
+                  const processAnchorIdx = visibleProcessIndices[0] ?? (finalAssistantIdx >= 0 ? finalAssistantIdx : userIdx);
                   pushRendered(
                     <div
                       key={`process-group-${userIdx}-${finalAssistantIdx}`}
@@ -1028,14 +1087,24 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                       />
                     </div>,
                     processRefIdx,
+                    `process-${userIdx >= 0 ? messageItemKey(userIdx, "user") : `orphan-${orphanGroupSeq++}`}`,
                   );
                 }
 
                 if (finalAnswerMessage) {
-                  pushRendered(renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles }), visibleRefIndexByMessage.get(finalAssistantIdx));
+                  pushRendered(renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles }), visibleRefIndexByMessage.get(finalAssistantIdx), messageItemKey(finalAssistantIdx, "answer"));
                 }
-                for (let renderIdx = finalAssistantIdx + 1; renderIdx < endIdx; renderIdx++) {
-                  pushRendered(renderMessage(renderIdx), visibleRefIndexByMessage.get(renderIdx));
+                // Trailing singles are messages AFTER the turn's final answer
+                // (custom entries, late tool results). An orphaned-prefix turn
+                // has finalAssistantIdx === -1 and the ProcessGroup above
+                // already represents every prefix message — starting the loop
+                // at 0 here would re-render the whole prefix as raw expanded
+                // MessageViews (inline tool cards + usage footers), the
+                // "running turn won't collapse" report.
+                if (finalAssistantIdx >= 0) {
+                  for (let renderIdx = finalAssistantIdx + 1; renderIdx < endIdx; renderIdx++) {
+                    pushRendered(renderMessage(renderIdx), visibleRefIndexByMessage.get(renderIdx), messageItemKey(renderIdx, "tail"));
+                  }
                 }
               }
               // After building all items, expose the per-message → item map to
@@ -1056,10 +1125,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 }
               });
               refToItemIndexRef.current = refToItem;
+              itemKeysRef.current = itemKeys;
               return (
                 <VirtualizedMessageList
                   scrollElementRef={scrollContainerRef}
                   items={rendered}
+                  getItemKey={getItemKey}
                   virtualizerRef={messageVirtualizerRef}
                 />
               );

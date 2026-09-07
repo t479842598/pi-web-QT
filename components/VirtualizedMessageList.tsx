@@ -23,12 +23,18 @@ import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 export function VirtualizedMessageList({
   scrollElementRef,
   items,
+  getItemKey,
   estimateSize = 120,
   overscan = 8,
   virtualizerRef,
 }: {
   scrollElementRef: RefObject<HTMLElement | null>;
   items: ReactNode[];
+  /** Stable identity per item (entryId / structural id). Without it TanStack
+   * keys AND its measurement cache are index-positioned, so a prepend or a
+   * full tail-window replacement shifts every row's cached size onto the
+   * wrong content and the list jumps. */
+  getItemKey: (index: number) => string;
   estimateSize?: number;
   overscan?: number;
   /** Receives the virtualizer instance (for minimap layout queries). */
@@ -43,6 +49,7 @@ export function VirtualizedMessageList({
     getScrollElement: () => scrollElementRef.current,
     estimateSize: useCallback(() => estimateSize, [estimateSize]),
     overscan,
+    getItemKey,
     // Items only ever grow at the tail (streaming) or are fully replaced
     // (branch switch) — never reordered, so index keys are stable.
   });
