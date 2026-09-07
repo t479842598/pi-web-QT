@@ -25,6 +25,7 @@ export const zhCNLocale = {
     "desktop.models": "模型",
     "desktop.skills": "技能",
     "desktop.plugins": "插件",
+    "desktop.subagents": "子代理",
     "desktop.proxy": "代理",
     "desktop.proxyEnable": "启用代理",
     "desktop.proxyProtocol": "协议",

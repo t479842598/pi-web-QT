@@ -25,6 +25,7 @@ export const enLocale = {
     "desktop.models": "Models",
     "desktop.skills": "Skills",
     "desktop.plugins": "Plugins",
+    "desktop.subagents": "Subagents",
     "desktop.proxy": "Proxy",
     "desktop.proxyEnable": "Enable Proxy",
     "desktop.proxyProtocol": "Protocol",
