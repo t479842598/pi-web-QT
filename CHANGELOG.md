@@ -2,6 +2,11 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.17.2 — 2026-09-07（修复 v0.17.1 消息文字重叠）
+
+- **消息文字重叠修复**：v0.17.1 引入的 `getItemKey` 通过渲染期写入的 ref 解析行 key——React 并发渲染下，被打断/丢弃的渲染也会发布 keys，ResizeObserver 随后拿着已提交 DOM 的 `data-index` 去新 keys 数组查 key，导致一行的高度被存到另一行的 key 下，虚拟列表行槽位互相覆盖（多层文字叠印）。现在 item keys 作为与 `items` 同一次渲染产出的 prop 传入，key 与 DOM `data-index` 永远同源，不可能错位。
+- **零高幻影行剔除**：孤立 toolResult（无 ProcessGroup 承载时）与渲染为 null 的条目不再进入虚拟列表——它们此前会产生 0 高行，与后继行落在同一 offset。
+
 ## v0.17.1 — 2026-09-07（修复运行中聊天置顶/历史不可达/工具行不折叠）
 
 - **运行中不再整包 reload**：链式运行（排队引导 / goal 循环 / 运行中自动压缩）间隙的 `agent_end`/`prompt_done`/`compaction_end` 不再把消息数组整体替换为 50 条尾部窗口——根治"对话过程中视图突然置顶、下方空白、无法上滚看历史"。历史加载统一推迟到真正 settle（`agent_settled` / `finishPromptWithoutStream`）。

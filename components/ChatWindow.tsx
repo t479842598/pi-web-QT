@@ -409,11 +409,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   // Rendered-item index per visible (user/assistant) message ref index. Built
   // alongside the rendered array in the JSX IIFE below (see refToItemIndexRef).
   const refToItemIndexRef = useRef<Array<number | undefined>>([]);
-  // Stable identity per rendered item (parallel to the rendered array), rebuilt
-  // during the same JSX IIFE; the virtualizer reads it through this stable
-  // callback so its measurement cache survives prepends / tail-window swaps.
-  const itemKeysRef = useRef<string[]>([]);
-  const getItemKey = useCallback((index: number) => itemKeysRef.current[index] ?? `idx-${index}`, []);
+  // NOTE: item keys are passed to VirtualizedMessageList as a plain prop array
+  // rendered in the same commit — NOT via a ref read inside getItemKey. A
+  // ref-backed callback lets an interrupted/concurrent render publish keys for
+  // rows that were never committed; the ResizeObserver then resolves a row's
+  // key through the NEW array while measuring the OLD DOM, and the virtualizer
+  // stores one row's height under another row's key (overlapping text).
   // Stable adapter object for ChatMinimap (positions from the virtualizer
   // layout instead of DOM, which is virtualized). Object identity is stable
   // so the minimap's ResizeObserver wiring does not re-create on each render.
@@ -874,6 +875,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 // sentinel userIdx=-1) must degrade to a missing row instead of
                 // crashing the whole page through the error boundary.
                 if (!msg) return null;
+                // A standalone toolResult renders NOTHING in MessageView (its
+                // content is shown inside a ProcessGroup step). Emitting it as
+                // a list item produces a 0-height phantom row that parks at the
+                // same offset as its successor — skip it here so every caller
+                // (singles, trailing loop, live tail) stays clean.
+                if (msg.role === "toolResult") return null;
                 const prevAssistantEntryId =
                   msg.role === "user" && idx > 0 && messages[idx - 1].role === "assistant"
                     ? entryIds[idx - 1]
@@ -938,6 +945,10 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               const itemKeys: string[] = [];
               let orphanGroupSeq = 0;
               const pushRendered = (node: ReactNode, refIndex: number | undefined, key: string) => {
+                // A null node (e.g. a bare toolResult "single" that renders
+                // nothing) would become a 0-height virtual row sitting at the
+                // same offset as its successor — drop it instead.
+                if (node === null) return;
                 rendered.push(node);
                 itemStartRefs.push(refIndex);
                 itemKeys.push(key);
@@ -948,6 +959,10 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               };
               for (const item of items) {
                 if (item.kind === "single") {
+                  // A bare toolResult renders nothing in MessageView (its
+                  // content lives inside a ProcessGroup's step); emitting it
+                  // as an item would only produce a 0-height phantom row.
+                  if (messages[item.idx]?.role === "toolResult") continue;
                   pushRendered(renderMessage(item.idx), visibleRefIndexByMessage.get(item.idx), messageItemKey(item.idx, "single"));
                   continue;
                 }
@@ -1125,12 +1140,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 }
               });
               refToItemIndexRef.current = refToItem;
-              itemKeysRef.current = itemKeys;
               return (
                 <VirtualizedMessageList
                   scrollElementRef={scrollContainerRef}
                   items={rendered}
-                  getItemKey={getItemKey}
+                  itemKeys={itemKeys}
                   virtualizerRef={messageVirtualizerRef}
                 />
               );
