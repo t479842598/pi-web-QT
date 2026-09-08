@@ -2,6 +2,14 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.17.3 — 2026-09-07（备份导入修复 + 设置面板样式恢复 + 子代理中文化）
+
+- **备份导入崩溃修复（R.map is not a function）**：`BackupConfig` 的安装模型下拉误把 `/api/models` 的 `models`（`provider:id → name` 的 record）当数组 `.map`，只要备份里出现 manual 类 MCP server（如 Mac 的 bash 包装脚本在 Windows 上）就崩掉整棵 React 树，被 ErrorBoundary 拦成「应用加载失败」。改用 `modelList` 数组并加 `Array.isArray` 守卫。
+- **HTTP-only MCP server 不再被污染**：`adaptMcpConfig` 对无 `command` 的远端 server（streamable-http/sse，如 anysearch）现在原样保留，不再注入空 `command/args` 写坏恢复后的 `mcp.json`。
+- **设置面板样式全面恢复**：`app/settings.css`（SettingsUi/AgentsConfig 等全部 className 样式）在历史合并中被误删 `import`，导致设置内所有页面几乎无样式。已在 `app/layout.tsx` 恢复导入。
+- **子代理菜单中文化**：补 `desktop.subagents` 缺失 key（设置侧栏此前显示原始 key）；`agentSwitcher` 族谱面板在 zh-CN 下的 "Agents/搜索 Agents/子 Agent" 等统一改为「子代理/搜索子代理」。
+- **Windows 开发/生产脚本修复**：`bin/with-memory-limit.js` 在 Windows 下 `spawnSync` npm `.bin` shim 报 ENOENT，改为解析 `.cmd` 兄弟文件经 `%ComSpec%` 调起，`npm run dev/start` 在 Windows 恢复可用。
+
 ## v0.17.2 — 2026-09-07（修复 v0.17.1 消息文字重叠）
 
 - **消息文字重叠修复**：v0.17.1 引入的 `getItemKey` 通过渲染期写入的 ref 解析行 key——React 并发渲染下，被打断/丢弃的渲染也会发布 keys，ResizeObserver 随后拿着已提交 DOM 的 `data-index` 去新 keys 数组查 key，导致一行的高度被存到另一行的 key 下，虚拟列表行槽位互相覆盖（多层文字叠印）。现在 item keys 作为与 `items` 同一次渲染产出的 prop 传入，key 与 DOM `data-index` 永远同源，不可能错位。
