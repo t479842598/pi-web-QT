@@ -26,6 +26,17 @@ try {
 const pkgDir = path.join(__dirname, "..");
 const nextDir = path.join(pkgDir, ".next");
 
+// Self-heal a broken process cwd: when this launcher itself is spawned from a
+// directory that was deleted (launchd working-directory churn, temp dirs), the
+// cwd stays invalid for our whole lifetime and every stdio MCP child inherits
+// it — node engines then die at startup with `process.cwd ENOENT (uv_cwd)`.
+// Land on the package directory before anything spawns.
+try {
+  process.cwd();
+} catch {
+  process.chdir(pkgDir);
+}
+
 // Resolve next's CLI entry directly to avoid relying on .bin symlinks (which
 // may not exist when installed via npx).
 let nextBin;
@@ -89,10 +100,14 @@ const nextArgs = ["start", "-p", port, "-H", hostname];
 
 // Always run next's JS entry with node directly — avoids .bin symlink issues
 // and path-with-spaces problems on Windows when shell: true is used.
+// PWD is exported explicitly: under launchd (and other minimal supervisors)
+// the chain sets no PWD env var, so agent-spawned MCP stdio children used to
+// inherit an empty one — enough to hang shell-based MCP wrappers that do a
+// "$PWD"-based workspace upward lookup (dirname "" → "." forever).
 const child = spawn(process.execPath, ["--require", watchdogPreload, nextBin, ...nextArgs], {
   cwd: pkgDir,
   stdio: ["inherit", "pipe", "inherit"],
-  env: { ...process.env, PI_WEB_HOSTNAME: hostname, PI_WEB_PORT: String(port) },
+  env: { ...process.env, PWD: pkgDir, PI_WEB_HOSTNAME: hostname, PI_WEB_PORT: String(port) },
 });
 wireChildProcessLifecycle(child);
 

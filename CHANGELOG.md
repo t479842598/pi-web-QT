@@ -2,6 +2,12 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.17.5 — 2026-09-08（修复新建会话 30 秒超时）
+
+- **新建会话超时根因修复（"Timed out creating a new session after 30s"）**：launchd 链路启动的 pi-web 从不设置 `PWD` 环境变量，MCP stdio 子进程继承空 `PWD` 后，带 `$PWD` 向上查找逻辑的 shell 型 MCP wrapper（如 lrnev-mcp-ws）会陷入 `dirname "" → "."` 死循环，永远到不了引擎启动；pi 的 MCP 客户端按 1/3/5/10/30 秒退避重试 5 轮（≈49s），必然超过前端 30 秒的会话创建超时——无论选什么模型都报错。`bin/pi-web.js` 现在给 next-server 显式导出 `PWD=<包目录>`。
+- **失效 cwd 自愈**：若启动器自身从已被删除的目录被拉起（launchd 工作目录漂移、临时目录清理），进程 cwd 终生无效且被所有 MCP 子进程继承，node 型 MCP 引擎启动即崩 `process.cwd ENOENT (uv_cwd)`。启动器现在检测到无效 cwd 时自动落到包目录。
+- 连带效果：lrnev 等 MCP 工具在 launchd/launchctl 管理的部署下恢复随会话加载；新建带完整工具集的会话耗时从 30s+ 超时降到 ~1-2s。
+
 ## v0.17.4 — 2026-09-08（修复「打开即用」后端秒退白屏）
 
 - **Windows 端自动拉起修复**：Tauri `resource_dir()` 在部分安装形态下返回 `\\?\E:\...` verbatim 路径，Node 的 CJS loader 无法解析（`EISDIR: illegal operation on a directory, lstat 'E:'`），desktop-server 被拉起后立即退出——窗口停留空白、30141 从未监听。现在 spawn 前统一把 node 二进制、入口脚本、cwd 规整为普通 Win32 路径（`\\?\UNC\` 前缀还原为 `\\server\share`），并已在本机安装环境实测「双击即用」。
