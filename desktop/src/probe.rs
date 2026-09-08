@@ -337,6 +337,29 @@ fn bundled_available(_app: &AppHandle) -> bool {
     false
 }
 
+/// Strip the Windows verbatim prefix (`\\?\C:\...`) from a path. Tauri's
+/// `resource_dir()` can return verbatim paths (registry-driven install
+/// resolution); Node's CJS loader crashes on them outright
+/// (`EISDIR: illegal operation on a directory, lstat 'E:'`), so the spawned
+/// backend dies instantly and the window stays blank. Verbatim paths only
+/// exist on Windows; other platforms return the path unchanged.
+#[cfg(windows)]
+fn strip_verbatim(path: &std::path::Path) -> std::path::PathBuf {
+    let s = path.as_os_str().to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return std::path::PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => std::path::PathBuf::from(rest),
+        None => path.to_path_buf(),
+    }
+}
+
+#[cfg(not(windows))]
+fn strip_verbatim(path: &std::path::Path) -> std::path::PathBuf {
+    path.to_path_buf()
+}
+
 /// 拉起随包内置的 Node + Next.js standalone 后端（`resources/backend/server.js`）。
 /// 成功返回子进程句柄；资源缺失或启动失败返回 None（调用方回退 CLI）。
 #[cfg(not(mobile))]
@@ -348,14 +371,19 @@ fn spawn_bundled(
     let bundled = locate_bundled(app)?;
     // 监听地址随认证状态派生（见 bind_host）：免密仅回环，设密才对外。
     let host = bind_host(password);
-    let mut cmd = Command::new(&bundled.node);
-    cmd.arg(&bundled.server_js)
+    // Node cannot exec verbatim (\\?\) paths — normalize node, entry script
+    // and cwd to plain Win32 paths before spawning.
+    let node = strip_verbatim(&bundled.node);
+    let server_js = strip_verbatim(&bundled.server_js);
+    let backend_dir = strip_verbatim(&bundled.backend_dir);
+    let mut cmd = Command::new(&node);
+    cmd.arg(&server_js)
         // 命令行参数与 env 双保险：新版 standalone 读 PORT/HOSTNAME，旧版读参数。
         .arg("-H")
         .arg(host)
         .arg("-p")
         .arg("30141")
-        .current_dir(&bundled.backend_dir)
+        .current_dir(&backend_dir)
         .env("HOSTNAME", host)
         .env("PORT", "30141")
         // 进程保持：不注入 PI_WEB_PARENT_PID —— 客户端 GUI 退出后后端常驻
@@ -402,7 +430,7 @@ fn spawn_bundled(
     }
     match cmd.spawn() {
         Ok(child) => {
-            eprintln!("[desktop] 拉起内置后端: node {:?}", bundled.server_js);
+            eprintln!("[desktop] 拉起内置后端: node {:?}", server_js);
             Some(child)
         }
         Err(e) => {
