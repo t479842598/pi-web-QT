@@ -2,6 +2,10 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.17.4 — 2026-09-08（修复「打开即用」后端秒退白屏）
+
+- **Windows 端自动拉起修复**：Tauri `resource_dir()` 在部分安装形态下返回 `\\?\E:\...` verbatim 路径，Node 的 CJS loader 无法解析（`EISDIR: illegal operation on a directory, lstat 'E:'`），desktop-server 被拉起后立即退出——窗口停留空白、30141 从未监听。现在 spawn 前统一把 node 二进制、入口脚本、cwd 规整为普通 Win32 路径（`\\?\UNC\` 前缀还原为 `\\server\share`），并已在本机安装环境实测「双击即用」。
+
 ## v0.17.3 — 2026-09-07（备份导入修复 + 设置面板样式恢复 + 子代理中文化）
 
 - **备份导入崩溃修复（R.map is not a function）**：`BackupConfig` 的安装模型下拉误把 `/api/models` 的 `models`（`provider:id → name` 的 record）当数组 `.map`，只要备份里出现 manual 类 MCP server（如 Mac 的 bash 包装脚本在 Windows 上）就崩掉整棵 React 树，被 ErrorBoundary 拦成「应用加载失败」。改用 `modelList` 数组并加 `Array.isArray` 守卫。

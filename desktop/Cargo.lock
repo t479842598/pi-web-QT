@@ -2645,7 +2645,7 @@ dependencies = [
 
 [[package]]
 name = "pi-web-desktop"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "base64 0.22.1",
  "bytes",
