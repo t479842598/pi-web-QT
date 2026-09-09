@@ -25,10 +25,12 @@ export async function GET(req: Request) {
         encode(event);
       });
 
-      // Heartbeat every 30s to prevent server/proxy timeout.
+      // Heartbeat every 30s to prevent server/proxy timeout. A JSON frame, not
+      // an SSE comment (`:...`): clients detect half-open connections by frame
+      // recency, which comments cannot provide.
       const heartbeat = setInterval(() => {
         try {
-          controller.enqueue(encoder.encode(":\n\n"));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "heartbeat" })}\n\n`));
         } catch {
           // controller already closed
         }
@@ -45,8 +47,12 @@ export async function GET(req: Request) {
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      // no-transform keeps intermediates (and Next's compression middleware,
+      // which treats text/event-stream as compressible) from buffering the
+      // stream; X-Accel-Buffering: no does the same for nginx-style proxies.
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

@@ -10,6 +10,16 @@ test("global events SSE subscribes to the session bus and heartbeats", async () 
   assert.match(source, /30_000/);
   assert.match(source, /req\.signal\.addEventListener\("abort", cleanup/);
   assert.match(source, /"Content-Type": "text\/event-stream"/);
+  // Heartbeats must be observable JSON frames so clients can detect
+  // half-open (zombie) connections by frame recency.
+  assert.match(source, /JSON\.stringify\(\{ type: "heartbeat" \}\)/);
+});
+
+test("global events SSE opt out of proxy buffering and transforms", async () => {
+  const source = await readFile(new URL("./route.ts", import.meta.url), "utf8");
+
+  assert.match(source, /"Cache-Control": "no-cache, no-transform"/);
+  assert.match(source, /"X-Accel-Buffering": "no"/);
 });
 
 test("global events SSE forwards bus events with sessionId intact", async () => {

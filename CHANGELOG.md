@@ -2,6 +2,17 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.17.6 — 2026-09-09（修复远程/移动端网页访问：翻页卡死与运行态永久卡"思考中"）
+
+- **向上翻历史不再被卡死请求锁死**：`loadContext` 此前是裸 fetch（无超时无守卫），手机/隧道网络下一次挂起的分页请求会把 `loadingOlderRef` 永久置 true，该会话从此滚到顶毫无反应（切走再切回才恢复）。现在分页请求有 30s 超时、AbortError 自动重试一次，失败给可读提示（"Failed to load earlier messages"）而非只进 console。
+- **分页与整包重载的竞态消除**：`loadSession` 整包替换尾部窗口 / 404 清空时递增历史纪元（`historyEpochRef`），晚到的旧分页响应被丢弃——不再把陈旧页 prepend 到已替换的消息数组上造成重复或错位。
+- **远程端不再永久卡在"思考中"**：网页端运行态此前只由 SSE 终止事件清除，手机切后台/切网把 TCP 挂成半开连接（readyState 一直 OPEN、`onerror` 永不触发），终止事件永久丢失。三道修复：
+  - **心跳可观测化**：`/api/agent/[id]/events` 与 `/api/events` 的 30s 心跳从 SSE 注释（浏览器 EventSource 完全不可见）改为 JSON 帧 `{"type":"heartbeat"}`，客户端据此判断连接死活。
+  - **僵尸连接检测**：直连 SSE 报 OPEN 但 >95s（3 个心跳周期）无任何帧时，发送前（`ensureEventsConnected`）与运行中（15s 对账 tick）都强制重建连接；重连后路由的 `connected` + `state_sync` 立即收敛 UI。
+  - **对账强化**：对账 fetch 加 10s 超时（死网络下 fetch 原本会无限挂起，失败计数永不上涨）；连续 3 次失败升级为可读提示并释放 UI（对齐 `waitForPromptSettlement` 既有策略）；对账 effect 补 `pageshow`/`focus` 唤醒（bfcache 恢复、窗口聚焦这些 visibilitychange 覆盖不到的路径也能立即对账）。
+- **SSE 防代理缓冲**：`/api/events` 与 `/api/agent/running/events` 补 `Cache-Control: no-cache, no-transform` + `X-Accel-Buffering: no`（对齐 per-session 路由），防止中间代理缓冲/压缩事件流。
+- 测试：新增 `hooks/useAgentSession.remote-resilience.test.mjs`（9 项回归）并更新 SSE 路由测试；全量 1037 用例通过，tsc/eslint 干净。
+
 ## v0.17.5 — 2026-09-08（修复新建会话 30 秒超时）
 
 - **新建会话超时根因修复（"Timed out creating a new session after 30s"）**：launchd 链路启动的 pi-web 从不设置 `PWD` 环境变量，MCP stdio 子进程继承空 `PWD` 后，带 `$PWD` 向上查找逻辑的 shell 型 MCP wrapper（如 lrnev-mcp-ws）会陷入 `dirname "" → "."` 死循环，永远到不了引擎启动；pi 的 MCP 客户端按 1/3/5/10/30 秒退避重试 5 轮（≈49s），必然超过前端 30 秒的会话创建超时——无论选什么模型都报错。`bin/pi-web.js` 现在给 next-server 显式导出 `PWD=<包目录>`。

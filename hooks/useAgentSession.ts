@@ -299,6 +299,15 @@ const EVENT_STREAM_IDLE_GRACE_MS = 120_000;
 // global /api/events bus takes over, so OTHER clients' changes still reach an
 // idle tab in seconds without a manual refresh.
 const AGENT_STATE_RECONCILE_MS = 15_000;
+// The server heartbeats every 30s. If a nominally-OPEN direct SSE has carried
+// no frame for ~3 periods, treat it as a half-open zombie and rebuild it.
+const EVENT_STREAM_ZOMBIE_MS = 95_000;
+// Reconcile fetches must not hang forever: on a dead network fetch has no
+// built-in timeout, so the failure counter would never advance and the
+// escalation below would never fire.
+const RECONCILE_FETCH_TIMEOUT_MS = 10_000;
+// Consecutive dead reconcile polls before the UI is released with a notice.
+const RECONCILE_MAX_FAILURES = 3;
 // Opening an inactive session may load its resources and extensions before the
 // SSE route can emit `connected`. Five seconds is not enough for a cold
 // Turbopack route or a session with several extensions.
@@ -852,6 +861,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const eventStreamGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventStreamGraceGenerationRef = useRef(0);
   const eventStreamGraceActiveRef = useRef(false);
+  // Half-open connection detection: timestamp of the last frame (event or
+  // heartbeat) observed on the direct SSE. Mobile backgrounding suspends the
+  // TCP connection without closing it — readyState stays OPEN forever, the
+  // terminal event never arrives, and every other recovery path (bus
+  // suppression, no reconnect) is defeated. If the server's 30s heartbeat is
+  // silent for ~3 periods, the connection is a zombie and must be rebuilt.
+  const lastEventFrameAtRef = useRef(0);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const agentRunningRef = useRef(false);
   const sdkAgentActiveRef = useRef(false);
@@ -1034,6 +1050,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       if (res.status === 404) {
         if (showLoading) {
+          // The message array is about to be cleared: in-flight loadContext
+          // pages for the old content must not prepend onto the empty array.
+          historyEpochRef.current += 1;
           setData(null);
           setActiveLeafId(null);
           setMessages([]);
@@ -1077,6 +1096,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (!agentRunningRef.current) {
         ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
       }
+      // The tail window is being replaced wholesale: drop any loadContext page
+      // still in flight so its stale cursor cannot prepend onto the new array.
+      historyEpochRef.current += 1;
       setHistoryCursor(d.context.oldestEntryId);
       setHasEarlierMessages(d.context.hasMore);
       // A model_change entry can lag the live set_model result during a reload.
@@ -1170,44 +1192,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }, 35_000);
     return () => window.clearTimeout(timer);
   }, [loading, session]);
-
-  const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null) => {
-    try {
-      const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
-      if (leafId) params.set("leafId", leafId);
-      // Page upward: ask the server for the `tail` ancestors preceding `before`,
-      // then prepend them. Omitting `before` fetches the most-recent `tail`.
-      if (before) params.set("before", before);
-      const url = `/api/sessions/${encodeURIComponent(sid)}/context?${params}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as { context: SessionData["context"] };
-      if (sessionIdRef.current !== sid) return;
-      setHistoryCursor(d.context.oldestEntryId);
-      setHasEarlierMessages(d.context.hasMore);
-      setData((prev) => {
-        if (!prev || prev.sessionId !== sid) return prev;
-        const context = before ? {
-          ...prev.context,
-          messages: [...d.context.messages, ...prev.context.messages],
-          entryIds: [...d.context.entryIds, ...prev.context.entryIds],
-          oldestEntryId: d.context.oldestEntryId,
-          hasMore: d.context.hasMore,
-        } : d.context;
-        return { ...prev, context };
-      });
-      if (before) {
-        // Older page: prepend so scroll position stays anchored.
-        setMessages((prev) => [...d.context.messages, ...prev]);
-        setEntryIds((prev) => [...d.context.entryIds, ...prev]);
-      } else {
-        setMessages(d.context.messages);
-        setEntryIds(d.context.entryIds ?? []);
-      }
-    } catch (e) {
-      console.error("Failed to load context:", e);
-    }
-  }, []);
 
   const loadTools = useCallback(async (sid: string) => {
     try {
@@ -1365,6 +1349,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const connectEvents = useCallback((sid: string): Promise<EventStreamConnectionResult> => {
     closeEvents();
+    lastEventFrameAtRef.current = Date.now();
     const es = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
     eventSourceRef.current = es;
     eventSourceSessionIdRef.current = sid;
@@ -1383,6 +1368,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const timeout = setTimeout(() => settle("timeout"), EVENT_STREAM_CONNECT_TIMEOUT_MS);
 
       es.onmessage = (e) => {
+        lastEventFrameAtRef.current = Date.now();
         try {
           const event = JSON.parse(e.data) as AgentEvent;
           if (event.type === "connected") settle("connected");
@@ -1418,11 +1404,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const ensureEventsConnected = useCallback(async (sid: string) => {
     const current = eventSourceRef.current;
     if (current && eventSourceSessionIdRef.current === sid) {
-      if (current.readyState === EventSource.OPEN) return;
-      const attempt = eventConnectionAttemptRef.current;
-      if (attempt?.source === current && attempt.pending) {
-        await attempt.promise;
-        if (eventSourceRef.current === current && current.readyState === EventSource.OPEN) return;
+      if (current.readyState === EventSource.OPEN) {
+        // Half-open zombie: the transport reports OPEN but the server's 30s
+        // heartbeat has been silent far beyond its period. Reconnect from
+        // scratch instead of trusting a connection that can no longer deliver
+        // events (mobile backgrounding suspends TCP without closing it).
+        if (Date.now() - lastEventFrameAtRef.current > EVENT_STREAM_ZOMBIE_MS) {
+          closeEvents();
+        } else {
+          return;
+        }
+      } else {
+        const attempt = eventConnectionAttemptRef.current;
+        if (attempt?.source === current && attempt.pending) {
+          await attempt.promise;
+          if (eventSourceRef.current === current && current.readyState === EventSource.OPEN) return;
+        }
       }
     }
 
@@ -1487,6 +1484,74 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       },
     });
   }, []);
+
+  // ── History pagination ───────────────────────────────────────────────────
+  // Bumped whenever loadSession swaps the whole message array for a fresh
+  // bounded tail window (or clears it on 404). An in-flight loadContext
+  // response from before the swap must be dropped — prepending a stale page
+  // onto the replaced array duplicates or misplaces messages.
+  const historyEpochRef = useRef(0);
+
+  const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null) => {
+    const epoch = historyEpochRef.current;
+    const fetchPage = async (signal: AbortSignal) => {
+      const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
+      if (leafId) params.set("leafId", leafId);
+      // Page upward: ask the server for the `tail` ancestors preceding `before`,
+      // then prepend them. Omitting `before` fetches the most-recent `tail`.
+      if (before) params.set("before", before);
+      return fetch(`/api/sessions/${encodeURIComponent(sid)}/context?${params}`, { signal });
+    };
+    try {
+      // 超时兜底：手机/隧道网络下请求可能无限挂起，卡死的分页请求会通过
+      // finally 里的 loadingOlderRef 永久锁死该会话的向上翻页。超时视为偶发
+      // 慢重试一次，两次都超时才向用户给出可读提示。
+      const timeoutController = new AbortController();
+      const timer = setTimeout(() => timeoutController.abort(), 30_000);
+      let res: Response;
+      try {
+        res = await fetchPage(timeoutController.signal);
+      } catch (e) {
+        if (!(e instanceof DOMException && e.name === "AbortError")) throw e;
+        res = await fetchPage(timeoutController.signal);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json() as { context: SessionData["context"] };
+      // A completion reload (agent_settled / prompt_done) swapped the message
+      // array while this page was in flight — its cursor is gone; drop it.
+      if (sessionIdRef.current !== sid || historyEpochRef.current !== epoch) return;
+      setHistoryCursor(d.context.oldestEntryId);
+      setHasEarlierMessages(d.context.hasMore);
+      setData((prev) => {
+        if (!prev || prev.sessionId !== sid) return prev;
+        const context = before ? {
+          ...prev.context,
+          messages: [...d.context.messages, ...prev.context.messages],
+          entryIds: [...d.context.entryIds, ...prev.context.entryIds],
+          oldestEntryId: d.context.oldestEntryId,
+          hasMore: d.context.hasMore,
+        } : d.context;
+        return { ...prev, context };
+      });
+      if (before) {
+        // Older page: prepend so scroll position stays anchored.
+        setMessages((prev) => [...d.context.messages, ...prev]);
+        setEntryIds((prev) => [...d.context.entryIds, ...prev]);
+      } else {
+        setMessages(d.context.messages);
+        setEntryIds(d.context.entryIds ?? []);
+      }
+    } catch (e) {
+      console.error("Failed to load context:", e);
+      // 滚动触发的静默失败在界面上表现为"滚到顶没反应"；给一条可读提示，
+      // 否则用户无从区分"没有更多历史"与"加载失败"。会话已切换则不提示。
+      if (mountedRef.current && sessionIdRef.current === sid && historyEpochRef.current === epoch) {
+        addNotice({ type: "error", message: "Failed to load earlier messages. Scroll up to retry." });
+      }
+    }
+  }, [addNotice]);
 
   const handleExtensionUiRequest = useCallback((request: ExtensionUiRequest) => {
     switch (request.method) {
@@ -1701,12 +1766,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // agent_end never arrives and the UI stays in streaming state forever.
   // If the server reports idle while we still think it's running, finish
   // through the same path as prompt_done.
+  const reconcileFailuresRef = useRef(0);
   const reconcileAgentState = useCallback(async (sid: string) => {
     if (!agentRunningRef.current && !streamActiveRef.current) return;
     const runId = promptRunIdRef.current;
     try {
-      const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
-      if (!res.ok) return;
+      // A hung fetch must count as a failure: on a dead network fetch has no
+      // built-in timeout, so without this the escalation below never fires.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), RECONCILE_FETCH_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch(`/api/agent/${encodeURIComponent(sid)}`, { signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      reconcileFailuresRef.current = 0;
       const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
       // A slow response can straddle a run boundary (previous run finished
       // and the user already started the next one while this request was in
@@ -1742,9 +1818,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       await finishPromptWithoutStream(sid, runId);
     } catch {
-      // Network still down — the next poll / visibility / online tick retries.
+      // Network still down — count consecutive failures and escalate like
+      // waitForPromptSettlement does: after 3 dead polls (~45s+) the run's
+      // fate is unknowable, so surface a notice and release the UI instead of
+      // showing "thinking" forever. A later agent_start re-enters running if
+      // the server was actually still busy.
+      reconcileFailuresRef.current += 1;
+      if (
+        reconcileFailuresRef.current < RECONCILE_MAX_FAILURES
+        || !mountedRef.current
+        || promptRunIdRef.current !== runId
+      ) return;
+      reconcileFailuresRef.current = 0;
+      addNotice({ type: "error", message: "Cannot reach the pi-web service. Make sure it is running, then refresh the page." });
+      rpcPromptPendingRef.current = false;
+      optimisticUserMessageKeyRef.current = null;
+      settleUiStage();
     }
-  }, [finishPromptWithoutStream, setPendingRecovery, setQueuedMessages]);
+  }, [addNotice, finishPromptWithoutStream, setPendingRecovery, setQueuedMessages, settleUiStage]);
 
   // Recovery net for missed SSE events: while the agent is running, verify
   // against the server periodically and whenever the tab returns to the
@@ -1760,15 +1851,44 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const onVisible = () => {
       if (document.visibilityState === "visible") reconcile();
     };
+    // Mobile backgrounding suspends the 15s interval WITHOUT changing
+    // visibilityState in some flows (app switcher restores, bfcache), so the
+    // tab can come back to a finished run still labeled "thinking". pageshow
+    // and focus are the reliable wake-ups for those paths.
+    const onPageShow = () => reconcile();
+    const onFocus = () => reconcile();
     const interval = setInterval(reconcile, AGENT_STATE_RECONCILE_MS);
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("focus", onFocus);
     window.addEventListener("online", reconcile);
     return () => {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("focus", onFocus);
       window.removeEventListener("online", reconcile);
     };
   }, [agentRunning, streamState.isStreaming, reconcileAgentState]);
+
+  // Half-open SSE sweep: while a run is active, a direct stream whose 30s
+  // heartbeat has been silent for ~3 periods is a zombie (mobile network
+  // switch suspends TCP without closing it — readyState stays OPEN and
+  // onerror never fires). Rebuilding it makes the route's fresh `connected` +
+  // `state_sync` frames converge the UI even if the run already ended.
+  useEffect(() => {
+    if (!agentRunning && !streamState.isStreaming) return;
+    const sweep = () => {
+      const sid = sessionIdRef.current;
+      const source = eventSourceRef.current;
+      if (!sid || !source || source.readyState !== EventSource.OPEN) return;
+      if (Date.now() - lastEventFrameAtRef.current <= EVENT_STREAM_ZOMBIE_MS) return;
+      void connectEvents(sid);
+    };
+    sweep();
+    const interval = setInterval(sweep, AGENT_STATE_RECONCILE_MS);
+    return () => clearInterval(interval);
+  }, [agentRunning, streamState.isStreaming, connectEvents]);
 
   useEffect(() => {
     agentRunningRef.current = agentRunning;

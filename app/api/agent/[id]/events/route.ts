@@ -108,10 +108,13 @@ export async function GET(
         }
       });
 
-      // Heartbeat every 30s to prevent server/proxy timeout (Next.js default ~120-150s)
+      // Heartbeat every 30s to prevent server/proxy timeout (Next.js default ~120-150s).
+      // A JSON frame, not an SSE comment (`:...`): the web client's zombie-connection
+      // detector needs an observable frame to distinguish a healthy idle stream
+      // from a half-open connection whose transport still reports OPEN.
       const heartbeat = setInterval(() => {
         try {
-          controller.enqueue(encoder.encode(":\n\n"));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "heartbeat" })}\n\n`));
         } catch {
           // controller already closed
         }

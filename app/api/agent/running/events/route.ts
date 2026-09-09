@@ -28,6 +28,14 @@ export async function GET(req: Request) {
     },
   });
   return new Response(stream, {
-    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
+    // no-transform keeps intermediates (and Next's compression middleware,
+    // which treats text/event-stream as compressible) from buffering the
+    // stream; X-Accel-Buffering: no does the same for nginx-style proxies.
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
   });
 }
