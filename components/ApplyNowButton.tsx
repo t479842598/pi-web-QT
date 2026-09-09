@@ -72,8 +72,8 @@ export function ApplyNowButton({
       >
         {busy ? t("desktop.applyNowApplying") : t("desktop.applyNow")}
       </button>
-      {done && <span style={{ color: "#22c55e", fontSize: 12 }}>{t("desktop.applyNowDone")}</span>}
-      {error && <span style={{ color: "#ef4444", fontSize: 12 }}>{error}</span>}
+      {done && <span style={{ color: "var(--status-success)", fontSize: 12 }}>{t("desktop.applyNowDone")}</span>}
+      {error && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{error}</span>}
     </span>
   );
 }

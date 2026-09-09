@@ -319,16 +319,6 @@ const EVENT_STREAM_CONNECT_TIMEOUT_MS = 30_000;
 // so the failure surfaces through handleSend's catch (error notice + reset).
 const ENSURE_NEW_SESSION_TIMEOUT_MS = 30_000;
 
-/** Injected ahead of every prompt while plan mode is active. Read-only
- *  analysis contract — the toolset (read/grep/find/ls) enforces it too. */
-const PLAN_MODE_INSTRUCTION =
-  `You are in PLAN MODE. Work as a read-only planning assistant.\n` +
-  `- Analyze, read, search and reason about the codebase; do NOT modify any files.\n` +
-  `- Do NOT run shell commands that mutate state, install packages, or start servers.\n` +
-  `- When you have enough understanding, produce a concrete, step-by-step implementation plan.\n` +
-  `- Structure the plan with clear phases, the files involved, and any risks or open questions.\n` +
-  `- Do not write code yet — the plan itself is the deliverable.`;
-
 /** Known mode-instruction block headers (from lib/modes buildModeSystemPrompt
  *  and the legacy plan block). Used to strip the injected prefix from echoed
  *  user messages so the chat bubble shows only what the user typed. */
@@ -493,7 +483,9 @@ export interface AttachedImage {
 }
 
 type SelectedModel = { provider: string; modelId: string };
-type ModelEntry = { id: string; name: string; provider: string };
+/** `input` carries the model's accepted modalities (["text","image"]…) so the
+ *  composer can refuse image attachments for text-only models. */
+type ModelEntry = { id: string; name: string; provider: string; input?: string[] };
 type ModelsResponse = {
   models: Record<string, string>;
   modelList?: ModelEntry[];
@@ -631,16 +623,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [newSessionModel, setNewSessionModel] = useState<SelectedModel | null>(null);
   const [newSessionDefaultModel, setNewSessionDefaultModel] = useState<SelectedModel | null>(null);
   const [toolPreset, setToolPreset] = useState<"none" | "default" | "full" | "plan">("full");
-  // Plan mode pins the session to a read-only toolset and injects a plan-only
-  // instruction into every prompt. Persists until explicitly exited.
-  const [planMode, setPlanMode] = useState(false);
+  // Plan mode is DERIVED from the collaboration mode, not a second flag.
+  // Two independent states used to drift: collaborationMode could be "plan"
+  // while planMode stayed false (and vice versa), so the prompt block, the
+  // read-only toolset and the review dialog disagreed about whether plan mode
+  // was actually on. The @narumitw/pi-plan-mode extension owns the toolset and
+  // plan workflow; this hook only drives it (see syncPlanModeExtension).
   const prePlanPresetRef = useRef<"none" | "default" | "full">("default");
   // Ref mirror so handleSend can read plan mode without re-binding (keeps the
   // React Compiler's memoization stable across the large hook body).
   const planModeRef = useRef(false);
-  useEffect(() => {
-    planModeRef.current = planMode;
-  }, [planMode]);
   // ── Chat modes (Reasonix port) ───────────────────────────────────────────
   // Loaded from /api/modes (~/.pi/agent/settings.json `modes`) so the
   // selection survives page reloads and new sessions inherit the same defaults.
@@ -728,6 +720,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const tokenMode = modeSettings.tokenMode;
   const toolApprovalMode = modeSettings.toolApprovalMode;
   const permissionRules = modeSettings.permissionRules;
+  /** Derived: see the note where planModeRef is declared. */
+  const planMode = collaborationMode === "plan";
+  useEffect(() => {
+    planModeRef.current = planMode;
+  }, [planMode]);
   const collaborationModeRef = useRef<CollaborationMode>(collaborationMode);
   const tokenModeRef = useRef<TokenMode>(tokenMode);
   const toolApprovalModeRef = useRef<ToolApprovalMode>(toolApprovalMode);
@@ -2196,6 +2193,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             return [...prev, delivered];
           });
         } else if (completed) {
+          // entryIds is deliberately NOT appended here. The SDK emits
+          // message_end BEFORE it persists the entry (agent-session.js emits,
+          // then calls sessionManager.appendMessage), so the entry id does not
+          // exist yet and the client cannot know it. The run's completion reload
+          // (prompt_done / agent_settled -> loadSession) replaces messages and
+          // entryIds together, which is what re-anchors these rows. ChatWindow's
+          // live-tail item keys therefore must not depend on entryIds — see
+          // liveProcessItemKey/liveAnswerItemKey there.
           setMessages((prev) => [...prev, normalizeToolCalls(completed)]);
         }
         resetStreamUpdates();
@@ -2383,21 +2388,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       tokenMode: tokenModeRef.current,
       goalText: collaborationModeRef.current === "goal" ? (goalTextRef.current ?? undefined) : undefined,
     });
-    // Compatibility: the legacy plan toggle (T-009 unifies it into
-    // collaborationMode) still injects its read-only block when no mode block
-    // is otherwise active.
-    const planFallback = !modeBlock && planModeRef.current && !isSlashCommandPrompt
-      ? PLAN_MODE_INSTRUCTION
-      : "";
     // Inject the mode block only once per mode composition. Once the agent has
     // the plan/goal contract in context, repeating the block on every message
     // is redundant — and the user should not see the same prompt text repeated
     // across turns (or after switching windows and back).
-    const combinedBlock = modeBlock || planFallback;
+    const combinedBlock = modeBlock;
     const modeSignature = [
       collaborationModeRef.current,
       tokenModeRef.current,
-      planModeRef.current ? "legacy-plan" : "",
       combinedBlock ? String(combinedBlock.length) : "",
     ].join("|");
     // A new session has no id yet (sessionIdRef fills in after ensureNewSession),
@@ -2424,8 +2422,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setMessages((prev) => [...prev, userMsg]);
     optimisticUserMessageKeyRef.current = userMessageKey(userMsg);
     promptRunIdRef.current = promptRunId;
-    // Goal mode: the first user message becomes the goal; the loop auto-continues.
-    if (collaborationModeRef.current === "goal" && !isSlashCommandPrompt) {
+    // Goal mode: the FIRST text message of a goal run becomes the objective.
+    // A goal must not be re-declared by later messages — doing so reset the
+    // objective and every budget counter whenever the user typed mid-run. It
+    // also must not be started from an image-only message: the server rejects
+    // an empty goalText and the failure used to be swallowed, leaving the UI
+    // showing a "running" goal that the engine never had.
+    const shouldStartGoal = collaborationModeRef.current === "goal"
+      && !isSlashCommandPrompt
+      && trimmedMessage.length > 0
+      && goalStateRef.current.status === "idle";
+    if (shouldStartGoal) {
       goalTextRef.current = trimmedMessage;
       setGoalState((prev) => ({
         ...prev,
@@ -2486,7 +2493,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (!sseReady) void waitForPromptSettlement(sid, promptRunId);
           // Server-side goal engine: register the goal so it auto-continues
           // even if the page is closed/refreshed (wish-style development).
-          if (collaborationModeRef.current === "goal" && !isSlashCommandPrompt) {
+          if (shouldStartGoal) {
             void sendAgentCommand(sid, { type: "goal_start", goalText: trimmedMessage }).catch(() => {});
           }
         } else {
@@ -2510,7 +2517,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           ...(piImages?.length ? { images: piImages } : {}),
         });
         if (!sseReady) void waitForPromptSettlement(session.id, promptRunId);
-        if (collaborationModeRef.current === "goal" && !isSlashCommandPrompt) {
+        if (shouldStartGoal) {
           void sendAgentCommand(session.id, { type: "goal_start", goalText: trimmedMessage }).catch(() => {});
         }
       }
@@ -3189,56 +3196,47 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // ── Plan mode ────────────────────────────────────────────────────────────
   // Entering/exiting delegates to the @narumitw/pi-plan-mode extension via the
   // /plan slash command (the prompt RPC path executes extension commands). The
-  // extension owns the read-only toolset and plan workflow; the frontend keeps
-  // its own planMode flag + PlanReviewDialog for the post-plan review shelf.
+  // extension owns the read-only toolset and the plan workflow; the frontend
+  // only tracks the collaboration mode and shows PlanReviewDialog afterwards.
   // Uses a generation counter so rapid toggles don't race (e.g. exit + re-enter
   // before the exit command completes).
   const planModeGenRef = useRef(0);
-  const handlePlanModeChange = useCallback(async (enabled: boolean) => {
+  const syncPlanModeExtension = useCallback(async (next: CollaborationMode) => {
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     const gen = ++planModeGenRef.current;
-    if (enabled) {
+    if (next === "plan") {
       // Remember the active preset so exiting plan mode can restore it.
       prePlanPresetRef.current = toolPreset === "plan" ? "default" : toolPreset;
-      setPlanMode(true);
-      planModeRef.current = true;
-      injectedModeSignatureRef.current = { sessionKey: "", signature: "" };
       if (sid) {
         try {
           // Activate the extension's Plan mode (read-only tools + plan workflow).
           await sendAgentCommand(sid, { type: "prompt", message: "/plan" });
-          if (planModeGenRef.current !== gen) return; // superseded by a later call
         } catch (e) {
-          if (planModeGenRef.current !== gen) return;
+          if (planModeGenRef.current !== gen) return; // superseded by a later call
           console.error("Failed to enter plan mode:", e);
         }
       }
-    } else {
-      setPlanMode(false);
-      planModeRef.current = false;
-      injectedModeSignatureRef.current = { sessionKey: "", signature: "" };
-      if (sid) {
-        try {
-          // Exit the extension's Plan mode; it restores the previous toolset.
-          await sendAgentCommand(sid, { type: "prompt", message: "/plan exit" });
-          if (planModeGenRef.current !== gen) return; // superseded
-        } catch (e) {
-          if (planModeGenRef.current !== gen) return;
-          console.error("Failed to exit plan mode:", e);
-        }
-        // The extension's /plan exit is fire-and-forget from the wrapper's
-        // perspective (send("prompt") always resolves with null, even when the
-        // slash command failed internally). Never leave the session locked in
-        // the read-only plan toolset: explicitly restore the full toolset
-        // regardless of whether /plan exit succeeded. withExtensionTools keeps
-        // all extension/package tools, so nothing is lost.
+      return;
+    }
+    if (sid) {
+      try {
+        // Exit the extension's Plan mode; it restores the previous toolset.
+        await sendAgentCommand(sid, { type: "prompt", message: "/plan exit" });
         if (planModeGenRef.current !== gen) return; // superseded
-        try {
-          const restore = prePlanPresetRef.current;
-          await sendAgentCommand(sid, { type: "set_tools", toolNames: getToolNamesForPreset(restore) });
-        } catch (e) {
-          console.error("Failed to restore tools after plan exit:", e);
-        }
+      } catch (e) {
+        if (planModeGenRef.current !== gen) return;
+        console.error("Failed to exit plan mode:", e);
+      }
+      // The extension's /plan exit is fire-and-forget from the wrapper's
+      // perspective (send("prompt") always resolves with null, even when the
+      // slash command failed internally). Never leave the session locked in
+      // the read-only plan toolset: explicitly restore the full toolset
+      // regardless of whether /plan exit succeeded.
+      if (planModeGenRef.current !== gen) return; // superseded
+      try {
+        await sendAgentCommand(sid, { type: "set_tools", toolNames: getToolNamesForPreset(prePlanPresetRef.current) });
+      } catch (e) {
+        console.error("Failed to restore tools after plan exit:", e);
       }
     }
   }, [toolPreset]);
@@ -3266,14 +3264,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     });
   }, []);
 
-  const handleCollaborationModeChange = useCallback((mode: CollaborationMode) => {
-    persistModeSettings({ ...modeSettingsRef.current, collaborationMode: normalizeCollaborationMode(mode) });
+  /**
+   * Switch the collaboration mode.
+   *
+   * Returns a promise that resolves once the plan extension has been driven
+   * (entered or exited), so callers that immediately send a prompt — plan
+   * execute/exit — cannot race the toolset restore.
+   */
+  const handleCollaborationModeChange = useCallback((mode: CollaborationMode): Promise<void> => {
+    const next = normalizeCollaborationMode(mode);
+    const wasPlan = collaborationModeRef.current === "plan";
+    persistModeSettings({ ...modeSettingsRef.current, collaborationMode: next });
     // Sync the ref immediately (not via the effect) so callers that send a
     // prompt right after switching — e.g. plan execute/exit — see the new mode
     // and do not inject the previous mode's instruction block.
-    collaborationModeRef.current = normalizeCollaborationMode(mode);
+    collaborationModeRef.current = next;
     injectedModeSignatureRef.current = { sessionKey: "", signature: "" };
-    if (mode !== "goal") {
+    if (next !== "goal") {
       // Leaving goal mode stops the server-side auto-continue loop.
       goalTextRef.current = null;
       goalLoopRunningRef.current = false;
@@ -3281,7 +3288,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const sid = sessionIdRef.current;
       if (sid) void sendAgentCommand(sid, { type: "goal_stop" }).catch(() => {});
     }
-  }, [persistModeSettings]);
+    // Drive the plan extension on every transition into or out of plan mode.
+    // Only transitions, so re-selecting the current mode is a no-op.
+    if (next === "plan" && !wasPlan) return syncPlanModeExtension("plan");
+    if (next !== "plan" && wasPlan) return syncPlanModeExtension("normal");
+    return Promise.resolve();
+  }, [persistModeSettings, syncPlanModeExtension]);
 
   const handleTokenModeChange = useCallback(async (mode: TokenMode) => {
     persistModeSettings({ ...modeSettingsRef.current, tokenMode: normalizeTokenMode(mode) });
@@ -3800,7 +3812,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleRecallQueue, resolveRecovery, exportQueueData, importQueueData, stageQueueImport,
     moveQueuedMessage, recallQueuedMessage, requeueAt, removeQueuedMessage,
     handleBuiltinSlashCommand,
-    handleToolPresetChange, handleThinkingLevelChange, handlePlanModeChange, loadTools, loadSlashCommands, reloadModels: loadModels, setActiveLeafId, setData, setMessages, loadContext,
+    handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, reloadModels: loadModels, setActiveLeafId, setData, setMessages, loadContext,
     dispatch, setAgentRunning, setForkingEntryId,
     handleLeafChange,
     // Subscriptions

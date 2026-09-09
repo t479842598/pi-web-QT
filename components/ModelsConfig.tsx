@@ -340,7 +340,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <SectionTitle>{t("desktop.modelsProvider")}</SectionTitle>
         <button onClick={onDelete}
-          style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "#ef4444", cursor: "pointer", fontSize: 11 }}>
+          style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "var(--status-error)", cursor: "pointer", fontSize: 11 }}>
           {t("desktop.delete")}
         </button>
       </div>
@@ -349,7 +349,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
         <TextInput value={editingName} onChange={setEditingName} placeholder="provider-name" mono />
         {editingName !== name && editingName.trim() && (
           <button onClick={() => onRename(editingName.trim())}
-            style={{ marginTop: 4, padding: "3px 10px", background: "var(--accent)", border: "none", borderRadius: 4, color: "#fff", cursor: "pointer", fontSize: 11, alignSelf: "flex-start" }}>
+            style={{ marginTop: 4, padding: "3px 10px", background: "var(--accent)", border: "none", borderRadius: 4, color: "var(--accent-fg)", cursor: "pointer", fontSize: 11, alignSelf: "flex-start" }}>
             {t("desktop.rename")}
           </button>
         )}
@@ -390,14 +390,14 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
           <button
             onClick={onAddModel}
             title={t("desktop.modelsAddModelManual")}
-            style={{ height: 30, padding: "0 12px", border: "none", borderRadius: 5, background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
+            style={{ height: 30, padding: "0 12px", border: "none", borderRadius: 5, background: "var(--accent)", color: "var(--accent-fg)", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
           >
             {t("desktop.modelsAddModelManual")}
           </button>
         </div>
 
         {discoveryState.phase === "error" && (
-          <div style={{ padding: "7px 9px", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 5, color: "#ef4444", fontSize: 11, lineHeight: 1.4 }}>
+          <div style={{ padding: "7px 9px", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 5, color: "var(--status-error)", fontSize: 11, lineHeight: 1.4 }}>
             {discoveryState.message}
           </div>
         )}
@@ -497,7 +497,7 @@ const LEVEL_COLORS: Record<ThinkingLevel, string> = {
   medium:  "#a78bfa",
   high:    "#f472b6",
   xhigh:   "#fb923c",
-  max:     "#ef4444",
+  max:     "var(--status-error)",
 };
 
 export function ThinkingLevelMapEditor({
@@ -546,7 +546,7 @@ export function ThinkingLevelMapEditor({
           fontWeight: 600,
         };
         const btnActiveDisabled: React.CSSProperties = {
-          background: "#ef4444",
+          background: "var(--status-error)",
           color: "#fff",
           fontWeight: 600,
         };
@@ -839,9 +839,9 @@ function ModelDetail({
     ? catalogState.message
     : catalogResultSummary;
   const catalogStatusColor = catalogState.phase === "error"
-    ? "#ef4444"
+    ? "var(--status-error)"
     : catalogState.phase === "success" && catalogState.recommendation.price.status === "unreliable"
-      ? "#d97706"
+      ? "var(--status-warning)"
       : "var(--text-dim)";
 
   return (
@@ -879,8 +879,8 @@ function ModelDetail({
             style={{
               height: 24,
               padding: "0 8px",
-              background: testState.phase === "success" ? "#16a34a" : "none",
-              border: `1px solid ${testState.phase === "success" ? "#16a34a" : "var(--border)"}`,
+              background: testState.phase === "success" ? "var(--status-success)" : "none",
+              border: `1px solid ${testState.phase === "success" ? "var(--status-success)" : "var(--border)"}`,
               borderRadius: 4,
               color: testState.phase === "success" ? "#fff" : (!model.id.trim() || testState.phase === "testing") ? "var(--text-dim)" : "var(--text-muted)",
               cursor: (!model.id.trim() || testState.phase === "testing") ? "not-allowed" : "pointer",
@@ -896,7 +896,7 @@ function ModelDetail({
             {testState.phase === "testing" ? t("desktop.modelsTesting") : testState.phase === "success" ? t("desktop.modelsOk") : t("desktop.modelsTest")}
           </button>
           <button onClick={onDelete}
-            style={{ height: 24, padding: "0 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "#ef4444", cursor: "pointer", fontSize: 11, boxSizing: "border-box" }}>
+            style={{ height: 24, padding: "0 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "var(--status-error)", cursor: "pointer", fontSize: 11, boxSizing: "border-box" }}>
             {t("desktop.modelsRemove")}
           </button>
         </div>
@@ -1171,8 +1171,8 @@ function OAuthDetail({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <SectionTitle>{t("desktop.modelsSubscription")}</SectionTitle>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: provider.loggedIn ? "#4ade80" : "var(--border)", display: "inline-block" }} />
-          <span style={{ fontSize: 11, color: provider.loggedIn ? "#4ade80" : "var(--text-dim)" }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: provider.loggedIn ? "var(--status-success)" : "var(--border)", display: "inline-block" }} />
+          <span style={{ fontSize: 11, color: provider.loggedIn ? "var(--status-success)" : "var(--text-dim)" }}>
             {provider.loggedIn ? t("desktop.modelsConnected") : t("desktop.modelsNotConnected")}
           </span>
         </div>
@@ -1261,10 +1261,10 @@ function OAuthDetail({
           <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>{loginState.message}</p>
         )}
         {loginState.phase === "success" && (
-          <p style={{ margin: 0, fontSize: 12, color: "#4ade80" }}>{t("desktop.modelsConnectedSuccessfully")}</p>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--status-success)" }}>{t("desktop.modelsConnectedSuccessfully")}</p>
         )}
         {loginState.phase === "error" && (
-          <p style={{ margin: 0, fontSize: 12, color: "#f87171" }}>{loginState.message}</p>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--status-error)" }}>{loginState.message}</p>
         )}
       </div>
 
@@ -1281,14 +1281,14 @@ function OAuthDetail({
           <>
             <button
               onClick={handleLogin}
-              style={{ padding: "5px 14px", background: "var(--accent)", border: "none", borderRadius: 5, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+              style={{ padding: "5px 14px", background: "var(--accent)", border: "none", borderRadius: 5, color: "var(--accent-fg)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
             >
               {provider.loggedIn ? t("desktop.modelsReLogin") : t("desktop.modelsLogin")}
             </button>
             {provider.loggedIn && (
               <button
                 onClick={handleLogout}
-                style={{ padding: "5px 12px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 5, color: "#ef4444", cursor: "pointer", fontSize: 12 }}
+                style={{ padding: "5px 12px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 5, color: "var(--status-error)", cursor: "pointer", fontSize: 12 }}
               >
                 {t("desktop.modelsDisconnect")}
               </button>
@@ -1384,8 +1384,8 @@ function ApiKeyDetail({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <SectionTitle>{t("desktop.modelsApiKey")}</SectionTitle>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: provider.configured ? "#4ade80" : "var(--border)", display: "inline-block" }} />
-          <span style={{ fontSize: 11, color: provider.configured ? "#4ade80" : "var(--text-dim)" }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: provider.configured ? "var(--status-success)" : "var(--border)", display: "inline-block" }} />
+          <span style={{ fontSize: 11, color: provider.configured ? "var(--status-success)" : "var(--text-dim)" }}>
             {provider.configured ? t("desktop.modelsConfigured") : t("desktop.modelsNotConfigured")}
           </span>
         </div>
@@ -1418,7 +1418,7 @@ function ApiKeyDetail({
             disabled={saving || !apiKey.trim() || savedOk}
             style={{
               padding: "6px 12px",
-              background: savedOk ? "#16a34a" : apiKey.trim() ? "var(--accent)" : "var(--bg-panel)",
+              background: savedOk ? "var(--status-success)" : apiKey.trim() ? "var(--accent)" : "var(--bg-panel)",
               border: "none", borderRadius: 5,
               color: (apiKey.trim() || savedOk) ? "#fff" : "var(--text-dim)",
               cursor: (saving || !apiKey.trim() || savedOk) ? "not-allowed" : "pointer",
@@ -1432,7 +1432,7 @@ function ApiKeyDetail({
         </div>
       </Field>
 
-      {error && <p style={{ margin: 0, fontSize: 12, color: "#f87171" }}>{error}</p>}
+      {error && <p style={{ margin: 0, fontSize: 12, color: "var(--status-error)" }}>{error}</p>}
 
       {provider.configured && (
         <button
@@ -1441,7 +1441,7 @@ function ApiKeyDetail({
           style={{
             alignSelf: "flex-start", padding: "5px 12px",
             background: "none", border: "1px solid rgba(239,68,68,0.3)",
-            borderRadius: 5, color: "#ef4444",
+            borderRadius: 5, color: "var(--status-error)",
             cursor: removing ? "not-allowed" : "pointer", fontSize: 12,
           }}
         >
@@ -1691,7 +1691,7 @@ function CustomProviderDialog({
             </select>
             <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{t("desktop.modelsCallFormatHelp")}</span>
             {apiSel === CUSTOM_CALL_FORMAT && (
-              <span style={{ fontSize: 10, color: "#d97706", lineHeight: 1.4 }}>{t("desktop.modelsCustomCallFormatHelp")}</span>
+              <span style={{ fontSize: 10, color: "var(--status-warning)", lineHeight: 1.4 }}>{t("desktop.modelsCustomCallFormatHelp")}</span>
             )}
           </div>
 
@@ -1706,7 +1706,7 @@ function CustomProviderDialog({
               ))}
             </select>
             {importValue && (
-              <span style={{ fontSize: 10, color: "#4ade80" }}>{t("desktop.modelsImported")}: {importValue}</span>
+              <span style={{ fontSize: 10, color: "var(--status-success)" }}>{t("desktop.modelsImported")}: {importValue}</span>
             )}
           </div>
 
@@ -1730,7 +1730,7 @@ function CustomProviderDialog({
                   style={{ flexShrink: 0, width: 28, height: 28, background: "none", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-dim)", cursor: "pointer", fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
               </div>
             )}
-            {baseUrl.trim() && !urlValid && <span style={{ fontSize: 10, color: "#ef4444" }}>{t("desktop.modelsUrlInvalid")}</span>}
+            {baseUrl.trim() && !urlValid && <span style={{ fontSize: 10, color: "var(--status-error)" }}>{t("desktop.modelsUrlInvalid")}</span>}
 
             <Field label={t("desktop.modelsApiKey")}>
               <SecretTextInput value={apiKey} onChange={setApiKey} placeholder={t("desktop.modelsApiKeyPlaceholder")} mono />
@@ -2292,7 +2292,7 @@ export function ModelsConfig({
 
         {/* Footer */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
-          {saveError && <span style={{ fontSize: 12, color: "#f87171", flex: 1 }}>{saveError}</span>}
+          {saveError && <span style={{ fontSize: 12, color: "var(--status-error)", flex: 1 }}>{saveError}</span>}
           {!embedded && (
             <button onClick={() => { void requestClose(); }} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>
               {t("desktop.cancel")}
@@ -2303,7 +2303,7 @@ export function ModelsConfig({
             position: "relative",
             padding: "6px 16px",
             minWidth: 92,
-            background: savedOk ? "#16a34a" : saving ? "var(--bg-panel)" : "var(--accent)",
+            background: savedOk ? "var(--status-success)" : saving ? "var(--bg-panel)" : "var(--accent)",
             border: "none", borderRadius: 6,
             color: savedOk ? "#fff" : saving ? "var(--text-muted)" : "#fff",
             cursor: (saving || savedOk) ? "default" : "pointer", fontSize: 13, fontWeight: 600,

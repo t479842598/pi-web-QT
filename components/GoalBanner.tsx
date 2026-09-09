@@ -29,12 +29,14 @@ interface GoalBannerProps {
 }
 
 const STATUS_COLORS: Record<GoalStatus, string> = {
-  idle: "#6b7280",
-  running: "#10b981",
-  paused: "#d97706",
+  idle: "var(--text-muted)",
+  running: "var(--status-success)",
+  paused: "var(--status-warning)",
+  // blocked sits between warning and error on purpose, so it keeps its own
+  // orange instead of collapsing into one of the two semantic tokens.
   blocked: "#ea580c",
-  budget_limited: "#ef4444",
-  complete: "#6b7280",
+  budget_limited: "var(--status-error)",
+  complete: "var(--text-muted)",
 };
 
 const RESUMABLE = new Set<GoalStatus>(["paused", "blocked"]);

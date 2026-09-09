@@ -60,3 +60,16 @@ test("manual collapse during streaming is not immediately forced open again", ()
   assert.match(source, /if \(!userCollapsedDuringStreamRef\.current\) setAreaExpanded\(true\)/);
   assert.match(source, /userCollapsedDuringStreamRef\.current = isStreaming && !next/);
 });
+
+test("tool blocks get a referentially stable prop object so ToolCallBlock's memo can hit", () => {
+  // Regression: passing an inline object literal to the memoized ToolCallBlock
+  // defeated its shallow compare, re-rendering every tool block on each
+  // streaming frame. The adapter memoizes the object on the step's own fields.
+  assert.match(source, /const MemoizedToolCall = memo\(function MemoizedToolCall/);
+  assert.match(
+    source,
+    /const toolCallContent = useMemo<ToolCallContent>\(\(\) => \(\{[\s\S]*?\}\), \[block\.toolCallId, block\.toolName, block\.input\]\);/,
+  );
+  // No inline object literal may reach ToolCallBlock directly anymore.
+  assert.doesNotMatch(source, /<ToolCallBlock\s+block=\{\{/);
+});

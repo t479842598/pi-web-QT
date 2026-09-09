@@ -582,7 +582,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
         }}
       >
         {error ? (
-          <div style={{ color: "#f87171", fontSize: 13 }}>{error}</div>
+          <div style={{ color: "var(--status-error)", fontSize: 13 }}>{error}</div>
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -691,7 +691,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
       >
         <div style={{ width: "min(680px, 100%)" }}>
           {error && (
-            <div style={{ color: "#f87171", fontSize: 13, marginBottom: 12, textAlign: "center" }}>
+            <div style={{ color: "var(--status-error)", fontSize: 13, marginBottom: 12, textAlign: "center" }}>
               {error}
             </div>
           )}
@@ -794,7 +794,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
       </div>
       <div style={{ flex: 1, minHeight: 0, background: "var(--bg-panel)" }}>
         {error ? (
-          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, color: "#f87171", fontSize: 13, textAlign: "center" }}>
+          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, color: "var(--status-error)", fontSize: 13, textAlign: "center" }}>
             {error}
           </div>
         ) : (
@@ -1118,7 +1118,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
 
   if (error) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#f87171", fontSize: 13 }}>
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--status-error)", fontSize: 13 }}>
         {error}
       </div>
     );
@@ -1364,7 +1364,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
                   padding: "5px 12px",
                   borderBottom: "1px solid var(--border)",
                   background: "rgba(248,113,113,0.14)",
-                  color: "#f87171",
+                  color: "var(--status-error)",
                   fontSize: 11,
                   flexShrink: 0,
                 }}

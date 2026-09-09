@@ -2,6 +2,11 @@ import type { Metadata } from "next";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import "./settings.css";
+// Static per-theme variables (generated from lib/theme.ts by
+// scripts/generate-theme-css.mjs). Loaded after globals.css so a saved theme
+// paints correctly on the FIRST frame instead of waiting for the async
+// /api/themes fetch that useTheme performs.
+import "./theme-presets.css";
 import "@fontsource/ia-writer-quattro";
 import "@fontsource/ia-writer-quattro/400-italic.css";
 import "@fontsource/ia-writer-quattro/700.css";

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { resolve } from "path";
+import { tmpdir } from "os";
+import { join, resolve } from "path";
 import {
   createAgentSessionServices,
   getAgentDir,
+  ModelRuntime,
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { resolveVisibleModels } from "@/lib/model-scope";
@@ -10,6 +12,8 @@ import { projectTrustReloadOptions } from "@/lib/project-trust";
 import {
   applyBuiltinOverridePatches,
   getEffectiveOverrides,
+  upsertBuiltinModels,
+  type BuiltinModelUpsert,
   type OverridePatch,
   type OverridePatches,
 } from "@/lib/builtin-model-overrides";
@@ -25,10 +29,15 @@ interface BuiltinModelInfo {
   contextWindow?: number;
   maxTokens?: number;
   thinkingLevelMap?: Record<string, string | null>;
+  input?: string[];
+  /** True when models[] defines this id and the SDK registry does not. */
+  custom?: boolean;
 }
 
-const ALLOWED_FIELDS = new Set(["name", "reasoning", "contextWindow", "maxTokens", "thinkingLevelMap", "hidden"]);
+const ALLOWED_FIELDS = new Set(["name", "reasoning", "contextWindow", "maxTokens", "thinkingLevelMap", "hidden", "input"]);
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+/** Input modalities the SDK accepts in `input`. */
+const INPUT_MODALITIES = new Set(["text", "image"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -39,6 +48,12 @@ function validateThinkingMap(value: unknown): boolean {
   return Object.entries(value).every(([key, entry]) => THINKING_LEVELS.has(key) && (entry === null || typeof entry === "string"));
 }
 
+function validateInputList(value: unknown): boolean {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((entry) => typeof entry === "string" && INPUT_MODALITIES.has(entry));
+}
+
 function validatePatchValue(field: string, value: unknown): boolean {
   if (value === null) return true;
   if (field === "name") return typeof value === "string" && value.trim().length > 0;
@@ -47,6 +62,7 @@ function validatePatchValue(field: string, value: unknown): boolean {
     return typeof value === "number" && Number.isFinite(value) && value > 0;
   }
   if (field === "thinkingLevelMap") return validateThinkingMap(value);
+  if (field === "input") return validateInputList(value);
   return false;
 }
 
@@ -64,6 +80,22 @@ function parsePatches(value: unknown): OverridePatches {
     if (Object.keys(patch).length > 0) patches[modelId] = patch;
   }
   return patches;
+}
+
+/** Ids the SDK's own registry provides for this provider, ignoring models.json.
+ *  Only these entries may be pruned from models[] as redundant override shells;
+ *  anything else there was created by the user. */
+async function getBuiltinModelIds(providerId: string): Promise<string[]> {
+  try {
+    const runtime = await ModelRuntime.create({ modelsPath: join(tmpdir(), "pi-web-builtin-registry.json") });
+    const providers = await runtime.getProviders();
+    const provider = providers.find((entry) => entry.id === providerId);
+    return (provider?.getModels() ?? []).map((model) => model.id);
+  } catch {
+    // If the registry cannot be read we must NOT prune anything: keeping an
+    // extra entry is harmless, deleting a user's model is not.
+    return [];
+  }
 }
 
 export async function GET(req: Request) {
@@ -98,6 +130,7 @@ export async function GET(req: Request) {
         contextWindow: model.contextWindow,
         maxTokens: model.maxTokens,
         thinkingLevelMap: model.thinkingLevelMap,
+        input: model.input,
       }))
       .sort((a, b) => a.id.localeCompare(b.id));
 
@@ -105,6 +138,21 @@ export async function GET(req: Request) {
     const providers = isRecord(modelsJson.providers) ? modelsJson.providers : {};
     const provider = isRecord(providers[providerId]) ? providers[providerId] : undefined;
     const overrides = getEffectiveOverrides(provider);
+
+    // Mark ids that only exist because models[] defines them, so the editor can
+    // tell a user-added model from a builtin one with a builtin's name.
+    const builtinIds = new Set(await getBuiltinModelIds(providerId));
+    const customIds = new Set<string>();
+    if (Array.isArray(provider?.models)) {
+      for (const entry of provider.models) {
+        if (isRecord(entry) && typeof entry.id === "string" && !builtinIds.has(entry.id)) {
+          customIds.add(entry.id);
+        }
+      }
+    }
+    for (const model of models) {
+      if (customIds.has(model.id)) model.custom = true;
+    }
 
     return NextResponse.json({
       provider: providerId,
@@ -134,27 +182,64 @@ export async function PATCH(req: Request) {
     if (!providerId) return NextResponse.json({ error: "provider is required" }, { status: 400 });
     const patches = parsePatches(body.patches ?? {});
 
-    // models: 可选，写入该提供商的完整模型列表（「获取新模型」用）。
-    // 写完整上游列表而非仅新增项，避免任何合并语义下丢模型。
-    let parsedModels: Array<{ id: string; name?: string }> | undefined;
+    // models: optional upsert list keyed by id. Used by "fetch new models"
+    // (which sends the whole upstream list) AND by the manual "add model" form
+    // (which sends a single new id). Upsert — not replace — so a manual add can
+    // never drop the other models the user configured.
+    let parsedModels: BuiltinModelUpsert[] | undefined;
     if (body.models !== undefined) {
-      if (!Array.isArray(body.models) || !body.models.every((m) => isRecord(m) && typeof m.id === "string" && m.id.trim())) {
+      if (!Array.isArray(body.models)) {
         return NextResponse.json({ error: "models must be an array of { id, name? }" }, { status: 400 });
       }
-      parsedModels = body.models.map((m) => ({
-        id: (m as { id: string }).id.trim(),
-        ...(typeof (m as { name?: unknown }).name === "string" && (m as { name: string }).name.trim()
-          ? { name: (m as { name: string }).name.trim() }
-          : {}),
-      }));
+      const parsed: BuiltinModelUpsert[] = [];
+      for (const entry of body.models) {
+        if (!isRecord(entry) || typeof entry.id !== "string" || !entry.id.trim()) {
+          return NextResponse.json({ error: "models must be an array of { id, name? }" }, { status: 400 });
+        }
+        const upsert: BuiltinModelUpsert = { id: entry.id.trim() };
+        if (typeof entry.name === "string" && entry.name.trim()) upsert.name = entry.name.trim();
+        if (typeof entry.reasoning === "boolean") upsert.reasoning = entry.reasoning;
+        if (entry.input !== undefined) {
+          if (!validateInputList(entry.input)) {
+            return NextResponse.json({ error: `Invalid input for model ${upsert.id}` }, { status: 400 });
+          }
+          upsert.input = entry.input as string[];
+        }
+        if (entry.contextWindow !== undefined) {
+          if (!validatePatchValue("contextWindow", entry.contextWindow)) {
+            return NextResponse.json({ error: `Invalid contextWindow for model ${upsert.id}` }, { status: 400 });
+          }
+          upsert.contextWindow = entry.contextWindow as number;
+        }
+        if (entry.maxTokens !== undefined) {
+          if (!validatePatchValue("maxTokens", entry.maxTokens)) {
+            return NextResponse.json({ error: `Invalid maxTokens for model ${upsert.id}` }, { status: 400 });
+          }
+          upsert.maxTokens = entry.maxTokens as number;
+        }
+        if (entry.thinkingLevelMap !== undefined) {
+          if (!validateThinkingMap(entry.thinkingLevelMap)) {
+            return NextResponse.json({ error: `Invalid thinkingLevelMap for model ${upsert.id}` }, { status: 400 });
+          }
+          upsert.thinkingLevelMap = entry.thinkingLevelMap as Record<string, string | null>;
+        }
+        parsed.push(upsert);
+      }
+      parsedModels = parsed;
     }
+
+    // Ids the SDK's base registry provides. Only these may be pruned as
+    // redundant override shells; anything else in models[] is user-created.
+    const builtinModelIds = new Set(
+      (await getBuiltinModelIds(providerId)),
+    );
 
     const result = await mutateModelsConfig((current) => {
       const providers = isRecord(current.providers) ? current.providers : {};
       const existingProvider = isRecord(providers[providerId]) ? providers[providerId] : undefined;
-      let nextProvider = applyBuiltinOverridePatches(existingProvider, patches);
+      let nextProvider = applyBuiltinOverridePatches(existingProvider, patches, { builtinModelIds });
       if (parsedModels) {
-        nextProvider = { ...nextProvider, models: parsedModels };
+        nextProvider = upsertBuiltinModels(nextProvider, parsedModels);
       }
       const nextProviders = { ...providers };
       if (Object.keys(nextProvider).length > 0) nextProviders[providerId] = nextProvider;

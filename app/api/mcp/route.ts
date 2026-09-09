@@ -5,12 +5,9 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "@/lib/atomic-file";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import type { McpServerConfig } from "@/lib/api-types";
+import { normalizeMcpServers, validateMcpServers } from "@/lib/mcp-config";
 
 export const dynamic = "force-dynamic";
-
-const SERVER_NAME_RE = /^[a-zA-Z0-9_-]+$/;
-const TRANSPORTS = new Set(["stdio", "sse", "http"]);
-const LIFECYCLES = new Set(["eager", "lazy"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -25,32 +22,10 @@ function readMcpServers(): Record<string, McpServerConfig> {
   if (!existsSync(filePath)) return {};
   try {
     const parsed = JSON.parse(readFileSync(filePath, "utf8")) as { mcpServers?: unknown };
-    return isRecord(parsed) && isRecord(parsed.mcpServers) ? parsed.mcpServers as Record<string, McpServerConfig> : {};
+    return normalizeMcpServers(isRecord(parsed) ? parsed.mcpServers : undefined);
   } catch {
     return {};
   }
-}
-
-/** Validate one server entry against the mcp.json contract. Unknown fields
- *  (env / requestTimeoutMs / cwd / ...) are passed through untouched. */
-function validateServer(name: string, value: unknown): string | null {
-  if (!SERVER_NAME_RE.test(name)) return `Invalid server name "${name}" (allowed: letters, digits, _ and -)`;
-  if (!isRecord(value)) return `Server "${name}" must be an object`;
-  if (typeof value.command !== "string" || !value.command.trim()) {
-    return `Server "${name}" requires a string command`;
-  }
-  if (value.args !== undefined) {
-    if (!Array.isArray(value.args) || !value.args.every((arg) => typeof arg === "string")) {
-      return `Server "${name}" args must be an array of strings`;
-    }
-  }
-  if (value.transport !== undefined && !TRANSPORTS.has(value.transport as string)) {
-    return `Server "${name}" transport must be one of stdio, sse, http`;
-  }
-  if (value.lifecycle !== undefined && !LIFECYCLES.has(value.lifecycle as string)) {
-    return `Server "${name}" lifecycle must be one of eager, lazy`;
-  }
-  return null;
 }
 
 export async function GET(req: Request) {
@@ -70,7 +45,20 @@ export async function GET(req: Request) {
   }
 }
 
-/** Full replacement of the `mcpServers` map. */
+/** Read the whole mcp.json document so a write preserves sibling keys the
+ *  editor does not manage (notably the extension's `settings` block). */
+function readMcpDocument(): Record<string, unknown> {
+  const filePath = mcpFilePath();
+  if (!existsSync(filePath)) return {};
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(filePath, "utf8"));
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Full replacement of the `mcpServers` map. Sibling keys are preserved. */
 export async function PUT(req: Request) {
   if (!isApiRequestAllowed(req)) {
     return NextResponse.json({ error: "Access denied" }, { status: 403 });
@@ -85,13 +73,14 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "mcpServers must be an object" }, { status: 400 });
     }
 
-    const servers = body.mcpServers;
-    for (const [name, value] of Object.entries(servers)) {
-      const problem = validateServer(name, value);
-      if (problem) return NextResponse.json({ error: problem }, { status: 400 });
-    }
+    // Validate the ENTIRE map before writing anything: a full replacement that
+    // rejects one server must not leave the others half-applied, and it must
+    // never silently drop a server the UI cannot represent.
+    const problem = validateMcpServers(body.mcpServers);
+    if (problem) return NextResponse.json({ error: problem }, { status: 400 });
 
-    writePrivateFileAtomicSync(mcpFilePath(), `${JSON.stringify({ mcpServers: servers }, null, 2)}\n`);
+    const document = { ...readMcpDocument(), mcpServers: body.mcpServers };
+    writePrivateFileAtomicSync(mcpFilePath(), `${JSON.stringify(document, null, 2)}\n`);
     return NextResponse.json({ success: true, filePath: mcpFilePath() });
   } catch (error) {
     return NextResponse.json(

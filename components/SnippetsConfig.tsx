@@ -23,7 +23,7 @@ const inputStyle: React.CSSProperties = {
 
 const buttonStyle: React.CSSProperties = {
   padding: "6px 12px", border: "none", borderRadius: 6,
-  background: "var(--accent)", color: "#fff", cursor: "pointer", fontSize: 12,
+  background: "var(--accent)", color: "var(--accent-fg)", cursor: "pointer", fontSize: 12,
 };
 
 export function SnippetsConfig() {

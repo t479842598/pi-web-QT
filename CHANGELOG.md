@@ -2,6 +2,52 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.17.7 — 2026-09-10（修复目标模式无法自驱、计划模式双状态漂移；新增扩展工具开关；MCP 配置与模型能力修复）
+
+### 目标模式：修好自动继续（此前实际只跑一轮）
+
+- **continuation 被自身忙标志挡掉（根因）**：SDK 在 `prompt()` 的 `finally` 里就发出 `agent_settled`，早于 wrapper 把 `promptRunning` 置回 false；旧代码在 settle 回调里直接 kick，守卫 `if (promptRunning) return` 必然命中，且之后没有任何补偿驱动 —— 所以目标模式跑完第一轮就停，只有点「恢复」才会继续（恢复路径 arm 了 continuation 绕过守卫）。现在改为「settle 只记 pending 标志 → 等 wrapper 真正空闲再驱动」，并在 `prompt.then/catch` 里补一次驱动。
+- **continuation 改用真实 prompt 启动**：旧实现用 `followUp()`，而 SDK 只在一次 run 的收尾循环里 drain follow-up 队列 —— 对已空闲的会话它只会静默排队，直到用户下次发言才被送出。现在直接发起一轮 prompt，并走与用户消息相同的准入锁，避免与用户 prompt 并发竞争。
+- **每发一条消息都会重置目标**：目标模式下任何非斜杠消息都会把 goalText、turnsUsed、noProgressTurns、tokensUsed 全部清零并重发 `goal_start`，中途插话等于换目标、清空预算。现在只在「目标为空且消息含文本」时启动。
+- **纯图片消息会起一个空目标**：`goalText:""` 被服务端拒绝，错误又被 `.catch(() => {})` 吞掉，UI 却显示运行中。现在不会启动。
+- **token 统计把整个会话算进目标**：起始基线被重置为 0，第一次结算就把全部历史 token 计入，任何预算立刻超限。现在以目标开始时的会话累计为基线。
+- **`blocked:` 标记误判**：用子串匹配，`unblocked:`、`not blocked:` 都会把正常文本判成受阻并终止目标；`goal is complete` 也会命中「once the goal is complete we can ship」这类散文。现在改用词边界 + 否定判断，complete 要求出现在句首或行首。
+- **暂停/停止会清空用户排队消息**：旧 pause/stop 调 `clearQueue()`，连带丢掉用户自己的 steer/follow-up（数据丢失）。现在只取消 goal 自己的继续。
+- 停止时未重置工具调用基线的问题一并修掉。
+
+### 计划模式：收敛为单一状态源，并真正只读
+
+- **两套状态会漂移**：前端有一个独立的 `planMode` 布尔值与按会话持久化的 `collaborationMode` 并存，只在 UI 层手动同步。结果可能出现「提示词注入了计划块但只读工具集没生效」或反之，`PlanReviewDialog` 也依赖错的那一个。现在 `planMode` 由 `collaborationMode` 派生，切换模式时统一驱动 `@narumitw/pi-plan-mode` 扩展。
+- **移动端没有入口**：协作模式控件此前只在非移动端渲染，手机上无法进入计划模式。现在所有视口都显示。
+- **「提出建议」静默失效**：它走 `steer`，而该对话框只在运行结束后出现，此时 steer 只会入队、永不执行。现在改为真实 prompt。
+- **「执行」竞态**：退出计划模式的扩展命令与执行 prompt 会并发进入准入队列，且模式切换失败时用户点了没反应。现在等模式切换完成再发，失败也照常执行。
+
+### 扩展工具：可逐个开关（计划模式只读的前提）
+
+- 说明：扩展与 MCP 工具此前不受输入框工具预设影响，始终被注入（这是有意设计——预设管的是编码工具，不该因为选了只读就悄悄砍掉 `Agent`/`mcp_*`）。但这也意味着只读预设拦不住 `lsp_fix`、`start_supervision` 这类会写文件的扩展工具。
+- 新增 `~/.pi/agent/extension-tools.json` 持久化开关，在「设置 → 工具」页可逐个关闭；无配置时行为与之前完全一致（不改变任何人的现状）。切换后自动重载当前会话生效。
+
+### MCP 配置：修复远程服务器被误拒
+
+- 校验此前无条件要求 `command`，导致 `mcp.json` 里 `streamable-http` 型服务器（只有 `url`+`headers`，如 anysearch）在保存任意其他服务器时被整批拒绝；transport 枚举也写成了扩展不认识的 `http`。现在按 transport 分支校验、枚举对齐扩展的 `streamable-http`，旧值自动归一化；PUT 会保留 `mcpServers` 之外的同级键（如扩展的 `settings` 块）。
+- MCP 设置页补上 `url` / `headers` 字段，远程服务器现在可以从界面配置。
+
+### 内置供应商与图片能力
+
+- **「改了显示名但仍调用原模型 ID」**：SDK 的 `modelOverrides` 是字段级覆盖（没有 `id`），只能改展示名；要引入新的请求模型 ID 必须写 `provider.models[]`。现在内置供应商下可手动添加模型 ID，并在界面明确标注「显示名称只影响展示，请求使用模型 ID」。
+- **「内置供应商无法开启图片识别」**：除了补上 `input` 字段支持，还发现一个更隐蔽的问题——`models[]` 里只写 `{id}` 的空条目会覆盖内置定义，把 `deepseek-v4-flash-vision-exp` 的 `input` 从 `["text","image"]` 压成 `["text"]`。现在模型编辑区可单独勾选图片输入，且旧剪枝逻辑不再误删用户自建模型。
+- 图片能力打通到输入框：不支持的模型会置灰上传入口、拒绝拖入并提示，服务端也有兜底校验。
+
+### 其他修复
+
+- **MCP 设置页**：远程服务器在列表里显示 url 而非空 command。
+- **模型配置测试路由**补上鉴权（此前是 models-config 系列唯一没有来源守卫的路由，且接受请求体里的任意 baseUrl/apiKey 发上游请求）。
+- **虚拟列表性能**：`ProcessGroup` 每帧给 memo 的 `ToolCallBlock` 传新对象字面量导致 memo 永不命中、`ChatWindow` 的 ref 回调每帧重建导致所有可见行重挂、`useMessageRefs` 每帧重分配数组、`scrollMargin` 未设置。流式期间展开的工具详情会因 item key 抖动而自动收起的问题一并修复。
+- **Tab 栏重做**：从 141 行纯 inline style 收成 CSS 类，补 hover/圆角/active 指示条、溢出渐隐、active 自动滚入可见区、标签持久化（刷新不再丢失）。
+- **主题**：新增卡片式 mini 界面预览（每张卡用该主题真实配色画缩略界面），修掉「首次悬停无反应」；新增 `--accent-fg` 让 accent 按钮文字在浅色主题下可读；构建期生成 `app/theme-presets.css` 消除非默认主题的首屏闪烁；收敛约 300 处硬编码色值为语义 token。
+- **清理**：删除 11 个确认无引用的死代码文件。
+- 测试：新增 `lib/mcp-config.test.mjs`、`lib/extension-tools.test.mjs`、`lib/file-tab-state.test.mjs`、`lib/theme-presets-css.test.mjs`、`components/ChatWindow.turn-key.test.mjs`，并扩充 goal-engine / theme / plan-mode 断言；全量 1048 用例通过，tsc 与 eslint 干净。目标模式自驱、扩展工具白名单、计划模式只读三项均已用真实会话端到端实证。
+
 ## v0.17.6 — 2026-09-09（修复远程/移动端网页访问：翻页卡死与运行态永久卡"思考中"）
 
 - **向上翻历史不再被卡死请求锁死**：`loadContext` 此前是裸 fetch（无超时无守卫），手机/隧道网络下一次挂起的分页请求会把 `loadingOlderRef` 永久置 true，该会话从此滚到顶毫无反应（切走再切回才恢复）。现在分页请求有 30s 超时、AbortError 自动重试一次，失败给可读提示（"Failed to load earlier messages"）而非只进 console。

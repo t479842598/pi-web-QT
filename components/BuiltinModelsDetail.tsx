@@ -14,6 +14,9 @@ interface BuiltinModelInfo {
   contextWindow?: number;
   maxTokens?: number;
   thinkingLevelMap?: Record<string, string | null>;
+  input?: string[];
+  /** True when models[] defines this id and the SDK registry does not. */
+  custom?: boolean;
 }
 
 interface BuiltinModelsResponse {
@@ -31,6 +34,7 @@ interface Draft {
   maxTokens?: string;
   thinkingLevelMap?: Record<string, string | null>;
   hidden?: boolean;
+  input?: string[];
 }
 
 type FlushAction = () => Promise<void>;
@@ -55,6 +59,26 @@ function toOverrideDraft(draft: Draft): OverrideDraft {
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
     ...(typeof draft.hidden === "boolean" ? { hidden: draft.hidden } : {}),
+    ...(draft.input && draft.input.length > 0 ? { input: [...draft.input] } : {}),
+  };
+}
+
+/** Build the draft row for one model, preferring saved overrides over defaults. */
+function draftFor(model: BuiltinModelInfo, override: Record<string, unknown>): Draft {
+  return {
+    name: typeof override.name === "string" && override.name.length > 0 ? override.name : model.name,
+    reasoning: typeof override.reasoning === "boolean" ? override.reasoning : model.reasoning,
+    contextWindow: typeof override.contextWindow === "number"
+      ? String(override.contextWindow)
+      : model.contextWindow != null ? String(model.contextWindow) : "",
+    maxTokens: typeof override.maxTokens === "number"
+      ? String(override.maxTokens)
+      : model.maxTokens != null ? String(model.maxTokens) : "",
+    hidden: typeof override.hidden === "boolean" ? override.hidden : false,
+    thinkingLevelMap: (override.thinkingLevelMap as Draft["thinkingLevelMap"]) ?? model.thinkingLevelMap,
+    input: Array.isArray(override.input)
+      ? (override.input as string[])
+      : model.input,
   };
 }
 
@@ -94,6 +118,30 @@ export function BuiltinModelsDetail({
   modelsRef.current = models;
   dirtyRef.current = dirty;
 
+  /**
+   * Re-read the model list after a write. Every model needs a draft baseline:
+   * without one, the first edit to a newly added model is silently dropped by
+   * buildOverridePatches (or writes every default field as an override).
+   */
+  const reloadModels = useCallback(async (): Promise<void> => {
+    const reload = await fetch(`/api/models-config/builtin?provider=${encodeURIComponent(providerId)}`);
+    if (!reload.ok) return;
+    const reloaded = await reload.json() as {
+      models?: BuiltinModelInfo[];
+      overrides?: Record<string, Record<string, unknown>>;
+    };
+    if (!reloaded.models) return;
+    setModels(reloaded.models);
+    modelsRef.current = reloaded.models;
+    const refreshed: Record<string, Draft> = {};
+    for (const model of reloaded.models) {
+      refreshed[model.id] = draftFor(model, reloaded.overrides?.[model.id] ?? {});
+    }
+    setDrafts(refreshed);
+    setInitialDrafts(refreshed);
+    setDirty(new Set());
+  }, [providerId]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -108,19 +156,7 @@ export function BuiltinModelsDetail({
 
         const nextDrafts: Record<string, Draft> = {};
         for (const model of data.models) {
-          const override = data.overrides[model.id] ?? {};
-          nextDrafts[model.id] = {
-            name: typeof override.name === "string" && override.name.length > 0 ? override.name : model.name,
-            reasoning: typeof override.reasoning === "boolean" ? override.reasoning : model.reasoning,
-            contextWindow: typeof override.contextWindow === "number"
-              ? String(override.contextWindow)
-              : model.contextWindow != null ? String(model.contextWindow) : "",
-            maxTokens: typeof override.maxTokens === "number"
-              ? String(override.maxTokens)
-              : model.maxTokens != null ? String(model.maxTokens) : "",
-            hidden: typeof override.hidden === "boolean" ? override.hidden : false,
-            thinkingLevelMap: (override.thinkingLevelMap as Draft["thinkingLevelMap"]) ?? model.thinkingLevelMap,
-          };
+          nextDrafts[model.id] = draftFor(model, data.overrides[model.id] ?? {});
         }
         setModels(data.models);
         setDrafts(nextDrafts);
@@ -266,39 +302,75 @@ export function BuiltinModelsDetail({
       // 重新加载模型列表，并把新模型的默认值补进 drafts/initialDrafts：
       // 否则新模型没有初始基线，后续编辑保存会被 buildOverridePatches 静默跳过
       // （或把全部默认字段误写成 override）。
-      const reload = await fetch(`/api/models-config/builtin?provider=${encodeURIComponent(providerId)}`);
-      if (reload.ok) {
-        const reloaded = await reload.json() as { models?: BuiltinModelInfo[]; overrides?: Record<string, unknown> };
-        if (reloaded.models) {
-          setModels(reloaded.models);
-          modelsRef.current = reloaded.models;
-          const refreshed: Record<string, Draft> = {};
-          for (const m of reloaded.models) {
-            const override = (reloaded.overrides?.[m.id] ?? {}) as Record<string, unknown>;
-            refreshed[m.id] = {
-              name: typeof override.name === "string" && override.name.length > 0 ? override.name : m.name,
-              reasoning: typeof override.reasoning === "boolean" ? override.reasoning : m.reasoning,
-              contextWindow: typeof override.contextWindow === "number"
-                ? String(override.contextWindow)
-                : m.contextWindow != null ? String(m.contextWindow) : "",
-              maxTokens: typeof override.maxTokens === "number"
-                ? String(override.maxTokens)
-                : m.maxTokens != null ? String(m.maxTokens) : "",
-              hidden: typeof override.hidden === "boolean" ? override.hidden : false,
-              thinkingLevelMap: (override.thinkingLevelMap as Draft["thinkingLevelMap"]) ?? m.thinkingLevelMap,
-            };
-          }
-          setDrafts(refreshed);
-          setInitialDrafts(refreshed);
-          setDirty(new Set());
-        }
-      }
+      await reloadModels();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [discovery.models, onConfigChange, providerId]);
+  }, [discovery.models, onConfigChange, providerId, reloadModels]);
+
+  // ── 手动添加模型（写入一个真正的新模型 ID）──
+  // modelOverrides 只能改显示名，请求时用的永远是 provider 内置 ID；要新增一个
+  // 上游真实存在的模型 ID，必须写进 provider.models[]。服务端按 id upsert。
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manual, setManual] = useState({
+    id: "",
+    name: "",
+    contextWindow: "",
+    maxTokens: "",
+    reasoning: false,
+    vision: false,
+  });
+
+  const resetManual = useCallback(() => {
+    setManual({ id: "", name: "", contextWindow: "", maxTokens: "", reasoning: false, vision: false });
+  }, []);
+
+  const handleAddManualModel = useCallback(async () => {
+    const id = manual.id.trim();
+    if (!id) {
+      setError(t("desktop.builtinModelsManualIdRequired"));
+      return;
+    }
+    if (modelsRef.current.some((model) => model.id === id)) {
+      setError(t("desktop.builtinModelsManualDuplicate"));
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const contextWindow = numOrUndefined(manual.contextWindow);
+      const maxTokens = numOrUndefined(manual.maxTokens);
+      const res = await fetch("/api/models-config/builtin", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: providerId,
+          models: [{
+            id,
+            ...(manual.name.trim() ? { name: manual.name.trim() } : {}),
+            ...(manual.reasoning ? { reasoning: true } : {}),
+            input: manual.vision ? ["text", "image"] : ["text"],
+            ...(contextWindow !== undefined ? { contextWindow } : {}),
+            ...(maxTokens !== undefined ? { maxTokens } : {}),
+          }],
+        }),
+      });
+      const data = await res.json() as { success?: boolean; error?: string; provider?: Record<string, unknown> | null };
+      if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
+      onConfigChange?.(data.provider ?? null);
+      resetManual();
+      setManualOpen(false);
+      await reloadModels();
+      setSavedOk(true);
+      setTimeout(() => setSavedOk(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [manual, onConfigChange, providerId, reloadModels, resetManual, t]);
 
   if (loading) {
     return (
@@ -351,10 +423,118 @@ export function BuiltinModelsDetail({
               {saving ? t("desktop.modelsSaving") : `${t("desktop.modelsAddModelManual")} (${selectedNewIds.length})`}
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => {
+              if (manualOpen) resetManual();
+              setManualOpen((open) => !open);
+            }}
+            style={{
+              padding: "5px 12px",
+              background: "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 5,
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            {manualOpen ? t("desktop.cancel") : t("desktop.builtinModelsManualAdd")}
+          </button>
         </div>
 
+        {/* 手动添加模型：写一个新的请求模型 ID（与「改名」不同） */}
+        {manualOpen && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)" }}>
+            <p style={{ margin: 0, fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+              {t("desktop.builtinModelsManualHint")}
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-muted)" }}>
+                {t("desktop.modelsIdRequired")}
+                <input
+                  type="text"
+                  value={manual.id}
+                  placeholder="model-id"
+                  onChange={(e) => setManual((prev) => ({ ...prev, id: e.target.value }))}
+                  style={{ padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-muted)" }}>
+                {t("desktop.modelsName")}
+                <input
+                  type="text"
+                  value={manual.name}
+                  placeholder={t("desktop.modelsDisplayName")}
+                  onChange={(e) => setManual((prev) => ({ ...prev, name: e.target.value }))}
+                  style={{ padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)" }}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-muted)" }}>
+                {t("desktop.modelsContextWindow")}
+                <input
+                  type="number"
+                  min={1}
+                  value={manual.contextWindow}
+                  placeholder="128000"
+                  onChange={(e) => setManual((prev) => ({ ...prev, contextWindow: e.target.value }))}
+                  style={{ padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-muted)" }}>
+                {t("desktop.modelsMaxOutputTokens")}
+                <input
+                  type="number"
+                  min={1}
+                  value={manual.maxTokens}
+                  placeholder="16384"
+                  onChange={(e) => setManual((prev) => ({ ...prev, maxTokens: e.target.value }))}
+                  style={{ padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                />
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={manual.reasoning}
+                  onChange={(e) => setManual((prev) => ({ ...prev, reasoning: e.target.checked }))}
+                />
+                {t("desktop.builtinModelsReasoning")}
+              </label>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={manual.vision}
+                  onChange={(e) => setManual((prev) => ({ ...prev, vision: e.target.checked }))}
+                />
+                {t("desktop.modelsImageInput")}
+              </label>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => { void handleAddManualModel(); }}
+                disabled={saving || !manual.id.trim()}
+                style={{
+                  padding: "5px 14px",
+                  background: saving || !manual.id.trim() ? "var(--bg-panel)" : "var(--accent)",
+                  border: "none",
+                  borderRadius: 5,
+                  color: saving || !manual.id.trim() ? "var(--text-dim)" : "#fff",
+                  cursor: saving || !manual.id.trim() ? "not-allowed" : "pointer",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {saving ? t("desktop.modelsSaving") : t("desktop.modelsAdd")}
+              </button>
+            </div>
+          </div>
+        )}
+
         {discovery.phase === "error" && (
-          <p style={{ margin: 0, fontSize: 11, color: "#f87171" }}>{discovery.message}</p>
+          <p style={{ margin: 0, fontSize: 11, color: "var(--status-error)" }}>{discovery.message}</p>
         )}
 
         {discovery.phase === "success" && discovery.models && (
@@ -387,7 +567,7 @@ export function BuiltinModelsDetail({
                   <span style={{ fontSize: 12, color: "var(--text)", fontWeight: isNew ? 600 : 400 }}>{model.name || model.id}</span>
                   <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
                   {isNew && (
-                    <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--accent)", color: "#fff", marginLeft: "auto" }}>
+                    <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--accent)", color: "var(--accent-fg)", marginLeft: "auto" }}>
                       新
                     </span>
                   )}
@@ -398,7 +578,7 @@ export function BuiltinModelsDetail({
         )}
       </div>
 
-      {error && <p style={{ margin: 0, fontSize: 11, color: "#f87171" }}>{error}</p>}
+      {error && <p style={{ margin: 0, fontSize: 11, color: "var(--status-error)" }}>{error}</p>}
       {models.length === 0 && !error && (
         <p style={{ margin: 0, fontSize: 11, color: "var(--text-dim)" }}>{t("desktop.builtinModelsEmpty")}</p>
       )}
@@ -408,6 +588,7 @@ export function BuiltinModelsDetail({
           const draft = drafts[model.id] ?? {};
           const isOpen = expanded === model.id;
           const isDirty = dirty.has(model.id);
+          const isCustomModel = model.custom === true;
           return (
             <div key={model.id} style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", padding: "8px 10px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -420,6 +601,11 @@ export function BuiltinModelsDetail({
                   {isDirty && <span style={{ color: "var(--accent)", marginLeft: 6 }}>•</span>}
                 </button>
                 <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
+                {isCustomModel && (
+                  <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--bg-selected)", color: "var(--accent)" }}>
+                    {t("desktop.builtinModelsManualBadge")}
+                  </span>
+                )}
                 {(draft.reasoning ?? model.reasoning) && (
                   <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--bg-selected)", color: "var(--text-muted)" }}>
                     reasoning
@@ -443,7 +629,7 @@ export function BuiltinModelsDetail({
                       onChange={(e) => patch(model.id, { name: e.target.value.trim() || undefined })}
                       style={{ flex: 1, minWidth: 0, padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
                     />
-                    <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, color: draft.hidden ? "#f87171" : "var(--text-muted)", cursor: "pointer", whiteSpace: "nowrap", marginLeft: 8 }}>
+                    <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, color: draft.hidden ? "var(--status-error)" : "var(--text-muted)", cursor: "pointer", whiteSpace: "nowrap", marginLeft: 8 }}>
                       <input
                         type="checkbox"
                         checked={draft.hidden === true}
@@ -460,6 +646,14 @@ export function BuiltinModelsDetail({
                         onChange={(e) => patch(model.id, { reasoning: e.target.checked })}
                       />
                       {t("desktop.builtinModelsReasoning")}
+                    </label>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={draft.input?.includes("image") ?? false}
+                        onChange={(e) => patch(model.id, { input: e.target.checked ? ["text", "image"] : ["text"] })}
+                      />
+                      {t("desktop.modelsImageInput")}
                     </label>
                     <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", flex: isMobile ? 1 : undefined, width: isMobile ? "100%" : undefined }}>
                       {t("desktop.modelsContextWindow")}

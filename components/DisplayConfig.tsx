@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Moon, PaintBrush, Sun, Monitor, ArrowSquareOut, Link } from "@phosphor-icons/react";
+import { useState, useEffect, useCallback } from "react";
+import { Moon, PaintBrush, Sun, Monitor, ArrowSquareOut, Link, CheckCircle } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme, type ThemeMode } from "@/hooks/useTheme";
-import type { ThemeSetInfo } from "@/lib/theme";
+import type { ThemeSetInfo, ThemePreviewColors } from "@/lib/theme";
 
 // ── Tag / chip helpers ───────────────────────────────────────────────────────
 
@@ -128,28 +128,147 @@ function VariantDots({ hasDark, hasLight, darkColor, lightColor, t }: {
   );
 }
 
+// ── Theme card ──────────────────────────────────────────────────────────────
+
+/** Miniature of the app rendered in a theme's own colors.
+ *
+ * Uses the preview palette the server ships with each theme set instead of
+ * fetching the theme's full token set, so cards render instantly and a
+ * never-before-seen theme still previews correctly (the old hover preview only
+ * worked for themes that had already been loaded once). */
+function ThemeCardPreview({ colors }: { colors: ThemePreviewColors }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        display: "flex",
+        height: 62,
+        borderRadius: 6,
+        overflow: "hidden",
+        background: colors.bg,
+        border: `1px solid ${colors.border}`,
+      }}
+    >
+      {/* Sidebar */}
+      <div style={{ width: 26, flexShrink: 0, background: colors.panel, borderRight: `1px solid ${colors.border}`, padding: "5px 4px", display: "flex", flexDirection: "column", gap: 3 }}>
+        <span style={{ height: 3, borderRadius: 2, background: colors.accent, width: "70%" }} />
+        <span style={{ height: 3, borderRadius: 2, background: colors.muted, opacity: 0.5, width: "100%" }} />
+        <span style={{ height: 3, borderRadius: 2, background: colors.muted, opacity: 0.5, width: "82%" }} />
+        <span style={{ height: 3, borderRadius: 2, background: colors.muted, opacity: 0.5, width: "60%" }} />
+      </div>
+      {/* Conversation */}
+      <div style={{ flex: 1, minWidth: 0, padding: "5px 6px", display: "flex", flexDirection: "column", gap: 4 }}>
+        {/* user bubble */}
+        <div style={{ alignSelf: "flex-end", maxWidth: "78%", borderRadius: 5, background: colors.userBg, padding: "3px 5px", display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={{ height: 2.5, borderRadius: 2, background: colors.text, opacity: 0.75, width: 34 }} />
+          <span style={{ height: 2.5, borderRadius: 2, background: colors.text, opacity: 0.5, width: 22 }} />
+        </div>
+        {/* assistant text */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={{ height: 2.5, borderRadius: 2, background: colors.text, opacity: 0.7, width: "86%" }} />
+          <span style={{ height: 2.5, borderRadius: 2, background: colors.muted, opacity: 0.65, width: "64%" }} />
+        </div>
+        {/* tool block */}
+        <div style={{ borderRadius: 4, background: colors.toolBg, borderLeft: `2px solid ${colors.accent}`, padding: "3px 5px", display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ width: 5, height: 5, borderRadius: "50%", background: colors.accent, flexShrink: 0 }} />
+          <span style={{ height: 2.5, borderRadius: 2, background: colors.muted, opacity: 0.7, width: "52%" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThemeCard({
+  active,
+  hovered,
+  disabled,
+  displayName,
+  colors,
+  hasDark,
+  hasLight,
+  onClick,
+  onHoverStart,
+  onHoverEnd,
+}: {
+  active: boolean;
+  hovered: boolean;
+  disabled: boolean;
+  displayName: string;
+  colors?: ThemePreviewColors;
+  hasDark: boolean;
+  hasLight: boolean;
+  onClick: () => void;
+  onHoverStart: () => void;
+  onHoverEnd: () => void;
+}) {
+  const borderColor = active
+    ? "var(--accent)"
+    : hovered ? "var(--border-hover)" : "var(--border)";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+      onFocus={onHoverStart}
+      onBlur={onHoverEnd}
+      aria-pressed={active}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 7,
+        padding: 8,
+        border: `1px solid ${borderColor}`,
+        borderRadius: 9,
+        background: hovered && !active ? "var(--bg-hover)" : "var(--bg-card)",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+        textAlign: "left",
+        minWidth: 0,
+        transition: "border-color 0.15s, background 0.15s",
+      }}
+    >
+      {colors
+        ? <ThemeCardPreview colors={colors} />
+        : <div aria-hidden="true" style={{ height: 62, borderRadius: 6, background: "var(--bg-panel)", border: "1px solid var(--border)" }} />}
+      <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: active ? 600 : 400, color: active ? "var(--accent)" : "var(--text)" }}>
+          {displayName}
+        </span>
+        <VariantDots hasDark={hasDark} hasLight={hasLight} darkColor={colors?.accent} lightColor={colors?.accent} t={() => ""} />
+        {active && <CheckCircle size={13} weight="fill" color="var(--accent)" aria-hidden="true" style={{ flexShrink: 0 }} />}
+      </span>
+    </button>
+  );
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 export function DisplayConfig() {
-  const { mode, resolvedMode, themeName, setMode, setTheme, previewTheme, clearPreview, isThemeCached, borderDepth, setBorderDepth } = useTheme();
+  const { mode, resolvedMode, themeName, setMode, setTheme, borderDepth, setBorderDepth } = useTheme();
   const { locale: language, setLocale: setLanguage, t } = useI18n();
   const [themeSets, setThemeSets] = useState<ThemeSetInfo[]>([]);
+  const [defaultPreview, setDefaultPreview] = useState<ThemePreviewColors | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState<string | null>(null);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/themes")
+    // The server picks the variant whose palette each card should show, so it
+    // needs to know which mode the user is currently looking at.
+    fetch(`/api/themes?mode=${resolvedMode}`)
       .then((r) => r.ok ? r.json() : null)
-      .then((data: { themeSets: ThemeSetInfo[] } | null) => {
+      .then((data: { themeSets: ThemeSetInfo[]; defaultPreview?: ThemePreviewColors } | null) => {
         if (cancelled || !data) return;
         setThemeSets(data.themeSets);
+        setDefaultPreview(data.defaultPreview);
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [resolvedMode]);
 
   const handleThemeChange = useCallback((name: string) => {
     setApplying(name);
@@ -158,19 +277,16 @@ export function DisplayConfig() {
 
   /** Hover preview: 防抖 160ms + 仅预览已缓存主题（未缓存需点击加载），
    *  避免鼠标扫过列表时触发大量 fetch 与全量 CSS 变量重算导致卡顿。 */
-  const hoverTimer = useRef<number | null>(null);
+  /**
+   * Hover only highlights the card now. The old live whole-page preview was
+   * removed with the chip row: it only worked for themes already in the fetch
+   * cache (a first hover on any other theme silently did nothing), and each
+   * successful preview recomputed every CSS variable on the page. The card's
+   * own mini preview conveys the palette without either problem.
+   */
   const handleThemeHover = useCallback((name: string | null) => {
     setHoveredTag(name);
-    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
-    hoverTimer.current = window.setTimeout(() => {
-      hoverTimer.current = null;
-      if (name !== null) {
-        if (isThemeCached(name)) void previewTheme(name);
-      } else {
-        void clearPreview();
-      }
-    }, 160);
-  }, [previewTheme, clearPreview, isThemeCached]);
+  }, []);
 
   const handleModeChange = useCallback((m: ThemeMode) => {
     setMode(m);
@@ -226,27 +342,34 @@ export function DisplayConfig() {
         {loading ? (
           <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{t("desktop.loadingThemes")}</span>
         ) : (
-          <div style={tagGroupStyle}>
-            <button
-              type="button" onClick={() => handleThemeChange("")} disabled={applying !== null}
-              style={tagStyle(themeName === "", hoveredTag === "__default__", applying !== null)}
-              onMouseEnter={() => handleThemeHover("")}
-              onMouseLeave={() => handleThemeHover(null)}
-            >
-              {t("desktop.defaultTheme")}
-            </button>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
+            <ThemeCard
+              active={themeName === ""}
+              hovered={hoveredTag === "__default__"}
+              disabled={applying !== null}
+              displayName={t("desktop.defaultTheme")}
+              colors={defaultPreview}
+              hasDark
+              hasLight
+              onClick={() => handleThemeChange("")}
+              onHoverStart={() => handleThemeHover("")}
+              onHoverEnd={() => handleThemeHover(null)}
+            />
 
             {themeSets.map((ts) => (
-              <button
-                key={ts.name} type="button"
-                onClick={() => handleThemeChange(ts.name)} disabled={applying !== null}
-                style={tagStyle(themeName === ts.name, hoveredTag === ts.name, applying === ts.name)}
-                onMouseEnter={() => handleThemeHover(ts.name)}
-                onMouseLeave={() => handleThemeHover(null)}
-              >
-                {ts.displayName}
-                <VariantDots hasDark={ts.hasDark} hasLight={ts.hasLight} darkColor={ts.accent} lightColor={ts.accentLight} t={t} />
-              </button>
+              <ThemeCard
+                key={ts.name}
+                active={themeName === ts.name}
+                hovered={hoveredTag === ts.name}
+                disabled={applying !== null}
+                displayName={ts.displayName}
+                colors={ts.preview}
+                hasDark={ts.hasDark}
+                hasLight={ts.hasLight}
+                onClick={() => handleThemeChange(ts.name)}
+                onHoverStart={() => handleThemeHover(ts.name)}
+                onHoverEnd={() => handleThemeHover(null)}
+              />
             ))}
           </div>
         )}

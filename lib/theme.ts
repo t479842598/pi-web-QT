@@ -31,6 +31,18 @@ export interface PiTheme {
   colors: Record<string, string | number>;
 }
 
+/** The handful of colors a theme card needs to draw its mini preview. */
+export interface ThemePreviewColors {
+  bg: string;
+  panel: string;
+  border: string;
+  text: string;
+  muted: string;
+  accent: string;
+  userBg: string;
+  toolBg: string;
+}
+
 /** Represents a paired theme set (e.g. "gruvbox" with dark + light variants). */
 export interface ThemeSetInfo {
   /** Base name (e.g. "gruvbox") — used as the stable identifier. */
@@ -47,6 +59,13 @@ export interface ThemeSetInfo {
   accent?: string;
   /** Light variant accent (primary) color — theme swatch dot. */
   accentLight?: string;
+  /**
+   * Preview palette for the variant the user is currently looking at, so the
+   * settings UI can draw an accurate card without fetching each theme's full
+   * token set. `previewIsDark` says which variant these colors describe.
+   */
+  preview?: ThemePreviewColors;
+  previewIsDark?: boolean;
 }
 
 /** A resolved, ready-to-use theme (one variant of a set). */
@@ -190,6 +209,10 @@ function resolveBuiltinTheme(name: string, variant: ThemeVariant): ResolvedTheme
     "--text-dim": colors.dim,
     "--accent": colors.accent,
     "--accent-hover": colors.accentHover,
+    // Readable text on an accent-colored surface. Hardcoding white broke light
+    // themes whose accent is pale; pick whichever of the theme's own text and
+    // background contrasts more against the accent.
+    "--accent-fg": accentForeground(colors.accent, colors.text, colors.bg),
     "--accent-blue": colors.accent,
     "--accent-red": colors.red,
     "--accent-green": colors.green,
@@ -378,6 +401,11 @@ function contrastRatio(foreground: string, background: string): number {
   return (Math.max(foregroundLum, backgroundLum) + 0.05) / (Math.min(foregroundLum, backgroundLum) + 0.05);
 }
 
+/** Text color to use on top of an accent-colored surface. */
+function accentForeground(accent: string, text: string, bg: string): string {
+  return contrastRatio(text, accent) >= contrastRatio(bg, accent) ? text : bg;
+}
+
 /**
  * Preserve a theme status color's hue while making a modest contrast adjustment.
  * Git status has redundant text, dot, and capsule-background signals, so 3:1
@@ -469,6 +497,7 @@ function mapToCssVars(
   // Accent
   css["--accent"] = accent;
   css["--accent-hover"] = isDark ? lighten(accent, 0.2) : darken(accent, 0.15);
+  css["--accent-fg"] = accentForeground(accent, text, bg0);
   css["--accent-blue"] = vars.blue || accent;
 
   // Semantic colors
@@ -736,8 +765,46 @@ function scanThemeDir(dir: string): ScannedFile[] {
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
-/** List all available theme sets (global + project). */
-export function listThemeSets(projectCwd?: string): ThemeSetInfo[] {
+/**
+ * Preview palette for the built-in default theme (`themeName === ""`), which
+ * lives in globals.css rather than in a theme set. Kept here so the settings
+ * cards have one source for previews instead of hardcoding colors in the UI.
+ * Mirrors the `:root` / `html.dark` token values.
+ */
+export function getDefaultThemePreview(isDark: boolean): ThemePreviewColors {
+  return isDark
+    ? { bg: "#1a1a1a", panel: "#242424", border: "#3a3a3a", text: "#e8e8e8", muted: "#888888", accent: "#64c1b6", userBg: "#1e2a2b", toolBg: "#171c1c" }
+    : { bg: "#ffffff", panel: "#f5f5f5", border: "#e0e0e0", text: "#1a1a1a", muted: "#555555", accent: "#0d9488", userBg: "#eff6ff", toolBg: "#f9fafb" };
+}
+
+/** Pick the preview palette for the variant the user is currently viewing. */
+function previewFor(theme: BuiltinThemeSet, preferDark: boolean): { preview: ThemePreviewColors; previewIsDark: boolean } | undefined {
+  const isDark = preferDark ? Boolean(theme.dark) : !theme.light;
+  const colors = isDark ? theme.dark : theme.light;
+  if (!colors) return undefined;
+  return {
+    previewIsDark: isDark,
+    preview: {
+      bg: colors.bg,
+      panel: colors.panel,
+      border: colors.border,
+      text: colors.text,
+      muted: colors.muted,
+      accent: colors.accent,
+      userBg: colors.userBg,
+      toolBg: colors.toolBg,
+    },
+  };
+}
+
+/**
+ * List all available theme sets (global + project).
+ *
+ * @param preferDark which variant the preview palette should describe — the
+ *   caller passes its resolved mode so every card matches what selecting that
+ *   theme would actually look like right now.
+ */
+export function listThemeSets(projectCwd?: string, preferDark = true): ThemeSetInfo[] {
   const result: ThemeSetInfo[] = Object.entries(ALL_BUILTIN_THEME_SETS).map(([name, theme]) => ({
     name,
     displayName: theme.displayName,
@@ -746,6 +813,7 @@ export function listThemeSets(projectCwd?: string): ThemeSetInfo[] {
     builtin: true,
     accent: theme.dark?.accent,
     accentLight: theme.light?.accent,
+    ...previewFor(theme, preferDark),
   }));
   const seen = new Set(Object.keys(ALL_BUILTIN_THEME_SETS));
 
@@ -789,10 +857,39 @@ export function listThemeSets(projectCwd?: string): ThemeSetInfo[] {
       hasLight,
       builtin: false,
       ...extractThemeSetAccent(files),
+      ...extractThemeSetPreview(files, preferDark),
     });
   }
 
   return result;
+}
+
+/** Preview palette for a scanned (file-backed) theme group. */
+function extractThemeSetPreview(
+  files: ScannedFile[],
+  preferDark: boolean,
+): { preview?: ThemePreviewColors; previewIsDark?: boolean } {
+  const wantVariant: ThemeVariant = preferDark ? "dark" : "light";
+  const file = files.find((f) => f.variant === wantVariant) ?? files[0];
+  if (!file) return {};
+  const theme = parseThemeFile(file.path);
+  if (!theme) return {};
+  const vars = resolveVars(theme.vars);
+  const colors = resolveColors(theme.colors, vars);
+  const cssVars = mapToCssVars(colors, vars);
+  return {
+    previewIsDark: relativeLuminance(vars.bg0 || "#1a1a1a") < 0.5,
+    preview: {
+      bg: cssVars["--bg"],
+      panel: cssVars["--bg-panel"],
+      border: cssVars["--border"],
+      text: cssVars["--text"],
+      muted: cssVars["--text-muted"],
+      accent: cssVars["--accent"],
+      userBg: cssVars["--user-bg"],
+      toolBg: cssVars["--tool-bg"],
+    },
+  };
 }
 
 /**

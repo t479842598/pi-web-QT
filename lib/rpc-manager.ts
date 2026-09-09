@@ -21,6 +21,7 @@ import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled, getSubagentSettingsPath } from "./subagent-settings";
 import { mkdirSync, existsSync as fileExistsSync, readFileSync as readFileFs, writeFileSync as writeFileFs } from "fs";
 import { resolveShellTools } from "./powershell-settings";
+import { filterDisabledExtensionTools, readExtensionToolSettings } from "./extension-tools";
 import { createProjectCommandBashOperations } from "./project-command-env";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import { readModeSettings } from "./modes-config";
@@ -247,6 +248,19 @@ class PlainTextTheme extends Theme {
 const PLAIN_TEXT_THEME = new PlainTextTheme();
 const CUSTOM_UI_KEYBINDINGS = new TuiKeybindingsManager(TUI_KEYBINDINGS);
 
+/**
+ * Build the active tool list for a session.
+ *
+ * Coding builtins follow the requested preset, but every non-builtin tool the
+ * SDK registry exposes (extensions, packages, MCP servers) is added on top.
+ * That is deliberate: the preset dropdown governs coding tools, and dropping
+ * `Agent`/`mcp_*` merely because the user picked "read only" would silently
+ * break extensions. Users who need a hard read-only session can switch
+ * individual extension tools off (see lib/extension-tools.ts) — with no
+ * configuration nothing is filtered.
+ *
+ * An empty `toolNames` still means "Chat only": no tools at all.
+ */
 function withExtensionTools(session: AgentSessionLike, toolNames: string[]): string[] {
   if (toolNames.length === 0) return [];
 
@@ -257,7 +271,10 @@ function withExtensionTools(session: AgentSessionLike, toolNames: string[]): str
     .map((t) => t.name)
     .filter((name) => !codingToolNames.has(name));
 
-  return [...new Set([...selectedToolNames, ...extensionToolNames])];
+  return filterDisabledExtensionTools(
+    [...new Set([...selectedToolNames, ...extensionToolNames])],
+    readExtensionToolSettings(),
+  );
 }
 
 /**
@@ -353,8 +370,21 @@ export class AgentSessionWrapper {
   private goalTokensAccounted = 0;
   /** Tool-call count already accounted for (to compute per-turn no-progress). */
   private goalToolCallsAccounted = 0;
-  /** Set while a goal continuation follow_up is in flight to avoid double-drive. */
+  /** Set while a goal continuation run is in flight to avoid double-drive. */
   private goalContinuationInFlight = false;
+  /**
+   * A settled turn asked for the next goal turn. Consumed by
+   * tryDriveGoalContinuation once the wrapper is genuinely idle.
+   *
+   * It exists because agent_settled is emitted from inside the SDK run's
+   * `finally` (agent-session.js `_emitAgentSettled`), i.e. BEFORE the wrapper's
+   * own prompt promise resolves and clears `promptRunning`. Driving straight
+   * from the settle callback therefore always saw a busy wrapper and the loop
+   * silently stopped after one turn.
+   */
+  private goalContinuationPending = false;
+  /** Guards against scheduling more than one deferred drive. */
+  private goalDriveScheduled = false;
 
   readonly cwd: string;
 
@@ -462,11 +492,12 @@ export class AgentSessionWrapper {
         goalState: state,
       });
     });
-    // Wrapper (re)created with a persisted running goal: kick the loop once so
-    // an idle agent resumes after a page refresh / wrapper rebuild instead of
+    // Wrapper (re)created with a persisted running goal: resume the loop once so
+    // an idle agent continues after a page refresh / wrapper rebuild instead of
     // stalling forever (agent_settled only fires after a run).
     if (this.goalEngine.isRunning()) {
-      this.scheduleGoalKick();
+      this.goalContinuationPending = true;
+      this.maybeDriveGoalContinuation();
     }
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       if (event.type === "agent_end" || event.type === "message_end" || event.type === "entry_appended" || event.type === "session_info_changed") {
@@ -522,74 +553,165 @@ export class AgentSessionWrapper {
   private handleGoalSettled(): void {
     if (!this.goalEngine.isRunning()) {
       this.goalEngine.disarmContinuation();
+      this.goalContinuationPending = false;
       return;
     }
 
     // Settle the turn that just finished.
     const lastText = this.inner.getLastAssistantText() ?? "";
-    let tokenDelta = 0;
-    let toolCallsThisTurn = 0;
-    try {
-      const entries = this.inner.sessionManager.getEntries();
-      const total = sumAssistantUsage(entries);
-      tokenDelta = Math.max(0, total - this.goalTokensAccounted);
-      this.goalTokensAccounted = total;
-      // Per-turn tool calls = delta since the last settlement (zero-call turns
-      // count as stalled; a single historical tool call must not mask it).
-      const totalCalls = countToolCallsInEntries(entries);
-      toolCallsThisTurn = Math.max(0, totalCalls - this.goalToolCallsAccounted);
-      this.goalToolCallsAccounted = totalCalls;
-    } catch {
-      // Settlement must never crash the wrapper event loop.
-    }
+    // Deltas are measured against the baselines the last settlement stored, so
+    // a goal started mid-conversation only accounts for its own usage.
+    const totalUsage = this.currentSessionUsageTotal();
+    const tokenDelta = Math.max(0, totalUsage - this.goalTokensAccounted);
+    this.goalTokensAccounted = totalUsage;
+    // Per-turn tool calls = delta since the last settlement (zero-call turns
+    // count as stalled; a single historical tool call must not mask it).
+    const totalCalls = this.currentSessionToolCallTotal();
+    const toolCallsThisTurn = Math.max(0, totalCalls - this.goalToolCallsAccounted);
+    this.goalToolCallsAccounted = totalCalls;
 
     const { verdict } = this.goalEngine.settleTurn(lastText, tokenDelta, toolCallsThisTurn);
     if (verdict.action !== "continue") {
       this.goalEngine.disarmContinuation();
+      this.goalContinuationPending = false;
       return;
     }
 
-    this.scheduleGoalKick();
+    this.goalContinuationPending = true;
+    this.maybeDriveGoalContinuation();
   }
 
   /**
-   * Drive one goal continuation when the agent is idle. Guards against double
-   * drives and queues a kick when the agent is mid-run (settled again later).
+   * Record that the goal wants another turn, then drive it once the wrapper is
+   * idle. Safe to call from anywhere and any number of times: the pending flag
+   * is consumed exactly once per settlement.
    */
-  private scheduleGoalKick(): void {
-    if (!this.goalEngine.isRunning()) return;
-    if (this.goalContinuationInFlight) return;
-    if (this.goalEngine.isContinuationArmed()) {
-      this.goalEngine.disarmContinuation();
-      this.driveGoalContinuation();
+  private maybeDriveGoalContinuation(): void {
+    if (!this.goalContinuationPending || this.goalDriveScheduled) return;
+    if (!this.goalEngine.isRunning()) {
+      this.goalContinuationPending = false;
       return;
     }
-    if (this.inner.isStreaming || this.promptRunning || this.inner.pendingMessageCount > 0) return;
+    this.goalDriveScheduled = true;
+    // Defer by a macrotask: the settle callback runs inside the SDK's run
+    // `finally`, so neither the SDK nor this wrapper's prompt bookkeeping is
+    // idle yet. By the time the timer fires, the wrapper's prompt.then has
+    // normally cleared `promptRunning`; if it has not, the prompt.then hook
+    // below calls back in.
+    setTimeout(() => {
+      this.goalDriveScheduled = false;
+      this.tryDriveGoalContinuation();
+    }, 0);
+  }
+
+  /**
+   * Stop driving further goal turns without touching the user's queue.
+   *
+   * The old pause/stop handlers called `inner.clearQueue()`, which drops the
+   * user's own steering and follow-up messages too — a data-loss bug. Goal
+   * continuation no longer uses the SDK queue at all (it runs a real prompt),
+   * so cancelling just needs to drop the pending flag.
+   */
+  private cancelGoalContinuation(): void {
+    this.goalContinuationPending = false;
+    this.goalEngine.disarmContinuation();
+  }
+
+  /** Start the next goal turn when nothing else is running. */
+  private tryDriveGoalContinuation(): void {
+    if (!this.goalContinuationPending) return;
+    if (!this.goalEngine.isRunning()) {
+      this.goalContinuationPending = false;
+      return;
+    }
+    if (this.goalContinuationInFlight || this.promptRunning || this.inner.isStreaming || this.inner.isBashRunning) {
+      return;
+    }
+    this.goalContinuationPending = false;
     this.driveGoalContinuation();
   }
 
-  /** Fire one follow_up continuation for the active goal. */
+  /**
+   * Run one goal continuation as a real prompt.
+   *
+   * A queued `followUp()` cannot do this: the SDK only drains the follow-up
+   * queue inside an active run (agent-session `_handlePostAgentRun`), so on an
+   * idle session it would sit there until the user's next message.
+   */
   private driveGoalContinuation(): void {
     if (!this.goalEngine.isRunning() || this.goalContinuationInFlight) return;
     this.goalContinuationInFlight = true;
-    void this.inner.followUp(GOAL_CONTINUE_INSTRUCTION)
-      .catch(() => {})
-      .finally(() => {
+    this.promptRunning = true;
+    this.promptPhase = "waiting_model";
+    this.resetIdleTimer();
+    notifyRunningChange();
+    const finish = () => {
+      this.promptRunning = false;
+      this.promptPhase = null;
+      this.resetIdleTimer();
+      notifyRunningChange();
+    };
+    // Admit through the same lock the RPC prompt path uses: a user prompt may
+    // already be in admission when the continuation timer fires, and two
+    // concurrent submissions would race the SDK's own run decision.
+    void this.acquirePromptAdmission().then(async (releaseAdmission) => {
+      try {
+        // The goal may have been paused/stopped while we waited for admission.
+        if (!this.goalEngine.isRunning()) {
+          finish();
+          return;
+        }
+        await this.inner.prompt(GOAL_CONTINUE_INSTRUCTION);
+        finish();
+        this.emit({ type: "prompt_done" });
+        // The turn that just ran may itself have requested another one; its
+        // settle callback only set the pending flag because we were busy.
+        this.maybeDriveGoalContinuation();
+      } catch (error) {
+        finish();
+        this.emit({
+          type: "prompt_error",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        releaseAdmission();
         this.goalContinuationInFlight = false;
-      });
+      }
+    });
   }
 
   private handleGoalStartCommand(goalText: string, tokenBudget: number | null): GoalRuntimeState {
     const state = this.goalEngine.start(goalText, tokenBudget);
-    this.goalTokensAccounted = 0;
-    this.goalToolCallsAccounted = 0;
+    // Baseline the counters on the session's CURRENT totals. Resetting them to
+    // 0 made the first settlement account every historical token in the
+    // conversation as this goal's usage, which inflated tokensUsed and tripped
+    // any budget immediately.
+    this.goalTokensAccounted = this.currentSessionUsageTotal();
+    this.goalToolCallsAccounted = this.currentSessionToolCallTotal();
     return state;
   }
 
   private handleGoalStopCommand(): GoalRuntimeState {
     this.goalEngine.stop();
     this.goalTokensAccounted = 0;
+    this.goalToolCallsAccounted = 0;
     return this.goalEngine.getState();
+  }
+
+  private currentSessionUsageTotal(): number {
+    try {
+      return sumAssistantUsage(this.inner.sessionManager.getEntries());
+    } catch {
+      return 0;
+    }
+  }
+
+  private currentSessionToolCallTotal(): number {
+    try {
+      return countToolCallsInEntries(this.inner.sessionManager.getEntries());
+    } catch {
+      return 0;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -714,9 +836,26 @@ export class AgentSessionWrapper {
     this.persistQueue();
   }
 
+  /**
+   * Reject image payloads when the session's current model declares no image
+   * modality. The SDK's `input` is the same list `/api/models` exposes, so the
+   * server and the composer agree. A model without `input` is treated as
+   * text-only, matching the client's default.
+   */
+  private validateImagesSupportedByCurrentModel(): string | null {
+    const model = this.inner.model as { id?: string; input?: string[] } | null;
+    if (!model?.id) return null;
+    if (Array.isArray(model.input) && model.input.includes("image")) return null;
+    return `Model "${model.id}" does not accept image input. Switch to a model with image support.`;
+  }
+
   private async requeueEntry(entry: QueueEntry): Promise<void> {
     const imageError = validateAgentImages(entry.images);
     if (imageError) throw new Error(imageError);
+    if (entry.images?.length) {
+      const capabilityError = this.validateImagesSupportedByCurrentModel();
+      if (capabilityError) throw new Error(capabilityError);
+    }
     this.hintQueueImages(entry.kind, entry.images);
     if (entry.kind === "steer") await this.inner.steer(entry.text, entry.images);
     else await this.inner.followUp(entry.text, entry.images);
@@ -1147,6 +1286,12 @@ export class AgentSessionWrapper {
     if (type === "prompt" || type === "steer" || type === "follow_up" || type === "requeue_at") {
       const imageError = validateAgentImages(command.images);
       if (imageError) throw new Error(imageError);
+      // Server-side capability backstop: the composer hides image attachment for
+      // text-only models, but another client (or a stale UI) can still send one.
+      if (Array.isArray(command.images) && command.images.length > 0) {
+        const imageCapabilityError = this.validateImagesSupportedByCurrentModel();
+        if (imageCapabilityError) throw new Error(imageCapabilityError);
+      }
     }
     const allowedDuringReplacement = COMMANDS_ALLOWED_DURING_SESSION_REPLACEMENT.has(type);
     if (this.sessionReplacement && !allowedDuringReplacement) {
@@ -1249,6 +1394,9 @@ export class AgentSessionWrapper {
             this.promptPhase = null;
             if (!streamingBehavior) this.emit({ type: "prompt_done" });
             notifyRunningChange();
+            // The wrapper is only now genuinely idle: a goal turn that settled
+            // during this prompt could not drive its continuation yet.
+            this.maybeDriveGoalContinuation();
           }, (error) => {
             rejectPreflight(error);
             finishPrompt();
@@ -1263,6 +1411,7 @@ export class AgentSessionWrapper {
               if (!streamingBehavior) this.emit({ type: "prompt_done" });
             }
             notifyRunningChange();
+            this.maybeDriveGoalContinuation();
           }).catch((error) => {
             console.error(
               "[pi-web] prompt completion handler failed:",
@@ -1329,40 +1478,27 @@ export class AgentSessionWrapper {
           : null;
         const state = this.handleGoalStartCommand(goalText, tokenBudget);
         // Kick the loop immediately if the agent is idle (fresh goal).
-        this.scheduleGoalKick();
+        this.goalContinuationPending = true;
+        this.maybeDriveGoalContinuation();
         return { goalState: state };
       }
 
       case "goal_pause": {
-        // Drop any in-flight continuation so the paused goal does not consume
-        // an already-queued follow_up.
-        try {
-          this.inner.clearQueue();
-          this.queueMirror = [];
-          this.persistQueue();
-        } catch {
-          // Best-effort queue clear.
-        }
+        this.cancelGoalContinuation();
         return { goalState: this.goalEngine.pause() };
       }
 
       case "goal_resume": {
         const state = this.goalEngine.resume();
         if (state.status === "running") {
-          this.goalEngine.armContinuation();
-          this.scheduleGoalKick();
+          this.goalContinuationPending = true;
+          this.maybeDriveGoalContinuation();
         }
         return { goalState: state };
       }
 
       case "goal_stop": {
-        try {
-          this.inner.clearQueue();
-          this.queueMirror = [];
-          this.persistQueue();
-        } catch {
-          // Best-effort queue clear.
-        }
+        this.cancelGoalContinuation();
         return { goalState: this.handleGoalStopCommand() };
       }
 
@@ -1371,7 +1507,8 @@ export class AgentSessionWrapper {
         if (!goalText) throw new Error("goal_edit requires a non-empty goalText");
         const state = this.goalEngine.edit(goalText);
         if (state.status === "running") {
-          this.scheduleGoalKick();
+          this.goalContinuationPending = true;
+          this.maybeDriveGoalContinuation();
         }
         return { goalState: state };
       }

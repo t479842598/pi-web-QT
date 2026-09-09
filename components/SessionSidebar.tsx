@@ -4,6 +4,7 @@ import { cancelSessionTitleRequest, generateSessionTitleRequest } from "@/lib/se
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, memo, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowClockwise, Archive, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, GitFork, Lightning, List, MagnifyingGlass, PencilSimple, Plug, Plus, PushPin, Sparkle, Stack, StackSimple, Trash, UploadSimple, X } from "@phosphor-icons/react";
+import { SETTINGS_TABS, type SettingsTab } from "./SettingsModal";
 import type { SessionInfo } from "@/lib/types";
 import { sameIdSet } from "@/lib/id-set";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -28,6 +29,10 @@ import { samePath } from "@/lib/paths";
 import { stripModeInstructionBlocks } from "@/lib/modes";
 import { showBrowserNotification } from "@/lib/browser-notifications";
 
+/** Settings sections surfaced as sidebar-footer shortcuts. Kept small on
+ *  purpose — the footer is a quick-jump strip, not a full settings index. */
+const SIDEBAR_SETTINGS_TABS = new Set<SettingsTab>(["models", "skills", "plugins", "mcp", "subagents", "display"]);
+
 interface Props {
   selectedSessionId: string | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
@@ -45,7 +50,7 @@ interface Props {
   onFileCreated?: (filePath: string) => void;
   onFileDeleted?: (filePath: string, isDir: boolean) => void;
   /** Open the settings modal (used by the title-generation failure banner). */
-  onOpenSettings?: (tab?: string) => void;
+  onOpenSettings?: (tab?: SettingsTab) => void;
   selectedSessionStats?: SessionStatsInfo | null;
   workspaceControlsHosts?: {
     title?: HTMLElement | null;
@@ -1832,10 +1837,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               style={{ width: "100%", fontSize: 11, fontFamily: "var(--font-mono)", padding: "5px 8px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--bg)", color: "var(--text)", boxSizing: "border-box" }}
             />
             <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
-              <button onClick={() => void handleCreateWorktree()} disabled={wtBusy || !wtNewBranch.trim()} style={{ flex: 1, padding: "4px 0", background: "var(--accent)", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: wtBusy || !wtNewBranch.trim() ? "not-allowed" : "pointer", opacity: wtBusy || !wtNewBranch.trim() ? 0.65 : 1 }}>{wtBusy ? t("desktop.creating") : t("desktop.create")}</button>
+              <button onClick={() => void handleCreateWorktree()} disabled={wtBusy || !wtNewBranch.trim()} style={{ flex: 1, padding: "4px 0", background: "var(--accent)", border: "none", borderRadius: 5, color: "var(--accent-fg)", fontSize: 11, fontWeight: 600, cursor: wtBusy || !wtNewBranch.trim() ? "not-allowed" : "pointer", opacity: wtBusy || !wtNewBranch.trim() ? 0.65 : 1 }}>{wtBusy ? t("desktop.creating") : t("desktop.create")}</button>
               <button onClick={() => { setWtNewOpen(false); setWtNewBranch(""); setWtError(null); }} style={{ flex: 1, padding: "4px 0", background: "var(--bg-hover)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-muted)", fontSize: 11, cursor: "pointer" }}>{t("desktop.cancel")}</button>
             </div>
-            {wtError && <div style={{ marginTop: 5, color: "#dc2626", fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>{wtError}</div>}
+            {wtError && <div style={{ marginTop: 5, color: "var(--status-error)", fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>{wtError}</div>}
           </div>
         )}
       </AnimatedDropdown>
@@ -1989,10 +1994,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     style={{ width: "100%", fontSize: 11, fontFamily: "var(--font-mono)", padding: "5px 8px", border: "1px solid var(--accent)", borderRadius: 5, outline: "none", background: "var(--bg)", color: "var(--text)", boxSizing: "border-box" }}
                   />
                   <div style={{ display: "flex", gap: 5, marginTop: 5 }}>
-                    <button onClick={() => void handleCreateWorktree()} disabled={wtBusy || !wtNewBranch.trim()} style={{ flex: 1, padding: "4px 0", background: "var(--accent)", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: wtBusy || !wtNewBranch.trim() ? "not-allowed" : "pointer", opacity: wtBusy || !wtNewBranch.trim() ? 0.65 : 1 }}>{wtBusy ? t("desktop.creating") : t("desktop.create")}</button>
+                    <button onClick={() => void handleCreateWorktree()} disabled={wtBusy || !wtNewBranch.trim()} style={{ flex: 1, padding: "4px 0", background: "var(--accent)", border: "none", borderRadius: 5, color: "var(--accent-fg)", fontSize: 11, fontWeight: 600, cursor: wtBusy || !wtNewBranch.trim() ? "not-allowed" : "pointer", opacity: wtBusy || !wtNewBranch.trim() ? 0.65 : 1 }}>{wtBusy ? t("desktop.creating") : t("desktop.create")}</button>
                     <button onClick={() => { setWtNewOpen(false); setWtNewBranch(""); setWtError(null); }} style={{ flex: 1, padding: "4px 0", background: "var(--bg-hover)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-muted)", fontSize: 11, cursor: "pointer" }}>{t("desktop.cancel")}</button>
                   </div>
-                  {wtError && <div style={{ marginTop: 5, color: "#dc2626", fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>{wtError}</div>}
+                  {wtError && <div style={{ marginTop: 5, color: "var(--status-error)", fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>{wtError}</div>}
                 </div>
               )}
             </AnimatedDropdown>
@@ -2272,7 +2277,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               width: 26, height: 26, padding: 0, marginRight: 6,
               background: sessionRefreshDone ? "rgba(74,222,128,0.18)" : "none",
               border: "none",
-              color: sessionRefreshDone ? "#4ade80" : "var(--text-dim)",
+              color: sessionRefreshDone ? "var(--status-success)" : "var(--text-dim)",
               cursor: "pointer",
               borderRadius: 5,
               flexShrink: 0,
@@ -2282,7 +2287,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             onMouseLeave={(e) => { if (!sessionRefreshDone) { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; } }}
           >
             {sessionRefreshDone ? (
-              <Check size={13} color="#4ade80" weight="regular" aria-hidden="true" />
+              <Check size={13} color="var(--status-success)" weight="regular" aria-hidden="true" />
             ) : (
               <ArrowClockwise size={13} weight="regular" aria-hidden="true" />
             )}
@@ -2440,7 +2445,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             <button
                               onClick={() => void handleRemoveWorktree(wt.path, true)}
                               disabled={wtBusy}
-                              style={{ padding: "3px 9px", background: "#ef4444", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
+                              style={{ padding: "3px 9px", background: "var(--status-error)", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
                             >
                               {t("desktop.force")}
                             </button>
@@ -2503,7 +2508,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                                 borderRadius: 5, flexShrink: 0,
                                 transition: "color 0.12s, background 0.12s",
                               }}
-                              onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.background = "rgba(239,68,68,0.08)"; }}
+                              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--status-error)"; e.currentTarget.style.background = "rgba(239,68,68,0.08)"; }}
                               onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
                             >
                               <Trash size={12} weight="regular" aria-hidden="true" />
@@ -2614,7 +2619,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   {wtError && (
                     <div style={{
                       padding: "5px 10px 8px",
-                      color: "#dc2626",
+                      color: "var(--status-error)",
                       fontSize: 11,
                       lineHeight: 1.35,
                       overflowWrap: "anywhere",
@@ -2694,7 +2699,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </div>
           )}
           {error && (
-            <div style={{ padding: "12px 14px", color: "#f87171", fontSize: 12 }}>
+            <div style={{ padding: "12px 14px", color: "var(--status-error)", fontSize: 12 }}>
               {error}
             </div>
           )}
@@ -2853,7 +2858,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 width: 26, height: 26, padding: 0, marginRight: 6,
                 background: explorerRefreshDone ? "rgba(74,222,128,0.18)" : "none",
                 border: "none",
-                color: explorerRefreshDone ? "#4ade80" : "var(--text-dim)",
+                color: explorerRefreshDone ? "var(--status-success)" : "var(--text-dim)",
                 cursor: "pointer",
                 borderRadius: 5,
                 flexShrink: 0,
@@ -2863,7 +2868,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               onMouseLeave={(e) => { if (explorerRefreshDone) return; e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
             >
               {explorerRefreshDone ? (
-                <Check size={13} color="#4ade80" weight="regular" aria-hidden="true" />
+                <Check size={13} color="var(--status-success)" weight="regular" aria-hidden="true" />
               ) : (
                 <ArrowClockwise size={13} weight="regular" aria-hidden="true" />
               )}
@@ -2900,24 +2905,28 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       )}
       {onOpenSettings && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 5, padding: "7px 8px", borderTop: "1px solid var(--border)", flexShrink: 0, marginTop: "auto" }}>
-          {[
-            { tab: "models", label: t("desktop.models"), Icon: Cpu },
-            { tab: "skills", label: t("desktop.skills"), Icon: Stack },
-            { tab: "plugins", label: t("desktop.plugins"), Icon: Plug },
-          ].map(({ tab, label, Icon }) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => onOpenSettings(tab)}
-              title={label}
-              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, minWidth: 0, padding: "6px 4px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text-muted)", cursor: "pointer", fontSize: 10.5 }}
-              onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; }}
-              onMouseLeave={(event) => { event.currentTarget.style.background = "var(--bg-panel)"; event.currentTarget.style.color = "var(--text-muted)"; }}
-            >
-              <Icon size={13} aria-hidden="true" />
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-            </button>
-          ))}
+          {/* Shortcuts to the settings sections a sidebar user reaches for most.
+              Derived from the modal's own tab registry so the two cannot drift
+              (the previous hardcoded trio silently omitted MCP). */}
+          {SETTINGS_TABS
+            .filter(({ id }) => SIDEBAR_SETTINGS_TABS.has(id))
+            .map(({ id: tab, labelKey, Icon }) => {
+              const label = t(labelKey as Parameters<typeof t>[0]);
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => onOpenSettings(tab)}
+                  title={label}
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, minWidth: 0, padding: "6px 4px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text-muted)", cursor: "pointer", fontSize: 10.5 }}
+                  onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.background = "var(--bg-panel)"; event.currentTarget.style.color = "var(--text-muted)"; }}
+                >
+                  <Icon size={13} aria-hidden="true" />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                </button>
+              );
+            })}
         </div>
       )}
     </div>
@@ -3415,7 +3424,7 @@ const SessionItem = memo(function SessionItem({
                     width: 20, height: 20, padding: 0,
                     background: "none", border: "none",
                     borderRadius: 4,
-                    color: autoNameError ? "#ef4444" : "var(--text-dim)",
+                    color: autoNameError ? "var(--status-error)" : "var(--text-dim)",
                     cursor: !hasMessages ? "default" : "pointer",
                     flexShrink: 0,
                     opacity: autoNaming ? 0.7 : !hasMessages ? 0.35 : 1,
@@ -3423,10 +3432,10 @@ const SessionItem = memo(function SessionItem({
                   }}
                   onMouseEnter={(e) => {
                     if (autoNaming || !hasMessages) return;
-                    e.currentTarget.style.color = autoNameError ? "#ef4444" : "var(--accent)";
+                    e.currentTarget.style.color = autoNameError ? "var(--status-error)" : "var(--accent)";
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.color = autoNameError ? "#ef4444" : "var(--text-dim)";
+                    e.currentTarget.style.color = autoNameError ? "var(--status-error)" : "var(--text-dim)";
                   }}
                 >
                   {autoNaming ? (
@@ -3530,7 +3539,7 @@ const SessionItem = memo(function SessionItem({
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 650, color: "#ef4444", flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 12, fontWeight: 650, color: "var(--status-error)", flex: 1, minWidth: 0 }}>
                       {t("desktop.titleGenerationFailed")}
                     </span>
                     <button
@@ -3553,7 +3562,7 @@ const SessionItem = memo(function SessionItem({
                       style={{
                         display: "inline-flex", alignItems: "center", gap: 4,
                         padding: "5px 10px", borderRadius: 6,
-                        background: "#ef4444", border: "none",
+                        background: "var(--status-error)", border: "none",
                         color: "#fff", fontSize: 11.5, fontWeight: 600,
                         cursor: autoNaming ? "default" : "pointer",
                       }}
@@ -3626,7 +3635,7 @@ const SessionItem = memo(function SessionItem({
                     {titleModelLoading ? (
                       <div style={{ padding: "12px 8px", fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.loading")}</div>
                     ) : titleModelError ? (
-                      <div style={{ padding: "12px 8px", fontSize: 12, color: "#ef4444" }}>
+                      <div style={{ padding: "12px 8px", fontSize: 12, color: "var(--status-error)" }}>
                         {t("desktop.modelsLoadFailed")}: {titleModelError}
                       </div>
                     ) : titleModels.length === 0 ? (
@@ -3901,7 +3910,7 @@ function SessionCompactRow({
             {t("desktop.archiveSessionConfirm", { title: `“${title.slice(0, 22)}${title.length > 22 ? "…" : ""}”` })}
           </div>
           <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-            <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); void performArchive(); }} style={{ display: "flex", alignItems: "center", gap: 4, height: 28, padding: "0 11px", background: "var(--accent)", border: "none", borderRadius: 6, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+            <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); void performArchive(); }} style={{ display: "flex", alignItems: "center", gap: 4, height: 28, padding: "0 11px", background: "var(--accent)", border: "none", borderRadius: 6, color: "var(--accent-fg)", cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
               <Archive size={12} weight="regular" aria-hidden="true" />
               {t("desktop.archiveSession")}
             </button>

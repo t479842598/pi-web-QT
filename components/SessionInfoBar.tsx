@@ -160,7 +160,7 @@ export function SessionInfoBar({
   let ctxColor = "var(--text-muted)";
   if (contextUsage?.contextWindow) {
     const pct = contextUsage.percent;
-    if (pct !== null && pct > 90) ctxColor = "#ef4444";
+    if (pct !== null && pct > 90) ctxColor = "var(--status-error)";
     else if (pct !== null && pct > 70) ctxColor = "rgba(234,179,8,0.95)";
   }
 

@@ -147,7 +147,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     moveQueuedMessage, recallQueuedMessage, requeueAt, removeQueuedMessage,
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands,
-    planMode, handlePlanModeChange,
+    planMode,
     collaborationMode, toolApprovalMode,
     handleCollaborationModeChange,
     approvalRequests, resolveApproval,
@@ -236,30 +236,34 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     // execution prompt so the agent implements it with the normal toolset.
     setPlanReviewOpen(false);
     const plan = planReviewTextRef.current;
-    if (collaborationMode === "plan") handleCollaborationModeChange("normal");
-    void handlePlanModeChange(false).then(() => {
-      if (plan) {
-        const execPrompt = t("tasks.planReviewExecutePrompt", { plan });
-        void handleSend(execPrompt);
-      }
-    });
-  }, [handlePlanModeChange, handleSend, t, collaborationMode, handleCollaborationModeChange]);
+    if (!plan) return;
+    // Wait for the mode switch to finish driving /plan exit before sending, so
+    // the execution prompt cannot race the extension command's toolset restore.
+    // A failed switch must still run the plan: the user asked to execute it.
+    void handleCollaborationModeChange(collaborationMode === "plan" ? "normal" : collaborationMode)
+      .catch((error) => { console.error("Failed to leave plan mode before executing:", error); })
+      .then(() => {
+        void handleSend(t("tasks.planReviewExecutePrompt", { plan }));
+      });
+  }, [handleCollaborationModeChange, handleSend, t, collaborationMode]);
   const planReviewTextRef = useRef<string | null>(null);
   useEffect(() => {
     planReviewTextRef.current = planReviewText;
   }, [planReviewText]);
 
   const handlePlanFeedback = useCallback((text: string) => {
-    // Send suggestions back, staying in plan mode for another pass.
+    // Stay in plan mode for another pass. This must be a real prompt, not a
+    // steer: the review dialog only appears once the run has gone idle, and a
+    // steer on an idle session is merely queued — the feedback would silently
+    // never run.
     setPlanReviewOpen(false);
-    void handleSteer(text);
-  }, [handleSteer]);
+    void handleSend(text);
+  }, [handleSend]);
 
   const handlePlanExit = useCallback(() => {
     setPlanReviewOpen(false);
-    if (collaborationMode === "plan") handleCollaborationModeChange("normal");
-    void handlePlanModeChange(false);
-  }, [handlePlanModeChange, collaborationMode, handleCollaborationModeChange]);
+    void handleCollaborationModeChange(collaborationMode === "plan" ? "normal" : collaborationMode);
+  }, [handleCollaborationModeChange, collaborationMode]);
 
   useEffect(() => {
     if (!extensionDialog || soundedExtensionDialogIdRef.current === extensionDialog.id) return;
@@ -409,6 +413,34 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   // Rendered-item index per visible (user/assistant) message ref index. Built
   // alongside the rendered array in the JSX IIFE below (see refToItemIndexRef).
   const refToItemIndexRef = useRef<Array<number | undefined>>([]);
+  // Per-visible-row ref callbacks, keyed by refIndex. Cached so React does not
+  // detach/re-attach every row on each streaming render (see attachVisibleRef).
+  const visibleRefCallbackCacheRef = useRef(
+    new Map<number, { state: { isLastUser: boolean }; callback: (el: HTMLDivElement | null) => void }>(),
+  );
+  // Height of the extension status/widget block rendered above the virtual list
+  // inside the same scroll container. Passed to the virtualizer as scrollMargin
+  // so item offsets line up with scrollTop when those rows are present.
+  const virtualListHeaderRef = useRef<HTMLDivElement | null>(null);
+  const [virtualListHeaderHeight, setVirtualListHeaderHeight] = useState(0);
+  useEffect(() => {
+    const element = virtualListHeaderRef.current;
+    if (!element) {
+      setVirtualListHeaderHeight((current) => (current === 0 ? current : 0));
+      return;
+    }
+    const measure = () => {
+      const next = element.getBoundingClientRect().height;
+      // Round to whole pixels: sub-pixel churn from the observer would push a
+      // new scrollMargin (and a virtualizer re-layout) every frame.
+      const rounded = Math.round(next);
+      setVirtualListHeaderHeight((current) => (current === rounded ? current : rounded));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   // NOTE: item keys are passed to VirtualizedMessageList as a plain prop array
   // rendered in the same commit — NOT via a ref read inside getItemKey. A
   // ref-backed callback lets an interrupted/concurrent render publish keys for
@@ -520,21 +552,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   // during streaming (inline arrows would otherwise create a new identity each
   // frame and defeat the memo).
   const handleRetryModels = useCallback(() => { reloadModels(); }, [reloadModels]);
-  const handlePlanModeToggle = useCallback((enabled: boolean) => {
-    handlePlanModeChange(enabled);
-    if (enabled && collaborationMode !== "plan") handleCollaborationModeChange("plan");
-    else if (!enabled && collaborationMode === "plan") handleCollaborationModeChange("normal");
-  }, [handlePlanModeChange, handleCollaborationModeChange, collaborationMode]);
+  // The collaboration mode is the single source of truth: planMode is derived
+  // from it inside useAgentSession, and switching the mode drives the
+  // @narumitw/pi-plan-mode extension (read-only toolset + plan workflow).
   const handleCollaborationModeSelect = useCallback((mode: CollaborationMode) => {
-    // Sync the legacy plan toggle (read-only toolset) with the new
-    // collaboration mode so the two entry points stay consistent.
-    handleCollaborationModeChange(mode);
-    if (mode === "plan" && !planMode) {
-      void handlePlanModeChange(true);
-    } else if (mode !== "plan" && planMode) {
-      void handlePlanModeChange(false);
-    }
-  }, [handleCollaborationModeChange, handlePlanModeChange, planMode]);
+    void handleCollaborationModeChange(mode);
+  }, [handleCollaborationModeChange]);
 
   // 上游行为：子代理会话只读 —— 不渲染输入框（relation.kind === "subagent"）。
   const isSubagentSession = session?.relation?.kind === "subagent";
@@ -565,8 +588,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       compactResult={compactResult}
       toolPreset={toolPreset}
       onToolPresetChange={session || isNew ? handleToolPresetChange : undefined}
-      planMode={planMode}
-      onPlanModeChange={handlePlanModeToggle}
       collaborationMode={collaborationMode}
       toolApprovalMode={toolApprovalMode}
       onCollaborationModeChange={handleCollaborationModeSelect}
@@ -846,27 +867,47 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           <div ref={scrollContainerRef} className="h-full min-w-0 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
             <div style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
-              <ExtensionStatusBar statuses={extensionStatuses} />
-              <ExtensionWidgets widgets={aboveEditorWidgets} />
+              <div ref={virtualListHeaderRef}>
+                <ExtensionStatusBar statuses={extensionStatuses} />
+                <ExtensionWidgets widgets={aboveEditorWidgets} />
+              </div>
 
             {(() => {
               const { toolResultsMap, lastUserIdx, visibleRefIndexByMessage, items } = historyPipeline;
 
-              const attachVisibleRef = (idx: number, refIndex: number) => (el: HTMLDivElement | null) => {
-                messageRefs.current[refIndex] = el;
-                if (idx === lastUserIdx) {
-                  (lastUserMsgRef as { current: HTMLDivElement | null }).current = el;
-                  // Consume the pending scroll-to-user flag exactly when the
-                  // target row mounts. The messages.length effect in
-                  // useAgentSession defers to this: scrolling there while the
-                  // row is not yet attached would read the PREVIOUS user
-                  // message's ref and yank the viewport up to an old turn.
-                  if (el && pendingScrollToUserRef.current) {
-                    pendingScrollToUserRef.current = false;
-                    initialScrollDoneRef.current = true;
-                    scrollUserMsgToTop();
-                  }
+              // Ref callbacks are cached per refIndex so their identity survives
+              // re-renders. React detaches (calls with null) and re-attaches any
+              // row whose callback identity changed, so returning a fresh arrow
+              // every render re-attached every visible row on every streaming
+              // frame. The cached callback reads only refs plus a per-row mutable
+              // flag, so the cache can be keyed by refIndex alone.
+              const visibleRefCallbacks = visibleRefCallbackCacheRef.current;
+              const attachVisibleRef = (idx: number, refIndex: number) => {
+                let entry = visibleRefCallbacks.get(refIndex);
+                if (!entry) {
+                  const state = { isLastUser: false };
+                  entry = {
+                    state,
+                    callback: (el: HTMLDivElement | null) => {
+                      messageRefs.current[refIndex] = el;
+                      if (!state.isLastUser) return;
+                      (lastUserMsgRef as { current: HTMLDivElement | null }).current = el;
+                      // Consume the pending scroll-to-user flag exactly when
+                      // the target row mounts. The messages.length effect in
+                      // useAgentSession defers to this: scrolling there while
+                      // the row is not yet attached would read the PREVIOUS
+                      // user message's ref and yank the viewport to an old turn.
+                      if (el && pendingScrollToUserRef.current) {
+                        pendingScrollToUserRef.current = false;
+                        initialScrollDoneRef.current = true;
+                        scrollUserMsgToTop();
+                      }
+                    },
+                  };
+                  visibleRefCallbacks.set(refIndex, entry);
                 }
+                entry.state.isLastUser = idx === lastUserIdx;
+                return entry.callback;
               };
 
               const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean; writtenFiles?: WrittenFile[] } = {}): ReactNode => {
@@ -943,7 +984,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               // otherwise a structural id. Index-positioned keys/measurements
               // go stale on prepend or full tail-window replacement.
               const itemKeys: string[] = [];
-              let orphanGroupSeq = 0;
               const pushRendered = (node: ReactNode, refIndex: number | undefined, key: string) => {
                 // A null node (e.g. a bare toolResult "single" that renders
                 // nothing) would become a 0-height virtual row sitting at the
@@ -957,6 +997,35 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 const entryId = entryIds[idx];
                 return entryId || `${fallbackPrefix}-${idx}`;
               };
+              /**
+               * Item keys for a turn's process group and final answer.
+               *
+               * Two separate schemes, because the two phases have opposite
+               * requirements:
+               *
+               * - LIVE TAIL (streaming): keyed by the turn's user INDEX. This is
+               *   the only anchor that exists for the whole run — the assistant
+               *   row appears/disappears as tool steps complete and the
+               *   persisted entryId does not exist yet (`message_end` is emitted
+               *   before the SDK appends the entry). The old keys were not
+               *   stable here: the process key embedded `liveProcessIndices[0]`
+               *   (changed when the first process block appeared) and the answer
+               *   key switched from `live-answer-streaming-*` to an assistant
+               *   entryId form on every assistant `message_end` — once per tool
+               *   step. Either change remounted ProcessGroup/MessageView and
+               *   discarded the user's expanded tool details.
+               *
+               * - HISTORICAL: keyed by entryId (`messageItemKey`). Indexes shift
+               *   when an older page is prepended, so an index key would remount
+               *   every group on load-earlier.
+               *
+               * The one remount when a run ends and the list reloads is expected:
+               * a finished run collapses its ProcessGroup anyway.
+               */
+              const liveProcessItemKey = (userIdx: number) => `live-process-u${userIdx}`;
+              const liveAnswerItemKey = (userIdx: number) => `live-answer-u${userIdx}`;
+              const processItemKey = (userIdx: number) => `process-${messageItemKey(userIdx, "user")}`;
+              const answerItemKey = (userIdx: number) => `answer-${messageItemKey(userIdx, "user")}`;
               for (const item of items) {
                 if (item.kind === "single") {
                   // A bare toolResult renders nothing in MessageView (its
@@ -1035,7 +1104,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                         />
                       </div>,
                       processRefIdx,
-                      `live-process-${userIdx}-${liveProcessIndices[0] ?? "none"}`,
+                      liveProcessItemKey(userIdx),
                     );
                   }
                   if (liveAnswerMessage) {
@@ -1051,7 +1120,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     onOpenSession={onOpenSession}
                       />,
                       finalAssistantIdx >= 0 ? visibleRefIndexByMessage.get(finalAssistantIdx) : undefined,
-                      finalAssistantIdx >= 0 ? `live-answer-${messageItemKey(finalAssistantIdx, "answer")}` : `live-answer-streaming-${userIdx}`,
+                      liveAnswerItemKey(userIdx),
                     );
                   }
                   continue;
@@ -1083,7 +1152,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     .map((processIdx) => visibleRefIndexByMessage.get(processIdx))
                     .find((value): value is number => typeof value === "number")
                     ?? (finalAnswerMessage ? undefined : visibleRefIndexByMessage.get(finalAssistantIdx));
-                  const processAnchorIdx = visibleProcessIndices[0] ?? (finalAssistantIdx >= 0 ? finalAssistantIdx : userIdx);
                   pushRendered(
                     <div
                       key={`process-group-${userIdx}-${finalAssistantIdx}`}
@@ -1102,12 +1170,16 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                       />
                     </div>,
                     processRefIdx,
-                    `process-${userIdx >= 0 ? messageItemKey(userIdx, "user") : `orphan-${orphanGroupSeq++}`}`,
+                    processItemKey(userIdx),
                   );
                 }
 
                 if (finalAnswerMessage) {
-                  pushRendered(renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles }), visibleRefIndexByMessage.get(finalAssistantIdx), messageItemKey(finalAssistantIdx, "answer"));
+                  pushRendered(
+                    renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage, writtenFiles }),
+                    visibleRefIndexByMessage.get(finalAssistantIdx),
+                    answerItemKey(userIdx),
+                  );
                 }
                 // Trailing singles are messages AFTER the turn's final answer
                 // (custom entries, late tool results). An orphaned-prefix turn
@@ -1146,6 +1218,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   items={rendered}
                   itemKeys={itemKeys}
                   virtualizerRef={messageVirtualizerRef}
+                  headerHeight={virtualListHeaderHeight}
                 />
               );
             })()}
@@ -1381,9 +1454,9 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
     >
       {notices.map((notice, index) => {
         const color = notice.type === "error"
-          ? "#ef4444"
+          ? "var(--status-error)"
           : notice.type === "warning"
-            ? "#d97706"
+            ? "var(--status-warning)"
             : notice.type === "success"
               ? "#10b981"
               : "var(--accent)";

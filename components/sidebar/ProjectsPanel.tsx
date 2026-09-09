@@ -702,7 +702,7 @@ function PanelSessionRow({
         </span>
         <button
           onClick={() => { setConfirming(false); onArchive(); }}
-          style={{ display: "flex", alignItems: "center", gap: 4, height: 24, padding: "0 9px", background: "#ef4444", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
+          style={{ display: "flex", alignItems: "center", gap: 4, height: 24, padding: "0 9px", background: "var(--status-error)", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
         >
           <Archive size={11} aria-hidden="true" />
           {t("desktop.archiveSession")}
@@ -724,9 +724,9 @@ function PanelSessionRow({
         disabled={!hasMessages}
         title={autoNameError ?? (!hasMessages ? t("desktop.titleNeedsMessages") : autoNaming ? t("desktop.generatingTitle") : t("desktop.generateTitle"))}
         aria-label={t("desktop.generateTitle")}
-        style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: autoNameError ? "#ef4444" : "var(--text-dim)", cursor: !hasMessages ? "default" : "pointer", flexShrink: 0, opacity: autoNaming ? 0.7 : !hasMessages ? 0.35 : 1, transition: "color 0.12s" }}
+        style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, background: "none", border: "none", borderRadius: 4, color: autoNameError ? "var(--status-error)" : "var(--text-dim)", cursor: !hasMessages ? "default" : "pointer", flexShrink: 0, opacity: autoNaming ? 0.7 : !hasMessages ? 0.35 : 1, transition: "color 0.12s" }}
         onMouseEnter={(e) => { if (!autoNaming && hasMessages) e.currentTarget.style.color = "var(--accent)"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = autoNameError ? "#ef4444" : "var(--text-dim)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = autoNameError ? "var(--status-error)" : "var(--text-dim)"; }}
       >
         {autoNaming ? (
           <svg style={{ animation: "spin 1s linear infinite" }} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -845,9 +845,9 @@ function PanelArchivedRow({ session, folderName, onUnarchive, onDeleteForever }:
           onClick={onDeleteForever}
           title={t("desktop.deleteForever")}
           aria-label={t("desktop.deleteForever")}
-          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, background: "none", border: "none", borderRadius: 4, color: "#ef4444", cursor: "pointer", flexShrink: 0 }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "#f87171"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = "#ef4444"; }}
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, background: "none", border: "none", borderRadius: 4, color: "var(--status-error)", cursor: "pointer", flexShrink: 0 }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--status-error)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--status-error)"; }}
         >
           <Trash2 size={13} aria-hidden="true" />
         </button>

@@ -105,7 +105,7 @@ export function TitleModelSetting() {
         >
           <option value="">{t("desktop.titleModelFollowSession")}</option>
           {invalid && value !== null && (
-            <option value={value} style={{ color: "#ef4444" }}>
+            <option value={value} style={{ color: "var(--status-error)" }}>
               {value}（{t("desktop.titleModelInvalid")}）
             </option>
           )}
@@ -123,17 +123,17 @@ export function TitleModelSetting() {
         </select>
         {saving && <span style={{ fontSize: 11, color: "var(--text-dim)" }}>…</span>}
         {!saving && savedOk && (
-          <span style={{ fontSize: 11, color: "#4ade80" }}>{t("desktop.titleModelSaved")}</span>
+          <span style={{ fontSize: 11, color: "var(--status-success)" }}>{t("desktop.titleModelSaved")}</span>
         )}
       </div>
       <p style={{ margin: 0, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>
         {t("desktop.titleModelDescription")}
       </p>
       {error && (
-        <p style={{ margin: 0, fontSize: 11, color: "#ef4444", lineHeight: 1.5 }}>{error}</p>
+        <p style={{ margin: 0, fontSize: 11, color: "var(--status-error)", lineHeight: 1.5 }}>{error}</p>
       )}
       {invalid && value !== null && (
-        <p style={{ margin: 0, fontSize: 11, color: "#ef4444", lineHeight: 1.5 }}>
+        <p style={{ margin: 0, fontSize: 11, color: "var(--status-error)", lineHeight: 1.5 }}>
           {value}（{t("desktop.titleModelInvalid")}）
         </p>
       )}

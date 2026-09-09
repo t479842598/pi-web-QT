@@ -4,17 +4,27 @@ import { useCallback, useEffect, useState } from "react";
 import { PencilSimple, PlusIcon, Trash } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { SettingCard, SettingNote, SettingRow, SettingRowLast } from "./SettingCard";
-import type { McpConfigResponse, McpServerConfig } from "@/lib/api-types";
+import type { McpConfigResponse, McpServerConfig, McpTransport } from "@/lib/api-types";
+import { normalizeMcpTransport } from "@/lib/api-types";
+import { validateMcpServer } from "@/lib/mcp-config";
 import { VisionMcpConfig, VISION_SERVER_NAME } from "./VisionMcpConfig";
 import { ApplyNowButton } from "./ApplyNowButton";
 
-const TRANSPORTS = ["stdio", "sse", "http"] as const;
+/** Mirrors pi-mcp-extension's zod enum — "http" was a pi-web-only mistake. */
+const TRANSPORTS: readonly McpTransport[] = ["stdio", "streamable-http", "sse"] as const;
 const LIFECYCLES = ["eager", "lazy"] as const;
+
+/** URL transports are configured with url/headers; stdio uses command/args. */
+function isUrlTransport(transport: string): boolean {
+  return transport === "streamable-http" || transport === "sse";
+}
 
 interface FormState {
   name: string;
   command: string;
   args: string; // one per line
+  url: string;
+  headers: string; // JSON
   transport: string;
   lifecycle: string;
   requestTimeoutMs: string;
@@ -25,6 +35,8 @@ const emptyForm: FormState = {
   name: "",
   command: "",
   args: "",
+  url: "",
+  headers: "",
   transport: "stdio",
   lifecycle: "eager",
   requestTimeoutMs: "",
@@ -64,7 +76,9 @@ function serverToForm(name: string, server: McpServerConfig): FormState {
     name,
     command: server.command ?? "",
     args: Array.isArray(server.args) ? server.args.join("\n") : "",
-    transport: typeof server.transport === "string" ? server.transport : "stdio",
+    url: typeof server.url === "string" ? server.url : "",
+    headers: server.headers !== undefined ? JSON.stringify(server.headers, null, 2) : "",
+    transport: normalizeMcpTransport(server.transport),
     lifecycle: typeof server.lifecycle === "string" ? server.lifecycle : "eager",
     requestTimeoutMs:
       typeof server.requestTimeoutMs === "number" ? String(server.requestTimeoutMs) : "",
@@ -74,34 +88,65 @@ function serverToForm(name: string, server: McpServerConfig): FormState {
 }
 
 function formToServer(form: FormState): { error?: string; server?: McpServerConfig } {
-  if (!form.command.trim()) return { error: "Command is required" };
-  const args = form.args
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const transport = (TRANSPORTS as readonly string[]).includes(form.transport)
+    ? form.transport as McpTransport
+    : "stdio";
+
   const server: McpServerConfig = {
-    command: form.command.trim(),
-    args,
-    transport: (TRANSPORTS as readonly string[]).includes(form.transport)
-      ? form.transport as McpServerConfig["transport"]
-      : "stdio",
+    transport,
     lifecycle: (LIFECYCLES as readonly string[]).includes(form.lifecycle)
       ? form.lifecycle as McpServerConfig["lifecycle"]
       : "eager",
   };
+
+  if (isUrlTransport(transport)) {
+    server.url = form.url.trim();
+    if (form.headers.trim() !== "") {
+      try {
+        server.headers = parseStringRecord(form.headers, "Headers");
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  } else {
+    server.command = form.command.trim();
+    server.args = form.args
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
   if (form.requestTimeoutMs.trim() !== "") {
-    const ms = Number(form.requestTimeoutMs);
-    if (!Number.isFinite(ms) || ms <= 0) return { error: "Request timeout must be a positive number" };
-    server.requestTimeoutMs = ms;
+    server.requestTimeoutMs = Number(form.requestTimeoutMs);
   }
   if (form.env.trim() !== "") {
     try {
-      server.env = JSON.parse(form.env) as unknown;
-    } catch {
-      return { error: "Environment must be valid JSON" };
+      server.env = parseStringRecord(form.env, "Environment");
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
     }
   }
+
+  // Share the API's contract instead of re-implementing it: the form can only
+  // produce a server the route would accept, and the messages match.
+  const problem = validateMcpServer(form.name.trim() || "server", server);
+  if (problem) return { error: problem };
   return { server };
+}
+
+/** Parse a JSON object whose values must all be strings. */
+function parseStringRecord(text: string, label: string): Record<string, string> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`${label} must be valid JSON`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
+    || !Object.values(parsed).every((value) => typeof value === "string")) {
+    throw new Error(`${label} must be a JSON object of string values`);
+  }
+  return parsed as Record<string, string>;
 }
 
 export function McpConfig({ sessionId }: { sessionId?: string | null }) {
@@ -233,7 +278,7 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
         {!loaded ? (
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.loading")}</div>
         ) : loadError ? (
-          <div style={{ fontSize: 12, color: "#ef4444" }}>{loadError}</div>
+          <div style={{ fontSize: 12, color: "var(--status-error)" }}>{loadError}</div>
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -293,15 +338,16 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                           <span style={badgeStyle("var(--accent)", "rgba(37,99,235,0.12)")}>
                             {server.transport ?? "stdio"}
                           </span>
-                          <span style={badgeStyle("#d97706", "rgba(245,158,11,0.12)")}>
+                          <span style={badgeStyle("var(--status-warning)", "rgba(245,158,11,0.12)")}>
                             {server.lifecycle ?? "lazy"}
                           </span>
                         </div>
                         <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {server.command}
-                          {Array.isArray(server.args) && server.args.length > 0
-                            ? ` ${server.args.map((arg) => arg.includes(" ") ? `"${arg}"` : arg).join(" ")}`
-                            : ""}
+                          {isUrlTransport(normalizeMcpTransport(server.transport))
+                            ? server.url
+                            : `${server.command ?? ""}${Array.isArray(server.args) && server.args.length > 0
+                              ? ` ${server.args.map((arg) => arg.includes(" ") ? `"${arg}"` : arg).join(" ")}`
+                              : ""}`}
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -339,7 +385,7 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                             background: "rgba(239,68,68,0.08)",
                             border: "1px solid var(--border)",
                             borderRadius: 6,
-                            color: "#ef4444",
+                            color: "var(--status-error)",
                             cursor: saving ? "not-allowed" : "pointer",
                             fontSize: 12,
                             opacity: saving ? 0.5 : 1,
@@ -371,21 +417,6 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                       placeholder="my-server"
                       style={{ ...inputStyle, opacity: editing.isNew ? 1 : 0.5 }}
                     />
-                    <span style={labelStyle()}>{t("desktop.mcpCommand")} *</span>
-                    <input
-                      value={form.command}
-                      onChange={(event) => setField("command", event.target.value)}
-                      placeholder="npx @modelcontextprotocol/server-foo"
-                      style={inputStyle}
-                    />
-                    <span style={labelStyle()}>{t("desktop.mcpArgs")}</span>
-                    <textarea
-                      value={form.args}
-                      onChange={(event) => setField("args", event.target.value)}
-                      placeholder={"--port 3000\n--verbose"}
-                      rows={3}
-                      style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }}
-                    />
                     <span style={labelStyle()}>{t("desktop.mcpTransport")}</span>
                     <select
                       value={form.transport}
@@ -394,6 +425,43 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                     >
                       {TRANSPORTS.map((value) => <option key={value} value={value}>{value}</option>)}
                     </select>
+                    {isUrlTransport(form.transport) ? (
+                      <>
+                        <span style={labelStyle()}>{t("desktop.mcpUrl")} *</span>
+                        <input
+                          value={form.url}
+                          onChange={(event) => setField("url", event.target.value)}
+                          placeholder="https://example.com/mcp"
+                          style={inputStyle}
+                        />
+                        <span style={labelStyle()}>{t("desktop.mcpHeaders")}</span>
+                        <textarea
+                          value={form.headers}
+                          onChange={(event) => setField("headers", event.target.value)}
+                          placeholder={'{\n  "Authorization": "Bearer ..."\n}'}
+                          rows={3}
+                          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <span style={labelStyle()}>{t("desktop.mcpCommand")} *</span>
+                        <input
+                          value={form.command}
+                          onChange={(event) => setField("command", event.target.value)}
+                          placeholder="npx @modelcontextprotocol/server-foo"
+                          style={inputStyle}
+                        />
+                        <span style={labelStyle()}>{t("desktop.mcpArgs")}</span>
+                        <textarea
+                          value={form.args}
+                          onChange={(event) => setField("args", event.target.value)}
+                          placeholder={"--port 3000\n--verbose"}
+                          rows={3}
+                          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }}
+                        />
+                      </>
+                    )}
                     <span style={labelStyle()}>{t("desktop.mcpLifecycle")}</span>
                     <select
                       value={form.lifecycle}
@@ -455,14 +523,14 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                     >
                       {t("desktop.mcpCancel")}
                     </button>
-                    {saveError && <span style={{ color: "#ef4444", fontSize: 12 }}>{saveError}</span>}
+                    {saveError && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{saveError}</span>}
                   </div>
                 </SettingRowLast>
               </SettingCard>
             )}
 
             {saved && !editing && (
-              <div style={{ fontSize: 12, color: "#22c55e" }}>{t("desktop.mcpSavedRestart")}</div>
+              <div style={{ fontSize: 12, color: "var(--status-success)" }}>{t("desktop.mcpSavedRestart")}</div>
             )}
           </>
         )}

@@ -24,8 +24,8 @@ export interface ColumnMeta {
 export const COLUMN_META: Record<BoardColumnId, ColumnMeta> = {
   todo: { id: "todo", marker: "var(--text-dim)" },
   inProgress: { id: "inProgress", marker: "var(--accent)" },
-  attention: { id: "attention", marker: "#f59e0b" },
-  done: { id: "done", marker: "#10b981" },
+  attention: { id: "attention", marker: "var(--status-warning)" },
+  done: { id: "done", marker: "var(--status-success)" },
 };
 
 /** i18n key prefix for a column label (tasks.colTodo etc.). */

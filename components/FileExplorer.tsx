@@ -484,7 +484,7 @@ function TreeNode({
                 onClick={(e) => { e.stopPropagation(); onDelete(node.fullPath, node.name, node.isDir); }}
                 title={t("files.delete")}
                 aria-label={t("files.delete")}
-                style={{ ...HOVER_ACTION_STYLE, color: "#f87171" }}
+                style={{ ...HOVER_ACTION_STYLE, color: "var(--status-error)" }}
               >
                 <Trash size={11} weight="regular" aria-hidden="true" />
               </button>,
@@ -891,12 +891,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               {pendingConflict.conflicts.length} file{pendingConflict.conflicts.length === 1 ? "" : "s"} already exist: {pendingConflict.conflicts.join(", ")}
             </div>
             {pendingConflict.nonReplaceable.length > 0 && (
-              <div style={{ marginTop: 3, fontSize: 10, color: "#f59e0b", lineHeight: 1.35, overflowWrap: "anywhere" }}>
+              <div style={{ marginTop: 3, fontSize: 10, color: "var(--status-warning)", lineHeight: 1.35, overflowWrap: "anywhere" }}>
                 Cannot replace: {pendingConflict.nonReplaceable.join(", ")}
               </div>
             )}
             <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
-              <button type="button" onClick={() => void performUpload(pendingConflict.files, "overwrite")} style={{ height: 22, padding: "0 7px", border: "1px solid #ef4444", borderRadius: 4, background: "transparent", color: "#ef4444", cursor: "pointer", fontSize: 10 }}>
+              <button type="button" onClick={() => void performUpload(pendingConflict.files, "overwrite")} style={{ height: 22, padding: "0 7px", border: "1px solid #ef4444", borderRadius: 4, background: "transparent", color: "var(--status-error)", cursor: "pointer", fontSize: 10 }}>
                 Replace
               </button>
               <button type="button" onClick={() => void performUpload(pendingConflict.files, "skip")} style={{ height: 22, padding: "0 7px", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 10 }}>
@@ -910,7 +910,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         )}
 
         {uploadError && (
-          <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 11, lineHeight: 1.35, color: "#f87171" }}>
+          <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 11, lineHeight: 1.35, color: "var(--status-error)" }}>
             <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{uploadError}</span>
             <DismissButton onClick={() => setUploadError(null)} title="Dismiss error" />
           </div>
@@ -921,7 +921,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 22, fontSize: 11 }}>
               <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
                 {uploadSummary.uploaded.length > 0 && (
-                  <span title={`${uploadSummary.uploaded.length} uploaded`} aria-label={`${uploadSummary.uploaded.length} uploaded`} style={{ display: "flex", alignItems: "center", gap: 3, color: "#22c55e" }}>
+                  <span title={`${uploadSummary.uploaded.length} uploaded`} aria-label={`${uploadSummary.uploaded.length} uploaded`} style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--status-success)" }}>
                     <Check size={13} weight="regular" aria-hidden="true" />
                     <span>{uploadSummary.uploaded.length}</span>
                   </span>
@@ -933,7 +933,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                   </span>
                 )}
                 {uploadSummary.errors.length > 0 && (
-                  <span title={`${uploadSummary.errors.length} failed`} aria-label={`${uploadSummary.errors.length} failed`} style={{ display: "flex", alignItems: "center", gap: 3, color: "#f87171" }}>
+                  <span title={`${uploadSummary.errors.length} failed`} aria-label={`${uploadSummary.errors.length} failed`} style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--status-error)" }}>
                     <Warning size={13} weight="regular" aria-hidden="true" />
                     <span>{uploadSummary.errors.length}</span>
                   </span>
@@ -954,7 +954,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               <DismissButton onClick={() => setUploadSummary(null)} title="Dismiss upload results" />
             </div>
             {uploadSummary.errors.map((item) => (
-              <div key={item.name} title={item.error} style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, minWidth: 0, fontSize: 10, color: "#f87171" }}>
+              <div key={item.name} title={item.error} style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, minWidth: 0, fontSize: 10, color: "var(--status-error)" }}>
                 <Info size={11} weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" />
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
               </div>
@@ -965,7 +965,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       )}
 
       {mutationError && (
-        <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "6px 8px", borderBottom: "1px solid var(--border)", fontSize: 11, lineHeight: 1.35, color: "#f87171" }}>
+        <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "6px 8px", borderBottom: "1px solid var(--border)", fontSize: 11, lineHeight: 1.35, color: "var(--status-error)" }}>
           <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{mutationError}</span>
           <DismissButton onClick={() => setMutationError(null)} title={t("files.dismissError")} />
         </div>
@@ -1005,7 +1005,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         {hasSearchQuery && (
           <div style={{ paddingTop: 3 }}>
             {searchLoading && <div role="status" style={{ padding: "6px 2px", fontSize: 10, color: "var(--text-dim)" }}>{t("sidebar.searchingFiles")}</div>}
-            {!searchLoading && searchError && <div role="alert" style={{ padding: "6px 2px", fontSize: 10, color: "#f87171" }}>{t("i18n.networkError")}</div>}
+            {!searchLoading && searchError && <div role="alert" style={{ padding: "6px 2px", fontSize: 10, color: "var(--status-error)" }}>{t("i18n.networkError")}</div>}
             {!searchLoading && !searchError && searchPaths.length === 0 && <div style={{ padding: "6px 2px", fontSize: 10, color: "var(--text-dim)" }}>{t("sidebar.noMatchingFiles")}</div>}
             {!searchLoading && !searchError && searchPaths.length > 0 && (
               <div>
@@ -1048,7 +1048,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         {loading ? (
           <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>Loading files...</div>
         ) : error ? (
-          <div style={{ padding: "8px 12px", fontSize: 11, color: "#f87171" }}>{error}</div>
+          <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--status-error)" }}>{error}</div>
         ) : hasSearchQuery ? (
           <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }} />
         ) : (

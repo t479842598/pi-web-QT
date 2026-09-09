@@ -26,7 +26,7 @@ const thumbStyle: React.CSSProperties = {
   width: THUMB_SIZE,
   height: THUMB_SIZE,
   borderRadius: "50%",
-  background: "#fff",
+  background: "var(--accent-fg)",
   transition: "left 0.18s ease, transform 0.18s ease",
   boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
 };

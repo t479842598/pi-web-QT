@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MarkdownBody } from "./MarkdownBody";
 import { MessageView, ThinkingBlock, ToolCallBlock } from "./MessageView";
 import { useI18n } from "@/hooks/useI18n";
@@ -574,6 +574,38 @@ function imageSource(block: Extract<ProcessContentBlock, { type: "image" }>): st
   return `data:${source.media_type ?? "image/png"};base64,${source.data}`;
 }
 
+/**
+ * Stable adapter from a process step's tool block to `ToolCallBlock`'s props.
+ *
+ * `ToolCallBlock` is memoized, but ProcessGroup used to hand it a fresh object
+ * literal on every render, so the shallow compare never matched and every tool
+ * block re-rendered on every streaming frame. `useMemo` keyed on the step's own
+ * identity/fields keeps that object referentially stable.
+ */
+const MemoizedToolCall = memo(function MemoizedToolCall({
+  block,
+  processStyle = true,
+}: {
+  block: Extract<ProcessContentBlock, { type: "toolCall" }>;
+  processStyle?: boolean;
+}) {
+  const toolCallContent = useMemo<ToolCallContent>(() => ({
+    type: "toolCall",
+    toolCallId: block.toolCallId,
+    toolName: block.toolName,
+    input: block.input,
+  }), [block.toolCallId, block.toolName, block.input]);
+
+  return (
+    <ToolCallBlock
+      block={toolCallContent}
+      result={block.result}
+      duration={block.duration}
+      processStyle={processStyle}
+    />
+  );
+});
+
 function StepContent({ step, cwd, onOpenFile, sessionId, ts, isStreaming }: {
   step: Step;
   cwd?: string;
@@ -591,17 +623,7 @@ function StepContent({ step, cwd, onOpenFile, sessionId, ts, isStreaming }: {
         {step.leadBlocks.length > 0 && (
           <ProcessNarrative blocks={step.leadBlocks} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} isStreaming={isStreaming} />
         )}
-        <ToolCallBlock
-          block={{
-            type: "toolCall",
-            toolCallId: step.block.toolCallId,
-            toolName: step.block.toolName,
-            input: step.block.input,
-          } as ToolCallContent}
-          result={step.block.result}
-          duration={step.block.duration}
-          processStyle
-        />
+        <MemoizedToolCall block={step.block} />
       </div>
     );
   }
@@ -615,17 +637,7 @@ function StepContent({ step, cwd, onOpenFile, sessionId, ts, isStreaming }: {
                 <ProcessNarrative blocks={step.leadBlocks[idx]} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} isStreaming={isStreaming} />
               </div>
             )}
-            <ToolCallBlock
-              block={{
-                type: "toolCall",
-                toolCallId: block.toolCallId,
-                toolName: block.toolName,
-                input: block.input,
-              } as ToolCallContent}
-              result={block.result}
-              duration={block.duration}
-              processStyle
-            />
+            <MemoizedToolCall block={block} />
           </div>
         ))}
       </div>

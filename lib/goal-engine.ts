@@ -54,6 +54,37 @@ export const GOAL_CONTINUE_INSTRUCTION =
 export const GOAL_COMPLETE_MARKERS = ["goal complete", "[goal: complete]", "goal is complete"];
 export const GOAL_BLOCKED_MARKERS = ["goal blocked", "[goal: blocked]", "blocked:"];
 
+/**
+ * True when the assistant declared the goal blocked.
+ *
+ * A bare substring test is wrong here: "unblocked: …" contains "blocked:", and
+ * "not blocked: …" reads as the opposite. So the bare `blocked:` form only
+ * counts when it is not glued to a preceding word and not negated; the explicit
+ * phrases and the bracketed form always count.
+ */
+function hasBlockedMarker(lowerText: string): boolean {
+  if (lowerText.includes("[goal: blocked]") || lowerText.includes("goal blocked")) return true;
+  const re = /(?:^|[^a-z])blocked\s*:/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(lowerText)) !== null) {
+    const before = lowerText.slice(0, match.index).trimEnd();
+    if (!/\bnot$/.test(before)) return true;
+  }
+  return false;
+}
+
+/**
+ * True when the assistant declared the goal complete.
+ *
+ * The bare phrases must start a sentence (or line) so prose such as "once the
+ * goal is complete we can ship" cannot terminate a running goal; the bracketed
+ * form is unambiguous and matches anywhere.
+ */
+function hasCompleteMarker(lowerText: string): boolean {
+  if (lowerText.includes("[goal: complete]")) return true;
+  return /(?:^|\n|[.!?]\s+)(?:goal(?:\s+is)?\s+complete|goal\s+complete)\b/.test(lowerText);
+}
+
 interface GoalFile {
   version: 1;
   state: GoalRuntimeState;
@@ -279,7 +310,7 @@ export class GoalEngine {
     const timeUsedSeconds = this.state.timeUsedSeconds + wallSec;
     const turnsUsed = this.state.turnsUsed + 1;
 
-    if (GOAL_COMPLETE_MARKERS.some((m) => lower.includes(m))) {
+    if (hasCompleteMarker(lower)) {
       const next = {
         ...this.state,
         turnsUsed,
@@ -289,7 +320,7 @@ export class GoalEngine {
       this.commit({ ...next, status: "complete" });
       return { verdict: { action: "complete" }, state: this.getState() };
     }
-    if (GOAL_BLOCKED_MARKERS.some((m) => lower.includes(m))) {
+    if (hasBlockedMarker(lower)) {
       const next = {
         ...this.state,
         turnsUsed,

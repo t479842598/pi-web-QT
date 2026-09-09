@@ -106,7 +106,7 @@ export function StashDialog({ open, onOpenChange, cwd }: StashDialogProps) {
               style={{
                 alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 5,
                 padding: "7px 14px", borderRadius: 8,
-                background: "var(--accent)", color: "#fff",
+                background: "var(--accent)", color: "var(--accent-fg)",
                 border: "none", fontSize: 12, fontWeight: 600, cursor: busy ? "not-allowed" : "pointer",
               }}
             >
@@ -116,12 +116,12 @@ export function StashDialog({ open, onOpenChange, cwd }: StashDialogProps) {
           </div>
 
           {error && (
-            <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(239,68,68,0.10)", color: "#ef4444", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(239,68,68,0.10)", color: "var(--status-error)", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
               {error}
             </div>
           )}
           {output && (
-            <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(34,197,94,0.10)", color: "#22c55e", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(34,197,94,0.10)", color: "var(--status-success)", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
               {output}
             </div>
           )}
@@ -163,7 +163,7 @@ export function StashDialog({ open, onOpenChange, cwd }: StashDialogProps) {
                       style={{
                         display: "inline-flex", alignItems: "center",
                         padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)",
-                        background: "none", color: "#ef4444", fontSize: 11, cursor: busy ? "not-allowed" : "pointer",
+                        background: "none", color: "var(--status-error)", fontSize: 11, cursor: busy ? "not-allowed" : "pointer",
                       }}
                     >
                       {t("desktop.stashDrop")}

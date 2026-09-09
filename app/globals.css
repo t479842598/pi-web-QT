@@ -84,6 +84,7 @@
   --text-dim: #888888;
   --accent: #0d9488;
   --accent-hover: #0f766e;
+  --accent-fg: #ffffff;
   --user-bg: #eff6ff;
   --assistant-bg: #ffffff;
   --tool-bg: #f9fafb;
@@ -142,6 +143,7 @@ html.dark {
   --text-dim: #555555;
   --accent: #64c1b6;
   --accent-hover: #96e1d8;
+  --accent-fg: #1a1a1a;
   --user-bg: #1e2a2b;
   --assistant-bg: #1a1a1a;
   --tool-bg: #171c1c;
@@ -932,29 +934,31 @@ pre, code {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+/* Error tone comes from the semantic token so every theme (including light
+   ones) keeps the state readable instead of forcing a dark-theme red. */
 .group\/process .process-tab-error {
-  background-color: rgba(248, 113, 113, 0.06);
+  background-color: color-mix(in srgb, var(--status-error) 6%, transparent);
   background-image: repeating-linear-gradient(
     -45deg,
     transparent 0 3px,
-    rgba(248, 113, 113, 0.12) 3px 6px
+    color-mix(in srgb, var(--status-error) 12%, transparent) 3px 6px
   );
-  color: #f87171;
+  color: var(--status-error);
 }
 .group\/process .process-tab-error.process-tab-active {
-  background-color: rgba(248, 113, 113, 0.16);
+  background-color: color-mix(in srgb, var(--status-error) 16%, transparent);
   background-image: repeating-linear-gradient(
     -45deg,
     transparent 0 3px,
-    rgba(248, 113, 113, 0.2) 3px 6px
+    color-mix(in srgb, var(--status-error) 20%, transparent) 3px 6px
   );
-  color: #f87171;
+  color: var(--status-error);
 }
 .group\/process .process-tab-error:hover {
-  background-color: rgba(248, 113, 113, 0.12);
+  background-color: color-mix(in srgb, var(--status-error) 12%, transparent);
 }
 .group\/process .process-tab-error.process-tab-active:hover {
-  background-color: rgba(248, 113, 113, 0.22);
+  background-color: color-mix(in srgb, var(--status-error) 22%, transparent);
 }
 
 .group\/process .process-file-tag {
@@ -2423,5 +2427,153 @@ span.token.table {
   }
   .chat-input-textarea {
     font-size: max(16px, var(--chat-content-font-size, 14px)) !important;
+  }
+}
+
+/* ── File / terminal tab bar (right panel) ───────────────────────────────────
+   Replaces the previous all-inline-style implementation. Tabs are rounded
+   chips separated by gap instead of 1px rules, and every state uses a theme
+   token so a light theme stays readable. */
+.file-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  min-width: 0;
+  padding: 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+}
+
+.file-tab-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* No fade when the strip does not overflow: the mask would otherwise dim the
+   first and last tab at all times. */
+.file-tab-bar.no-overflow {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.file-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 28px;
+  min-width: 96px;
+  max-width: 200px;
+  padding: 0 4px 0 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.file-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.file-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.file-tab[aria-selected="true"] {
+  background: var(--bg-card);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* Active indicator: a short accent bar pinned to the tab's bottom edge. */
+.file-tab[aria-selected="true"]::after {
+  position: absolute;
+  bottom: -1px;
+  left: 50%;
+  width: 16px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  content: "";
+  transform: translateX(-50%);
+}
+
+.file-tab-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.72;
+}
+
+.file-tab[aria-selected="true"] .file-tab-icon,
+.file-tab:hover .file-tab-icon {
+  opacity: 1;
+}
+
+.file-tab-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+}
+
+/* The close affordance appears on hover / focus, and stays visible on the
+   active tab so a single-tab strip is still closable at a glance. */
+.file-tab:hover .file-tab-close,
+.file-tab:focus-within .file-tab-close,
+.file-tab[aria-selected="true"] .file-tab-close {
+  opacity: 1;
+}
+
+.file-tab-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.file-tab-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  opacity: 1;
+}
+
+.file-tab-close:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+@media (pointer: coarse) {
+  .file-tab-close {
+    width: 28px;
+    height: 28px;
+    opacity: 1;
   }
 }

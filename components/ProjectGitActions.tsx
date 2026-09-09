@@ -56,9 +56,9 @@ export function ProjectGitActions({ cwd }: ProjectGitActionsProps) {
         style={{ position: "relative" }}
       >
         {pushState === "ok" ? (
-          <CheckCircle size={13} color="#22c55e" weight="fill" aria-hidden="true" />
+          <CheckCircle size={13} color="var(--status-success)" weight="fill" aria-hidden="true" />
         ) : pushState === "error" ? (
-          <XCircle size={13} color="#ef4444" weight="fill" aria-hidden="true" />
+          <XCircle size={13} color="var(--status-error)" weight="fill" aria-hidden="true" />
         ) : (
           <CloudArrowUp size={13} aria-hidden="true" />
         )}
@@ -80,9 +80,9 @@ export function ProjectGitActions({ cwd }: ProjectGitActionsProps) {
             position: "fixed", bottom: 60, left: "50%", transform: "translateX(-50%)",
             zIndex: 1200, maxWidth: "60vw",
             padding: "8px 14px", borderRadius: 8,
-            background: "var(--bg-panel)", border: `1px solid ${pushState === "ok" ? "#22c55e" : "#ef4444"}`,
+            background: "var(--bg-panel)", border: `1px solid ${pushState === "ok" ? "var(--status-success)" : "var(--status-error)"}`,
             boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-            fontSize: 12, color: pushState === "ok" ? "#22c55e" : "#ef4444",
+            fontSize: 12, color: pushState === "ok" ? "var(--status-success)" : "var(--status-error)",
             whiteSpace: "pre-wrap", wordBreak: "break-word",
           }}
         >

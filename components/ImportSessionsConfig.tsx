@@ -306,7 +306,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
     return (
       <div style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <CheckCircle size={20} weight="fill" style={{ color: "#4ade80" }} />
+          <CheckCircle size={20} weight="fill" style={{ color: "var(--status-success)" }} />
           <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>
             {t("desktop.importDone") ?? "导入完成"}
           </span>
@@ -322,7 +322,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
             </span>
           )}
           {progress.errors > 0 && (
-            <span style={{ marginLeft: 8, color: "#ef4444" }}>
+            <span style={{ marginLeft: 8, color: "var(--status-error)" }}>
               {t("desktop.importErrorsCount", { errors: progress.errors }) ??
                 `，${progress.errors} 个失败`}
             </span>
@@ -371,7 +371,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
     <div style={{ padding: isMobile ? "12px 18px" : "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
       {/* 错误 */}
       {error && (
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: "#ef4444", lineHeight: 1.5 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: "var(--status-error)", lineHeight: 1.5 }}>
           <Warning size={14} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>{error}</span>
         </div>

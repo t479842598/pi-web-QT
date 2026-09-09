@@ -243,7 +243,7 @@ export function VisionMcpConfig({ sessionId }: { sessionId?: string | null }) {
                   padding: "1px 6px",
                   borderRadius: 3,
                   background: registered ? "rgba(37,99,235,0.12)" : "rgba(245,158,11,0.12)",
-                  color: registered ? "var(--accent)" : "#d97706",
+                  color: registered ? "var(--accent)" : "var(--status-warning)",
                   textTransform: "capitalize",
                 }}
               >
@@ -261,7 +261,7 @@ export function VisionMcpConfig({ sessionId }: { sessionId?: string | null }) {
         </SettingRowLast>
       ) : loadError ? (
         <SettingRowLast>
-          <div style={{ padding: "8px 0", fontSize: 12, color: "#ef4444" }}>{loadError}</div>
+          <div style={{ padding: "8px 0", fontSize: 12, color: "var(--status-error)" }}>{loadError}</div>
         </SettingRowLast>
       ) : (
         <>
@@ -316,7 +316,7 @@ export function VisionMcpConfig({ sessionId }: { sessionId?: string | null }) {
                     background: "none",
                     border: "1px solid var(--border)",
                     borderRadius: 6,
-                    color: "#ef4444",
+                    color: "var(--status-error)",
                     cursor: savingReg ? "not-allowed" : "pointer",
                     fontSize: 12,
                   }}
@@ -324,9 +324,9 @@ export function VisionMcpConfig({ sessionId }: { sessionId?: string | null }) {
                   {t("desktop.mcpVisionRemove")}
                 </button>
               )}
-              {regSaved && <span style={{ color: "#22c55e", fontSize: 12 }}>{t("desktop.mcpVisionSavedReg")}</span>}
-              {regRemoved && <span style={{ color: "#22c55e", fontSize: 12 }}>{t("desktop.mcpVisionRemoved")}</span>}
-              {regError && <span style={{ color: "#ef4444", fontSize: 12 }}>{regError}</span>}
+              {regSaved && <span style={{ color: "var(--status-success)", fontSize: 12 }}>{t("desktop.mcpVisionSavedReg")}</span>}
+              {regRemoved && <span style={{ color: "var(--status-success)", fontSize: 12 }}>{t("desktop.mcpVisionRemoved")}</span>}
+              {regError && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{regError}</span>}
             </div>
           </SettingRow>
 
@@ -391,10 +391,10 @@ export function VisionMcpConfig({ sessionId }: { sessionId?: string | null }) {
                 >
                   {restarting ? t("desktop.mcpVisionRestarting") : t("desktop.mcpVisionRestart")}
                 </button>
-                {modelSaved && <span style={{ color: "#22c55e", fontSize: 12 }}>{t("desktop.mcpVisionSavedModel")}</span>}
-                {restartDone && <span style={{ color: "#22c55e", fontSize: 12 }}>{t("desktop.mcpVisionRestarted")}</span>}
-                {modelError && <span style={{ color: "#ef4444", fontSize: 12 }}>{modelError}</span>}
-                {restartError && <span style={{ color: "#ef4444", fontSize: 12 }}>{restartError}</span>}
+                {modelSaved && <span style={{ color: "var(--status-success)", fontSize: 12 }}>{t("desktop.mcpVisionSavedModel")}</span>}
+                {restartDone && <span style={{ color: "var(--status-success)", fontSize: 12 }}>{t("desktop.mcpVisionRestarted")}</span>}
+                {modelError && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{modelError}</span>}
+                {restartError && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{restartError}</span>}
               </div>
               <SettingNote>
                 {t("desktop.mcpVisionModelNote")}

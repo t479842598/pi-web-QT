@@ -418,7 +418,7 @@ export function ProxyConfig() {
             padding: "6px 12px",
             borderRadius: 6,
             backgroundColor: "rgba(34, 197, 94, 0.12)",
-            color: "#22c55e",
+            color: "var(--status-success)",
             fontSize: 13,
           }}
         >
@@ -436,7 +436,7 @@ export function ProxyConfig() {
             padding: "6px 12px",
             borderRadius: 6,
             backgroundColor: "rgba(239, 68, 68, 0.10)",
-            color: "#ef4444",
+            color: "var(--status-error)",
             fontSize: 13,
           }}
         >
@@ -456,7 +456,7 @@ export function ProxyConfig() {
             backgroundColor: testResult.ok
               ? "rgba(34, 197, 94, 0.10)"
               : "rgba(239, 68, 68, 0.10)",
-            color: testResult.ok ? "#22c55e" : "#ef4444",
+            color: testResult.ok ? "var(--status-success)" : "var(--status-error)",
             fontSize: 13,
           }}
         >

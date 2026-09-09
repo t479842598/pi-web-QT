@@ -249,7 +249,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
           />
           <span style={{ fontSize: 12, color: "var(--text)" }}>
             {t("desktop.backupIncludeSecrets")}
-            <span style={{ display: "block", fontSize: 11, color: "#ef4444" }}>{t("desktop.backupSecretsWarning")}</span>
+            <span style={{ display: "block", fontSize: 11, color: "var(--status-error)" }}>{t("desktop.backupSecretsWarning")}</span>
           </span>
         </label>
 
@@ -270,13 +270,13 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
           type="button"
           onClick={handleExport}
           disabled={exporting}
-          style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--accent)", border: "none", borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 600, cursor: exporting ? "wait" : "pointer" }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--accent)", border: "none", borderRadius: 6, color: "var(--accent-fg)", fontSize: 12, fontWeight: 600, cursor: exporting ? "wait" : "pointer" }}
         >
           <Download size={15} aria-hidden="true" />
           {exporting ? t("desktop.backupExporting") : t("desktop.backupExportButton")}
         </button>
         {exportError && (
-          <p style={{ margin: "8px 0 0", fontSize: 11, color: "#ef4444" }}>{exportError}</p>
+          <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--status-error)" }}>{exportError}</p>
         )}
       </section>
 
@@ -306,7 +306,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
         </button>
 
         {importError && (
-          <p style={{ margin: "0 0 10px", fontSize: 11, color: "#ef4444", lineHeight: 1.5 }}>{importError}</p>
+          <p style={{ margin: "0 0 10px", fontSize: 11, color: "var(--status-error)", lineHeight: 1.5 }}>{importError}</p>
         )}
 
         {/* Preview */}
@@ -366,7 +366,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
                       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <code style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text)" }}>{server.name}</code>
-                          <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: server.action === "manual" || server.action === "keep-with-warning" ? "rgba(239,68,68,0.15)" : "var(--bg-selected)", color: server.action === "manual" || server.action === "keep-with-warning" ? "#ef4444" : "var(--text-muted)" }}>
+                          <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: server.action === "manual" || server.action === "keep-with-warning" ? "rgba(239,68,68,0.15)" : "var(--bg-selected)", color: server.action === "manual" || server.action === "keep-with-warning" ? "var(--status-error)" : "var(--text-muted)" }}>
                             {ACTION_LABELS[server.action]}
                           </span>
                         </div>
@@ -376,7 +376,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
                             <> → <code style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>{server.adapted.command}</code></>
                           )}
                         </div>
-                        {server.reason && <div style={{ fontSize: 11, color: "#ef4444" }}>{server.reason}</div>}
+                        {server.reason && <div style={{ fontSize: 11, color: "var(--status-error)" }}>{server.reason}</div>}
                         {server.action === "manual" && server.installPrompt && cwd && (
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
                             <select
@@ -446,7 +446,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
 
             {/* Warnings */}
             {preview.preview.warnings.length > 0 && (
-              <div style={{ fontSize: 11, color: "#ef4444", lineHeight: 1.5 }}>
+              <div style={{ fontSize: 11, color: "var(--status-error)", lineHeight: 1.5 }}>
                 {preview.preview.warnings.map((w, i) => (
                   <div key={i}>⚠ {w}</div>
                 ))}
@@ -458,7 +458,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
                 type="button"
                 onClick={handleRestore}
                 disabled={restoring || selectedCategories.size === 0}
-                style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--accent)", border: "none", borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 600, cursor: restoring ? "wait" : "pointer", opacity: selectedCategories.size === 0 ? 0.5 : 1 }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--accent)", border: "none", borderRadius: 6, color: "var(--accent-fg)", fontSize: 12, fontWeight: 600, cursor: restoring ? "wait" : "pointer", opacity: selectedCategories.size === 0 ? 0.5 : 1 }}
               >
                 <Upload size={15} aria-hidden="true" />
                 {restoring ? t("desktop.backupRestoring") : t("desktop.backupRestoreButton")}
@@ -485,7 +485,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
 
             {report.restored.length > 0 && (
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#4ade80", marginBottom: 4 }}>✓ {t("desktop.backupReportRestored")}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--status-success)", marginBottom: 4 }}>✓ {t("desktop.backupReportRestored")}</div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.6, fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>
                   {report.restored.join("\n")}
                 </div>
@@ -501,7 +501,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
             )}
             {report.manual.length > 0 && (
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#ef4444", marginBottom: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--status-error)", marginBottom: 4 }}>
                   <Warning size={12} style={{ verticalAlign: -2 }} aria-hidden="true" /> {t("desktop.backupReportManual")}
                 </div>
                 {report.manual.map((m, i) => (
@@ -512,7 +512,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
               </div>
             )}
             {report.warnings.length > 0 && (
-              <div style={{ fontSize: 11, color: "#ef4444", lineHeight: 1.6 }}>
+              <div style={{ fontSize: 11, color: "var(--status-error)", lineHeight: 1.6 }}>
                 {report.warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
               </div>
             )}

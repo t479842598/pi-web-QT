@@ -27,6 +27,7 @@ export function VirtualizedMessageList({
   estimateSize = 120,
   overscan = 8,
   virtualizerRef,
+  headerHeight = 0,
 }: {
   scrollElementRef: RefObject<HTMLElement | null>;
   items: ReactNode[];
@@ -41,6 +42,11 @@ export function VirtualizedMessageList({
   overscan?: number;
   /** Receives the virtualizer instance (for minimap layout queries). */
   virtualizerRef?: MutableRefObject<Virtualizer<HTMLElement, Element> | null>;
+  /** Height (px) of siblings rendered ABOVE the list inside the same scroll
+   * container (ExtensionStatusBar / ExtensionWidgets). The virtualizer maps
+   * item offsets to scrollTop as if the list started at 0, so any non-zero
+   * header shifts every row by that amount unless it is passed as scrollMargin. */
+  headerHeight?: number;
 }) {
   // TanStack Virtual's API returns non-memoizable functions; React Compiler
   // would skip this component anyway. Keep it a leaf: stable props in, rows
@@ -52,6 +58,7 @@ export function VirtualizedMessageList({
     estimateSize: useCallback(() => estimateSize, [estimateSize]),
     overscan,
     getItemKey: useCallback((index: number) => itemKeys[index] ?? `idx-${index}`, [itemKeys]),
+    scrollMargin: headerHeight,
     // Items only ever grow at the tail (streaming) or are fully replaced
     // (branch switch) — never reordered, so index keys are stable.
   });

@@ -59,6 +59,8 @@ interface ModelOption {
   provider: string;
   modelId: string;
   name: string;
+  /** Accepted input modalities; undefined means "unknown, assume text-only". */
+  input?: string[];
 }
 
 interface Props {
@@ -71,7 +73,7 @@ interface Props {
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
   modelNames?: Record<string, string>;
-  modelList?: { id: string; name: string; provider: string }[];
+  modelList?: { id: string; name: string; provider: string; input?: string[] }[];
   modelScopeWarnings?: string[];
   /** Non-null when the model list failed to load (server error) — the selector
    *  is hidden while empty, so surface the failure instead. */
@@ -81,9 +83,6 @@ interface Props {
   compactResult?: CompactResultInfo | null;
   toolPreset?: "none" | "default" | "full" | "plan";
   onToolPresetChange?: (preset: "none" | "default" | "full") => void;
-  /** Plan mode: read-only analysis mode toggled from the attach menu. */
-  planMode?: boolean;
-  onPlanModeChange?: (enabled: boolean) => void;
   // Chat modes (Reasonix port). The composer only exposes the collaboration
   // mode; run tier and tool approval come from the system settings defaults
   // (toolApprovalMode is kept read-only here for the is-yolo shell accent).
@@ -462,7 +461,7 @@ function QueuedMessageRow({ kind, text, label, index, total, onMove, onRecall, o
 
 export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, modelScopeWarnings, modelsError, onRetryModels, onModelChange,
-  compactResult, toolPreset, onToolPresetChange, planMode = false, onPlanModeChange,
+  compactResult, toolPreset, onToolPresetChange,
   collaborationMode = "normal", toolApprovalMode = "auto",
   onCollaborationModeChange,
   goalState, onGoalStart, onGoalPause, onGoalResume, onGoalStop,
@@ -478,6 +477,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 }: Props, ref) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
+  // Image capability of the currently selected model, read straight from the
+  // model list so it is available to the attachment handlers declared below.
+  // An unknown modality list is treated as text-only: silently shipping an
+  // image to a model that cannot read it only surfaces as an upstream 400.
+  const supportsImageInput = model
+    ? (modelList?.find((entry) => entry.id === model.modelId && entry.provider === model.provider)?.input?.includes("image") ?? false)
+    : false;
   // Thinking levels are model-facing identifiers, so keep their labels in English.
   const thinkingLevelLabels: Record<typeof THINKING_LEVELS[number], string> = {
     auto: "auto",
@@ -526,6 +532,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [t]);
   const [pasteGuardWarning, setPasteGuardWarning] = useState<string | null>(null);
   const pasteGuardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Transient inline notice for rejected attachments (e.g. images on a
+   *  text-only model). Shares the composer's warning slot. */
+  const showComposerNotice = useCallback((message: string) => {
+    setPasteGuardWarning(message);
+    if (pasteGuardTimerRef.current) clearTimeout(pasteGuardTimerRef.current);
+    pasteGuardTimerRef.current = setTimeout(() => setPasteGuardWarning(null), 5000);
+  }, []);
   const nextPasteIdRef = useRef(0);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -594,6 +607,24 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
   pastedBlocksRef.current = pastedBlocks;
+
+  /** Attach images, unless the selected model cannot read them. Defined before
+   *  useImperativeHandle so the imperative addImages/addFiles paths share it. */
+  const processImageFiles = useCallback(async (files: File[]) => {
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    if (!imageFiles.length) return;
+    if (!supportsImageInput) {
+      showComposerNotice(t("desktop.imageInputUnsupported"));
+      return;
+    }
+    const newImages = await Promise.all(
+      imageFiles.map(async (file) => ({
+        ...await compressImageFile(file),
+        previewUrl: URL.createObjectURL(file),
+      }))
+    );
+    setAttachedImages((prev) => [...prev, ...newImages]);
+  }, [showComposerNotice, supportsImageInput, t]);
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -693,18 +724,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       return shellRef.current?.getBoundingClientRect().height ?? 0;
     },
   }));
-
-  const processImageFiles = useCallback(async (files: File[]) => {
-    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
-    if (!imageFiles.length) return;
-    const newImages = await Promise.all(
-      imageFiles.map(async (file) => ({
-        ...await compressImageFile(file),
-        previewUrl: URL.createObjectURL(file),
-      }))
-    );
-    setAttachedImages((prev) => [...prev, ...newImages]);
-  }, []);
 
   const toggleFavorite = useCallback((provider: string, modelId: string) => {
     setFavorites((prev) => {
@@ -853,10 +872,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [pasteLabelPattern]);
 
   const showPasteGuardWarning = useCallback(() => {
-    setPasteGuardWarning(t("desktop.pastedMissingContent"));
-    if (pasteGuardTimerRef.current) clearTimeout(pasteGuardTimerRef.current);
-    pasteGuardTimerRef.current = setTimeout(() => setPasteGuardWarning(null), 5000);
-  }, [t]);
+    showComposerNotice(t("desktop.pastedMissingContent"));
+  }, [showComposerNotice, t]);
 
   const handleSend = useCallback(async () => {
     // Re-expand folded paste placeholders back into their full text.
@@ -1596,7 +1613,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   // Build model options: prefer modelList (has provider info), fallback to modelNames
   const modelOptions: ModelOption[] = (() => {
     if (modelList && modelList.length > 0) {
-      return modelList.map((m) => ({ provider: m.provider, modelId: m.id, name: m.name })).sort(compareModelOptions);
+      return modelList.map((m) => ({ provider: m.provider, modelId: m.id, name: m.name, input: m.input })).sort(compareModelOptions);
     }
     return Object.entries(modelNames ?? {}).map(([modelId, name]) => ({
       provider: model?.provider ?? "unknown",
@@ -2411,7 +2428,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 color: goalState.status === "complete"
                   ? "var(--accent-green, #22c55e)"
                   : goalState.status === "blocked" || goalState.status === "paused"
-                    ? "#f59e0b"
+                    ? "var(--status-warning)"
                     : "var(--accent)",
                 fontSize: 11,
                 fontWeight: 600,
@@ -2611,11 +2628,18 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     padding: 4,
                   }}
                 >
-                  {items.map((item) => (
+                  {items.map((item) => {
+                    // Image upload is unavailable when the selected model cannot
+                    // read images — disable it instead of letting the attach
+                    // fail at the provider.
+                    const disabled = item.id === "upload" && !supportsImageInput;
+                    return (
                     <button
                       key={item.id}
                       type="button"
                       role="menuitem"
+                      disabled={disabled}
+                      title={disabled ? t("desktop.imageInputUnsupported") : undefined}
                       onClick={() => {
                         setAttachMenuOpen(false);
                         if (item.id === "upload") {
@@ -2634,28 +2658,35 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                         width: "100%", padding: "8px 10px",
                         background: item.active ? "var(--bg-selected)" : "none",
                         border: "none", borderRadius: 8,
-                        cursor: "pointer", textAlign: "left",
+                        cursor: disabled ? "not-allowed" : "pointer", textAlign: "left",
+                        opacity: disabled ? 0.45 : 1,
                         transition: "background 0.12s",
                       }}
-                      onMouseEnter={(e) => { if (!item.active) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                      onMouseEnter={(e) => { if (!item.active && !disabled) e.currentTarget.style.background = "var(--bg-hover)"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = item.active ? "var(--bg-selected)" : "none"; }}
                     >
                       <item.icon size={16} weight={item.active ? "fill" : "regular"} color={item.active ? "var(--accent)" : "var(--text-muted)"} aria-hidden="true" />
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ display: "block", fontSize: 12.5, fontWeight: 550, color: "var(--text)" }}>{item.label}</span>
-                        <span style={{ display: "block", fontSize: 10.5, color: "var(--text-muted)", marginTop: 1, lineHeight: 1.4 }}>{item.desc}</span>
+                        <span style={{ display: "block", fontSize: 10.5, color: "var(--text-muted)", marginTop: 1, lineHeight: 1.4 }}>
+                          {disabled ? t("desktop.imageInputUnsupported") : item.desc}
+                        </span>
                       </span>
                       {item.active ? (
                         <CheckIcon size={12} weight="bold" color="var(--accent)" aria-hidden="true" />
                       ) : null}
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               );
             })()}
           </div>
           <div className="chat-input-toolbar-left" style={{ flex: "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
-            {!isMobile && onCollaborationModeChange && (
+            {/* Collaboration mode (normal / plan / goal) is available on every
+                viewport: it drives the plan extension's read-only toolset, so
+                hiding it on mobile left those users with no way into plan mode. */}
+            {onCollaborationModeChange && (
               <ModeControls
                 collaborationMode={collaborationMode}
                 onCollaborationModeChange={onCollaborationModeChange}
@@ -3206,8 +3237,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   overflow: "hidden",
                 }}
               >
-                <WarningCircleIcon size={14} color="#ef4444" weight="fill" style={{ flexShrink: 0 }} />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, color: "#ef4444" }}>
+                <WarningCircleIcon size={14} color="var(--status-error)" weight="fill" style={{ flexShrink: 0 }} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, color: "var(--status-error)" }}>
                   {t("desktop.modelsLoadFailed")}
                 </span>
                 {onRetryModels && (
@@ -3221,7 +3252,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                       background: "rgba(239,68,68,0.14)",
                       border: "none",
                       borderRadius: 4,
-                      color: "#ef4444",
+                      color: "var(--status-error)",
                       cursor: "pointer",
                       fontSize: 11, fontWeight: 600,
                       transition: "background 0.12s",
@@ -3287,7 +3318,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   background: "rgba(239,68,68,0.12)",
                   border: "none",
                   borderRadius: 6,
-                  color: "#ef4444",
+                  color: "var(--status-error)",
                   cursor: "pointer",
                   fontSize: 12, fontWeight: 600,
                   whiteSpace: "nowrap", letterSpacing: "-0.01em",

@@ -456,34 +456,6 @@ export function useTheme() {
     }
   }, [syncDOM]);
 
-  /** Preview a theme set without persisting it (hover preview).
-   *  Applies the theme for the current resolved mode only; writes nothing. */
-  const previewTheme = useCallback(async (name: string) => {
-    await applyModeAndTheme(resolvedMode, name);
-    const el = document.documentElement;
-    if (name) el.dataset.theme = name;
-    else delete el.dataset.theme;
-    applyBorderDepth(readBorderDepth());
-    notify();
-  }, [resolvedMode]);
-
-  /** 主题是否已加载过（命中缓存）。hover 预览只对已缓存主题生效，
-   *  未缓存主题需点击加载，避免扫过列表时触发大量 fetch + 全量 CSS 变量重算。 */
-  const isThemeCached = useCallback((name: string) => {
-    return themeCache.has(`${name}::${resolvedMode}`);
-  }, [resolvedMode]);
-
-  /** Cancel preview and re-apply the persisted theme. */
-  const clearPreview = useCallback(async () => {
-    const t = readThemeForMode();
-    await applyModeAndTheme(resolvedMode, t);
-    const el = document.documentElement;
-    if (t) el.dataset.theme = t;
-    else delete el.dataset.theme;
-    applyBorderDepth(readBorderDepth());
-    notify();
-  }, [resolvedMode]);
-
   /** Toggle between light / dark (explicit modes). */
   const toggleTheme = useCallback((origin?: ToggleOrigin) => {
     const curMode = getModeSnapshot();
@@ -528,12 +500,8 @@ export function useTheme() {
     themeName: storedThemeName,
     setMode: setModeAction,
     setTheme,
-    previewTheme,
-    clearPreview,
     toggleTheme,
     isDark,
-    /** 主题是否已缓存（hover 预览可用） */
-    isThemeCached,
     /** Border visibility depth (0 = invisible, 50 = theme default, 100 = max contrast). */
     borderDepth,
     /** Set border depth (0-100). */

@@ -33,7 +33,11 @@ interface SettingsModalProps {
   onSessionsChanged?: () => void;
 }
 
-const tabs: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
+/** The single source of truth for settings sections.
+ *
+ * Exported so other entry points (the sidebar footer) can offer the same set
+ * instead of maintaining a second, drifting list. */
+export const SETTINGS_TABS: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
   { id: "server", labelKey: "desktop.server", Icon: PlugsConnected },
   { id: "display", labelKey: "desktop.display", Icon: Monitor },
   { id: "chat", labelKey: "desktop.chat", Icon: ChatCenteredText },
@@ -72,7 +76,7 @@ export function SettingsModal({
   useEffect(() => {
     setDesktopShell(new URLSearchParams(window.location.search).has("piweb_connected"));
   }, []);
-  const visibleTabs = desktopShell ? tabs : tabs.filter(({ id }) => id !== "server");
+  const visibleTabs = desktopShell ? SETTINGS_TABS : SETTINGS_TABS.filter(({ id }) => id !== "server");
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
   // Multiple embedded configs can register a close-time flush (e.g. the
@@ -300,7 +304,7 @@ export function SettingsModal({
           </div>
         </div>
         {closeError && (
-          <div style={{ padding: "6px 18px", borderTop: "1px solid var(--border)", color: "#f87171", fontSize: 11 }}>
+          <div style={{ padding: "6px 18px", borderTop: "1px solid var(--border)", color: "var(--status-error)", fontSize: 11 }}>
             {closeError}
           </div>
         )}

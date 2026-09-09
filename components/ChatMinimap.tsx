@@ -541,9 +541,16 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
   );
 }
 
-// Hook to create a stable array of refs for messages
+// Hook to create a stable array of refs for messages.
+// The array identity must stay stable across renders: ChatMinimap wires its
+// ResizeObserver/measure effects to this ref, and the previous implementation
+// allocated a fresh array (plus `count` callback slots) on every render — i.e.
+// up to 30 times/second while streaming. Only the length is adjusted, and only
+// when it actually changes.
 export function useMessageRefs(count: number): RefObject<(HTMLDivElement | null)[]> {
   const refs = useRef<(HTMLDivElement | null)[]>([]);
-  refs.current = Array(count).fill(null).map((_, i) => refs.current[i] ?? null);
+  if (refs.current.length !== count) {
+    refs.current = Array.from({ length: count }, (_, i) => refs.current[i] ?? null);
+  }
   return refs;
 }

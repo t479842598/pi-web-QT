@@ -190,7 +190,7 @@ export function ApprovalModal({ request, queuedCount = 0, busy = false, onResolv
             style={{
               display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               width: "100%", padding: "9px 14px", borderRadius: 8,
-              background: "var(--accent)", color: "#fff",
+              background: "var(--accent)", color: "var(--accent-fg)",
               border: "none", fontSize: 12.5, fontWeight: 650,
               cursor: busy ? "not-allowed" : "pointer",
               transition: "opacity 0.12s",

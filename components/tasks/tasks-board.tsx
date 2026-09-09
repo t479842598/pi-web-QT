@@ -91,7 +91,7 @@ export function TasksBoardTitle() {
         </span>
       </h1>
       {attentionCount > 0 ? (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, borderRadius: 999, background: "rgba(239,68,68,0.12)", color: "#dc2626", padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, borderRadius: 999, background: "rgba(239,68,68,0.12)", color: "var(--status-error)", padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>
           {attentionCount} {t("tasks.attentionBadge")}
         </span>
       ) : null}
@@ -501,7 +501,7 @@ export function TasksBoard({ activeProject }: TasksBoardProps) {
             style={{
               display: "inline-flex", alignItems: "center", gap: 6,
               height: 30, borderRadius: 999, padding: "0 14px",
-              background: "var(--accent)", color: "#fff",
+              background: "var(--accent)", color: "var(--accent-fg)",
               border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer",
             }}
           >
@@ -525,7 +525,7 @@ export function TasksBoard({ activeProject }: TasksBoardProps) {
             style={{
               display: "inline-flex", alignItems: "center", gap: 6,
               padding: "7px 14px", borderRadius: 8,
-              background: "var(--accent)", color: "#fff",
+              background: "var(--accent)", color: "var(--accent-fg)",
               border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer",
             }}
           >

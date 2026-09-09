@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { completeSimple, type AssistantMessage } from "@earendil-works/pi-ai/compat";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,16 @@ function getAssistantText(message: AssistantMessage): string {
 }
 
 export async function POST(req: Request) {
+  // This route takes an arbitrary baseUrl/apiKey from the body and makes an
+  // upstream request, so it must carry the same origin/host guard as every
+  // other models-config route.
+  if (!isApiRequestAllowed(req)) {
+    return NextResponse.json({ ok: false, error: "Access denied" }, { status: 403 });
+  }
+  if (!hasJsonContentType(req)) {
+    return NextResponse.json({ ok: false, error: "Content-Type must be application/json" }, { status: 415 });
+  }
+
   let tempDir: string | undefined;
 
   try {

@@ -144,6 +144,35 @@ test("entry never restores plan mode's read-only toolset", () => {
   assert.match(loadToolsSource, /setToolPresetState\(\"default\"\)/);
 });
 
+test("plan mode is derived from the collaboration mode, not a second flag", () => {
+  // Regression: an independent planMode state drifted from collaborationMode,
+  // so the prompt block, the read-only toolset and the review dialog disagreed
+  // about whether plan mode was actually on.
+  assert.match(source, /const planMode = collaborationMode === \"plan\";/);
+  assert.doesNotMatch(source, /const \[planMode, setPlanMode\] = useState/);
+  // The extension is driven on transitions only.
+  assert.match(source, /const syncPlanModeExtension = useCallback/);
+  assert.match(source, /if \(next === \"plan\" && !wasPlan\) return syncPlanModeExtension\(\"plan\"\);/);
+  assert.match(source, /if \(next !== \"plan\" && wasPlan\) return syncPlanModeExtension\(\"normal\"\);/);
+  // Mode switching resolves only after the extension was driven, so plan
+  // execute/exit cannot race the toolset restore.
+  assert.match(source, /const handleCollaborationModeChange = useCallback\(\(mode: CollaborationMode\): Promise<void> =>/);
+  // The legacy duplicate prompt block is gone.
+  assert.doesNotMatch(source, /PLAN_MODE_INSTRUCTION/);
+});
+
+test("plan review feedback runs as a prompt so it is not silently queued", async () => {
+  const chatWindow = await readFile(new URL("../components/ChatWindow.tsx", import.meta.url), "utf8");
+  const feedback = chatWindow.slice(
+    chatWindow.indexOf("const handlePlanFeedback"),
+    chatWindow.indexOf("const handlePlanExit"),
+  );
+  // A steer on an idle session is only enqueued; the review dialog appears
+  // exactly when the run has gone idle, so feedback must start a real run.
+  assert.match(feedback, /void handleSend\(text\)/);
+  assert.doesNotMatch(feedback, /handleSteer/);
+});
+
 test("guards model list writes by request generation and context", () => {
   const loadSource = source.slice(
     source.indexOf("const loadModels = useCallback"),

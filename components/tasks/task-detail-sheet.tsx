@@ -214,7 +214,7 @@ export function TaskDetailSheet({
     display: "inline-flex", alignItems: "center", gap: 5,
     padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
     background: filled ? "var(--accent)" : danger ? "rgba(239,68,68,0.1)" : "var(--bg-hover)",
-    color: filled ? "#fff" : danger ? "#dc2626" : "var(--text)",
+    color: filled ? "#fff" : danger ? "var(--status-error)" : "var(--text)",
     border: filled || danger ? "none" : "1px solid var(--border)",
   });
 
@@ -291,7 +291,7 @@ export function TaskDetailSheet({
                 type="button"
                 onClick={() => void handleReturn()}
                 disabled={!returnText.trim()}
-                style={{ padding: "6px 14px", borderRadius: 8, background: "var(--accent)", color: "#fff", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                style={{ padding: "6px 14px", borderRadius: 8, background: "var(--accent)", color: "var(--accent-fg)", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
               >
                 {t("tasks.returnSubmit")}
               </button>
@@ -340,7 +340,7 @@ export function TaskDetailSheet({
                   <GitDiff size={13} style={{ flexShrink: 0, color: "var(--text-muted)" }} aria-hidden="true" />
                   <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-mono)", fontSize: 11 }}>{f.file}</span>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#059669", flexShrink: 0 }}>+{f.additions}</span>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#dc2626", flexShrink: 0 }}>-{f.deletions}</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--status-error)", flexShrink: 0 }}>-{f.deletions}</span>
                 </button>
               ))}
             </div>
@@ -371,7 +371,7 @@ export function TaskDetailSheet({
                 {diffPatch.split("\n").map((line, i) => {
                   let color: string | undefined;
                   if (line.startsWith("+") && !line.startsWith("+++")) color = "#059669";
-                  else if (line.startsWith("-") && !line.startsWith("---")) color = "#dc2626";
+                  else if (line.startsWith("-") && !line.startsWith("---")) color = "var(--status-error)";
                   else if (line.startsWith("@@")) color = "var(--accent)";
                   return <div key={i} style={{ color }}>{line || " "}</div>;
                 })}
@@ -425,7 +425,7 @@ export function TaskDetailSheet({
                 type="button"
                 onClick={() => void handleDelete()}
                 disabled={busy}
-                style={{ padding: "6px 14px", borderRadius: 8, background: "#dc2626", color: "#fff", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                style={{ padding: "6px 14px", borderRadius: 8, background: "var(--status-error)", color: "#fff", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
               >
                 {t("tasks.deleteConfirm")}
               </button>
@@ -434,7 +434,7 @@ export function TaskDetailSheet({
             <button
               type="button"
               onClick={() => setDeleteOpen(true)}
-              style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, background: "none", border: "1px solid var(--border)", color: "#dc2626", fontSize: 12, cursor: "pointer" }}
+              style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, background: "none", border: "1px solid var(--border)", color: "var(--status-error)", fontSize: 12, cursor: "pointer" }}
             >
               <Trash size={13} aria-hidden="true" />
               {t("tasks.delete")}

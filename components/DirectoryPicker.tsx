@@ -198,7 +198,7 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
               })()}
             </>
           )}
-          {(loadError || error) && <div style={{ padding: "8px", color: "#dc2626", fontSize: 11 }}>{loadError ?? error}</div>}
+          {(loadError || error) && <div style={{ padding: "8px", color: "var(--status-error)", fontSize: 11 }}>{loadError ?? error}</div>}
         </div>
 
         <div className="directory-picker-footer" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, flexShrink: 0, padding: "10px 18px", borderTop: "1px solid var(--border)" }}>
@@ -209,7 +209,7 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
             onClick={() => onSelect(currentPath)}
             disabled={!canSelect}
             title={t("directoryPicker.selectCurrentDirectory")}
-            style={{ padding: "6px 16px", border: 0, borderRadius: 6, background: "var(--accent)", color: "#fff", fontSize: 13, fontWeight: 600, opacity: canSelect ? 1 : 0.6, cursor: canSelect ? "pointer" : "default" }}
+            style={{ padding: "6px 16px", border: 0, borderRadius: 6, background: "var(--accent)", color: "var(--accent-fg)", fontSize: 13, fontWeight: 600, opacity: canSelect ? 1 : 0.6, cursor: canSelect ? "pointer" : "default" }}
           >
             {busy ? t("i18n.checking") : t("directoryPicker.selectThisFolder")}
           </button>

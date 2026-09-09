@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { getFileIcon } from "./FileIcons";
@@ -24,19 +24,53 @@ interface Props {
 
 export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
   const { t } = useI18n();
-  const [hoveredClose, setHoveredClose] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [overflows, setOverflows] = useState(false);
+
+  // Keep the selected tab visible when tabs are opened from elsewhere (a file
+  // click in the explorer, a keyboard arrow, restoring a persisted strip).
+  useEffect(() => {
+    if (!activeTabId) return;
+    const list = listRef.current;
+    if (!list) return;
+    const active = list.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(activeTabId)}"]`);
+    active?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeTabId, tabs.length]);
+
+  // Track overflow so the edge fade is only applied when it is meaningful.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const update = () => setOverflows(list.scrollWidth > list.clientWidth + 1);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [tabs.length]);
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>, tab: Tab) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelectTab(tab.id);
+      return;
+    }
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const index = tabs.findIndex((item) => item.id === tab.id);
+    const next = event.key === "Home" ? 0
+      : event.key === "End" ? tabs.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    onSelectTab(tabs[next].id);
+    const list = listRef.current;
+    list?.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(tabs[next].id)}"]`)?.focus();
+  }, [onSelectTab, tabs]);
 
   return (
     <div
+      ref={listRef}
       role="tablist"
-      style={{
-        display: "flex",
-        alignItems: "flex-end",
-        background: "var(--bg-panel)",
-        overflowX: "auto",
-        flexShrink: 0,
-        height: 36,
-      }}
+      className={`file-tab-bar${overflows ? "" : " no-overflow"}`}
     >
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
@@ -44,23 +78,12 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
           <div
             key={tab.id}
             role="tab"
+            data-tab-id={tab.id}
             aria-label={tab.kind === "terminal" ? t("terminal.tabLabel", { name: tab.label }) : tab.label}
             aria-selected={isActive}
             tabIndex={isActive || (!activeTabId && tabs[0].id === tab.id) ? 0 : -1}
-            onKeyDown={(event) => {
-              if (event.target !== event.currentTarget) return;
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onSelectTab(tab.id);
-              } else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
-                event.preventDefault();
-                const index = tabs.findIndex((item) => item.id === tab.id);
-                const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
-                  : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-                onSelectTab(tabs[next].id);
-                (event.currentTarget.parentElement?.children[next] as HTMLElement)?.focus();
-              }
-            }}
+            className="file-tab"
+            onKeyDown={(event) => handleKeyDown(event, tab)}
             onClick={() => onSelectTab(tab.id)}
             onMouseDown={(e) => {
               // Prevent the middle-click autoscroll default on the tab itself.
@@ -73,61 +96,20 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               e.stopPropagation();
               if (!tab.closing) onCloseTab(tab.id);
             }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              height: 36,
-              paddingLeft: 12,
-              paddingRight: 6,
-              borderRight: "1px solid var(--border)",
-              background: isActive ? "var(--bg)" : "var(--bg-panel)",
-              cursor: "pointer",
-              fontSize: 12,
-              color: isActive ? "var(--text)" : "var(--text-muted)",
-              whiteSpace: "nowrap",
-              maxWidth: 180,
-              minWidth: 80,
-              flexShrink: 0,
-              userSelect: "none",
-              transition: "background 0.1s, color 0.1s",
-            }}
           >
-            <span style={{ flexShrink: 0, opacity: isActive ? 1 : 0.7, display: "flex", alignItems: "center" }}>
+            <span className="file-tab-icon">
               {tab.kind === "terminal" ? (
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
                 </svg>
               ) : getFileIcon(tab.label, 13)}
             </span>
-            <span
-              style={{
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                flex: 1,
-                fontWeight: isActive ? 500 : 400,
-              }}
-              title={tab.filePath}
-            >
-              {tab.label}
-            </span>
+            <span className="file-tab-label" title={tab.filePath}>{tab.label}</span>
             <button
+              type="button"
+              className="file-tab-close"
               disabled={tab.closing}
               onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
-              onMouseEnter={() => setHoveredClose(tab.id)}
-              onMouseLeave={() => setHoveredClose(null)}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 24, height: 24,
-                background: hoveredClose === tab.id ? "var(--bg-hover)" : "transparent",
-                border: "none",
-                borderRadius: 4,
-                color: hoveredClose === tab.id ? "var(--text)" : "var(--text-dim)",
-                cursor: "pointer",
-                padding: 0,
-                flexShrink: 0,
-                transition: "background 0.1s, color 0.1s",
-              }}
               title={t("desktop.closeTab")}
               aria-label={t("desktop.closeTabWithLabel", { label: tab.label })}
             >

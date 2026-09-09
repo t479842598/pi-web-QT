@@ -114,7 +114,7 @@ export function TaskMergeDialog({
               disabled={(!autoMessage && !message.trim()) || submitting}
               style={{
                 padding: "8px 16px", borderRadius: 8,
-                background: "var(--accent)", color: "#fff",
+                background: "var(--accent)", color: "var(--accent-fg)",
                 border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer",
               }}
             >

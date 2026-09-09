@@ -151,13 +151,36 @@ export interface PluginsResponse {
 }
 
 /** One entry under mcp.json's `mcpServers` map. Unknown extra fields
- *  (env, requestTimeoutMs, cwd, ...) are passed through by the API. */
+ *  (env, requestTimeoutMs, cwd, ...) are passed through by the API.
+ *
+ *  `command`/`args` are stdio-only and `url` is URL-transport-only, so both are
+ *  optional here; which ones are required depends on `transport`. The enum
+ *  mirrors pi-mcp-extension's zod schema ("stdio" | "streamable-http" | "sse") —
+ *  a legacy "http" value written by older pi-web builds is normalized on read. */
 export interface McpServerConfig {
-  command: string;
-  args: string[];
-  transport?: "stdio" | "sse" | "http";
+  command?: string;
+  args?: string[];
+  /** Remote endpoint for `streamable-http` / `sse` transports. */
+  url?: string;
+  /** Static HTTP headers for `streamable-http` / `sse` transports. */
+  headers?: Record<string, string>;
+  /** OAuth config consumed by pi-mcp-extension (URL transports only). */
+  auth?: Record<string, unknown>;
+  transport?: McpTransport;
   lifecycle?: "eager" | "lazy";
+  env?: Record<string, string>;
+  requestTimeoutMs?: number;
   [key: string]: unknown;
+}
+
+/** Transports accepted by pi-mcp-extension's mcp.json schema. */
+export type McpTransport = "stdio" | "streamable-http" | "sse";
+
+/** Legacy pi-web wrote "http" for what the extension calls "streamable-http". */
+export function normalizeMcpTransport(value: unknown): McpTransport {
+  if (value === "stdio" || value === "sse" || value === "streamable-http") return value;
+  if (value === "http") return "streamable-http";
+  return "stdio";
 }
 
 export interface McpConfigResponse {

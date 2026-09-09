@@ -9,6 +9,7 @@ import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
+import { FILE_TABS_KEY, restoreFileTabs, serializeFileTabs } from "@/lib/file-tab-state";
 import { SettingsModal, type SettingsTab } from "./SettingsModal";
 import { TasksViewProvider } from "@/contexts/tasks-view-context";
 import { TasksBoard, TasksBoardTitle } from "./tasks/tasks-board";
@@ -153,6 +154,32 @@ export function AppShell() {
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  // Restore the tab strip once on mount. Reading localStorage in the initial
+  // state would run during SSR/hydration and produce a mismatch, so restore in
+  // an effect and persist on every subsequent change.
+  const fileTabsRestoredRef = useRef(false);
+  useEffect(() => {
+    if (fileTabsRestoredRef.current) return;
+    fileTabsRestoredRef.current = true;
+    let restored: ReturnType<typeof restoreFileTabs>;
+    try {
+      restored = restoreFileTabs(localStorage.getItem(FILE_TABS_KEY));
+    } catch {
+      return;
+    }
+    if (restored.tabs.length === 0) return;
+    setFileTabs(restored.tabs);
+    setActiveFileTabId(restored.activeId);
+    setRightPanelOpen(restored.open);
+  }, []);
+  useEffect(() => {
+    if (!fileTabsRestoredRef.current) return;
+    try {
+      localStorage.setItem(FILE_TABS_KEY, serializeFileTabs(fileTabs, activeFileTabId, rightPanelOpen));
+    } catch {
+      // Quota/private mode: persistence is a convenience, never a hard failure.
+    }
+  }, [fileTabs, activeFileTabId, rightPanelOpen]);
   // Agents 面板（上游 AgentSessionPanel）：会话族谱 + 运行状态，右栏承载。
   const [agentsPanelOpen, setAgentsPanelOpen] = useState(false);
   const [agentsPanelSessions, setAgentsPanelSessions] = useState<SessionInfo[]>([]);
@@ -763,8 +790,9 @@ export function AppShell() {
         onOpenFile={handleOpenFile}
         selectedSessionStats={sessionStats}
         onOpenSettings={(tab) => {
-          const supported: SettingsTab[] = ["models", "skills", "plugins", "chat", "features", "logs"];
-          openSettings(supported.includes(tab as SettingsTab) ? tab as SettingsTab : "models");
+          // The sidebar derives its shortcuts from the settings tab registry,
+          // so any id it passes is valid by construction.
+          openSettings(tab ?? "models");
         }}
         explorerRefreshKey={explorerRefreshKey}
         onAtMention={handleAtMention}
@@ -953,7 +981,7 @@ export function AppShell() {
               role="alert"
               style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 24, color: "var(--text-muted)", textAlign: "center" }}
             >
-              <div style={{ fontSize: 14, color: "#dc2626" }}>{t("desktop.unableToOpenWorkspace")}</div>
+              <div style={{ fontSize: 14, color: "var(--status-error)" }}>{t("desktop.unableToOpenWorkspace")}</div>
               <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 12 }}>
                 {initialNavigation.requestedCwd}
               </div>
@@ -1007,7 +1035,9 @@ export function AppShell() {
               onCloseTab={handleCloseFileTab}
             />
           </div>
-          {/* Agents 族谱面板开关 */}
+          {/* Agents 族谱面板开关 — separated from the tab strip by a rule so the
+              two controls do not read as one row of tabs. */}
+          <div style={{ width: 1, height: 18, flexShrink: 0, background: "var(--border)", marginRight: 6 }} aria-hidden="true" />
           <button
             type="button"
             onClick={() => setAgentsPanelOpen((v) => !v)}

@@ -69,7 +69,7 @@ export function StatusChip({ task }: { task: WorkTask }) {
     case "awaiting_input":
     case "review":
       return (
-        <span style={{ ...base, border: "1px solid rgba(245,158,11,0.45)", background: "rgba(245,158,11,0.08)", color: "#d97706" }}>
+        <span style={{ ...base, border: "1px solid rgba(245,158,11,0.45)", background: "rgba(245,158,11,0.08)", color: "var(--status-warning)" }}>
           {label}
         </span>
       );
@@ -82,7 +82,7 @@ export function StatusChip({ task }: { task: WorkTask }) {
       );
     case "failed":
       return (
-        <span style={{ ...base, background: "rgba(239,68,68,0.12)", color: "#dc2626" }}>
+        <span style={{ ...base, background: "rgba(239,68,68,0.12)", color: "var(--status-error)" }}>
           {label}
         </span>
       );
@@ -103,7 +103,7 @@ export function PreflightChip({ task }: { task: WorkTask }) {
     light.status === "passed"
       ? { background: "rgba(16,185,129,0.12)", color: "#059669" }
       : light.status === "failed"
-        ? { background: "rgba(239,68,68,0.12)", color: "#dc2626" }
+        ? { background: "rgba(239,68,68,0.12)", color: "var(--status-error)" }
         : { background: "var(--bg-hover)", color: "var(--text-muted)" };
   return (
     <span
@@ -197,7 +197,7 @@ export function TaskCard({
     task.filesChanged != null && task.filesChanged > 0 ? (
       <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontFamily: "var(--font-mono)", fontSize: 10 }}>
         <span style={{ color: "#059669" }}>+{task.additions ?? 0}</span>
-        <span style={{ color: "#dc2626" }}>-{task.deletions ?? 0}</span>
+        <span style={{ color: "var(--status-error)" }}>-{task.deletions ?? 0}</span>
       </span>
     ) : null;
   const when = formatTaskWhen(
@@ -304,7 +304,7 @@ export function TaskCard({
       </div>
 
       {task.lastError && (task.status === "failed" || task.status === "review") ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, borderRadius: 8, background: "rgba(239,68,68,0.08)", padding: "6px 8px", fontSize: 11, color: "#dc2626" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, borderRadius: 8, background: "rgba(239,68,68,0.08)", padding: "6px 8px", fontSize: 11, color: "var(--status-error)" }}>
           <WarningCircle size={13} style={{ flexShrink: 0 }} aria-hidden="true" />
           <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.lastError}</span>
           <button
@@ -336,7 +336,7 @@ export function TaskCard({
               style={{
                 display: "inline-flex", alignItems: "center", gap: 5,
                 padding: "4px 10px", borderRadius: 7,
-                background: "var(--accent)", color: "#fff",
+                background: "var(--accent)", color: "var(--accent-fg)",
                 border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600,
               }}
             >

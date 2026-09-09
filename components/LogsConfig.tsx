@@ -101,15 +101,15 @@ export function LogsConfig() {
         </select>
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("desktop.logsSearch")} style={{ flex: 1, minWidth: 180, padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }} />
         <button type="button" onClick={() => void load()} title={t("desktop.refresh")} aria-label={t("desktop.refresh")} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text-muted)", cursor: "pointer" }}><ArrowClockwise size={14} /></button>
-        <button type="button" onClick={() => void clear()} title={t("desktop.logsClear")} aria-label={t("desktop.logsClear")} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "#ef4444", cursor: "pointer" }}><Trash size={14} /></button>
+        <button type="button" onClick={() => void clear()} title={t("desktop.logsClear")} aria-label={t("desktop.logsClear")} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--status-error)", cursor: "pointer" }}><Trash size={14} /></button>
       </div>
       {loading && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>{t("desktop.loading")}</div>}
-      {error && <div style={{ color: "#ef4444", fontSize: 12 }}>{error}</div>}
+      {error && <div style={{ color: "var(--status-error)", fontSize: 12 }}>{error}</div>}
       {!loading && !error && entries.length === 0 && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>{t("desktop.logsEmpty")}</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {entries.map((entry) => (
           <details key={entry.id} style={{ border: "1px solid var(--border)", borderRadius: 7, background: "var(--bg-panel)", padding: "8px 10px" }}>
-            <summary style={{ cursor: "pointer", color: entry.level === "error" ? "#ef4444" : entry.level === "warning" ? "#f59e0b" : "var(--text)", fontSize: 12 }}>
+            <summary style={{ cursor: "pointer", color: entry.level === "error" ? "var(--status-error)" : entry.level === "warning" ? "var(--status-warning)" : "var(--text)", fontSize: 12 }}>
               <span style={{ fontFamily: "var(--font-mono)", marginRight: 8 }}>{entry.statusCode ?? "—"}</span>
               <span style={{ marginRight: 8 }}>{new Date(entry.timestamp).toLocaleString()}</span>
               <span style={{ overflowWrap: "anywhere" }}>{entry.message.length > 180 ? `${entry.message.slice(0, 180)}…` : entry.message}</span>

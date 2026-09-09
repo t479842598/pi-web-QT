@@ -103,7 +103,7 @@ export function PlanReviewDialog({
               disabled={busy || !feedback.trim()}
               style={{
                 padding: "5px 12px", borderRadius: 6,
-                background: "var(--accent)", color: "#fff",
+                background: "var(--accent)", color: "var(--accent-fg)",
                 border: "none", fontSize: 11.5, fontWeight: 600,
                 cursor: busy || !feedback.trim() ? "not-allowed" : "pointer",
               }}
@@ -165,7 +165,7 @@ export function PlanReviewDialog({
           style={{
             display: "inline-flex", alignItems: "center", gap: 5,
             padding: "6px 12px", borderRadius: 7,
-            background: "var(--accent)", color: "#fff",
+            background: "var(--accent)", color: "var(--accent-fg)",
             border: "none", fontSize: 12, fontWeight: 650,
             cursor: busy ? "not-allowed" : "pointer",
             transition: "opacity 0.12s",
