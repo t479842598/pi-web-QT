@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "@phosphor-icons/react";
+import { Robot } from "@phosphor-icons/react/Robot";
 import { useI18n } from "@/hooks/useI18n";
 import { getFileIcon } from "./FileIcons";
 
@@ -9,10 +10,12 @@ export interface Tab {
   id: string;
   label: string;
   filePath: string;
-  kind?: "terminal";
+  kind?: "terminal" | "subagent";
   closing?: boolean;
   sourceSessionId?: string | null;
   initialDisplayMode?: "diff";
+  /** Subagent run shown by a `kind: "subagent"` tab. */
+  sessionId?: string;
 }
 
 interface Props {
@@ -79,7 +82,11 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
             key={tab.id}
             role="tab"
             data-tab-id={tab.id}
-            aria-label={tab.kind === "terminal" ? t("terminal.tabLabel", { name: tab.label }) : tab.label}
+            aria-label={tab.kind === "terminal"
+              ? t("terminal.tabLabel", { name: tab.label })
+              : tab.kind === "subagent"
+                ? t("subagent.transcriptTitle") + ": " + tab.label
+                : tab.label}
             aria-selected={isActive}
             tabIndex={isActive || (!activeTabId && tabs[0].id === tab.id) ? 0 : -1}
             className="file-tab"
@@ -98,7 +105,9 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
             }}
           >
             <span className="file-tab-icon">
-              {tab.kind === "terminal" ? (
+              {tab.kind === "subagent" ? (
+                <Robot size={13} aria-hidden="true" />
+              ) : tab.kind === "terminal" ? (
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
                 </svg>

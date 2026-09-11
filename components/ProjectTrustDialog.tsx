@@ -2,6 +2,7 @@
 
 import { ShieldCheck } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 
 export function ProjectTrustDialog({
   cwd,
@@ -18,6 +19,8 @@ export function ProjectTrustDialog({
 }) {
   const { t } = useI18n();
 
+  useEscapeKey(!busy, onCancelAction);
+
   return (
     <div
       role="presentation"
@@ -30,9 +33,6 @@ export function ProjectTrustDialog({
         justifyContent: "center",
         padding: 16,
         background: "rgba(0, 0, 0, 0.4)",
-      }}
-      onClick={(event) => {
-        if (!busy && event.target === event.currentTarget) onCancelAction();
       }}
     >
       <section

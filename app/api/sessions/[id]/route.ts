@@ -102,7 +102,17 @@ export async function GET(
       })(),
       parentSessionId,
       ...(subagent
-        ? { relation: { kind: "subagent" as const, parentSessionId: subagent.parentSessionId, profile: subagent.profile, description: subagent.description, status: liveRpc?.isRunning() ? "running" as const : subagent.status } }
+        ? { relation: {
+            kind: "subagent" as const,
+            parentSessionId: subagent.parentSessionId,
+            profile: subagent.profile,
+            description: subagent.description,
+            status: liveRpc?.isRunning() ? "running" as const : subagent.status,
+            // The run's own start/finish; the parent's Agent tool result has no
+            // completedAt for a background run.
+            ...(subagent.createdAt ? { createdAt: subagent.createdAt } : {}),
+            ...(subagent.completedAt ? { completedAt: subagent.completedAt } : {}),
+          } }
         : header.parentSession
           ? { relation: { kind: "fork" as const, ...(parentSessionId ? { originSessionId: parentSessionId } : {}) } }
           : {}),

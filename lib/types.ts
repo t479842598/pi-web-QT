@@ -354,6 +354,14 @@ export interface SessionInfo {
         profile: string;
         description: string;
         status: SubagentSessionStatus;
+        /**
+         * The run's own start/finish times, read from the subagent session's
+         * metadata entries. The parent's `Agent` tool result cannot supply
+         * these: a background run returns immediately, so its result keeps
+         * `status: "running"` and has no `completedAt` forever.
+         */
+        createdAt?: string;
+        completedAt?: string;
       };
   /** Whether this session is pinned to the top of the session list (stored in settings.json sessionPins). */
   pinned?: boolean;

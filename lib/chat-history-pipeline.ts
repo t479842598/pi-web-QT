@@ -1,6 +1,12 @@
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, ToolResultMessage } from "./types";
 import { getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "./message-display";
-import { collectProcessContentBlocks, splitAssistantContentBlocks, type ProcessContentBlock } from "./process-content";
+import {
+  collectProcessContentBlocks,
+  splitAssistantContentBlocks,
+  splitProcessSegments,
+  type ProcessContentBlock,
+  type ProcessSegment,
+} from "./process-content";
 import { extractTurnWrittenFiles, type WrittenFile } from "./turn-written-files";
 
 /**
@@ -65,6 +71,12 @@ export type HistoryRenderItem =
       finalAssistantIdx: number;
       visibleProcessIndices: number[];
       processBlocks: ProcessContentBlock[];
+      /**
+       * `processBlocks` split into consecutive groups with every subagent
+       * `Agent` call hoisted into its own segment, so each subagent renders as
+       * a persistent row instead of collapsing into the process card.
+       */
+      processSegments: ProcessSegment[];
       finalAnswerMessage: AssistantMessage | null;
       writtenFiles: WrittenFile[] | undefined;
     };
@@ -116,7 +128,7 @@ export function buildHistoryPipeline(
         .filter((processIdx) => hasDisplayableProcessMessage(messages[processIdx]));
       const processBlocks = collectProcessContentBlocks(messages, entryIds, processIndices, toolResultsMap);
       if (processBlocks.length > 0) {
-        items.push({ kind: "turn", userIdx: -1, endIdx, startsCompactionTurn: false, finalAssistantIdx: -1, visibleProcessIndices: processIndices, processBlocks, finalAnswerMessage: null, writtenFiles: undefined });
+        items.push({ kind: "turn", userIdx: -1, endIdx, startsCompactionTurn: false, finalAssistantIdx: -1, visibleProcessIndices: processIndices, processBlocks, processSegments: splitProcessSegments(processBlocks), finalAnswerMessage: null, writtenFiles: undefined });
         idx = endIdx;
         continue;
       }
@@ -138,7 +150,7 @@ export function buildHistoryPipeline(
       const processIndices = Array.from({ length: endIdx - userIdx - 1 }, (_, offset) => userIdx + 1 + offset)
         .filter((processIdx) => hasDisplayableProcessMessage(messages[processIdx]));
       const processBlocks = collectProcessContentBlocks(messages, entryIds, processIndices, toolResultsMap);
-      items.push({ kind: "turn", userIdx, endIdx, startsCompactionTurn, finalAssistantIdx, visibleProcessIndices: processIndices, processBlocks, finalAnswerMessage: null, writtenFiles: undefined });
+      items.push({ kind: "turn", userIdx, endIdx, startsCompactionTurn, finalAssistantIdx, visibleProcessIndices: processIndices, processBlocks, processSegments: splitProcessSegments(processBlocks), finalAnswerMessage: null, writtenFiles: undefined });
       idx = endIdx;
       continue;
     }
@@ -190,6 +202,7 @@ export function buildHistoryPipeline(
       finalAssistantIdx,
       visibleProcessIndices,
       processBlocks,
+      processSegments: splitProcessSegments(processBlocks),
       finalAnswerMessage,
       writtenFiles,
     });

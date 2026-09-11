@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { ArrowClockwise, CloudArrowUp, X } from "@phosphor-icons/react";
 import type { StashEntry } from "@/lib/git-ops";
 
@@ -19,6 +20,8 @@ export function StashDialog({ open, onOpenChange, cwd }: StashDialogProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [output, setOutput] = useState<string | null>(null);
+
+  useEscapeKey(open && !busy, () => onOpenChange(false));
 
   const refresh = useCallback(async () => {
     if (!cwd) return;
@@ -71,7 +74,6 @@ export function StashDialog({ open, onOpenChange, cwd }: StashDialogProps) {
         display: "flex", alignItems: "center", justifyContent: "center",
         background: "rgba(0,0,0,0.45)",
       }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onOpenChange(false); }}
     >
       <div style={{
         width: "min(520px, calc(100vw - 48px))",

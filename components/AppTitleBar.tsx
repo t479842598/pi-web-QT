@@ -14,6 +14,7 @@ import {
   Sun,
 } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionInfo } from "@/lib/types";
 import { DynamicIsland } from "./desktop";
@@ -136,6 +137,8 @@ export function AppTitleBar({
 }: AppTitleBarProps) {
   const { t: translate } = useI18n();
   const [titleModalOpen, setTitleModalOpen] = useState(false);
+
+  useEscapeKey(titleModalOpen, () => setTitleModalOpen(false));
   // 桌面壳环境（URL 带 ?piweb_connected=1）：显示「切换服务器」入口
   const [desktopShell, setDesktopShell] = useState(false);
 
@@ -631,7 +634,6 @@ export function AppTitleBar({
             paddingTop: 48,
             background: "rgba(0,0,0,0.35)",
           }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setTitleModalOpen(false); }}
         >
           <div
             role="dialog"

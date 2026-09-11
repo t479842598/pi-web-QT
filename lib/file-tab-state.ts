@@ -32,6 +32,7 @@ export function serializeFileTabs(tabs: Tab[], activeId: string | null, open: bo
         label: tab.label,
         filePath: tab.filePath,
         ...(tab.kind ? { kind: tab.kind } : {}),
+        ...(tab.sessionId ? { sessionId: tab.sessionId } : {}),
         ...(tab.sourceSessionId ? { sourceSessionId: tab.sourceSessionId } : {}),
         ...(tab.initialDisplayMode ? { initialDisplayMode: tab.initialDisplayMode } : {}),
       })),
@@ -58,13 +59,19 @@ export function restoreFileTabs(raw: string | null): StoredFileTabs {
       const id = typeof entry.id === "string" ? entry.id : "";
       const filePath = typeof entry.filePath === "string" ? entry.filePath : "";
       const label = typeof entry.label === "string" ? entry.label : "";
-      if (!id || !filePath || !label || seen.has(id)) continue;
+      const isSubagent = entry.kind === "subagent";
+      const sessionId = typeof entry.sessionId === "string" ? entry.sessionId : "";
+      // A subagent tab is anchored to its session id, not a file path; every
+      // other tab still requires a file path.
+      if (!id || !label || seen.has(id)) continue;
+      if (isSubagent ? !sessionId : !filePath) continue;
       seen.add(id);
       tabs.push({
         id,
         label,
         filePath,
         ...(entry.kind === "terminal" ? { kind: "terminal" as const } : {}),
+        ...(isSubagent ? { kind: "subagent" as const, sessionId } : {}),
         ...(typeof entry.sourceSessionId === "string" ? { sourceSessionId: entry.sourceSessionId } : {}),
         ...(entry.initialDisplayMode === "diff" ? { initialDisplayMode: "diff" as const } : {}),
       });

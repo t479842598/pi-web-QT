@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Pi Web 远程</title>
+  <link rel="icon" href="/icon.svg" />
+  <link rel="stylesheet" href="/remote.css" />
+</head>
+<body>
+  <main id="app" data-state="waiting">
+    <section class="card" id="connect">
+      <h1>Pi Web 远程</h1>
+      <p class="muted" id="hint">正在读取配对信息…</p>
+      <button type="button" id="retry" hidden>重新连接</button>
+    </section>
+
+    <section class="card" id="error" hidden>
+      <h1 id="error-title">无法连接</h1>
+      <p class="muted" id="error-detail"></p>
+      <button type="button" id="error-retry">重试</button>
+    </section>
+  </main>
+
+  <script type="module" src="/remote.js"></script>
+</body>
+</html>

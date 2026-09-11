@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PlusIcon } from "@phosphor-icons/react";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { useI18n } from "@/hooks/useI18n";
 import type { PluginPackageInfo, PluginsResponse } from "@/lib/api-types";
 
@@ -604,6 +605,8 @@ export function PluginsConfig({
   const [data, setData] = useState<PluginsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEscapeKey(!embedded && Boolean(onCloseAction), () => onCloseAction?.());
   const [selected, setSelected] = useState<string | null>(null);
   const [addMode, setAddMode] = useState(false);
   const [installSource, setInstallSource] = useState("");
@@ -731,7 +734,6 @@ export function PluginsConfig({
       style={embedded
         ? { display: "flex", flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }
         : { position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (!embedded && e.target === e.currentTarget) onCloseAction?.(); }}
     >
       <div
         style={embedded

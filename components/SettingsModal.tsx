@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChatCenteredText, ChartBar, Cpu, Database, DownloadSimple, Lightning, List, ListBullets, Monitor, Network, Plug, PlugsConnected, Robot, Stack, TerminalWindow, X } from "@phosphor-icons/react";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
+import { ChatCenteredText, ChartBar, Cpu, Database, DeviceMobile, DownloadSimple, Lightning, List, ListBullets, Monitor, Network, Plug, PlugsConnected, Robot, Stack, TerminalWindow, X } from "@phosphor-icons/react";
 import { BackupConfig } from "./BackupConfig";
 import { ChatConfig } from "./ChatConfig";
 import { DisplayConfig } from "./DisplayConfig";
@@ -18,10 +19,11 @@ import { AgentsConfig } from "./AgentsConfig";
 import { ToolsConfig } from "./ToolsConfig";
 import { UsageConfig } from "./UsageConfig";
 import { ServerSwitchConfig } from "./ServerSwitchConfig";
+import { PairDevicePanel } from "./PairDeviceDialog";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 
-export type SettingsTab = "server" | "display" | "chat" | "models" | "skills" | "plugins" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import" | "mcp" | "subagents" | "tools";
+export type SettingsTab = "server" | "display" | "chat" | "models" | "skills" | "plugins" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import" | "mcp" | "subagents" | "tools" | "remote";
 
 interface SettingsModalProps {
   initialTab?: SettingsTab;
@@ -39,6 +41,7 @@ interface SettingsModalProps {
  * instead of maintaining a second, drifting list. */
 export const SETTINGS_TABS: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
   { id: "server", labelKey: "desktop.server", Icon: PlugsConnected },
+  { id: "remote", labelKey: "pair.tabLabel", Icon: DeviceMobile },
   { id: "display", labelKey: "desktop.display", Icon: Monitor },
   { id: "chat", labelKey: "desktop.chat", Icon: ChatCenteredText },
   { id: "models", labelKey: "desktop.models", Icon: Cpu },
@@ -71,7 +74,9 @@ export function SettingsModal({
   const [activeTab, setActiveTab] = useState<SettingsTab>(
     initialTab === "skills" || initialTab === "plugins" ? (cwd ? initialTab : "display") : initialTab,
   );
-  // 桌面壳环境（URL 带 ?piweb_connected=1）：显示「服务器」配置入口；纯浏览器隐藏
+  // 桌面壳环境（URL 带 ?piweb_connected=1）：显示「服务器」配置入口；纯浏览器隐藏。
+  // 远程配对不在此列——它由网页端生成二维码给手机扫，浏览器里同样需要，
+  // 面板自己会在未配置中继时给出提示。
   const [desktopShell, setDesktopShell] = useState(false);
   useEffect(() => {
     setDesktopShell(new URLSearchParams(window.location.search).has("piweb_connected"));
@@ -108,6 +113,8 @@ export function SettingsModal({
     }
   }, [closing, onCloseAction]);
 
+  useEscapeKey(!closing, () => { void requestClose(); });
+
   return (
     <div
       style={{
@@ -118,9 +125,6 @@ export function SettingsModal({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-      }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) void requestClose();
       }}
     >
       <section
@@ -252,6 +256,9 @@ export function SettingsModal({
 
           <div style={{ display: activeTab === "server" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <ServerSwitchConfig />
+          </div>
+          <div style={{ display: activeTab === "remote" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
+            <PairDevicePanel />
           </div>
           <div style={{ display: activeTab === "display" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <DisplayConfig />

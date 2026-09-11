@@ -383,7 +383,15 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
       firstMessage: stripModeInstructionBlocks(s.firstMessage || "(no messages)").slice(0, FIRST_MESSAGE_MAX_CHARS),
       parentSessionId: originSessionId,
       ...(subagent
-        ? { relation: { kind: "subagent" as const, parentSessionId: subagent.parentSessionId, profile: subagent.profile, description: subagent.description, status: subagent.status } }
+        ? { relation: {
+            kind: "subagent" as const,
+            parentSessionId: subagent.parentSessionId,
+            profile: subagent.profile,
+            description: subagent.description,
+            status: subagent.status,
+            ...(subagent.createdAt ? { createdAt: subagent.createdAt } : {}),
+            ...(subagent.completedAt ? { completedAt: subagent.completedAt } : {}),
+          } }
         : s.parentSessionPath
           ? { relation: { kind: "fork" as const, ...(originSessionId ? { originSessionId } : {}) } }
           : {}),

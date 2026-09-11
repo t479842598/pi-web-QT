@@ -1,0 +1,29 @@
+# Caddy reverse proxy for the Pi Web relay.
+#
+# Caddy obtains and renews the certificate automatically, and reverse_proxy
+# handles the WebSocket upgrade by default — the only thing that needs saying
+# explicitly here is to keep the proxy out of the frame path.
+
+relay.example.com {
+  encode zstd gzip
+
+  # Static mobile page and health check.
+  handle {
+    reverse_proxy 127.0.0.1:8787 {
+      flush_interval -1
+    }
+  }
+
+  # WebSocket transport.
+  handle /ws* {
+    reverse_proxy 127.0.0.1:8787 {
+      # Stream frames straight through instead of buffering them; a buffered
+      # long-lived socket is what makes the phone look stuck.
+      flush_interval -1
+      transport http {
+        read_timeout 0
+        write_timeout 0
+      }
+    }
+  }
+}

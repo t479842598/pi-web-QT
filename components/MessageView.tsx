@@ -28,7 +28,8 @@ import { GitForkIcon } from "@phosphor-icons/react/GitFork";
 import { useI18n } from "@/hooks/useI18n";
 import { cnyCost, matchesDeepSeekCNY, formatCNY } from "@/lib/deepseek-pricing";
 import { skillExpansionToCommand } from "@/lib/slash-display";
-import type { SubagentToolDetails } from "@/lib/subagent-extension";
+import { isSubagentToolDetails } from "@/lib/subagent-tool-details";
+import type { SubagentToolDetails } from "@/lib/subagent-tool-details";
 import type {
   AgentMessage,
   UserMessage,
@@ -908,12 +909,6 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
       )}
     </div>
   );
-}
-
-function isSubagentToolDetails(value: unknown): value is SubagentToolDetails {
-  if (!value || typeof value !== "object") return false;
-  const details = value as Partial<SubagentToolDetails>;
-  return details.kind === "pi-web-subagent" && typeof details.sessionId === "string";
 }
 
 function ThinkingContentBody({ block, sessionId, entryId, blockIndex, isStreaming, cwd, onOpenFile, className }: {

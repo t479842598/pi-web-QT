@@ -6,6 +6,7 @@ import type {
   ImageContent,
   ToolResultMessage,
 } from "./types";
+import { isSubagentToolDetails } from "./subagent-tool-details";
 
 export interface BlockOrigin {
   phase: "process" | "result";
@@ -35,6 +36,94 @@ export type ProcessContentBlock =
       status: "running" | "success" | "error";
     })
   | (ProcessBlockBase & { type: "custom"; customType: string; message: CustomMessage });
+
+/**
+ * A subagent `Agent` tool call, hoisted out of the process group.
+ *
+ * Subagent runs are long-lived and interesting on their own, so they get a
+ * persistent row in the conversation instead of disappearing into a collapsed
+ * "process" card. Not exported from this module as a type predicate: the
+ * caller supplies the message index so the row can be anchored for the
+ * minimap.
+ */
+export interface SubagentRunEntry {
+  toolCallId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  result?: ToolResultMessage;
+  duration?: number;
+  status: "running" | "success" | "error";
+  /** Index of the assistant message this block came from. */
+  sourceMessageIndex: number;
+}
+
+/**
+ * A turn's hoisted subagent row. `beforeBlocks` are the process blocks that
+ * preceded it and must render as a collapsed group above the row; a following
+ * group is started for whatever comes after.
+ */
+export interface ProcessSegment {
+  kind: "group" | "subagent";
+  blocks: ProcessContentBlock[];
+  subagent?: SubagentRunEntry;
+}
+
+/**
+ * True for an `Agent` tool call that should render as its own subagent row.
+ *
+ * Hoisting is only safe when the row can stand on its own: a still-running
+ * call (the row shows live progress) or a result that carries valid subagent
+ * details. A failed `Agent` dispatch returns `details: undefined` with the
+ * real error text in `result.content`, so hoisting it would produce an
+ * unclickable row that hides the failure — those stay in the process group.
+ */
+export function isSubagentBlock(block: ProcessContentBlock): boolean {
+  if (block.type !== "toolCall" || block.toolName !== "Agent") return false;
+  if (block.status === "running" || !block.result) return true;
+  return isSubagentToolDetails(block.result.details);
+}
+
+/**
+ * Split a turn's process blocks into render segments, pulling every `Agent`
+ * tool call out into its own segment while preserving the original order.
+ *
+ * Consecutive non-subagent blocks stay in one group so the collapsed summary
+ * is unchanged; a subagent block ends the current group and starts a new one
+ * after it.
+ */
+export function splitProcessSegments(blocks: ProcessContentBlock[]): ProcessSegment[] {
+  const segments: ProcessSegment[] = [];
+  let pending: ProcessContentBlock[] = [];
+
+  const flush = () => {
+    if (pending.length === 0) return;
+    segments.push({ kind: "group", blocks: pending });
+    pending = [];
+  };
+
+  for (const block of blocks) {
+    if (isSubagentBlock(block) && block.type === "toolCall") {
+      flush();
+      segments.push({
+        kind: "subagent",
+        blocks: [block],
+        subagent: {
+          toolCallId: block.toolCallId,
+          toolName: block.toolName,
+          input: block.input,
+          result: block.result,
+          duration: block.duration,
+          status: block.status,
+          sourceMessageIndex: block.origin.sourceMessageIndex,
+        },
+      });
+      continue;
+    }
+    pending.push(block);
+  }
+  flush();
+  return segments;
+}
 
 interface ConvertMessageOptions {
   messageIndex: number;

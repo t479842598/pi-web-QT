@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { CollaborationMode } from "@/lib/modes";
 import { ArrowRightIcon } from "@phosphor-icons/react/ArrowRight";
-import { CaretDownIcon } from "@phosphor-icons/react/CaretDown";
 import { CheckIcon } from "@phosphor-icons/react/Check";
 import { ListDashesIcon } from "@phosphor-icons/react/ListDashes";
 import { TargetIcon } from "@phosphor-icons/react/Target";
@@ -148,8 +147,9 @@ export function ModeControls({
   };
 
   const triggerStyle = (active: boolean): React.CSSProperties => ({
-    display: "flex", alignItems: "center", gap: 3,
-    padding: "3px 6px",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: 0,
+    width: 24,
     height: 24,
     background: active ? "var(--bg-hover)" : "none",
     border: "none",
@@ -163,7 +163,7 @@ export function ModeControls({
   });
 
   const CollabIcon = COLLAB_ICONS[collaborationMode];
-  const collabLabel = collaborationMode === "plan" ? t("modes.collabPlan") : collaborationMode === "goal" ? t("modes.collabGoal") : t("modes.collabNormal");
+  const collabTitleKey = collaborationMode === "plan" ? "modes.collabPlanTitle" : collaborationMode === "goal" ? "modes.collabGoalTitle" : "modes.collabNormalTitle";
 
   return (
     <>
@@ -171,16 +171,14 @@ export function ModeControls({
         <button
           ref={collabRef}
           type="button"
-          aria-label={t("modes.collabNormalTitle")}
-          title={t("modes.collabNormalTitle")}
+          aria-label={t(collabTitleKey)}
+          title={t(collabTitleKey)}
           aria-expanded={openMenu === "collab"}
           onClick={trigger("collab", collabRef)}
           disabled={disabled}
           style={triggerStyle(openMenu === "collab")}
         >
-          <CollabIcon size={13} weight={collaborationMode !== "normal" ? "fill" : "regular"} color={collaborationMode !== "normal" ? "var(--accent)" : "var(--text-muted)"} aria-hidden="true" />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{collabLabel}</span>
-          <CaretDownIcon size={10} weight="bold" aria-hidden="true" style={{ transform: openMenu === "collab" ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.12s", flexShrink: 0 }} />
+          <CollabIcon size={14} weight={collaborationMode !== "normal" ? "fill" : "regular"} color={collaborationMode !== "normal" ? "var(--accent)" : "var(--text-muted)"} aria-hidden="true" />
         </button>
       </div>
       {renderMenu()}

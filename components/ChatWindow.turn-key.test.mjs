@@ -21,9 +21,13 @@ test("historical keys stay entryId-based so prepending an older page is safe", (
 
 test("the live branch uses the live keys, not the entryId-based ones", () => {
   const live = source.slice(source.indexOf("const isLiveTail"), source.indexOf("if (finalAssistantIdx === -1"));
-  assert.match(live, /liveProcessItemKey\(userIdx\)/);
+  // Process groups may be split into per-segment keys once subagent rows are
+  // hoisted out, so accept the segment form as long as it is rooted in the
+  // turn's user index (live) and never the entryId-based key.
+  assert.match(live, /liveProcess(Item|Segment)Key\(userIdx/);
   assert.match(live, /liveAnswerItemKey\(userIdx\)/);
   assert.doesNotMatch(live, /answerItemKey\(userIdx\)/);
+  assert.doesNotMatch(live, /processItemKey\(userIdx\)/);
 });
 
 test("keys no longer embed values that change mid-run", () => {

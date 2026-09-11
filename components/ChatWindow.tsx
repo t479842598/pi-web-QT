@@ -6,7 +6,7 @@ import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { splitFinalAssistantBlocks, extractPlanText } from "@/lib/message-display";
 import { buildHistoryPipeline, hasDisplayableProcessMessage, withAssistantBlocks } from "@/lib/chat-history-pipeline";
 import { type WrittenFile } from "@/lib/turn-written-files";
-import { collectProcessContentBlocks, splitAssistantContentBlocks } from "@/lib/process-content";
+import { collectProcessContentBlocks, splitAssistantContentBlocks, splitProcessSegments } from "@/lib/process-content";
 import { MessageView } from "./MessageView";
 import { PlanReviewDialog } from "./PlanReviewDialog";
 import { GoalBanner } from "./GoalBanner";
@@ -16,6 +16,7 @@ import { requestCreateTaskFromText } from "@/lib/task-compose-events";
 /** Fired after parking a task draft — AppShell listens and opens the board. */
 export const OPEN_TASKS_VIEW_EVENT = "pi:open-tasks-view";
 import { ProcessGroup } from "./ProcessGroup";
+import { SubagentRunRow, type SubagentRunTimes } from "./SubagentRunRow";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { QueueRecoveryDialog } from "./QueueRecoveryDialog";
 import { SessionInfoBar } from "./SessionInfoBar";
@@ -32,6 +33,8 @@ import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import { isSubagentToolDetails } from "@/lib/subagent-tool-details";
+import type { ToolResultMessage } from "@/lib/types";
 
 interface Props {
   session: SessionInfo | null;
@@ -46,6 +49,10 @@ interface Props {
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
   /** Live subagent activity (Agent tool spawns/completions) forwarded to AppShell. */
   onOpenSession?: (sessionId: string) => void;
+  /** Open a subagent run's transcript in the right-hand panel (AppShell). */
+  onOpenSubagent?: (sessionId: string, label: string) => void;
+  /** Subagent session id → authoritative run record (from the session list). */
+  subagentRuns?: ReadonlyMap<string, SubagentRunTimes>;
   /** Live subagent fleet — rendered as inline cards on Agent/Task tool calls. */
   /** Open the fullscreen subagent conversation view (AppShell). */
   onSessionStatsPanelOpen?: () => void;
@@ -85,7 +92,7 @@ function getUserInputText(message: AgentMessage): string | null {
   return trimmed || null;
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onWorkspaceControlsHostChange, onViewFullHistory, systemPrompt, tasksBoardEnabled, onOpenSession }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onWorkspaceControlsHostChange, onViewFullHistory, systemPrompt, tasksBoardEnabled, onOpenSession, onOpenSubagent, subagentRuns }: Props) {
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -1026,6 +1033,21 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               const liveAnswerItemKey = (userIdx: number) => `live-answer-u${userIdx}`;
               const processItemKey = (userIdx: number) => `process-${messageItemKey(userIdx, "user")}`;
               const answerItemKey = (userIdx: number) => `answer-${messageItemKey(userIdx, "user")}`;
+              // A hoisted subagent row is stable regardless of the turn's
+              // position, so both the live tail and the historical list key it
+              // by toolCallId (the only anchor that exists mid-run, before any
+              // assistant entryId is persisted).
+              const subagentItemKey = (toolCallId: string) => `subagent-${toolCallId}`;
+              // The row's session id comes from the tool result details; a row
+              // whose result has not landed yet has none.
+              const subagentSessionId = (run: { result?: ToolResultMessage }) =>
+                isSubagentToolDetails(run.result?.details) ? run.result.details.sessionId : "";
+              // A turn's process blocks may be split into several groups once
+              // subagent rows are hoisted out; derive each group's key from the
+              // turn's own key so the "keys stay turn-scoped" rule still holds.
+              const liveProcessSegmentKey = (userIdx: number, segmentIdx: number) => `${liveProcessItemKey(userIdx)}-seg${segmentIdx}`;
+              const processSegmentKey = (userIdx: number, segmentIdx: number, firstBlockId: string) =>
+                `${processItemKey(userIdx)}-${firstBlockId || `seg${segmentIdx}`}`;
               for (const item of items) {
                 if (item.kind === "single") {
                   // A bare toolResult renders nothing in MessageView (its
@@ -1089,23 +1111,35 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     const processRefIdx = liveProcessIndices
                       .map((processIdx) => visibleRefIndexByMessage.get(processIdx))
                       .find((value): value is number => typeof value === "number");
-                    pushRendered(
-                      <div
-                        key={`live-process-group-${userIdx}`}
-                        ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
-                      >
-                        <ProcessGroup
-                          blocks={liveProcessBlocks}
-                          isStreaming={agentRunning || streamState.isStreaming}
-                          cwd={messageCwd}
-                          onOpenFile={onOpenFile}
-                          sessionId={session?.id ?? sessionIdRef.current ?? undefined}
-                          tokenRate={tokenRate}
-                        />
-                      </div>,
-                      processRefIdx,
-                      liveProcessItemKey(userIdx),
-                    );
+                    // Subagent runs render as their own persistent rows instead
+                    // of collapsing into the process card.
+                    splitProcessSegments(liveProcessBlocks).forEach((segment, segmentIdx) => {
+                      if (segment.kind === "subagent" && segment.subagent) {
+                        pushRendered(
+                          <SubagentRunRow key={subagentItemKey(segment.subagent.toolCallId)} run={segment.subagent} onOpenSubagent={onOpenSubagent} sessionRun={subagentRuns?.get(subagentSessionId(segment.subagent))} />,
+                          processRefIdx,
+                          subagentItemKey(segment.subagent.toolCallId),
+                        );
+                        return;
+                      }
+                      pushRendered(
+                        <div
+                          key={liveProcessSegmentKey(userIdx, segmentIdx)}
+                          ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
+                        >
+                          <ProcessGroup
+                            blocks={segment.blocks}
+                            isStreaming={agentRunning || streamState.isStreaming}
+                            cwd={messageCwd}
+                            onOpenFile={onOpenFile}
+                            sessionId={session?.id ?? sessionIdRef.current ?? undefined}
+                            tokenRate={tokenRate}
+                          />
+                        </div>,
+                        processRefIdx,
+                        liveProcessSegmentKey(userIdx, segmentIdx),
+                      );
+                    });
                   }
                   if (liveAnswerMessage) {
                     pushRendered(
@@ -1146,32 +1180,44 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   pushRendered(renderMessage(userIdx), visibleRefIndexByMessage.get(userIdx), messageItemKey(userIdx, "user"));
                 }
 
-                const { processBlocks, finalAnswerMessage, writtenFiles, visibleProcessIndices } = item;
-                if (processBlocks.length > 0) {
+                const { finalAnswerMessage, writtenFiles, visibleProcessIndices } = item;
+                if (item.processBlocks.length > 0) {
                   const processRefIdx = visibleProcessIndices
                     .map((processIdx) => visibleRefIndexByMessage.get(processIdx))
                     .find((value): value is number => typeof value === "number")
                     ?? (finalAnswerMessage ? undefined : visibleRefIndexByMessage.get(finalAssistantIdx));
-                  pushRendered(
-                    <div
-                      key={`process-group-${userIdx}-${finalAssistantIdx}`}
-                      ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
-                    >
-                      <ProcessGroup
-                        blocks={processBlocks}
-                        isStreaming={false}
-                        // Historical processing is always compact after a run;
-                        // the user can expand it explicitly from the summary.
-                        defaultExpanded={false}
-                        onAutoExpanded={undefined}
-                        cwd={messageCwd}
-                        onOpenFile={onOpenFile}
-                        sessionId={session?.id ?? sessionIdRef.current ?? undefined}
-                      />
-                    </div>,
-                    processRefIdx,
-                    processItemKey(userIdx),
-                  );
+                  // Subagent runs are hoisted out of the collapsed group so
+                  // each is a persistent row of its own.
+                  item.processSegments.forEach((segment, segmentIdx) => {
+                    if (segment.kind === "subagent" && segment.subagent) {
+                      pushRendered(
+                        <SubagentRunRow key={subagentItemKey(segment.subagent.toolCallId)} run={segment.subagent} onOpenSubagent={onOpenSubagent} sessionRun={subagentRuns?.get(subagentSessionId(segment.subagent))} />,
+                        processRefIdx,
+                        subagentItemKey(segment.subagent.toolCallId),
+                      );
+                      return;
+                    }
+                    pushRendered(
+                      <div
+                        key={`process-group-${userIdx}-${segmentIdx}`}
+                        ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
+                      >
+                        <ProcessGroup
+                          blocks={segment.blocks}
+                          isStreaming={false}
+                          // Historical processing is always compact after a run;
+                          // the user can expand it explicitly from the summary.
+                          defaultExpanded={false}
+                          onAutoExpanded={undefined}
+                          cwd={messageCwd}
+                          onOpenFile={onOpenFile}
+                          sessionId={session?.id ?? sessionIdRef.current ?? undefined}
+                        />
+                      </div>,
+                      processRefIdx,
+                      processSegmentKey(userIdx, segmentIdx, segment.blocks[0]?.id ?? ""),
+                    );
+                  });
                 }
 
                 if (finalAnswerMessage) {

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { X } from "@phosphor-icons/react";
 import type { WorkTask } from "@/lib/task-types";
 
@@ -25,6 +26,8 @@ export function TaskTranscriptDialog({
 }: TaskTranscriptDialogProps) {
   const { t } = useI18n();
 
+  useEscapeKey(open && Boolean(task), () => onOpenChange(false));
+
   useEffect(() => {
     if (!open) return;
   }, [open, task]);
@@ -38,7 +41,6 @@ export function TaskTranscriptDialog({
         display: "flex", alignItems: "center", justifyContent: "center",
         background: "rgba(0,0,0,0.45)",
       }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onOpenChange(false); }}
     >
       <div style={{
         width: "min(520px, calc(100vw - 48px))",

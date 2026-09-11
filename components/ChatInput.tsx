@@ -411,6 +411,7 @@ function QueuedMessageRow({ kind, text, label, index, total, onMove, onRecall, o
   return (
     <div
       title={text}
+      className="chat-input-queue-row"
       style={{
         display: "flex",
         alignItems: "center",
@@ -1758,7 +1759,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       style={{
         flexShrink: 0,
         background: "transparent",
-        padding: "0 16px 15px",
+        // Clear the iOS home indicator / gesture bar so the send button is
+        // never under it.
+        padding: isMobile
+          ? "0 16px max(15px, env(safe-area-inset-bottom))"
+          : "0 16px 15px",
         paddingRight: isMobile ? 16 : 34, // desktop: 16px base + 18px for ChatMinimap alignment
       }}
     >
@@ -1827,6 +1832,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             borderRadius: 6,
             background: "var(--bg-panel)",
             padding: "5px 0",
+            // A long queue used to push the composer off-screen; cap it and
+            // scroll instead of growing without bound.
+            maxHeight: "30dvh",
+            overflowY: "auto",
           }}>
             <div style={{
               display: "flex",
@@ -2557,8 +2566,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
         {/* Bottom bar: left | center (context) | right */}
         <div className="chat-input-toolbar" style={{
-          display: isMobile ? "grid" : "flex",
-          gridTemplateColumns: isMobile ? "auto auto minmax(0, 1fr)" : undefined,
+          display: "flex",
           alignItems: "center",
           gap: 4,
         }}>
@@ -2715,7 +2723,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               display: "flex",
               alignItems: "center",
               gap: isMobile ? 1 : 2,
-              flexWrap: "wrap",
               justifyContent: "flex-end",
               ...(isMobile ? {
                 flex: "1 1 auto",
@@ -2728,11 +2735,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   onClick={(e) => { if (isStreaming) return; const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setThinkingDropdownRect({ top: rect.top, left: rect.left, width: rect.width }); setThinkingDropdownOpen((v) => !v); }}
                   disabled={isStreaming}
                   title={t("desktop.changeReasoningLevel", { level: thinkingDisplayLabel })}
-                  aria-label={t("desktop.reasoningLevel")}
+                  aria-label={t("desktop.changeReasoningLevel", { level: thinkingDisplayLabel })}
                   style={{
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                    padding: isMobile ? "0 5px" : "3px 7px",
-                    width: isMobile ? "auto" : undefined,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    padding: 0,
+                    width: 24,
                     height: 24,
                     background: thinkingDropdownOpen ? "var(--bg-hover)" : "none",
                     border: "none",
@@ -2752,13 +2759,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   }}
                 >
                   <ThinkingLevelIcon level={thinkingLevel ?? "auto"} />
-                  <span style={{ whiteSpace: "nowrap" }}>{thinkingDisplayLabel}</span>
-                  <CaretDownIcon
-                    size={11}
-                    weight="bold"
-                    aria-hidden="true"
-                    style={{ transform: thinkingDropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.12s" }}
-                  />
                 </button>
                 {thinkingDropdownOpen && thinkingDropdownRect && (() => {
                     const vh = window.visualViewport?.height ?? window.innerHeight;
@@ -2916,17 +2916,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                       setModelDropdownOpen((v) => !v);
                     }}
                     disabled={isStreaming}
-                    title={currentName ?? undefined}
+                    title={currentName ?? t("desktop.selectModel")}
+                    aria-label={currentName ?? t("desktop.selectModel")}
                     style={{
-                      display: "flex", alignItems: "center", gap: 6,
-                      justifyContent: isMobile ? "flex-start" : undefined,
-                      padding: isMobile ? "4px 6px" : "3px 7px",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      padding: 0,
+                      width: isMobile ? 28 : 26,
                       height: 24,
-                      // Long model names must never crowd the toolbar: cap the
-                      // button at a fixed width and ellipsize the label (the
-                      // span below carries the overflow). Mobile gets a tighter
-                      // cap so thinking/tools/send stay on the same row.
-                      maxWidth: isMobile ? "min(150px, 42vw)" : "min(220px, 34vw)",
                       overflow: "hidden",
                       background: modelDropdownOpen ? "var(--bg-hover)" : "none",
                       border: "none",
@@ -2948,13 +2944,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     }}
                   >
                     <ProviderIcon id={model?.provider ?? "unknown"} size={14} />
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{currentName ?? t("desktop.selectModel")}</span>
-                    <CaretDownIcon
-                      size={11}
-                      weight="bold"
-                      aria-hidden="true"
-                      style={{ flexShrink: 0, transform: modelDropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.12s" }}
-                    />
                   </button>
                   {modelDropdownOpen && modelDropdownRect && (() => {
                     const viewportHeight = viewport.height || window.innerHeight;
@@ -3311,24 +3300,23 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 onClick={onAbort}
                 title={t("desktop.stopAgent")}
                 aria-label={t("desktop.stopAgent")}
+                className="chat-input-stop"
                 style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "3px 7px",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  padding: 0,
+                  width: 24,
                   height: 24,
                   background: "rgba(239,68,68,0.12)",
                   border: "none",
-                  borderRadius: 6,
+                  borderRadius: 4,
                   color: "var(--status-error)",
                   cursor: "pointer",
-                  fontSize: 12, fontWeight: 600,
-                  whiteSpace: "nowrap", letterSpacing: "-0.01em",
                   transition: "background 0.12s",
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.20)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; }}
               >
                 <SquareIcon size={14} />
-                {t("desktop.stop")}
               </button>
             )}
 

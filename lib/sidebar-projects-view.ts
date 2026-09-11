@@ -177,6 +177,9 @@ export function filterVisibleSessions(
   const { hiddenKeys, search } = options;
   return sessions.filter((s) => {
     if (s.archived) return false;
+    // Subagent runs are persisted sessions but are surfaced inside the parent
+    // conversation, never as their own sidebar rows.
+    if (s.relation?.kind === "subagent") return false;
     if (hiddenKeys?.size && hiddenKeys.has(sessionProjectKey(s))) return false;
     return sessionMatchesSearch(s, search ?? "");
   });

@@ -8,6 +8,7 @@ import type {
   ExtensionWidgetItem,
   SessionInfo,
   SessionTreeNode,
+  ToolResultMessage,
   UserMessage,
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
@@ -2225,6 +2226,38 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           const tools = prev.tools.filter((t) => t.id !== id);
           if (tools.length === 0) return { kind: "waiting_model" };
           return { kind: "running_tools", tools };
+        });
+        break;
+      }
+      case "tool_execution_update": {
+        // Only the Agent tool streams here (see the events route). The partial
+        // result carries the subagent's sessionId and status well before the
+        // call completes, so fold it in as a provisional toolResult keyed by
+        // toolCallId. A background dispatch keeps streaming after the real
+        // result has landed, so the real result must win: only fill in details,
+        // never overwrite content / isError / timestamp.
+        const id = typeof event.toolCallId === "string" ? event.toolCallId : null;
+        const partial = event.partialResult as { details?: unknown } | undefined;
+        const details = partial?.details;
+        if (!id || !details) break;
+        setMessages((prev) => {
+          const existingIdx = prev.findIndex((m) => m.role === "toolResult" && m.toolCallId === id);
+          if (existingIdx === -1) {
+            const provisional: ToolResultMessage = {
+              role: "toolResult",
+              toolCallId: id,
+              toolName: typeof event.toolName === "string" ? event.toolName : "Agent",
+              content: [],
+              details,
+            };
+            return [...prev, provisional];
+          }
+          const existing = prev[existingIdx];
+          // A real result already landed; keep its content and only refresh details.
+          if (existing.role !== "toolResult" || existing.content.length > 0) return prev;
+          const next = [...prev];
+          next[existingIdx] = { ...existing, details };
+          return next;
         });
         break;
       }

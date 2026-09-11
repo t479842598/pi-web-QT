@@ -10,6 +10,7 @@ import { sameIdSet } from "@/lib/id-set";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { QuickChangesPanel } from "./QuickChangesPanel";
@@ -1252,12 +1253,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   // Sessions of every worktree in the selected project are shown together.
   // Archived sessions are hidden from all normal lists (restorable from the
-  // archive view). Memoized: the session-tree memo downstream keys on these
-  // identities — an inline filter would rebuild the tree on every render.
+  // archive view). Subagent runs are hidden too: they are real persisted
+  // sessions, but they belong inside the parent conversation (inline rows +
+  // the right-panel transcript tab), not as separate conversations.
+  // Memoized: the session-tree memo downstream keys on these identities — an
+  // inline filter would rebuild the tree on every render.
   const filteredSessions = useMemo(
-    () => selectedProject
+    () => (selectedProject
       ? allSessions.filter((s) => !s.archived && (s.projectRoot ?? s.cwd) === selectedProject)
-      : allSessions.filter((s) => !s.archived),
+      : allSessions.filter((s) => !s.archived)
+    ).filter((s) => s.relation?.kind !== "subagent"),
     [allSessions, selectedProject],
   );
 
@@ -3059,6 +3064,8 @@ const SessionItem = memo(function SessionItem({
   const renameMeasureRef = useRef<HTMLSpanElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const [titleModelPickerOpen, setTitleModelPickerOpen] = useState(false);
+
+  useEscapeKey(titleModelPickerOpen, () => setTitleModelPickerOpen(false));
   const [titleModels, setTitleModels] = useState<Array<{ id: string; name?: string; provider?: string }>>([]);
   const [titleModelError, setTitleModelError] = useState<string | null>(null);
   const [titleModelLoading, setTitleModelLoading] = useState(false);
@@ -3601,7 +3608,6 @@ const SessionItem = memo(function SessionItem({
                   background: "rgba(0,0,0,0.4)",
                   padding: 16,
                 }}
-                onMouseDown={(e) => { if (e.target === e.currentTarget) setTitleModelPickerOpen(false); }}
               >
                 <div
                   role="dialog"

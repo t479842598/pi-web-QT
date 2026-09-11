@@ -8,6 +8,8 @@ import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
+import { SubagentTranscriptPanel } from "./SubagentTranscriptPanel";
+import type { SubagentRunTimes } from "./SubagentRunRow";
 import { TabBar, type Tab } from "./TabBar";
 import { FILE_TABS_KEY, restoreFileTabs, serializeFileTabs } from "@/lib/file-tab-state";
 import { SettingsModal, type SettingsTab } from "./SettingsModal";
@@ -187,7 +189,13 @@ export function AppShell() {
 
   // 打开面板或切换会话时拉取会话目录（含 relation），并在面板打开期间每 3s 轮询运行状态。
   useEffect(() => {
-    if (!agentsPanelOpen) return;
+    // Closing the panel must drop its snapshot: `subagentRuns` is derived from
+    // it and takes precedence over a row's own lookup, so a stale "running"
+    // entry would pin a finished background run forever.
+    if (!agentsPanelOpen) {
+      setAgentsPanelSessions((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
     let cancelled = false;
     const load = () => {
       fetch("/api/sessions", { cache: "no-store" })
@@ -606,6 +614,41 @@ export function AppShell() {
     handleOpenFile(filePath, getFileName(filePath), selectedSession?.id ?? null);
   }, [handleOpenFile, selectedSession?.id]);
 
+  /**
+   * Open (or focus) a subagent run's transcript as a right-panel tab. Reuses
+   * the file-tab machinery so it persists and closes like any other tab, but
+   * is keyed by session id instead of a path.
+   */
+  /**
+   * Subagent session id → authoritative run record. The parent's Agent tool
+   * result keeps `running` with no `completedAt` after a background run, so the
+   * subagent's own session record supplies both the real status and duration.
+   */
+  const subagentRuns = useMemo(() => {
+    const map = new Map<string, SubagentRunTimes>();
+    for (const session of agentsPanelSessions) {
+      if (session.relation?.kind !== "subagent") continue;
+      const relation = session.relation;
+      map.set(session.id, {
+        status: agentsPanelRunningIds.has(session.id) ? "running" : relation.status,
+        ...(relation.createdAt ? { createdAt: relation.createdAt } : {}),
+        ...(relation.completedAt ? { completedAt: relation.completedAt } : {}),
+      });
+    }
+    return map;
+  }, [agentsPanelSessions, agentsPanelRunningIds]);
+
+  const handleOpenSubagentTab = useCallback((sessionId: string, label: string) => {
+    const tabId = `subagent:${sessionId}`;
+    setFileTabs((prev) => {
+      if (prev.some((t) => t.id === tabId)) return prev;
+      return [...prev, { id: tabId, label, filePath: "", kind: "subagent", sessionId }];
+    });
+    setActiveFileTabId(tabId);
+    setRightPanelOpen(true);
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
+
   const handleCloseFileTab = useCallback((tabId: string) => {
     setFileTabs((prev) => {
       const next = prev.filter((t) => t.id !== tabId);
@@ -959,6 +1002,8 @@ export function AppShell() {
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
               onOpenSession={handleOpenSession}
+              onOpenSubagent={handleOpenSubagentTab}
+              subagentRuns={subagentRuns}
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
@@ -1070,7 +1115,14 @@ export function AppShell() {
                 onSelectSession={(session) => { setAgentsPanelOpen(false); handleSelectSessionRef.current(session); }}
               />
             );
-          })() : activeFileTab?.filePath ? (
+          })() : activeFileTab?.kind === "subagent" && activeFileTab.sessionId ? (
+            <SubagentTranscriptPanel
+              sessionId={activeFileTab.sessionId}
+              label={activeFileTab.label}
+              running={agentsPanelRunningIds.has(activeFileTab.sessionId)}
+              onOpenFile={handleOpenLinkedFile}
+            />
+          ) : activeFileTab?.filePath ? (
             <FileViewer
               filePath={activeFileTab.filePath}
               cwd={activeCwd ?? undefined}

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { useTasksView } from "@/contexts/tasks-view-context";
 import { X } from "@phosphor-icons/react";
 import {
@@ -35,6 +36,8 @@ export function TaskSettingsDialog({
   const [settings, setSettings] = useState<WorkTaskFolderSettings>(() => defaultTaskSettings());
   const [hasOwn, setHasOwn] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  useEscapeKey(!saving, () => onOpenChange(false));
 
   useEffect(() => {
     if (!open) return;
@@ -101,7 +104,6 @@ export function TaskSettingsDialog({
         display: "flex", alignItems: "center", justifyContent: "center",
         background: "rgba(0,0,0,0.45)",
       }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onOpenChange(false); }}
     >
       <div style={{
         width: "min(560px, calc(100vw - 48px))",

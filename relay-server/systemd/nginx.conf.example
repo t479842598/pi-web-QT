@@ -1,0 +1,49 @@
+# Nginx reverse proxy for the Pi Web relay.
+#
+# The two non-obvious requirements are the WebSocket upgrade passthrough and
+# disabling buffering — without the second, long-lived frames sit in the proxy
+# and the phone appears to hang.
+
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ''      close;
+}
+
+server {
+  listen 80;
+  server_name relay.example.com;
+  # certbot --nginx rewrites this to redirect + adds the 443 block.
+}
+
+server {
+  listen 443 ssl;
+  http2 on;
+  server_name relay.example.com;
+
+  ssl_certificate     /etc/letsencrypt/live/relay.example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/relay.example.com/privkey.pem;
+
+  # Static mobile page + health check.
+  location / {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  # WebSocket transport.
+  location /ws {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # Long-lived connection: do not buffer, do not time out early.
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+  }
+}

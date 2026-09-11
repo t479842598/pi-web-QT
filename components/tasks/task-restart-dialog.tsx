@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { useTasksView } from "@/contexts/tasks-view-context";
 import { X } from "@phosphor-icons/react";
 import { taskAction } from "@/lib/task-api";
@@ -32,6 +33,8 @@ export function TaskRestartDialog({
   const { refetch } = useTasksView();
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  useEscapeKey(!submitting, () => onOpenChange(false));
 
   // A fresh box per open — a note belongs to one restart, not to the next.
   useEffect(() => {
@@ -67,7 +70,6 @@ export function TaskRestartDialog({
         display: "flex", alignItems: "center", justifyContent: "center",
         background: "rgba(0,0,0,0.45)",
       }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onOpenChange(false); }}
     >
       <div style={{
         width: "min(480px, calc(100vw - 48px))",

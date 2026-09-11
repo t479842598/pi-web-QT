@@ -25,4 +25,14 @@ export async function register(): Promise<void> {
     // Engine startup is best-effort at boot; task commands report
     // "engine not running" and the next request can retry.
   }
+
+  // Outbound relay for remote access. Off unless PI_WEB_RELAY_URL is set —
+  // an unconfigured install must not open an unexpected socket. Anchored on
+  // globalThis so dev hot-reloads do not stack connections.
+  try {
+    const { ensureRelayClient } = await import("@/lib/relay-runtime");
+    ensureRelayClient();
+  } catch {
+    // Relay is optional; the direct tunnel path is unaffected when it fails.
+  }
 }

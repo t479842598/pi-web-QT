@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { BookmarkSimple, Trash, X } from "@phosphor-icons/react";
 import { listTaskTemplates, saveTaskTemplate, deleteTaskTemplate } from "@/lib/task-api";
 import type { WorkTask, WorkTaskTemplate } from "@/lib/task-types";
@@ -39,6 +40,8 @@ export function TaskEditorDialog({
   const [templates, setTemplates] = useState<WorkTaskTemplate[]>([]);
   const [templateName, setTemplateName] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEscapeKey(!busy, () => onOpenChange(false));
 
   // Initialize the form only once per open. The board's provider refetches the
   // task/project list on a 60s timer, SSE nudges, and visibility/online events;
@@ -126,7 +129,6 @@ export function TaskEditorDialog({
         display: "flex", alignItems: "center", justifyContent: "center",
         background: "rgba(0,0,0,0.45)",
       }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onOpenChange(false); }}
     >
       <div style={{
         width: "min(520px, calc(100vw - 48px))",

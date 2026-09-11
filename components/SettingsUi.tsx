@@ -1,6 +1,7 @@
 "use client";
 
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } from "react";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 
 type ConfigButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 type ConfigButtonSize = "small" | "default";
@@ -26,6 +27,8 @@ export function ConfigPanelShell({
   width = 900,
   height = "78vh",
 }: ConfigPanelShellProps) {
+  useEscapeKey(!embedded, onClose);
+
   const panelStyle = embedded
     ? undefined
     : ({
@@ -39,9 +42,6 @@ export function ConfigPanelShell({
       aria-modal={embedded ? undefined : "true"}
       aria-label={title}
       className={`config-panel-root ${embedded ? "is-embedded" : "is-modal"}`}
-      onClick={(event) => {
-        if (!embedded && event.target === event.currentTarget) onClose();
-      }}
     >
       <div className="config-panel-surface" style={panelStyle}>
         {!embedded && (

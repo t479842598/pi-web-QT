@@ -10,6 +10,7 @@ import {
   PlusIcon,
 } from "@phosphor-icons/react";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { TitleModelSetting } from "@/components/TitleModelSetting";
@@ -1477,6 +1478,8 @@ function AddProviderPicker({
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  useEscapeKey(true, onClose);
+
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 30); }, []);
 
   const q = search.trim().toLowerCase();
@@ -1506,7 +1509,6 @@ function AddProviderPicker({
   return (
     <div
       style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div style={{ width: 820, maxWidth: "calc(100vw - 32px)", maxHeight: "min(72vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
         {/* Search */}
@@ -1617,6 +1619,8 @@ function CustomProviderDialog({
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [headers, setHeaders] = useState<Record<string, string> | undefined>(undefined);
+
+  useEscapeKey(true, onCancel);
   const [urlOpen, setUrlOpen] = useState(false);
   const [modelId, setModelId] = useState("");
   const [contextWindow, setContextWindow] = useState("");
@@ -1658,7 +1662,6 @@ function CustomProviderDialog({
   return (
     <div
       style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div style={{ width: 480, maxWidth: "calc(100vw - 32px)", maxHeight: "min(82vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
         {/* Header */}
@@ -2049,6 +2052,10 @@ export function ModelsConfig({
     }
   }, [flushBuiltinModels, onCloseAction]);
 
+  // Escape closes the standalone dialog; the embedded variant lives inside
+  // SettingsModal, which owns its own close affordances.
+  useEscapeKey(!embedded && Boolean(onCloseAction), () => { void requestClose(); });
+
   const providers = Object.entries(config.providers ?? {});
   const builtinProviderIds = new Set([
     ...oauthProviders.map((provider) => provider.id),
@@ -2139,7 +2146,6 @@ export function ModelsConfig({
       style={embedded
         ? { display: "flex", flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }
         : { position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (!embedded && e.target === e.currentTarget) void requestClose(); }}
     >
       <div style={embedded
         ? { flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }

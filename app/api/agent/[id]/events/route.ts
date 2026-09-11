@@ -7,7 +7,24 @@ export const dynamic = "force-dynamic";
 // every streamed chunk. Omitting them avoids serializing duplicate payloads.
 const OMITTED_EVENT_TYPES = new Set(["turn_start", "turn_end", "tool_execution_update"]);
 
+/**
+ * Only the `Agent` tool reports meaningful partial results — a subagent's
+ * session id and status arrive through onUpdate long before the call
+ * completes. Every other tool emits one update per streamed chunk, so those
+ * stay dropped.
+ */
+const FORWARDED_UPDATE_TOOLS = new Set(["Agent"]);
+
 function toClientEvent(event: AgentEvent): AgentEvent | null {
+  if (event.type === "tool_execution_update") {
+    if (typeof event.toolName !== "string" || !FORWARDED_UPDATE_TOOLS.has(event.toolName)) return null;
+    return {
+      type: "tool_execution_update",
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      partialResult: event.partialResult,
+    };
+  }
   if (OMITTED_EVENT_TYPES.has(event.type)) return null;
   if (event.type === "message_update") {
     const clientEvent = { ...event };

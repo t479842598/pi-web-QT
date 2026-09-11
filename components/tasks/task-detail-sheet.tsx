@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { useTasksView } from "@/contexts/tasks-view-context";
 import {
   ArrowClockwise,
@@ -81,6 +82,8 @@ export function TaskDetailSheet({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteWorktree, setDeleteWorktree] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  useEscapeKey(true, () => onOpenChange(false));
 
   const taskId = task?.id ?? null;
   const projectRoot = task?.projectRoot ?? null;
@@ -224,7 +227,6 @@ export function TaskDetailSheet({
         position: "fixed", inset: 0, zIndex: 800,
         background: "rgba(0,0,0,0.35)",
       }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onOpenChange(false); }}
     >
       <div
         style={{

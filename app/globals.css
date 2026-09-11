@@ -130,6 +130,28 @@
   --hatch-color: rgba(13, 148, 136, 0.12);
   --hatch-spacing: 6px;
   --hatch-width: 1px;
+
+  /* ── Size scale ──────────────────────────────────────────────────────────
+     One base size drives the whole type ramp, so a density tweak stays in
+     proportion. Deliberately not overridden by themes: colour is thematic,
+     spacing is structural. */
+  --size-base: 14px;
+  --text-ui-xs: calc(var(--size-base) - 4px);
+  --text-ui-sm: calc(var(--size-base) - 2px);
+  --text-ui-base: var(--size-base);
+  --text-ui-caption: calc(var(--size-base) - 1px);
+  --text-ui-lg: calc(var(--size-base) + 2px);
+  --text-ui-xl: calc(var(--size-base) + 4px);
+
+  --radius-xs: 0.125rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  /* Horizontal page margin for the chat column and its composer. */
+  --page-margin-mobile: 20px;
+  --page-margin-desktop: 32px;
 }
 
 html.dark {
@@ -858,6 +880,17 @@ pre, code {
   box-shadow: none !important;
   cursor: not-allowed !important;
   transition: color 150ms ease, background 150ms ease !important;
+}
+/* Stop mirrors the send button's box so the toolbar does not reflow when a
+   run starts; only the tone differs. */
+.chat-input-stop {
+  display: inline-flex !important;
+  width: 24px !important;
+  height: 24px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  border-radius: 4px !important;
 }
 .chat-input-send:not(:disabled) {
   color: var(--accent-blue) !important;
@@ -1975,6 +2008,15 @@ span.token.table {
   width: max-content;
   max-width: min(92vw, 620px);
 }
+/* On a phone the 360px/340px floors are wider than the viewport once the
+   composer padding is subtracted, so the popover ran off the right edge. */
+@media (max-width: 640px) {
+  .session-info-bar-popover.is-session,
+  .session-info-bar-popover.is-branches {
+    min-width: 0;
+    max-width: calc(100vw - 16px);
+  }
+}
 .session-info-bar-popover.is-branches {
   left: 0;
   min-width: 340px;
@@ -2257,9 +2299,6 @@ span.token.table {
     letter-spacing: -0.01em;
   }
 
-  .chat-stats-center {
-    display: none !important;
-  }
   .directory-picker-back,
   .directory-picker-entry,
   .directory-picker-action {
@@ -2279,8 +2318,10 @@ span.token.table {
     top: 48px;
     left: 0;
     bottom: 0;
-    width: 280px;
-    max-width: 85vw;
+    /* Keep the px floor for very narrow phones, then let the drawer grow to a
+       comfortable reading width on a landscape phone / small tablet. */
+    width: min(88vw, 28rem);
+    max-width: 88vw;
     transition: transform 0.25s ease, box-shadow 0.25s ease;
   }
   .sidebar-container.sidebar-open {
@@ -2428,6 +2469,41 @@ span.token.table {
   .chat-input-textarea {
     font-size: max(16px, var(--chat-content-font-size, 14px)) !important;
   }
+  /* Composer controls are 24px boxes sized for a mouse cursor; on touch they
+     are the only way to attach, switch model, change reasoning or stop a run,
+     so widen the hit area without changing the visual weight. */
+  .chat-input-toolbar button,
+  .chat-input-toolbar-attach button,
+  .chat-input-toolbar-model button,
+  .chat-input-toolbar-thinking button {
+    min-width: 36px !important;
+    min-height: 36px !important;
+  }
+  .chat-input-send,
+  .chat-input-stop {
+    min-width: 36px !important;
+    min-height: 36px !important;
+  }
+  /* Queued-message move/recall/remove. */
+  .chat-input-queue-row button {
+    min-width: 32px !important;
+    min-height: 32px !important;
+  }
+  /* Streaming steer / follow-up floating actions. */
+  .chat-input-streaming-action {
+    min-width: 44px;
+    min-height: 36px;
+  }
+  /* Session info bar: push/stash/sound/compact are icon-only 22px buttons. */
+  .session-info-bar-button {
+    min-width: 32px;
+    min-height: 32px;
+  }
+  /* Tab close button is hover-revealed at 20px; touch has no hover. */
+  .file-tab-close {
+    min-width: 28px;
+    min-height: 28px;
+  }
 }
 
 /* ── File / terminal tab bar (right panel) ───────────────────────────────────
@@ -2477,6 +2553,15 @@ span.token.table {
   font-size: 12px;
   user-select: none;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+/* The 96px floor fits ~3 tabs on desktop; on a phone the right panel is the
+   whole screen and two tabs must still be reachable, so drop the floor. */
+@media (max-width: 640px) {
+  .file-tab {
+    min-width: 0;
+    max-width: 46vw;
+  }
 }
 
 .file-tab:hover {

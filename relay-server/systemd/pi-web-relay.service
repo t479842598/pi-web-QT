@@ -1,0 +1,25 @@
+[Unit]
+Description=Pi Web relay server
+Documentation=https://github.com/t479842598/pi-web-QT
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=piweb
+Group=piweb
+WorkingDirectory=/opt/pi-web-relay
+EnvironmentFile=/etc/pi-web-relay.env
+ExecStart=/usr/bin/node /opt/pi-web-relay/src/server.mjs
+Restart=always
+RestartSec=3
+# The relay is a thin forwarder; cap what a runaway frame can allocate.
+MemoryMax=512M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pi-web-relay
+
+[Install]
+WantedBy=multi-user.target

@@ -28,8 +28,10 @@ test("Escape closes image preview without reaching global shortcuts", () => {
   );
 });
 
-test("closes only when the backdrop itself is clicked", () => {
-  assert.match(source, /event\.target === event\.currentTarget[\s\S]*?closePreview\(\)/);
+test("a click on the dialog backdrop does not close it", () => {
+  // Backdrop clicks must not dismiss modals (app-wide policy); Escape and the
+  // close button are the only ways out.
+  assert.doesNotMatch(source, /event\.target === event\.currentTarget[\s\S]*?closePreview\(\)/);
 });
 
 test("keeps the preview and Pi-style close button inside mobile safe areas", () => {

@@ -79,9 +79,6 @@ export function ZoomPanViewer({
   // Select mode: toolbar toggle that hands the mouse to the browser so SVG
   // text can be selected and copied. Default (off) = drag to pan.
   const [selectMode, setSelectMode] = useState(false);
-  // Timestamp of the last finished pan drag; suppresses the click that the
-  // browser fires after a drag so it cannot close the dialog.
-  const dragEndedAtRef = useRef(0);
 
   const fitScaleRef = useRef(fitScale);
   const transformRef = useRef(transform);
@@ -260,23 +257,8 @@ export function ZoomPanViewer({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
-    const wasDrag = drag.moved;
     dragRef.current = null;
     setDragging(false);
-
-    // The browser may still fire a click after a pan drag; swallow it so a
-    // drag can never close the dialog.
-    if (wasDrag) dragEndedAtRef.current = Date.now();
-  };
-
-  const onClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (Date.now() - dragEndedAtRef.current < 500) return;
-    // Click on empty viewport chrome closes, unless the user just selected
-    // text (a selection means this was a text-drag, not a plain click).
-    if (event.target !== event.currentTarget) return;
-    const selection = window.getSelection();
-    if (selection && !selection.isCollapsed) return;
-    onClose();
   };
 
   const onDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -417,7 +399,6 @@ export function ZoomPanViewer({
           onPointerMove={onPointerMove}
           onPointerUp={endPointer}
           onPointerCancel={endPointer}
-          onClick={onClick}
           onDoubleClick={onDoubleClick}
         >
           <div

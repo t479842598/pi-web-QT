@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { DownloadSimple, Spinner, CheckCircle, Warning, X, ArrowCounterClockwise } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 
 // ============================================================================
 // 类型
@@ -42,6 +43,8 @@ function BottomSheet({ open, onClose, children }: { open: boolean; onClose: () =
   const [visible, setVisible] = useState(false);
   const [mounted, setMounted] = useState(false);
 
+  useEscapeKey(open, onClose);
+
   useEffect(() => {
     if (open) {
       setMounted(true);
@@ -58,7 +61,7 @@ function BottomSheet({ open, onClose, children }: { open: boolean; onClose: () =
   return (
     <>
       <div
-        onClick={onClose}
+        aria-hidden="true"
         style={{
           position: "fixed", inset: 0, zIndex: 1001,
           background: visible ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0)",
