@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { bindSocket, createHub } from "./hub.mjs";
 import { MAX_FRAME_BYTES, digestsEqual, hashToken } from "./protocol.mjs";
+import { WEB_PREFIX, isHtmlResponse, isRelayOwnedPath, rewriteHtml, rewriteLocation, toUpstreamPath } from "./proxy.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = resolve(here, "..", "public");
@@ -24,6 +25,9 @@ const PASSWORD = process.env.RELAY_PASSWORD ?? "";
 /** Shared secret the desktop must present to register as a device. */
 const DEVICE_SECRET = process.env.RELAY_DEVICE_SECRET ?? "";
 const PUBLIC_URL = (process.env.RELAY_PUBLIC_URL ?? "").replace(/\/$/, "");
+
+/** Cookie carrying the durable session credential for `/web/` proxy requests. */
+const SESSION_COOKIE = "piweb_relay_session";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -43,6 +47,124 @@ function log(level, message, extra) {
 }
 
 const hub = createHub({ log, deviceSecret: DEVICE_SECRET });
+
+function parseCookies(header) {
+  const out = new Map();
+  if (typeof header !== "string") return out;
+  for (const part of header.split(";")) {
+    const index = part.indexOf("=");
+    if (index === -1) continue;
+    out.set(part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim()));
+  }
+  return out;
+}
+
+/** Read the whole request body, capped so a large upload cannot exhaust memory. */
+function readBody(req, limit = 32 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > limit) { reject(new Error("request body too large")); req.destroy(); return; }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+/**
+ * Serve the full pi-web app under `/web/`.
+ *
+ * pi-web sits behind NAT, so this cannot be a plain reverse proxy — the request
+ * is tunnelled to the desktop over the same socket the phone uses. The session
+ * credential travels in a cookie, which is what lets ordinary browser requests
+ * (assets, API calls) authenticate without a WebSocket handshake.
+ */
+async function serveWeb(req, res) {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const cookies = parseCookies(req.headers.cookie);
+  const rawSession = cookies.get(SESSION_COOKIE) ?? "";
+  const session = hub.sessionFor(rawSession);
+  if (!session) {
+    res.writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end("<!doctype html><meta charset=utf-8><title>未配对</title>"
+      + "<p style=\"font-family:system-ui;padding:20px\">会话已失效或未配对。请回到远程首页重新扫码。</p>");
+    return;
+  }
+  const device = hub.deviceFor(session.mid);
+  if (!device || !device.socket) {
+    res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("桌面端未连接");
+    return;
+  }
+
+  let body;
+  try {
+    body = req.method === "GET" || req.method === "HEAD" ? undefined : (await readBody(req));
+  } catch (error) {
+    res.writeHead(413, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(error instanceof Error ? error.message : "body error");
+    return;
+  }
+
+  const headers = {};
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (typeof value !== "string") continue;
+    if (name === "host" || name === "cookie" || name === "connection" || name === "accept-encoding") continue;
+    headers[name] = value;
+  }
+
+  let status = 200;
+  const responseHeaders = {};
+  let headSent = false;
+  let htmlBuffer = null;
+  try {
+    await hub.proxyRequest(device, {
+      method: req.method ?? "GET",
+      path: toUpstreamPath(url.pathname) + url.search,
+      headers,
+      body: body && body.length > 0 ? body.toString("utf8") : undefined,
+      onHead: (upstreamStatus, upstreamHeaders) => {
+        status = upstreamStatus;
+        for (const [name, value] of Object.entries(upstreamHeaders)) {
+          if (name === "content-length" || name === "transfer-encoding" || name === "content-encoding" || name === "set-cookie") continue;
+          responseHeaders[name] = value;
+        }
+        if (upstreamHeaders.location) responseHeaders.location = rewriteLocation(upstreamHeaders.location);
+        headSent = true;
+        // HTML is buffered for the rewrite pass, so the length is unknown until
+        // the body is complete — hold the head back and send both together.
+        if (!isHtmlResponse(responseHeaders)) res.writeHead(status, responseHeaders);
+      },
+      onChunk: (chunk) => {
+        if (isHtmlResponse(responseHeaders)) {
+          htmlBuffer = htmlBuffer === null ? chunk : Buffer.concat([htmlBuffer, chunk]);
+          return;
+        }
+        if (headSent) res.write(chunk);
+      },
+      onEnd: () => {
+        if (htmlBuffer !== null) {
+          const html = rewriteHtml(htmlBuffer.toString("utf8"));
+          const out = Buffer.from(html, "utf8");
+          res.writeHead(status, { ...responseHeaders, "content-length": String(out.length) });
+          res.end(out);
+          return;
+        }
+        if (headSent) res.end();
+      },
+    });
+  } catch (error) {
+    if (!headSent) {
+      res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(`代理失败：${error instanceof Error ? error.message : String(error)}`);
+    } else {
+      res.end();
+    }
+  }
+}
 
 async function serveStatic(req, res) {
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -74,8 +196,21 @@ const server = createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({
       ok: true,
       devices: hub.devices.size,
+      sessions: hub.sessions.size,
       publicUrl: PUBLIC_URL || null,
     }));
+    return;
+  }
+  // The full app lives behind the same session cookie, so the page can hand
+  // off to it without a second pairing.
+  if (url.pathname === WEB_PREFIX || url.pathname.startsWith(`${WEB_PREFIX}/`)) {
+    // `/web` (no slash) is the only form that redirects: relative asset paths
+    // inside the proxied document resolve against `/web/`, not `/web`.
+    if (url.pathname === WEB_PREFIX) {
+      res.writeHead(302, { Location: `${WEB_PREFIX}/${url.search}` }).end();
+      return;
+    }
+    void serveWeb(req, res);
     return;
   }
   void serveStatic(req, res);

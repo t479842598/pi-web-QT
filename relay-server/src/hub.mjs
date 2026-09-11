@@ -13,6 +13,7 @@
 
 import {
   CLIENT_PAIR,
+  CLIENT_RESUME,
   DEVICE_REGISTER_ACK,
   DEVICE_REGISTER_INIT,
   ERRORS,
@@ -24,7 +25,9 @@ import {
   PING,
   PONG,
   PROTOCOL_VERSION,
+  SESSION_TTL_MS,
   createPairToken,
+  createSessionId,
   createTokenRecord,
   digestsEqual,
   encodeFrame,
@@ -33,6 +36,13 @@ import {
   parseFrame,
   redeemToken,
 } from "./protocol.mjs";
+import {
+  HTTP_REQUEST,
+  createTunnelRegistry,
+  isTunnelFrame,
+  payloadBytes,
+  MAX_TUNNEL_BODY_BYTES,
+} from "./tunnel.mjs";
 
 /** Default pairing lifetime: long enough to reach the phone, short enough to matter. */
 export const DEFAULT_TTL_MS = 10 * 60 * 1000;
@@ -51,6 +61,11 @@ export function createHub({
 } = {}) {
   /** deviceMid → { mid, socket, meta, tokens, clients } */
   const devices = new Map();
+  /** Relay-assigned client ids, so a tunnelled response can name its phone. */
+  let nextClientId = 1;
+  const tunnels = createTunnelRegistry({ now });
+  /** sha256(sessionId) → { sessionId, mid, tokenHash, expiresAt, cid } */
+  const sessions = new Map();
 
   function deviceFor(mid) {
     return devices.get(mid) ?? null;
@@ -143,6 +158,11 @@ export function createHub({
     if (!record) return { ok: false, code: ERRORS.sessionNotFound };
     if (record.revokedAt !== null) return { ok: false, code: ERRORS.sessionNotFound };
     record.revokedAt = now();
+    // Sessions derived from this token die with it, otherwise a revoked
+    // pairing could keep reconnecting with its credential.
+    for (const [hash, entry] of [...sessions]) {
+      if (entry.tokenHash === record.tokenHash) sessions.delete(hash);
+    }
     for (const client of device.clients) {
       if (client.tokenHash === record.tokenHash) {
         send(client.socket, { type: PAIR_RESULT, ok: false, code: ERRORS.kicked });
@@ -184,16 +204,117 @@ export function createHub({
       send(socket, { type: PAIR_RESULT, ok: false, code: result.code });
       return null;
     }
-    const client = { socket, tokenHash: result.record.tokenHash, mid };
+    const client = {
+      socket,
+      tokenHash: result.record.tokenHash,
+      mid,
+      cid: String(nextClientId++),
+      session: null,
+    };
     device.clients.add(client);
-    send(socket, { type: PAIR_RESULT, ok: true, protocol_version: PROTOCOL_VERSION });
-    log("info", "client paired", { mid, clients: device.clients.size });
+    // The pairing token is single-use, so it cannot be presented again after a
+    // reconnect — hand back a durable session credential instead. It is bound
+    // to the token, so revoking the token kills the session too.
+    const sessionId = createSessionId();
+    client.session = { id: sessionId, expiresAt: now() + SESSION_TTL_MS, tokenHash: result.record.tokenHash };
+    sessions.set(hashToken(sessionId), { sessionId, mid, tokenHash: result.record.tokenHash, expiresAt: client.session.expiresAt, cid: client.cid });
+    send(socket, { type: PAIR_RESULT, ok: true, protocol_version: PROTOCOL_VERSION, cid: client.cid, session: sessionId });
+    log("info", "client paired", { mid, cid: client.cid, clients: device.clients.size });
     return client;
+  }
+
+  /** Reattach with a durable session credential (reconnect or `/web/` access). */
+  function resumeClient(socket, frame) {
+    const raw = typeof frame.session === "string" ? frame.session : "";
+    if (!raw) return null;
+    const record = sessions.get(hashToken(raw));
+    if (!record) { send(socket, { type: PAIR_RESULT, ok: false, code: ERRORS.sessionNotFound }); return null; }
+    if (record.expiresAt !== null && now() >= record.expiresAt) {
+      sessions.delete(hashToken(raw));
+      send(socket, { type: PAIR_RESULT, ok: false, code: ERRORS.sessionExpired });
+      return null;
+    }
+    const device = deviceFor(record.mid);
+    if (!device) { send(socket, { type: PAIR_RESULT, ok: false, code: ERRORS.sessionNotFound }); return null; }
+    if (!device.socket) { send(socket, { type: PAIR_RESULT, ok: false, code: ERRORS.desktopDisconnected }); return null; }
+    const client = { socket, tokenHash: record.tokenHash, mid: record.mid, cid: String(nextClientId++), session: { id: raw, expiresAt: record.expiresAt, tokenHash: record.tokenHash } };
+    device.clients.add(client);
+    send(socket, { type: PAIR_RESULT, ok: true, protocol_version: PROTOCOL_VERSION, cid: client.cid, session: raw });
+    log("info", "client resumed", { mid: record.mid, cid: client.cid });
+    return client;
+  }
+
+  /** Resolve a session credential without needing a socket (used by `/web/`). */
+  function sessionFor(rawSession) {
+    if (typeof rawSession !== "string" || rawSession.length === 0) return null;
+    const record = sessions.get(hashToken(rawSession));
+    if (!record) return null;
+    if (record.expiresAt !== null && now() >= record.expiresAt) { sessions.delete(hashToken(rawSession)); return null; }
+    return record;
+  }
+
+  /**
+   * Run one HTTP request against the desktop, outside a client socket.
+   *
+   * The `/web/` proxy is a plain HTTP request from a browser, not a WebSocket
+   * client, so it has no socket to answer on. Registering a virtual client
+   * reuses the whole tunnelled request/response path instead of a second one.
+   */
+  function proxyRequest(device, { method = "GET", path, headers = {}, body, onHead, onChunk, onEnd, timeoutMs = 120_000 }) {
+    if (!device || !device.socket) return Promise.reject(new Error(ERRORS.desktopDisconnected));
+    const rid = `proxy-${nextClientId++}`;
+    const cid = rid;
+    let settle;
+    const done = new Promise((resolve, reject) => { settle = { resolve, reject }; });
+    const virtual = {
+      cid,
+      mid: device.mid,
+      tokenHash: "proxy",
+      socket: {
+        send(text) {
+          const frame = JSON.parse(text);
+          if (frame.type === "http_response_head") { onHead?.(frame.status, frame.headers ?? {}); return; }
+          if (frame.type === "http_response_chunk") {
+            const buf = frame.encoding === "base64" ? Buffer.from(frame.data, "base64") : Buffer.from(String(frame.data ?? ""));
+            onChunk?.(buf);
+            return;
+          }
+          if (frame.type === "http_response_end") {
+            device.clients.delete(virtual);
+            onEnd?.();
+            settle.resolve();
+          }
+        },
+        close() { device.clients.delete(virtual); },
+      },
+    };
+    device.clients.add(virtual);
+    const timer = setTimeout(() => {
+      device.clients.delete(virtual);
+      settle.reject(new Error("proxy request timed out"));
+    }, timeoutMs);
+    done.finally(() => clearTimeout(timer)).catch(() => {});
+    const result = forwardTunnelRequest(device, virtual, { type: HTTP_REQUEST, rid, method, path, headers, body });
+    if (!result.ok) {
+      device.clients.delete(virtual);
+      settle.reject(new Error(result.code));
+    }
+    return done;
   }
 
   function dropClient(device, client) {
     if (!device || !client) return;
     device.clients.delete(client);
+    tunnels.forget(client.cid);
+  }
+
+  /** Find the client a tunnelled response is addressed to. */
+  function clientByCid(device, cid) {
+    if (!device || typeof cid !== "string") return null;
+    for (const client of device.clients) {
+      if (client.cid === cid) return client;
+    }
+    return null;
   }
 
   /** Route a desktop frame to its paired client(s). */
@@ -207,6 +328,48 @@ export function createHub({
       try { recipient.socket.send(text); } catch { device.clients.delete(recipient); }
     }
     return true;
+  }
+
+  /**
+   * Route a tunnelled HTTP request from one phone to the desktop.
+   *
+   * Unlike chat frames this must not be broadcast: the reply carries the
+   * request's `rid`, and every phone has its own rid space. The client's `cid`
+   * travels with the request so the desktop can address the answer back.
+   */
+  function forwardTunnelRequest(device, client, frame) {
+    if (!device || !client || !device.socket) return { ok: false, code: ERRORS.desktopDisconnected };
+    const size = payloadBytes(frame.body);
+    if (size < 0 || size > MAX_TUNNEL_BODY_BYTES) return { ok: false, code: ERRORS.frameTooLarge };
+    const begun = tunnels.begin(client.cid, frame.rid);
+    if (!begun.ok) return { ok: false, code: ERRORS.unsupportedAction };
+    try {
+      device.socket.send(encodeFrame({ ...frame, type: HTTP_REQUEST, cid: client.cid }));
+      return { ok: true };
+    } catch {
+      tunnels.end(client.cid, frame.rid);
+      device.socket = null;
+      return { ok: false, code: ERRORS.desktopDisconnected };
+    }
+  }
+
+  /** Deliver a desktop tunnel response chunk to the one phone that asked. */
+  function forwardTunnelResponse(device, frame) {
+    const client = clientByCid(device, frame.cid);
+    if (!client) return false;
+    if (frame.type !== "http_response_head" && frame.type !== "http_response_chunk"
+      && frame.type !== "http_response_end") return false;
+    const size = payloadBytes(frame.data);
+    if (size < 0 || size > MAX_TUNNEL_BODY_BYTES) return false;
+    if (frame.type === "http_response_end") tunnels.end(client.cid, frame.rid);
+    try {
+      client.socket.send(encodeFrame(frame));
+      return true;
+    } catch {
+      device.clients.delete(client);
+      tunnels.forget(client.cid);
+      return false;
+    }
   }
 
   /** Route a client frame to the desktop. */
@@ -230,7 +393,27 @@ export function createHub({
     }
   }
 
-  return { devices, deviceFor, send, registerDevice, registerPair, revokePair, listPairs, pairClient, dropClient, forwardToClients, forwardToDevice };
+  return {
+    devices,
+    deviceFor,
+    send,
+    registerDevice,
+    registerPair,
+    revokePair,
+    listPairs,
+    pairClient,
+    resumeClient,
+    sessionFor,
+    proxyRequest,
+    dropClient,
+    clientByCid,
+    forwardToClients,
+    forwardToDevice,
+    forwardTunnelRequest,
+    forwardTunnelResponse,
+    tunnels,
+    sessions,
+  };
 }
 
 /**
@@ -265,12 +448,28 @@ export function bindSocket(hub, socket, role) {
     if (frame.type === PAIR_REGISTER) { reply({ type: PAIR_RESULT, ...hub.registerPair(session.device, frame), rid: frame.rid }); return; }
     if (frame.type === PAIR_REVOKE) { reply({ type: PAIR_RESULT, ...hub.revokePair(session.device, frame), rid: frame.rid }); return; }
     if (frame.type === PAIR_LIST) { reply({ type: PAIR_RESULT, ...hub.listPairs(session.device), rid: frame.rid }); return; }
+    // A tunnelled HTTP response is addressed to one phone via `cid`; chat
+    // frames have no cid and are still broadcast.
+    if (isTunnelFrame(frame.type)) { hub.forwardTunnelResponse(session.device, frame); return; }
     hub.forwardToClients(session.device, text);
   }
 
   function handleClientFrame(frame, text) {
     if (frame.type === CLIENT_PAIR) { session.client = hub.pairClient(socket, frame); return; }
+    if (frame.type === CLIENT_RESUME) { session.client = hub.resumeClient(socket, frame); return; }
     if (!session.client) { reply({ type: PAIR_RESULT, ok: false, code: ERRORS.sessionNotFound, rid: frame.rid }); return; }
+    if (frame.type === HTTP_REQUEST) {
+      const device = hub.deviceFor(session.client.mid);
+      const result = hub.forwardTunnelRequest(device, session.client, frame);
+      if (!result.ok) {
+        // Answer the *caller* rather than dropping: the page would otherwise
+        // hang on a request that never got a response head.
+        reply({ type: "http_response_head", cid: session.client.cid, rid: frame.rid, status: 502, headers: {} });
+        reply({ type: "http_response_end", cid: session.client.cid, rid: frame.rid });
+        log("warn", "tunnel request rejected", { code: result.code, path: frame.path });
+      }
+      return;
+    }
     hub.forwardToDevice(hub.deviceFor(session.client.mid), text);
   }
 

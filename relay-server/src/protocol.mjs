@@ -27,6 +27,8 @@ export const PAIR_LIST = "pair_list";
 
 /** Mobile client → relay. */
 export const CLIENT_PAIR = "client_pair";
+/** Resume a previously established session with its durable credential. */
+export const CLIENT_RESUME = "client_resume";
 export const PAIR_RESULT = "pair_result";
 
 /** Both directions. */
@@ -64,6 +66,20 @@ export function digestsEqual(a, b) {
 export function createPairToken() {
   return randomBytes(32).toString("base64url");
 }
+
+/** Generate a durable session credential (survives reconnects, revocable). */
+export function createSessionId() {
+  return randomBytes(24).toString("base64url");
+}
+
+/**
+ * Session lifetimes.
+ *
+ * A pairing token is single-use, so the phone cannot present it again on
+ * reconnect — the session credential is what makes reconnects and the `/web/`
+ * proxy work. It dies with its token (revocation) or at the cap.
+ */
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Byte length of a frame as it goes on the wire. */
 export function frameBytes(data) {

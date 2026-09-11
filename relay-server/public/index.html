@@ -6,22 +6,97 @@
   <meta name="color-scheme" content="light dark" />
   <title>Pi Web 远程</title>
   <link rel="icon" href="/icon.svg" />
-  <link rel="stylesheet" href="/remote.css" />
+  <link rel="stylesheet" href="/theme.css" />
 </head>
 <body>
-  <main id="app" data-state="waiting">
-    <section class="card" id="connect">
-      <h1>Pi Web 远程</h1>
-      <p class="muted" id="hint">正在读取配对信息…</p>
-      <button type="button" id="retry" hidden>重新连接</button>
+  <div id="app">
+    <!-- Home: projects and their sessions, styled after ZCode's remote shell. -->
+    <section id="view-home" class="view">
+      <header class="bar">
+        <div class="bar-title">
+          <div class="bar-main" id="home-title">Pi Web 远程</div>
+          <div class="bar-sub" id="home-status">正在连接…</div>
+        </div>
+        <div class="bar-actions">
+          <button type="button" class="icon-btn" id="home-refresh" title="刷新" aria-label="刷新">⟳</button>
+          <button type="button" class="icon-btn" id="home-web" title="打开完整界面" aria-label="打开完整界面">⤢</button>
+        </div>
+      </header>
+      <div class="search-bar">
+        <input id="home-search" type="search" placeholder="搜索会话或项目…" autocomplete="off" />
+      </div>
+      <div class="scroll" id="home-scroll">
+        <div id="home-body"></div>
+        <!-- Bot Channel exists in ZCode's remote shell but has no pi-web
+             equivalent yet; shown disabled so the feature set stays legible. -->
+        <div class="bot-channel" aria-disabled="true">
+          <div class="bot-channel-title">使用 Bot Channel<span class="badge">未接入</span></div>
+          <p class="bot-channel-desc">连接聊天 Bot，适合更长时间的移动端访问（微信 / 飞书 / Lark / Telegram）。pi-web 尚未实现该通道。</p>
+        </div>
+      </div>
     </section>
 
-    <section class="card" id="error" hidden>
-      <h1 id="error-title">无法连接</h1>
-      <p class="muted" id="error-detail"></p>
-      <button type="button" id="error-retry">重试</button>
+    <!-- Chat: one session. -->
+    <!-- Only the home view starts visible; the shell switches the rest in. -->
+    <section id="view-chat" class="view hidden">
+      <header class="bar">
+        <button type="button" class="icon-btn" id="chat-back" title="返回" aria-label="返回">←</button>
+        <div class="bar-title">
+          <div class="bar-main" id="chat-title">会话</div>
+          <div class="bar-sub" id="chat-status"></div>
+        </div>
+        <div class="bar-actions">
+          <button type="button" class="icon-btn" id="chat-view-toggle" title="切换显示模式" aria-label="切换显示模式">◨</button>
+          <button type="button" class="icon-btn" id="chat-web" title="打开完整界面" aria-label="打开完整界面">⤢</button>
+        </div>
+      </header>
+      <div class="chat-body">
+        <main class="chat-main" id="chat-main">
+          <div class="scroll" id="chat-scroll">
+            <div class="messages" id="chat-messages"></div>
+          </div>
+          <div class="composer">
+            <div class="composer-row" id="chat-model-row"></div>
+            <div class="composer-inner">
+              <textarea id="chat-input" rows="1" placeholder="发消息…" autocomplete="off"></textarea>
+              <button type="button" class="btn btn-primary" id="chat-send">发送</button>
+            </div>
+          </div>
+        </main>
+
+        <!-- Slide-in side pane (files / tabs), like ZCode's mobile side pane. -->
+        <div class="pane-overlay hidden" id="pane-overlay" aria-hidden="true">
+          <button type="button" class="pane-backdrop" id="pane-backdrop" aria-label="收起侧栏"></button>
+          <aside class="pane" id="pane">
+            <header class="pane-head">
+              <span id="pane-title">会话信息</span>
+              <button type="button" class="icon-btn" id="pane-close" aria-label="收起侧栏">✕</button>
+            </header>
+            <div class="pane-body" id="pane-body"></div>
+          </aside>
+        </div>
+
+        <div class="reconnect-toast hidden" id="reconnect-toast" aria-live="polite">
+          <span class="spinner"></span><span>正在自动重连…</span>
+        </div>
+        <div class="loading-overlay hidden" id="loading-overlay" aria-busy="true">
+          <div class="loading-card"><span class="spinner"></span><span>加载中…</span></div>
+        </div>
+      </div>
     </section>
-  </main>
+
+    <!-- Status / error states. -->
+    <section id="view-status" class="view hidden">
+      <header class="bar">
+        <div class="bar-title"><div class="bar-main" id="status-title">Pi Web 远程</div></div>
+      </header>
+      <div class="scroll">
+        <div class="error-box hidden" id="status-error"></div>
+        <p class="status-line" id="status-detail"></p>
+        <button type="button" class="btn" id="status-retry">重试</button>
+      </div>
+    </section>
+  </div>
 
   <script type="module" src="/remote.js"></script>
 </body>
