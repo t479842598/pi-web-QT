@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,6 +7,30 @@ import QRCode from "qrcode";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { getRelayClient } from "@/lib/relay-runtime";
 import { writePrivateFileAtomicSync } from "@/lib/atomic-file";
+import type { RelayClient } from "@/lib/relay-client";
+
+/** Must match the relay's hashing: sha256 hex of the raw token. */
+function hashToken(raw: string): string {
+  return createHash("sha256").update(raw, "utf8").digest("hex");
+}
+
+/**
+ * Is this saved token still known to the relay?
+ *
+ * Tokens live on the relay; the desktop only keeps a copy of the raw value. If
+ * the relay has forgotten it (restart before persistence, or a revoke issued
+ * elsewhere) the saved link is dead, and reusing it would hand the user a URL
+ * that fails with "invalid pairing" for no visible reason. On any doubt the
+ * caller reissues instead.
+ */
+async function linkIsLive(client: RelayClient, raw: string): Promise<boolean> {
+  const reply = await client.request({ type: "pair_list", timeoutMs: 8_000 }).catch(() => null);
+  if (!reply || reply.ok !== true || !Array.isArray(reply.pairs)) return false;
+  const digest = hashToken(raw);
+  return (reply.pairs as Array<Record<string, unknown>>).some(
+    (pair) => pair.tokenHash === digest && pair.revoked !== true,
+  );
+}
 
 /** One-shot tokens are for QR scans; the saved link uses 0 (= no expiry). */
 const QR_TTL_MS = 10 * 60 * 1000;
@@ -144,8 +169,8 @@ export async function POST(req: Request) {
     // devices. Reused until the user explicitly regenerates it, so every device
     // can share one URL.
     if (action === "create" || action === "regenerate") {
-      const existing = readLink();
-      if (existing && action === "create") {
+      const existing = action === "create" ? readLink() : null;
+      if (existing && await linkIsLive(client, existing.token)) {
         return NextResponse.json({ ok: true, url: linkUrl(existing.token, client.deviceMid), reusable: true, expiresAt: null, reused: true });
       }
 

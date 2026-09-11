@@ -2737,9 +2737,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   title={t("desktop.changeReasoningLevel", { level: thinkingDisplayLabel })}
                   aria-label={t("desktop.changeReasoningLevel", { level: thinkingDisplayLabel })}
                   style={{
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    padding: 0,
-                    width: 24,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? 0 : 5,
+                    padding: isMobile ? 0 : "0 6px",
+                    // Desktop shows the level name next to the icon; a phone keeps
+                    // the icon only so the row does not wrap.
+                    width: isMobile ? 24 : undefined,
                     height: 24,
                     background: thinkingDropdownOpen ? "var(--bg-hover)" : "none",
                     border: "none",
@@ -2759,6 +2761,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   }}
                 >
                   <ThinkingLevelIcon level={thinkingLevel ?? "auto"} />
+                  {!isMobile && (
+                    <span style={{ whiteSpace: "nowrap" }}>{thinkingDisplayLabel}</span>
+                  )}
                 </button>
                 {thinkingDropdownOpen && thinkingDropdownRect && (() => {
                     const vh = window.visualViewport?.height ?? window.innerHeight;
@@ -2919,9 +2924,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     title={currentName ?? t("desktop.selectModel")}
                     aria-label={currentName ?? t("desktop.selectModel")}
                     style={{
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      padding: 0,
-                      width: isMobile ? 28 : 26,
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? 0 : 5,
+                      padding: isMobile ? 0 : "0 6px",
+                      // Desktop shows the model name; a phone collapses to the
+                      // provider icon so the toolbar stays on one row.
+                      width: isMobile ? 28 : undefined,
+                      maxWidth: isMobile ? undefined : "min(220px, 34vw)",
                       height: 24,
                       overflow: "hidden",
                       background: modelDropdownOpen ? "var(--bg-hover)" : "none",
@@ -2944,6 +2952,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     }}
                   >
                     <ProviderIcon id={model?.provider ?? "unknown"} size={14} />
+                    {!isMobile && (
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                        {currentName ?? t("desktop.selectModel")}
+                      </span>
+                    )}
+                    {!isMobile && (
+                      <CaretDownIcon
+                        size={11}
+                        weight="bold"
+                        aria-hidden="true"
+                        style={{ flexShrink: 0, transform: modelDropdownOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.12s" }}
+                      />
+                    )}
                   </button>
                   {modelDropdownOpen && modelDropdownRect && (() => {
                     const viewportHeight = viewport.height || window.innerHeight;

@@ -46,7 +46,15 @@ function log(level, message, extra) {
   write(extra === undefined ? line : `${line} ${JSON.stringify(extra)}`);
 }
 
-const hub = createHub({ log, deviceSecret: DEVICE_SECRET });
+/**
+ * Where issued tokens are persisted.
+ *
+ * Without this a restart drops every pairing token, so a link the user saved on
+ * their phone stops working and the desktop keeps advertising a dead token.
+ */
+const STORE_PATH = process.env.RELAY_STORE_PATH?.trim() || resolve(here, "..", "tokens.json");
+
+const hub = createHub({ log, deviceSecret: DEVICE_SECRET, storePath: STORE_PATH });
 
 function parseCookies(header) {
   const out = new Map();

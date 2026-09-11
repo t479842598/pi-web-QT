@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import type { CollaborationMode } from "@/lib/modes";
 import { ArrowRightIcon } from "@phosphor-icons/react/ArrowRight";
 import { CheckIcon } from "@phosphor-icons/react/Check";
@@ -50,6 +51,7 @@ export function ModeControls({
   disabled = false,
 }: ModeControlsProps) {
   const { t } = useI18n();
+  const isMobile = useIsMobile();
   const [openMenu, setOpenMenu] = useState<"collab" | null>(null);
   const [closing, setClosing] = useState<"collab" | null>(null);
   const [rects, setRects] = useState<Record<string, { top: number; left: number; width: number }>>({});
@@ -147,9 +149,10 @@ export function ModeControls({
   };
 
   const triggerStyle = (active: boolean): React.CSSProperties => ({
-    display: "flex", alignItems: "center", justifyContent: "center",
-    padding: 0,
-    width: 24,
+    display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? 0 : 5,
+    padding: isMobile ? 0 : "0 6px",
+    // The mode name shows on desktop; a phone keeps the icon only.
+    width: isMobile ? 24 : undefined,
     height: 24,
     background: active ? "var(--bg-hover)" : "none",
     border: "none",
@@ -179,6 +182,11 @@ export function ModeControls({
           style={triggerStyle(openMenu === "collab")}
         >
           <CollabIcon size={14} weight={collaborationMode !== "normal" ? "fill" : "regular"} color={collaborationMode !== "normal" ? "var(--accent)" : "var(--text-muted)"} aria-hidden="true" />
+          {!isMobile && (
+            <span style={{ whiteSpace: "nowrap" }}>
+              {t(COLLAB_ITEMS.find((item) => item.value === collaborationMode)?.titleKey ?? "modes.collabNormalTitle")}
+            </span>
+          )}
         </button>
       </div>
       {renderMenu()}

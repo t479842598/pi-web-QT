@@ -43,6 +43,7 @@ import {
   payloadBytes,
   MAX_TUNNEL_BODY_BYTES,
 } from "./tunnel.mjs";
+import { loadTokens, saveTokens } from "./token-store.mjs";
 
 /** Default pairing lifetime: long enough to reach the phone, short enough to matter. */
 export const DEFAULT_TTL_MS = 10 * 60 * 1000;
@@ -58,6 +59,8 @@ export function createHub({
   deviceSecret = "",
   /** Cap on tracked devices so a peer cannot grow the map without bound. */
   maxDevices = 64,
+  /** Where issued tokens are persisted, so a saved link survives a restart. */
+  storePath = "",
 } = {}) {
   /** deviceMid → { mid, socket, meta, tokens, clients } */
   const devices = new Map();
@@ -66,6 +69,25 @@ export function createHub({
   const tunnels = createTunnelRegistry({ now });
   /** sha256(sessionId) → { sessionId, mid, tokenHash, expiresAt, cid } */
   const sessions = new Map();
+  /** deviceMid → StoredToken[]; survives restarts when `storePath` is set. */
+  const persisted = storePath ? loadTokens(storePath) : new Map();
+
+  /** Mirror the in-memory token lists to disk (best effort). */
+  function persist() {
+    if (!storePath) return;
+    const snapshot = new Map();
+    for (const [mid, device] of devices) {
+      const live = device.tokens.filter((token) => (
+        token.expiresAt === null || token.expiresAt > now()
+      ));
+      if (live.length > 0) snapshot.set(mid, live);
+    }
+    try {
+      saveTokens(storePath, snapshot);
+    } catch (error) {
+      log("warn", "failed to persist tokens", { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
 
   function deviceFor(mid) {
     return devices.get(mid) ?? null;
@@ -75,6 +97,14 @@ export function createHub({
     let device = devices.get(mid);
     if (!device) {
       device = { mid, socket: null, meta: {}, tokens: [], clients: new Set() };
+      // Restore tokens issued before the last restart, so a saved link keeps
+      // working instead of failing with "invalid pairing".
+      const restored = persisted.get(mid);
+      if (restored) {
+        device.tokens.push(...restored);
+        persisted.delete(mid);
+        log("info", "restored tokens", { mid, count: restored.length });
+      }
       devices.set(mid, device);
     }
     return device;
@@ -159,6 +189,7 @@ export function createHub({
       reusable,
     });
     device.tokens.push(record);
+    persist();
     return {
       ok: true,
       token: rawToken,
@@ -177,6 +208,7 @@ export function createHub({
     if (!record) return { ok: false, code: ERRORS.sessionNotFound };
     if (record.revokedAt !== null) return { ok: false, code: ERRORS.sessionNotFound };
     record.revokedAt = now();
+    persist();
     // Sessions derived from this token die with it, otherwise a revoked
     // pairing could keep reconnecting with its credential.
     for (const [hash, entry] of [...sessions]) {
@@ -203,6 +235,13 @@ export function createHub({
         reusable: entry.reusable === true,
         used: entry.usedAt !== null,
         revoked: entry.revokedAt !== null,
+        /**
+         * The token's digest. Exposed so the desktop can tell whether a link it
+         * saved is still live — a hash is not a credential (the raw token never
+         * leaves the desktop), and without it the desktop would keep handing
+         * back a token the relay has already forgotten.
+         */
+        tokenHash: entry.tokenHash,
         // How many phones are attached through this link right now.
         connections: [...device.clients].filter((client) => client.tokenHash === entry.tokenHash).length,
         connected: [...device.clients].some((client) => client.tokenHash === entry.tokenHash),

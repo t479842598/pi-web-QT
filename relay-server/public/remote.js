@@ -22,6 +22,7 @@ const EXPANDED_KEY = "piweb_relay_expanded";
 const ORGANIZE_KEY = "piweb_relay_organize";
 const SORT_KEY = "piweb_relay_sort";
 const VIEW_MODE_KEY = "piweb_relay_view_mode";
+const THEME_KEY = "piweb_relay_theme";
 /** Projects expanded on a device we have not seen before. */
 const DEFAULT_EXPANDED_PROJECTS = 2;
 
@@ -155,8 +156,89 @@ const state = {
   query: "",
   expanded: new Set(),
   expandedLoaded: false,
+  defaultsApplied: false,
   viewMode: readStore(VIEW_MODE_KEY) === "trajectory" ? "trajectory" : "folded",
+  theme: readStore(THEME_KEY) ?? "system",
 };
+
+/** Build an SVG icon reference from the sprite in index.html. */
+function icon(name, extraClass = "") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", extraClass ? `icon ${extraClass}` : "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
+/** Apply the saved theme; "system" follows the OS preference. */
+function applyTheme() {
+  const root = document.documentElement;
+  const effective = state.theme === "system"
+    ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : state.theme;
+  root.dataset.theme = effective;
+  if (state.theme === "system") delete root.dataset.themeMode;
+  else root.dataset.themeMode = state.theme;
+}
+
+function setTheme(next) {
+  state.theme = next;
+  writeStore(THEME_KEY, next);
+  applyTheme();
+  renderThemeMenu();
+}
+
+/** Theme switcher in the top bar, mirroring ZCode's theme menu. */
+function renderHomeTheme() {
+  const slot = $("home-theme");
+  slot.replaceChildren();
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "icon-btn";
+  button.title = "选择主题";
+  button.setAttribute("aria-label", "选择主题");
+  const current = state.theme === "system" ? "monitor" : state.theme === "dark" ? "moon" : "sun";
+  button.append(icon(current));
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const existing = slot.querySelector(".theme-menu");
+    if (existing) { existing.remove(); return; }
+    slot.append(buildThemeMenu());
+  });
+  slot.append(button);
+}
+
+function buildThemeMenu() {
+  const menu = document.createElement("div");
+  menu.className = "menu theme-menu";
+  const options = [
+    { value: "light", label: "浅色", icon: "sun" },
+    { value: "dark", label: "深色", icon: "moon" },
+    { value: "system", label: "跟随系统", icon: "monitor" },
+  ];
+  for (const option of options) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "menu-item";
+    if (state.theme === option.value) item.classList.add("is-active");
+    item.append(icon(option.icon));
+    const label = document.createElement("span");
+    label.textContent = option.label;
+    item.append(label);
+    item.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setTheme(option.value);
+    });
+    menu.append(item);
+  }
+  return menu;
+}
+
+function renderThemeMenu() {
+  renderHomeTheme();
+}
 
 function show(view) {
   for (const id of ["view-home", "view-chat", "view-status"]) {
@@ -192,9 +274,16 @@ function saveExpanded() {
   writeStore(EXPANDED_KEY, JSON.stringify([...state.expanded]));
 }
 
-/** Expand the most recently active projects on a device we have not seen. */
+/**
+ * Expand the most recently active projects on a device we have not seen.
+ *
+ * Runs once per device, tracked by its own flag: doing it whenever the set
+ * happens to be empty made collapsing every project re-expand the first two on
+ * the next tap.
+ */
 function applyDefaultExpansion(groups) {
-  if (state.expanded.size > 0) return;
+  if (state.defaultsApplied) return;
+  state.defaultsApplied = true;
   const recent = [...groups.entries()]
     .sort((a, b) => latestTime(b[1]) - latestTime(a[1]))
     .slice(0, DEFAULT_EXPANDED_PROJECTS);
@@ -349,25 +438,49 @@ function buildSectionHead(projectCount, sessionCount, showCollapseAll) {
     toggle.className = "icon-btn";
     toggle.title = collapse ? "收起全部项目" : "展开全部项目";
     toggle.setAttribute("aria-label", toggle.title);
-    toggle.textContent = collapse ? "⇈" : "⇊";
+    toggle.append(icon(collapse ? "chevrons-down-up" : "chevrons-up-down"));
     toggle.addEventListener("click", () => {
       if (state.expanded.size > 0) {
         state.expanded.clear();
       } else {
         for (const session of state.sessions) state.expanded.add(projectKey(session));
       }
+      // An explicit choice, so the one-time default must not fire again.
+      state.defaultsApplied = true;
       saveExpanded();
       renderHome();
     });
     actions.append(toggle);
   }
 
+  const refresh = document.createElement("button");
+  refresh.type = "button";
+  refresh.className = "icon-btn";
+  refresh.title = "刷新项目与会话";
+  refresh.setAttribute("aria-label", "刷新项目与会话");
+  refresh.append(icon("rotate-cw"));
+  refresh.addEventListener("click", () => {
+    void loadHome().catch(() => setHomeStatus("刷新失败"));
+  });
+  actions.append(refresh);
+
+  // Hand off to the full pi-web UI. Kept in the section header rather than the
+  // top bar so the bar matches ZCode's (title + theme menu only).
+  const openApp = document.createElement("button");
+  openApp.type = "button";
+  openApp.className = "icon-btn";
+  openApp.title = "打开完整界面";
+  openApp.setAttribute("aria-label", "打开完整界面");
+  openApp.append(icon("maximize"));
+  openApp.addEventListener("click", () => goToFullApp());
+  actions.append(openApp);
+
   const menuButton = document.createElement("button");
   menuButton.type = "button";
   menuButton.className = "icon-btn";
-  menuButton.title = "整理";
-  menuButton.setAttribute("aria-label", "整理");
-  menuButton.textContent = "⇅";
+  menuButton.title = "整理任务";
+  menuButton.setAttribute("aria-label", "整理任务");
+  menuButton.append(icon("sliders"));
 
   const menu = document.createElement("div");
   menu.className = "menu hidden";
@@ -407,7 +520,10 @@ function menuSection(title, options) {
     item.className = "menu-item";
     const active = state[option.group] === option.value;
     if (active) item.classList.add("is-active");
-    item.textContent = `${active ? "✓ " : ""}${option.label}`;
+    const label = document.createElement("span");
+    label.textContent = option.label;
+    item.append(label);
+    if (active) item.append(icon("chevron-right", "menu-check"));
     item.addEventListener("click", (event) => {
       event.stopPropagation();
       state[option.group] = option.value;
@@ -447,8 +563,11 @@ function buildProjectGroup(project, sessions) {
   }
   const count = document.createElement("span");
   count.textContent = `${sessions.length} 个会话`;
+  // A chevron that rotates on expand, rather than swapping glyphs — matches how
+  // the desktop list signals the same state change.
   const chevron = document.createElement("span");
-  chevron.textContent = expanded ? "⌄" : "›";
+  chevron.className = expanded ? "chevron-icon is-open" : "chevron-icon";
+  chevron.append(icon("chevron-right"));
   meta.append(count, chevron);
 
   row.append(title, meta);
@@ -1008,10 +1127,6 @@ function goToFullApp() {
   window.location.href = "/web/";
 }
 
-$("home-refresh").addEventListener("click", () => {
-  if (state.tunnel) void loadHome().catch(() => setHomeStatus("刷新失败"));
-});
-$("home-web").addEventListener("click", () => { goToFullApp(); });
 $("home-search").addEventListener("input", (event) => {
   state.query = event.currentTarget.value;
   renderHome();
@@ -1027,6 +1142,14 @@ $("chat-send").addEventListener("click", () => {
 
 $("pane-close").addEventListener("click", () => $("pane-overlay").classList.add("hidden"));
 $("pane-backdrop").addEventListener("click", () => $("pane-overlay").classList.add("hidden"));
+$("chat-pane-toggle").addEventListener("click", () => {
+  $("pane-overlay").classList.remove("hidden");
+  // Mirror ZCode: the chat behind an open pane is inert, so a stray tap cannot
+  // act on the conversation.
+  $("chat-main").setAttribute("inert", "");
+});
+$("pane-close").addEventListener("click", () => $("chat-main").removeAttribute("inert"));
+$("pane-backdrop").addEventListener("click", () => $("chat-main").removeAttribute("inert"));
 
 $("chat-input").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
@@ -1047,4 +1170,10 @@ window.addEventListener("pagehide", () => {
 });
 
 $("chat-view-toggle").title = state.viewMode === "trajectory" ? "当前：ZCode 轨迹" : "当前：pi-web 折叠";
+applyTheme();
+renderHomeTheme();
+// Follow the OS while in "system" mode, without a reload.
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (state.theme === "system") applyTheme();
+});
 connect();
