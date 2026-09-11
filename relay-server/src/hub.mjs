@@ -137,17 +137,36 @@ export function createHub({
     return device;
   }
 
-  /** Desktop → relay: mint a pairing token; the raw value is returned once. */
+  /**
+   * Desktop → relay: mint a pairing token; the raw value is returned once.
+   *
+   * A saved link passes `ttlMs: 0` and `reusable: true` so it never expires and
+   * works on every device; the default 10-minute single-use token is what the
+   * QR flow wants.
+   */
   function registerPair(device, frame) {
     const rawToken = createPairToken();
-    device.tokens.push(createTokenRecord({
+    const requestedTtl = typeof frame?.ttlMs === "number" && Number.isFinite(frame.ttlMs)
+      ? Math.max(0, frame.ttlMs)
+      : ttlMs;
+    const reusable = frame?.reusable === true;
+    const record = createTokenRecord({
       tokenHash: hashToken(rawToken),
       scope: frame?.scope,
-      ttlMs,
+      ttlMs: requestedTtl,
       nowMs: now(),
       label: frame?.label,
-    }));
-    return { ok: true, token: rawToken, device_mid: device.mid, expiresInMs: ttlMs };
+      reusable,
+    });
+    device.tokens.push(record);
+    return {
+      ok: true,
+      token: rawToken,
+      device_mid: device.mid,
+      expiresInMs: requestedTtl,
+      reusable,
+      expiresAt: record.expiresAt,
+    };
   }
 
   function revokePair(device, frame) {
@@ -174,15 +193,20 @@ export function createHub({
   }
 
   function listPairs(device) {
+    const nowMs = now();
     return {
       ok: true,
       pairs: device.tokens.map((entry) => ({
         label: entry.label,
         createdAt: entry.createdAt,
         expiresAt: entry.expiresAt,
+        reusable: entry.reusable === true,
         used: entry.usedAt !== null,
         revoked: entry.revokedAt !== null,
+        // How many phones are attached through this link right now.
+        connections: [...device.clients].filter((client) => client.tokenHash === entry.tokenHash).length,
         connected: [...device.clients].some((client) => client.tokenHash === entry.tokenHash),
+        expired: entry.expiresAt !== null && nowMs >= entry.expiresAt,
       })),
     };
   }
@@ -215,11 +239,16 @@ export function createHub({
     // The pairing token is single-use, so it cannot be presented again after a
     // reconnect — hand back a durable session credential instead. It is bound
     // to the token, so revoking the token kills the session too.
+    //
+    // A reusable link yields credentials without expiry: access is withdrawn by
+    // revoking the link, not by waiting the phone out. A one-shot token keeps
+    // the bounded lifetime.
     const sessionId = createSessionId();
-    client.session = { id: sessionId, expiresAt: now() + SESSION_TTL_MS, tokenHash: result.record.tokenHash };
-    sessions.set(hashToken(sessionId), { sessionId, mid, tokenHash: result.record.tokenHash, expiresAt: client.session.expiresAt, cid: client.cid });
+    const sessionExpiry = result.record.reusable ? null : now() + SESSION_TTL_MS;
+    client.session = { id: sessionId, expiresAt: sessionExpiry, tokenHash: result.record.tokenHash };
+    sessions.set(hashToken(sessionId), { sessionId, mid, tokenHash: result.record.tokenHash, expiresAt: sessionExpiry, cid: client.cid });
     send(socket, { type: PAIR_RESULT, ok: true, protocol_version: PROTOCOL_VERSION, cid: client.cid, session: sessionId });
-    log("info", "client paired", { mid, cid: client.cid, clients: device.clients.size });
+    log("info", "client paired", { mid, cid: client.cid, reusable: result.record.reusable === true, clients: device.clients.size });
     return client;
   }
 

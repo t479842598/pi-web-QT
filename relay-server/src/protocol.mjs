@@ -114,11 +114,20 @@ export function encodeFrame(message) {
   return JSON.stringify(message);
 }
 
-/** A token store entry: hashed token plus its lifetime and revocation state. */
-export function createTokenRecord({ tokenHash, scope, ttlMs, nowMs, label }) {
+/**
+ * A token store entry: hashed token plus its lifetime and revocation state.
+ *
+ * `reusable` separates the two pairing styles this relay supports:
+ * - one-shot (a scanned QR): expiry defaults to 10 minutes, the first redeem
+ *   consumes it, which is what makes a photographed code stop working;
+ * - reusable (a saved link): no expiry, any number of devices may redeem it,
+ *   and access is withdrawn by revoking it rather than by spending it.
+ */
+export function createTokenRecord({ tokenHash, scope, ttlMs, nowMs, label, reusable = false }) {
   return {
     tokenHash,
     scope: typeof scope === "string" && scope.length > 0 ? scope : "full",
+    reusable: reusable === true,
     createdAt: nowMs,
     expiresAt: ttlMs > 0 ? nowMs + ttlMs : null,
     /** Consumed by a successful pairing; a second attempt is rejected. */
@@ -132,11 +141,13 @@ export function createTokenRecord({ tokenHash, scope, ttlMs, nowMs, label }) {
 /**
  * Redeem a raw token against the store.
  *
- * Returns `{ ok: true, record }` exactly once per token, or `{ ok: false, code }`.
- * A single-use rule is what makes a leaked QR link stop working after pairing.
- * "Already used" and "revoked" report the same code to the client (there is
- * nothing useful it could do differently) but are tracked separately, so the
- * desktop's device list can still tell a successful pairing from a revocation.
+ * Returns `{ ok: true, record }`, or `{ ok: false, code }` when the token is
+ * unknown, revoked, spent, or past its expiry. A reusable token is never
+ * spent, so the same link keeps working on every device that opens it until it
+ * is revoked. "Already used" and "revoked" report the same code to the client
+ * (there is nothing useful it could do differently) but are tracked
+ * separately, so the desktop's device list can still tell a successful pairing
+ * from a revocation.
  */
 export function redeemToken(store, rawToken, { nowMs, singleUse = true }) {
   const digest = hashToken(rawToken);
@@ -147,6 +158,7 @@ export function redeemToken(store, rawToken, { nowMs, singleUse = true }) {
   if (record.expiresAt !== null && nowMs >= record.expiresAt) {
     return { ok: false, code: ERRORS.sessionExpired };
   }
-  if (singleUse) record.usedAt = nowMs;
+  // Only a one-shot token is consumed; a reusable link stays live.
+  if (singleUse && !record.reusable) record.usedAt = nowMs;
   return { ok: true, record };
 }

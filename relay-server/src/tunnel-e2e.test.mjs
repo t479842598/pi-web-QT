@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { bindSocket, createHub } from "./hub.mjs";
-import { parseFrame, PROTOCOL_VERSION, DEVICE_REGISTER_INIT, PAIR_REGISTER, CLIENT_PAIR, ERRORS } from "./protocol.mjs";
+import { parseFrame, PROTOCOL_VERSION, DEVICE_REGISTER_INIT, PAIR_LIST, PAIR_REGISTER, CLIENT_PAIR, ERRORS } from "./protocol.mjs";
 
 function fakeSocket() {
   const sent = [];
@@ -122,4 +122,102 @@ test("proxyRequest tunnels a request without a browser socket", async () => {
   device.emit("message", frame({ type: "http_response_end", cid: request.cid, rid: request.rid }));
   await promise;
   assert.deepEqual(seen, [["head", 200, "image/svg+xml"], ["chunk", "<svg/>"]]);
+});
+
+// ── Reusable (permanent) links ──────────────────────────────────────────────
+
+test("a reusable token pairs several devices through one link", () => {
+  const hub = createHub({ now: () => 1, log: () => {} });
+  const device = fakeSocket();
+  bindSocket(hub, device, "device");
+  device.emit("message", frame({ type: DEVICE_REGISTER_INIT, device_mid: "dev-1", protocol_version: PROTOCOL_VERSION }));
+  device.emit("message", frame({ type: PAIR_REGISTER, ttlMs: 0, reusable: true }));
+  const token = device.last().token;
+  assert.equal(typeof token, "string");
+
+  const sessions = new Set();
+  for (let i = 0; i < 3; i += 1) {
+    const client = fakeSocket();
+    bindSocket(hub, client, "client");
+    client.emit("message", frame({ type: CLIENT_PAIR, device_mid: "dev-1", token }));
+    assert.equal(client.last().ok, true, `device ${i} should pair`);
+    sessions.add(client.last().session);
+  }
+  assert.equal(sessions.size, 3, "each device gets its own credential");
+  assert.equal(hub.deviceFor("dev-1").clients.size, 3);
+});
+
+test("a reusable link reports how many devices are attached", () => {
+  const hub = createHub({ now: () => 1, log: () => {} });
+  const device = fakeSocket();
+  bindSocket(hub, device, "device");
+  device.emit("message", frame({ type: DEVICE_REGISTER_INIT, device_mid: "dev-1", protocol_version: PROTOCOL_VERSION }));
+  device.emit("message", frame({ type: PAIR_REGISTER, ttlMs: 0, reusable: true }));
+  const token = device.last().token;
+  assert.equal(typeof token, "string");
+
+  for (let i = 0; i < 2; i += 1) {
+    const extra = fakeSocket();
+    bindSocket(hub, extra, "client");
+    extra.emit("message", frame({ type: CLIENT_PAIR, device_mid: "dev-1", token }));
+  }
+  device.emit("message", frame({ type: PAIR_LIST }));
+  const reusable = device.last().pairs.find((pair) => pair.reusable === true);
+  assert.equal(reusable.connections >= 2, true, "connections reflects attached phones");
+  assert.equal(reusable.used, false, "a reusable token is never marked used");
+});
+
+test("revoking a reusable link drops every device that used it", () => {
+  const hub = createHub({ now: () => 1, log: () => {} });
+  const device = fakeSocket();
+  bindSocket(hub, device, "device");
+  device.emit("message", frame({ type: DEVICE_REGISTER_INIT, device_mid: "dev-1", protocol_version: PROTOCOL_VERSION }));
+  device.emit("message", frame({ type: PAIR_REGISTER, ttlMs: 0, reusable: true }));
+  const token = device.last().token;
+
+  const clients = [];
+  for (let i = 0; i < 2; i += 1) {
+    const client = fakeSocket();
+    bindSocket(hub, client, "client");
+    client.emit("message", frame({ type: CLIENT_PAIR, device_mid: "dev-1", token }));
+    clients.push(client);
+  }
+  assert.equal(hub.deviceFor("dev-1").clients.size, 2);
+
+  device.emit("message", frame({ type: "pair_revoke", token }));
+  for (const client of clients) {
+    assert.equal(client.closed, true, "every device is disconnected on revoke");
+    assert.equal(client.last().code, ERRORS.kicked);
+  }
+  assert.equal(hub.sessions.size, 0, "credentials die with the link");
+});
+
+test("a reusable link yields credentials without expiry", () => {
+  const hub = createHub({ now: () => 5, log: () => {} });
+  const device = fakeSocket();
+  bindSocket(hub, device, "device");
+  device.emit("message", frame({ type: DEVICE_REGISTER_INIT, device_mid: "dev-1", protocol_version: PROTOCOL_VERSION }));
+  device.emit("message", frame({ type: PAIR_REGISTER, ttlMs: 0, reusable: true }));
+  const token = device.last().token;
+  const client = fakeSocket();
+  bindSocket(hub, client, "client");
+  client.emit("message", frame({ type: CLIENT_PAIR, device_mid: "dev-1", token }));
+  const session = client.last().session;
+  const record = hub.sessionFor(session);
+  assert.equal(record.expiresAt, null, "a permanent link must not expire its sessions");
+});
+
+test("an expired one-shot token still reports expiry, not spent", () => {
+  let current = 0;
+  const hub = createHub({ now: () => current, log: () => {} });
+  const device = fakeSocket();
+  bindSocket(hub, device, "device");
+  device.emit("message", frame({ type: DEVICE_REGISTER_INIT, device_mid: "dev-1", protocol_version: PROTOCOL_VERSION }));
+  device.emit("message", frame({ type: PAIR_REGISTER, ttlMs: 100 }));
+  const token = device.last().token;
+  current = 500;
+  const client = fakeSocket();
+  bindSocket(hub, client, "client");
+  client.emit("message", frame({ type: CLIENT_PAIR, device_mid: "dev-1", token }));
+  assert.equal(client.last().code, ERRORS.sessionExpired);
 });

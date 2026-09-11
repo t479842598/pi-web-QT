@@ -66,6 +66,21 @@ export PI_WEB_RELAY_DEVICE_SECRET=<与中继同一串随机值>
 
 > `PI_WEB_RELAY_URL` 与 `PI_WEB_RELAY_PUBLIC_URL` 是两个不同的东西：前者是 WebSocket 端点，后者是手机浏览器打开的网页地址。写错会导致二维码指向一个打不开的 `wss://` 链接。
 
+## 三点五、页面与隧道（v0.17.9）
+
+中继除转发聊天帧外，还托管一个 ZCode 风格的移动页，并通过隧道代理 pi-web 的 HTTP 接口。
+
+| 路径 | 作用 |
+|------|------|
+| `/` 与 `/r/<token>` | 移动页（项目/会话列表、聊天、`/web/` 入口） |
+| `/web/*` | 完整 pi-web 界面（经隧道代理，路径前缀自动重写） |
+| `/ws` | WebSocket：聊天帧 + HTTP 隧道帧 |
+| `/healthz` | 健康检查（含 devices / sessions 计数） |
+
+**会话凭据**：配对 token 一次性，刷新页面或打开 `/web/` 需要凭据。配对成功时中继签发 30 天凭据，页面存 localStorage + Cookie（`/web/` 的普通请求只能靠 Cookie）。吊销 token 会连带作废其派生凭据。
+
+**协议帧**：`http_request` / `http_response_head` / `http_response_chunk` / `http_response_end`，响应带 `cid`（中继分配的手机 id）与 `rid`（该手机的请求 id），因此一台设备可同时服务多台手机且不会串话。
+
 ## 四、排障
 
 | 现象 | 排查 |
@@ -74,6 +89,7 @@ export PI_WEB_RELAY_DEVICE_SECRET=<与中继同一串随机值>
 | 连接几十秒就断 | 反代 `proxy_read_timeout` 是否过短；中继心跳 25s 一次 |
 | 扫码提示「配对信息无效」 | `RELAY_PUBLIC_URL` 与反代域名不一致，或二维码已过期 |
 | 扫码提示「桌面端已断开」 | pi-web 未启动或 `PI_WEB_RELAY_URL` 未配置/写错 |
+| **部署新页面后仍是旧内容** | 宝塔全局启用了 `proxy_cache`（`proxy.conf`）。站点的 `location /` 必须写 `proxy_cache off`，并清 `/www/server/nginx/proxy_cache_dir/`。症状是「中继本机 8787 是新内容、经 nginx 却是旧内容」 |
 | 设备列表显示不出中继地址 | pi-web 侧 `PI_WEB_RELAY_URL` 未设置 |
 
 ## 五、安全

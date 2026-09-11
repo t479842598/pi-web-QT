@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { bindSocket, createHub } from "./hub.mjs";
 import { MAX_FRAME_BYTES, digestsEqual, hashToken } from "./protocol.mjs";
-import { WEB_PREFIX, isHtmlResponse, isRelayOwnedPath, rewriteHtml, rewriteLocation, toUpstreamPath } from "./proxy.mjs";
+import { WEB_PREFIX, isHtmlResponse, rewriteHtml, rewriteLocation, toUpstreamPath } from "./proxy.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = resolve(here, "..", "public");

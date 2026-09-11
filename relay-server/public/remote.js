@@ -996,15 +996,27 @@ function connect() {
 
 // ── Wiring ──────────────────────────────────────────────────────────────────
 
+/**
+ * Hand off to the full pi-web UI.
+ *
+ * This is a plain page navigation on the relay's own origin — `/web/` is served
+ * by the relay, not by a Next.js router, so an assignment is the right call
+ * (the Next lint rule that flags it does not apply here).
+ */
+function goToFullApp() {
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+  window.location.href = "/web/";
+}
+
 $("home-refresh").addEventListener("click", () => {
   if (state.tunnel) void loadHome().catch(() => setHomeStatus("刷新失败"));
 });
-$("home-web").addEventListener("click", () => { window.location.href = "/web/"; });
+$("home-web").addEventListener("click", () => { goToFullApp(); });
 $("home-search").addEventListener("input", (event) => {
   state.query = event.currentTarget.value;
   renderHome();
 });
-$("chat-web").addEventListener("click", () => { window.location.href = "/web/"; });
+$("chat-web").addEventListener("click", () => { goToFullApp(); });
 $("chat-back").addEventListener("click", () => { state.streamRid = null; show("view-home"); });
 $("chat-view-toggle").addEventListener("click", toggleViewMode);
 $("status-retry").addEventListener("click", () => { state.attempt = 0; connect(); });
