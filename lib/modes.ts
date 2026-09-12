@@ -60,6 +60,49 @@ export function normalizeToolApprovalMode(value: unknown): ToolApprovalMode {
 }
 
 // ---------------------------------------------------------------------------
+// Chat modes — the composer's single mode picker, mirroring ZCode's four
+// modes. It is a UI-level projection over the two persisted axes: picking a
+// chat mode writes BOTH collaborationMode and toolApprovalMode, so existing
+// settings files (and everything reading the axes) keep working unchanged.
+// ---------------------------------------------------------------------------
+
+export type ChatMode = "plan" | "build" | "edit" | "yolo";
+
+export const CHAT_MODES: readonly ChatMode[] = ["plan", "build", "edit", "yolo"];
+
+export const DEFAULT_CHAT_MODE: ChatMode = "build";
+
+/** The (collaboration, approval) pair each chat mode maps onto. */
+export function chatModeAxes(mode: ChatMode): {
+  collaborationMode: CollaborationMode;
+  toolApprovalMode: ToolApprovalMode;
+} {
+  switch (mode) {
+    case "plan": return { collaborationMode: "plan", toolApprovalMode: "ask" };
+    case "edit": return { collaborationMode: "normal", toolApprovalMode: "auto" };
+    case "yolo": return { collaborationMode: "normal", toolApprovalMode: "yolo" };
+    case "build":
+    default: return { collaborationMode: "normal", toolApprovalMode: "ask" };
+  }
+}
+
+/**
+ * Derive the chat mode currently in effect from the persisted axes.
+ *
+ * `goal` has no ZCode counterpart and is returned separately: it is a pi-web
+ * extra that must stay reachable rather than being silently coerced to `build`.
+ */
+export function chatModeFromAxes(
+  collaborationMode: CollaborationMode,
+  toolApprovalMode: ToolApprovalMode,
+): ChatMode {
+  if (collaborationMode === "plan") return "plan";
+  if (toolApprovalMode === "yolo") return "yolo";
+  if (toolApprovalMode === "auto") return "edit";
+  return "build";
+}
+
+// ---------------------------------------------------------------------------
 // Economy tool whitelist — mirrors Reasonix tokenEconomyCoreBuiltins. Only
 // these tools stay enabled in economy mode; the agent is told to work direct.
 // ---------------------------------------------------------------------------

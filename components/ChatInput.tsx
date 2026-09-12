@@ -83,12 +83,14 @@ interface Props {
   compactResult?: CompactResultInfo | null;
   toolPreset?: "none" | "default" | "full" | "plan";
   onToolPresetChange?: (preset: "none" | "default" | "full") => void;
-  // Chat modes (Reasonix port). The composer only exposes the collaboration
-  // mode; run tier and tool approval come from the system settings defaults
-  // (toolApprovalMode is kept read-only here for the is-yolo shell accent).
+  // Chat modes (Reasonix port). The composer exposes a single ZCode-style mode
+  // picker that projects BOTH axes: collaboration (plan vs normal) and tool
+  // approval (ask/auto/yolo). toolApprovalMode is also read for the is-yolo
+  // shell accent.
   collaborationMode?: "normal" | "plan" | "goal";
   toolApprovalMode?: "ask" | "auto" | "yolo";
   onCollaborationModeChange?: (mode: "normal" | "plan" | "goal") => void;
+  onToolApprovalModeChange?: (mode: "ask" | "auto" | "yolo") => void;
   goalState?: import("@/hooks/useAgentSession").GoalRuntimeState;
   onGoalStart?: (text: string) => void;
   onGoalPause?: () => void;
@@ -565,7 +567,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   onSend, onBash, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, modelScopeWarnings, modelsError, onRetryModels, onModelChange,
   compactResult, toolPreset, onToolPresetChange,
   collaborationMode = "normal", toolApprovalMode = "auto",
-  onCollaborationModeChange,
+  onCollaborationModeChange, onToolApprovalModeChange,
   goalState, onGoalStart, onGoalPause, onGoalResume, onGoalStop,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue, onMoveQueue, onRecallOne, onRequeueAt, onRemoveQueueItem,
@@ -2877,6 +2879,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               <ModeControls
                 collaborationMode={collaborationMode}
                 onCollaborationModeChange={onCollaborationModeChange}
+                toolApprovalMode={toolApprovalMode}
+                onToolApprovalModeChange={onToolApprovalModeChange}
                 disabled={isStreaming}
               />
             )}

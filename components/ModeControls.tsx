@@ -3,51 +3,62 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import type { CollaborationMode } from "@/lib/modes";
-import { ArrowRightIcon } from "@phosphor-icons/react/ArrowRight";
+import type { ChatMode, CollaborationMode, ToolApprovalMode } from "@/lib/modes";
+import { chatModeAxes, chatModeFromAxes } from "@/lib/modes";
 import { CheckIcon } from "@phosphor-icons/react/Check";
-import { ListDashesIcon } from "@phosphor-icons/react/ListDashes";
 import { TargetIcon } from "@phosphor-icons/react/Target";
+import { Hand, NotepadText, ShieldAlert, ShieldCheck } from "lucide-react";
 
-type IconCmp = typeof ArrowRightIcon;
+/**
+ * Composer mode picker.
+ *
+ * The four primary modes mirror ZCode's picker one-for-one (same labels, same
+ * lucide icons — see docs/web-mobile-style-reference.md): plan / build / edit /
+ * yolo. Picking one writes BOTH persisted axes (collaboration + tool approval);
+ * the displayed selection is derived back from those axes, so a settings-file
+ * edit or another client keeps the picker honest.
+ *
+ * `goal` is pi-web's own continuous-goal mode with no ZCode counterpart, kept as
+ * a fifth entry so it stays reachable.
+ */
 
-interface MenuItem<M extends string> {
-  value: M;
+type IconCmp = typeof NotepadText;
+
+interface MenuItem {
+  value: ChatMode | "goal";
   Icon: IconCmp;
   titleKey: string;
   descKey: string;
+  /** ZCode marks full-access with a warning color. */
+  warning?: boolean;
 }
+
+const MODE_ITEMS: MenuItem[] = [
+  { value: "plan", Icon: NotepadText, titleKey: "modes.collabPlanTitle", descKey: "modes.collabPlanDesc" },
+  { value: "build", Icon: Hand, titleKey: "modes.chatBuildTitle", descKey: "modes.chatBuildDesc" },
+  { value: "edit", Icon: ShieldCheck, titleKey: "modes.chatEditTitle", descKey: "modes.chatEditDesc" },
+  { value: "yolo", Icon: ShieldAlert, titleKey: "modes.chatYoloTitle", descKey: "modes.chatYoloDesc", warning: true },
+  { value: "goal", Icon: TargetIcon as unknown as IconCmp, titleKey: "modes.collabGoalTitle", descKey: "modes.collabGoalDesc" },
+];
+
+const MODE_ICONS: Record<string, IconCmp> = Object.fromEntries(
+  MODE_ITEMS.map((item) => [item.value, item.Icon]),
+);
 
 interface ModeControlsProps {
   collaborationMode: CollaborationMode;
   onCollaborationModeChange: (mode: CollaborationMode) => void;
+  toolApprovalMode: ToolApprovalMode;
+  onToolApprovalModeChange?: (mode: ToolApprovalMode) => void;
   /** True while the agent is running — mode switches are disabled. */
   disabled?: boolean;
 }
 
-/**
- * Composer mode controls — ONLY the collaboration mode (常规/计划/目标) lives
- * here now. The run tier (运行档位) and tool approval (工具权限) selectors
- * were removed from the composer: their values come from the system settings
- * defaults (FeaturesConfig → /api/modes) and new sessions inherit them; the
- * per-session override API stays available for anything that still needs it.
- */
-
-const COLLAB_ITEMS: MenuItem<CollaborationMode>[] = [
-  { value: "normal", Icon: ArrowRightIcon, titleKey: "modes.collabNormalTitle", descKey: "modes.collabNormalDesc" },
-  { value: "plan", Icon: ListDashesIcon, titleKey: "modes.collabPlanTitle", descKey: "modes.collabPlanDesc" },
-  { value: "goal", Icon: TargetIcon, titleKey: "modes.collabGoalTitle", descKey: "modes.collabGoalDesc" },
-];
-
-const COLLAB_ICONS: Record<CollaborationMode, IconCmp> = {
-  normal: ArrowRightIcon,
-  plan: ListDashesIcon,
-  goal: TargetIcon,
-};
-
 export function ModeControls({
   collaborationMode,
   onCollaborationModeChange,
+  toolApprovalMode,
+  onToolApprovalModeChange,
   disabled = false,
 }: ModeControlsProps) {
   const { t } = useI18n();
@@ -76,9 +87,22 @@ export function ModeControls({
     closeTimerRef.current = window.setTimeout(() => setClosing(null), 150);
   }, []);
 
-  const pick = (value: string) => {
+  // The picker projects the persisted axes; goal short-circuits because it has
+  // no (collaboration, approval) pair of its own.
+  const activeValue: ChatMode | "goal" = collaborationMode === "goal"
+    ? "goal"
+    : chatModeFromAxes(collaborationMode, toolApprovalMode);
+
+  const pick = (value: ChatMode | "goal") => {
     closeMenu("collab");
-    if (value !== collaborationMode) onCollaborationModeChange(value as CollaborationMode);
+    if (value === activeValue) return;
+    if (value === "goal") {
+      onCollaborationModeChange("goal");
+      return;
+    }
+    const axes = chatModeAxes(value);
+    if (axes.collaborationMode !== collaborationMode) onCollaborationModeChange(axes.collaborationMode);
+    if (axes.toolApprovalMode !== toolApprovalMode) onToolApprovalModeChange?.(axes.toolApprovalMode);
   };
 
   const vh = () => window.visualViewport?.height ?? window.innerHeight;
@@ -112,8 +136,8 @@ export function ModeControls({
           transition: "opacity 0.12s",
         }}
       >
-        {COLLAB_ITEMS.map((item) => {
-          const isActive = item.value === collaborationMode;
+        {MODE_ITEMS.map((item) => {
+          const isActive = item.value === activeValue;
           const Icon = item.Icon;
           return (
             <button
@@ -135,7 +159,7 @@ export function ModeControls({
               onMouseEnter={(e) => { if (!isActive && !disabled) e.currentTarget.style.background = "var(--bg-hover)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? "var(--bg-selected)" : "none"; }}
             >
-              <Icon size={16} weight={isActive ? "fill" : "regular"} color={isActive ? "var(--accent)" : "var(--text-muted)"} aria-hidden="true" />
+              <Icon size={16} color={isActive ? (item.warning ? "var(--accent-orange, #f59e0b)" : "var(--accent)") : "var(--text-muted)"} aria-hidden="true" />
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: "block", fontSize: 12.5, fontWeight: 550, color: "var(--text)" }}>{t(item.titleKey)}</span>
                 <span style={{ display: "block", fontSize: 10.5, color: "var(--text-muted)", marginTop: 1, lineHeight: 1.4 }}>{t(item.descKey)}</span>
@@ -148,6 +172,13 @@ export function ModeControls({
     );
   };
 
+  const activeItem = MODE_ITEMS.find((item) => item.value === activeValue) ?? MODE_ITEMS[1];
+  const activeColor = activeValue === "build"
+    ? "var(--text-muted)"
+    : activeItem.warning
+      ? "var(--accent-orange, #f59e0b)"
+      : "var(--accent)";
+
   const triggerStyle = (active: boolean): React.CSSProperties => ({
     display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? 0 : 5,
     padding: isMobile ? 0 : "0 6px",
@@ -157,7 +188,7 @@ export function ModeControls({
     background: active ? "var(--bg-hover)" : "none",
     border: "none",
     borderRadius: 6,
-    color: collaborationMode !== "normal" ? "var(--accent)" : "var(--text-muted)",
+    color: activeColor,
     cursor: disabled ? "not-allowed" : "pointer",
     fontSize: 12,
     whiteSpace: "nowrap",
@@ -165,8 +196,8 @@ export function ModeControls({
     transition: "background 0.12s, color 0.12s",
   });
 
-  const CollabIcon = COLLAB_ICONS[collaborationMode];
-  const collabTitleKey = collaborationMode === "plan" ? "modes.collabPlanTitle" : collaborationMode === "goal" ? "modes.collabGoalTitle" : "modes.collabNormalTitle";
+  const ActiveIcon = activeItem.Icon;
+  const activeTitleKey = activeItem.titleKey;
 
   return (
     <>
@@ -174,17 +205,17 @@ export function ModeControls({
         <button
           ref={collabRef}
           type="button"
-          aria-label={t(collabTitleKey)}
-          title={t(collabTitleKey)}
+          aria-label={t(activeTitleKey)}
+          title={t(activeTitleKey)}
           aria-expanded={openMenu === "collab"}
           onClick={trigger("collab", collabRef)}
           disabled={disabled}
           style={triggerStyle(openMenu === "collab")}
         >
-          <CollabIcon size={14} weight={collaborationMode !== "normal" ? "fill" : "regular"} color={collaborationMode !== "normal" ? "var(--accent)" : "var(--text-muted)"} aria-hidden="true" />
+          <ActiveIcon size={14} color={activeColor} aria-hidden="true" />
           {!isMobile && (
             <span style={{ whiteSpace: "nowrap" }}>
-              {t(COLLAB_ITEMS.find((item) => item.value === collaborationMode)?.titleKey ?? "modes.collabNormalTitle")}
+              {t(activeTitleKey)}
             </span>
           )}
         </button>

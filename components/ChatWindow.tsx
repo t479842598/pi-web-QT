@@ -156,7 +156,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands,
     planMode,
     collaborationMode, toolApprovalMode,
-    handleCollaborationModeChange,
+    handleCollaborationModeChange, handleToolApprovalModeChange,
     approvalRequests, resolveApproval,
     goalState, handleGoalStart, handleGoalPause, handleGoalResume, handleGoalStop, handleGoalEdit,
     historyCursor, hasEarlierMessages, loadContext,
@@ -568,6 +568,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       collaborationMode={collaborationMode}
       toolApprovalMode={toolApprovalMode}
       onCollaborationModeChange={handleCollaborationModeSelect}
+      onToolApprovalModeChange={handleToolApprovalModeChange}
       goalState={goalState}
       onGoalStart={handleGoalStart}
       onGoalPause={handleGoalPause}
