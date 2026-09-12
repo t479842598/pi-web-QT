@@ -70,8 +70,6 @@ export type ChatMode = "plan" | "build" | "edit" | "yolo";
 
 export const CHAT_MODES: readonly ChatMode[] = ["plan", "build", "edit", "yolo"];
 
-export const DEFAULT_CHAT_MODE: ChatMode = "build";
-
 /** The (collaboration, approval) pair each chat mode maps onto. */
 export function chatModeAxes(mode: ChatMode): {
   collaborationMode: CollaborationMode;

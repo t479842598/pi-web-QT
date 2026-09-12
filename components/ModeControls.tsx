@@ -41,10 +41,6 @@ const MODE_ITEMS: MenuItem[] = [
   { value: "goal", Icon: TargetIcon as unknown as IconCmp, titleKey: "modes.collabGoalTitle", descKey: "modes.collabGoalDesc" },
 ];
 
-const MODE_ICONS: Record<string, IconCmp> = Object.fromEntries(
-  MODE_ITEMS.map((item) => [item.value, item.Icon]),
-);
-
 interface ModeControlsProps {
   collaborationMode: CollaborationMode;
   onCollaborationModeChange: (mode: CollaborationMode) => void;
