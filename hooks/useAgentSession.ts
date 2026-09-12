@@ -3393,6 +3393,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // it must NEVER overwrite the global defaults (owned by the settings
   // "Features" tab), otherwise every new chat would inherit this one's mode.
   const persistModeSettings = useCallback((next: ModeSettings) => {
+    // Sync the ref here, not via the effect: callers that write BOTH axes in
+    // one tick (the composer's chat-mode picker) derive each write from
+    // `modeSettingsRef.current`, and an effect-synced ref would still hold the
+    // pre-click value for the second call — silently dropping the first axis.
+    modeSettingsRef.current = next;
     setModeSettings(next);
     const sessionId = sessionIdRef.current;
     if (!sessionId) {

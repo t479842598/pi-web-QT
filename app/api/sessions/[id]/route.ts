@@ -13,10 +13,11 @@ import {
   invalidateOpenSessionCache,
   buildSessionContext,
   listAllSessions,
+  mergeSessionLists,
   openSessionCached,
   readSessionHeader,
 } from "@/lib/session-reader";
-import { getRpcSession, broadcastSessionBusEvent } from "@/lib/rpc-manager";
+import { abortSubagent, getRpcSession, getRpcSessionInfos, broadcastSessionBusEvent } from "@/lib/rpc-manager";
 import { mutateSettingsJson } from "@/lib/settings-lock";
 import { getAgentDir } from "@/lib/session-reader";
 import { setSessionArchived, dropSessionArchiveEntry } from "@/lib/session-archive";
@@ -212,6 +213,70 @@ export async function DELETE(
     const childPaths = new Set<string>();
     const targetPathKey = sessionPathKey(filePath);
     const dir = filePath.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
+
+    // Deleting a session also deletes every persisted or live subagent below
+    // it: a subagent is an implementation detail of its parent, so leaving its
+    // transcript behind would surface as an orphan row with a missing root.
+    const allSessions = mergeSessionLists(
+      await listAllSessions({ force: true }),
+      getRpcSessionInfos({ includeTransient: true }),
+    );
+    const childrenByParent = new Map<string, string[]>();
+    for (const session of allSessions) {
+      if (session.relation?.kind !== "subagent") continue;
+      const children = childrenByParent.get(session.relation.parentSessionId) ?? [];
+      children.push(session.id);
+      childrenByParent.set(session.relation.parentSessionId, children);
+    }
+    const sessionPaths = new Map(allSessions.map((session) => [session.id, session.path]));
+    // The catalogue can be stale or scoped to other projects; also read the
+    // sibling files directly so a just-created subagent is still found.
+    try {
+      for (const file of readdirSync(dir).filter((name) => name.endsWith(".jsonl"))) {
+        const childPath = join(dir, file);
+        if (sessionPathKey(childPath) === targetPathKey) continue;
+        try {
+          const lines = readFileSync(childPath, "utf8").split("\n").map((l) => l.replace(/\r$/, ""));
+          const header = JSON.parse(lines[0]) as { type?: string; id?: string };
+          if (header.type !== "session" || typeof header.id !== "string") continue;
+          const entries = lines.slice(1).flatMap((line) => {
+            try { return [JSON.parse(line) as SessionEntry]; } catch { return []; }
+          });
+          const subagent = readSubagentRun(entries, header.id, childPath);
+          if (!subagent) continue;
+          const children = childrenByParent.get(subagent.parentSessionId) ?? [];
+          children.push(header.id);
+          childrenByParent.set(subagent.parentSessionId, children);
+          sessionPaths.set(header.id, childPath);
+        } catch { /* skip malformed or concurrently removed sessions */ }
+      }
+    } catch { /* skip if dir unreadable */ }
+    const deletedSessionIds = new Set<string>([id]);
+    const pendingDelete = [id];
+    while (pendingDelete.length > 0) {
+      const parentId = pendingDelete.pop()!;
+      for (const childId of childrenByParent.get(parentId) ?? []) {
+        if (deletedSessionIds.has(childId)) continue;
+        deletedSessionIds.add(childId);
+        pendingDelete.push(childId);
+      }
+    }
+    const deletedPaths = new Map<string, string>([[id, filePath]]);
+    for (const deletedId of deletedSessionIds) {
+      const sessionPath = sessionPaths.get(deletedId);
+      if (sessionPath) deletedPaths.set(deletedId, sessionPath);
+    }
+    for (const deletedId of deletedSessionIds) {
+      if (deletedPaths.has(deletedId)) continue;
+      const runtimePath = getRpcSession(deletedId)?.sessionFile;
+      if (runtimePath) deletedPaths.set(deletedId, runtimePath);
+      else {
+        const resolvedPath = await resolveSessionPath(deletedId);
+        if (resolvedPath) deletedPaths.set(deletedId, resolvedPath);
+      }
+    }
+    const deletedPathKeys = new Set([...deletedPaths.values()].map((path) => sessionPathKey(path)));
+
     try {
       const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl") && join(dir, f) !== filePath);
       for (const file of files) {
@@ -236,6 +301,8 @@ export async function DELETE(
 
     for (const childPath of childPaths) {
       try {
+        // A subagent descendant is deleted below, not re-parented.
+        if (deletedPathKeys.has(sessionPathKey(childPath))) continue;
         const preview = readSessionHeader(childPath);
         if (!preview || preview.parentSession !== filePath) continue;
         // Stop the child's wrapper FIRST: rewriting the file underneath a
@@ -267,16 +334,30 @@ export async function DELETE(
       } catch { /* skip malformed / unreadable child */ }
     }
 
+    // Stop every descendant's live wrapper before unlinking (a running
+    // subagent would otherwise keep appending to a deleted file).
+    for (const deletedId of [...deletedSessionIds].reverse()) {
+      if (deletedId === id) continue;
+      try { await abortSubagent(deletedId); } catch { /* idle or completed */ }
+      await getRpcSession(deletedId)?.shutdown().catch(() => undefined);
+    }
     // Best-effort: a failing extension shutdown hook must not block the
     // delete (the wrapper is destroyed in shutdown's finally regardless).
+    try { await abortSubagent(id); } catch { /* ordinary session */ }
     await getRpcSession(id)?.shutdown().catch(() => undefined);
-    unlinkSync(filePath);
-    // Drop the queue sidecar and the archive entry so a hard delete leaves no
-    // orphan state behind (both are best-effort: the session is already gone).
-    try { removeQueue(filePath); } catch { /* sidecar absent */ }
-    await dropSessionArchiveEntry(getAgentDir(), id).catch(() => undefined);
-    invalidateOpenSessionCache(filePath);
-    invalidateSessionPathCache(id);
+    for (const [deletedId, deletedPath] of deletedPaths) {
+      try {
+        unlinkSync(deletedPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      // Drop the queue sidecar and the archive entry so a hard delete leaves no
+      // orphan state behind (both are best-effort: the session is already gone).
+      try { removeQueue(deletedPath); } catch { /* sidecar absent */ }
+      await dropSessionArchiveEntry(getAgentDir(), deletedId).catch(() => undefined);
+      invalidateOpenSessionCache(deletedPath);
+      invalidateSessionPathCache(deletedId);
+    }
     invalidateSessionListCache();
     return NextResponse.json({ ok: true });
   } catch (error) {

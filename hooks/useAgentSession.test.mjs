@@ -281,3 +281,18 @@ test("renews the selected-session lease and keeps its stream out of the grace wi
   assert.match(closeSource, /if \(sessionPropIdRef\.current === sid\)/);
   assert.match(closeSource, /cancelEventStreamGrace\(\);\s*\n\s*return;/);
 });
+
+test("persistModeSettings syncs the ref so one tick can write both axes", () => {
+  // The composer's chat-mode picker writes collaborationMode AND toolApprovalMode
+  // in the same tick. Each write derives from modeSettingsRef.current, so the
+  // ref must be updated synchronously — an effect-synced ref still holds the
+  // pre-click value for the second write and silently drops the first axis.
+  const persistSource = source.slice(
+    source.indexOf("const persistModeSettings = useCallback"),
+    source.indexOf("}, []);", source.indexOf("const persistModeSettings = useCallback")),
+  );
+  assert.match(persistSource, /modeSettingsRef\.current = next;/, "ref is synced inside persistModeSettings");
+  const refSyncIndex = persistSource.indexOf("modeSettingsRef.current = next;");
+  const setStateIndex = persistSource.indexOf("setModeSettings(next);");
+  assert.ok(refSyncIndex >= 0 && setStateIndex >= 0, "both assignments exist");
+});
