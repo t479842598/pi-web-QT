@@ -15,6 +15,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { TitleModelSetting } from "@/components/TitleModelSetting";
 import { BuiltinModelsDetail } from "@/components/BuiltinModelsDetail";
+import { ProviderUsageSummary } from "@/components/ProviderUsageSummary";
 import { ApplyNowButton } from "./ApplyNowButton";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
 import type { DiscoveredModel } from "@/lib/model-discovery";
@@ -1298,6 +1299,8 @@ function OAuthDetail({
         )}
       </div>
 
+      <ProviderUsageSummary providerId={provider.id} enabled={provider.loggedIn} />
+
       <BuiltinModelsDetail
         providerId={provider.id}
         onRegisterFlush={onRegisterBuiltinFlush}
@@ -1449,6 +1452,8 @@ function ApiKeyDetail({
           {removing ? t("desktop.modelsRemoving") : t("desktop.modelsDisconnect")}
         </button>
       )}
+
+      <ProviderUsageSummary providerId={provider.id} enabled={provider.configured} />
 
       <BuiltinModelsDetail
         providerId={provider.id}

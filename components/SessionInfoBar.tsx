@@ -16,7 +16,6 @@ import {
   Wallet,
 } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
-import type { DeepSeekBalanceData } from "@/hooks/useDeepSeekBalance";
 import { formatCNY } from "@/lib/deepseek-pricing";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionTreeNode } from "@/lib/types";
@@ -61,9 +60,6 @@ export interface SessionInfoBarProps {
   /** Show text label alongside the sound icon (e.g. "提示音：开启") */
   showSoundLabel?: boolean;
   /** Active session runs on the official DeepSeek provider (api.deepseek.com). */
-  isDeepSeekOfficial?: boolean;
-  /** Wallet balance fetched via GET /api/deepseek/balance. */
-  deepseekBalance?: DeepSeekBalanceData | null;
   /** Most recent finished turn's usage breakdown (for the 本次回复 block). */
   lastTurnUsage?: {
     model: string;
@@ -95,8 +91,6 @@ export function SessionInfoBar({
   branchActiveLeafId,
   onBranchLeafChange,
   showSoundLabel,
-  isDeepSeekOfficial,
-  deepseekBalance,
   lastTurnUsage,
 }: SessionInfoBarProps) {
   const { t: translate } = useI18n();
@@ -135,13 +129,6 @@ export function SessionInfoBar({
 
   // DeepSeek official balance chip title (computed before any early return so
   // hook order stays stable).
-  const balanceTitle = useMemo(() => {
-    const b = deepseekBalance;
-    if (!b?.available || b.totalBalance == null) return translate("desktop.balanceUnavailable");
-    const granted = Number(b.grantedBalance) || 0;
-    const toppedUp = Number(b.toppedUpBalance) || 0;
-    return `${translate("desktop.balance")}：${formatCNY(Number(b.totalBalance) || 0)}（${translate("desktop.balanceGranted")}：${formatCNY(granted)} / ${translate("desktop.balanceToppedUp")}：${formatCNY(toppedUp)}）`;
-  }, [deepseekBalance, translate]);
 
   if (!showChat) return null;
 
@@ -352,19 +339,6 @@ export function SessionInfoBar({
         </div>
       )}
 
-      {/* DeepSeek official balance (right side, before stats) */}
-      {isDeepSeekOfficial && deepseekBalance?.available && deepseekBalance.totalBalance != null && (
-        <span
-          className="session-info-bar-token-chip"
-          style={{ color: "var(--text-muted)", cursor: "default" }}
-          title={balanceTitle}
-        >
-          <Wallet size={11} aria-hidden="true" />
-          {translate("desktop.balance")} {formatCNY(Number(deepseekBalance.totalBalance) || 0)}
-        </span>
-      )}
-
-      {/* Token stats button + popover (right side) */}
       {hasStats && (
         <div className="session-info-bar-popover-host">
           <button
