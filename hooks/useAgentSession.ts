@@ -84,6 +84,7 @@ interface StreamingState {
 
 type StreamAction =
   | { type: "start" }
+  | { type: "resume" }
   | { type: "update"; message: Partial<AgentMessage> }
   | { type: "end" }
   | { type: "reset" };
@@ -92,6 +93,10 @@ function streamReducer(state: StreamingState, action: StreamAction): StreamingSt
   switch (action.type) {
     case "start":
       return { isStreaming: true, streamingMessage: null };
+    case "resume":
+      // Restoring a session that was already running must not wipe a partial
+      // that the SSE snapshot already delivered.
+      return { ...state, isStreaming: true };
     case "update":
       return { isStreaming: true, streamingMessage: action.message };
     case "end":
@@ -552,6 +557,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [error, setError] = useState<string | null>(null);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [activeToolResults, setActiveToolResults] = useState<Map<string, ToolResultMessage>>(new Map());
   const [entryIds, setEntryIds] = useState<string[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [hasEarlierMessages, setHasEarlierMessages] = useState(false);
@@ -931,7 +937,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const effectiveContextModel =
     contextModel && contextModel.provider && contextModel.modelId ? contextModel : null;
   const currentModel = currentModelOverride ?? effectiveContextModel ?? pendingModel ?? null;
-  const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
+  const displayModel = isNew
+    ? (newSessionModel ?? newSessionDefaultModel)
+    : currentModel ?? (data?.context.messages.length === 0 ? newSessionDefaultModel : null);
 
   const sessionStats = useMemo(() => {
     if (sessionStatsOverride) {
@@ -1618,6 +1626,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setAgentRunning(false);
     setAgentPhase(null);
     setRetryInfo(null);
+    setActiveToolResults(new Map());
     dispatch({ type: "end" });
     return wasRunning;
   }, [cancelStreamingScroll, resetStreamUpdates]);
@@ -2221,6 +2230,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       case "tool_execution_end": {
         const id = event.toolCallId as string;
+        setActiveToolResults((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Map(prev);
+          next.delete(id);
+          return next;
+        });
         setAgentPhase((prev) => {
           if (prev?.kind !== "running_tools") return prev;
           const tools = prev.tools.filter((t) => t.id !== id);
@@ -2230,6 +2245,27 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       }
       case "tool_execution_update": {
+        // Shell partials (bash/powershell): cache the streamed output so an SSE
+        // reconnect or a session opened mid-run still shows what already ran.
+        // The real toolResult later replaces this by toolCallId.
+        const partialResult = event.partialResult as Partial<ToolResultMessage> | undefined;
+        const partialContent = partialResult?.content;
+        const updateName = typeof event.toolName === "string" ? event.toolName : "";
+        const updateId = typeof event.toolCallId === "string" ? event.toolCallId : null;
+        if (updateId && (updateName === "bash" || updateName === "powershell") && Array.isArray(partialContent)) {
+          setActiveToolResults((prev) => {
+            const next = new Map(prev);
+            next.set(updateId, {
+              role: "toolResult",
+              toolCallId: updateId,
+              toolName: updateName,
+              content: partialContent,
+              isError: partialResult?.isError,
+              details: partialResult?.details,
+            } as ToolResultMessage);
+            return next;
+          });
+        }
         // Only the Agent tool streams here (see the events route). The partial
         // result carries the subagent's sessionId and status well before the
         // call completes, so fold it in as a provisional toolResult keyed by
@@ -2656,13 +2692,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [onSessionForked]);
 
-  const handleNavigate = useCallback(async (entryId: string) => {
+  const handleNavigate = useCallback(async (entryId: string): Promise<boolean> => {
+    if (bashRunningRef.current) return false;
     const sid = sessionIdRef.current;
-    if (!sid) return;
-    sendAgentCommand(sid, { type: "navigate_tree", targetId: entryId }).catch(() => {});
-    setActiveLeafId(entryId);
-    await loadContext(sid, entryId);
-  }, [loadContext]);
+    if (!sid) return false;
+    try {
+      const result = await sendAgentCommand<{ cancelled?: boolean }>(sid, {
+        type: "navigate_tree",
+        targetId: entryId,
+      });
+      if (result?.cancelled || sessionIdRef.current !== sid) return false;
+      setActiveLeafId(entryId);
+      await loadSession(sid);
+      return sessionIdRef.current === sid;
+    } catch (e) {
+      console.error("Failed to navigate:", e);
+      return false;
+    }
+  }, [loadSession]);
 
   const handleLeafChange = useCallback(async (leafId: string | null) => {
     setActiveLeafId(leafId);
@@ -3526,7 +3573,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           agentRunningRef.current = true;
           setAgentRunning(true);
           setAgentPhase(phaseFromServerState(state));
-          dispatch({ type: "start" });
+          dispatch({ type: "resume" });
           void connectEvents(session.id);
           if (!state.isStreaming && state.isPromptRunning) {
             void waitForPromptSettlement(session.id);
@@ -3817,7 +3864,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   return {
     // State
-    data, loading, error, activeLeafId, messages, entryIds, historyCursor, hasEarlierMessages, streamState,
+    data, loading, error, activeLeafId, messages, activeToolResults, entryIds, historyCursor, hasEarlierMessages, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, modelsError, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,

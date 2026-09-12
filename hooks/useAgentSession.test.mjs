@@ -227,3 +227,37 @@ test("non-empty queue_update schedules a get_state reconcile (self-heal missed d
   assert.match(source, /data\.state\?\.queuedMessages !== undefined/);
   assert.match(source, /setQueuedMessages\(normalizeQueuedMessages\(data\.state\.queuedMessages\)\)/);
 });
+
+test("reconnects active shell output to its streaming tool call", async () => {
+  const chatWindowSource = await readFile(new URL("../components/ChatWindow.tsx", import.meta.url), "utf8");
+  const updateSource = source.slice(
+    source.indexOf('case "tool_execution_update"'),
+    source.indexOf('case "queue_update"'),
+  );
+  const endSource = source.slice(
+    source.indexOf('case "tool_execution_end"'),
+    source.indexOf('case "tool_execution_update"'),
+  );
+
+  assert.match(updateSource, /updateName === "bash" \|\| updateName === "powershell"/);
+  assert.match(updateSource, /setActiveToolResults/);
+  assert.match(endSource, /setActiveToolResults[\s\S]*next\.delete\(id\)/);
+  // The pipeline seeds live partials before the authoritative message results.
+  assert.match(chatWindowSource, /buildHistoryPipeline\(messages, entryIds, messageCwd, activeToolResults\)/);
+});
+
+test("restoring a running session does not clear an SSE snapshot", () => {
+  const reducerSource = source.slice(
+    source.indexOf("function streamReducer"),
+    source.indexOf("interface AgentEvent"),
+  );
+  const restoreSource = source.slice(
+    source.indexOf("const restoreRunning ="),
+    source.indexOf("// 并行运行态探测"),
+  );
+  assert.match(reducerSource, /case "resume":/);
+  // Restoring a session that was already running resumes the stream instead of
+  // resetting it, so a partial delivered by the SSE snapshot survives.
+  assert.match(restoreSource, /dispatch\(\{ type: "resume" \}\)/);
+  assert.doesNotMatch(restoreSource, /dispatch\(\{ type: "start" \}\)/);
+});

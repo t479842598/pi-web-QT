@@ -8,6 +8,7 @@ import { buildHistoryPipeline, hasDisplayableProcessMessage, withAssistantBlocks
 import { type WrittenFile } from "@/lib/turn-written-files";
 import { collectProcessContentBlocks, splitAssistantContentBlocks, splitProcessSegments } from "@/lib/process-content";
 import { MessageView } from "./MessageView";
+import { MarkdownBody } from "./MarkdownBody";
 import { PlanReviewDialog } from "./PlanReviewDialog";
 import { GoalBanner } from "./GoalBanner";
 import { ApprovalModal } from "./ApprovalModal";
@@ -137,7 +138,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   }, []);
 
   const {
-    loading, error, messages, entryIds, streamState,
+    loading, error, messages, activeToolResults, entryIds, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, modelsError, reloadModels, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, sessionStats, tokenRate,
@@ -543,8 +544,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   // collection, written-file extraction) so streaming only recomputes the
   // live tail instead of re-transforming every historical turn on each frame.
   const historyPipeline = useMemo(
-    () => buildHistoryPipeline(messages, entryIds, messageCwd),
-    [messages, entryIds, messageCwd],
+    () => buildHistoryPipeline(messages, entryIds, messageCwd, activeToolResults),
+    [messages, entryIds, messageCwd, activeToolResults],
   );
 
   const availableThinkingLevels = displayModelValue
@@ -929,10 +930,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 // same offset as its successor — skip it here so every caller
                 // (singles, trailing loop, live tail) stays clean.
                 if (msg.role === "toolResult") return null;
-                const prevAssistantEntryId =
-                  msg.role === "user" && idx > 0 && messages[idx - 1].role === "assistant"
-                    ? entryIds[idx - 1]
-                    : undefined;
                 const isVisible = msg.role === "user" || msg.role === "assistant";
                 const currentRefIdx = visibleRefIndexByMessage.get(idx);
                 const keyPrefix = options.keyPrefix ?? "message";
@@ -959,10 +956,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     cwd={messageCwd}
                     onOpenFile={onOpenFile}
                     entryId={entryIds[idx]}
-                    onFork={agentRunning || isNew || (idx === 0 && msg.role === "user") ? undefined : handleFork}
+                    onFork={agentRunning || isNew ? undefined : handleFork}
                     forking={forkingEntryId === entryIds[idx]}
                     onNavigate={agentRunning ? undefined : handleNavigate}
-                    prevAssistantEntryId={agentRunning ? undefined : prevAssistantEntryId}
                     onEditContent={handleEditContent}
                     onQuoteReply={handleQuoteReply}
                     onOpenSession={onOpenSession}
@@ -1567,6 +1563,7 @@ function ExtensionDialog({
 }) {
   const { t } = useI18n();
   const [value, setValue] = useState(request.method === "editor" ? request.prefill ?? "" : "");
+  const focusFirstOption = useCallback((element: HTMLDivElement | null) => element?.focus(), []);
 
   useEffect(() => {
     setValue(request.method === "editor" ? request.prefill ?? "" : "");
@@ -1612,14 +1609,37 @@ function ExtensionDialog({
 
         <div style={{ padding: 14 }}>
           {request.method === "confirm" && (
-            <div style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{request.message}</div>
+            <MarkdownBody>{request.message}</MarkdownBody>
           )}
           {request.method === "select" && (
-            <div style={{ display: "grid", gap: 8 }}>
-              {request.options.map((option) => (
-                <button
+            <div
+              onKeyDown={(event) => {
+                if (!["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+                const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("[data-extension-option]"));
+                const index = buttons.indexOf(event.target as HTMLElement);
+                if (index < 0) return;
+                event.preventDefault();
+                const next = event.key === "Home" ? 0
+                  : event.key === "End" ? buttons.length - 1
+                  : (index + (event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+                buttons[next]?.focus();
+              }}
+              style={{ display: "grid", gap: 8 }}
+            >
+              {request.options.map((option, index) => (
+                <div
                   key={option}
+                  role="button"
+                  tabIndex={0}
+                  data-extension-option
+                  aria-label={option}
+                  ref={index === 0 ? focusFirstOption : undefined}
                   onClick={() => onRespond(request, { value: option })}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onRespond(request, { value: option });
+                  }}
                   style={{
                     width: "100%",
                     padding: "9px 10px",
@@ -1632,8 +1652,10 @@ function ExtensionDialog({
                     fontSize: 13,
                   }}
                 >
-                  {option}
-                </button>
+                  <div inert>
+                    <MarkdownBody>{option}</MarkdownBody>
+                  </div>
+                </div>
               ))}
             </div>
           )}

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { jsonResponse } from "@/lib/json-response";
 import { existsSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { randomUUID } from "crypto";
 import { join } from "path";
@@ -68,7 +69,7 @@ export async function GET(
     const sessionName = sm.getSessionName();
 
     if (initialView) {
-      return NextResponse.json({ sessionId: id, filePath, leafId, context });
+      return jsonResponse(req, { sessionId: id, filePath, leafId, context });
     }
 
     const header = sm.getHeader();
@@ -119,7 +120,7 @@ export async function GET(
       transient: !filePath || !existsSync(filePath),
     }]))[0] : null;
 
-    return NextResponse.json({
+    return jsonResponse(req, {
       sessionId: id,
       filePath,
       info,

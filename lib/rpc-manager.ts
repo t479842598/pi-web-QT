@@ -10,7 +10,7 @@ import { createQueueEntry, loadQueue, removeQueue, saveQueue, type PendingRecove
 import { invalidateModelsCache } from "./models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
-import { cacheSessionPath, invalidateSessionListCache, resolveSessionPath } from "./session-reader";
+import { cacheSessionPath, getLatestModelChange, invalidateSessionListCache, resolveSessionPath } from "./session-reader";
 import { createSubagentExtension, preferPiWebSubagentExtension } from "./subagent-extension";
 import { listSubagentProfiles, readSubagentRun, readSubagentSessionResources } from "./subagents";
 import { appendSessionToolSelection, readSessionToolSelection, validateSessionToolSelection } from "./session-tool-selection";
@@ -322,6 +322,7 @@ const MAX_REGISTERED_SESSIONS = 12;
 
 export class AgentSessionWrapper {
   private listeners: EventListener[] = [];
+  private activeToolEvents = new Map<string, AgentEvent>();
   private pendingUiResponses = new Map<string, PendingUiResponse>();
   private pendingUiRequests = new Map<string, AgentEvent>();
   private activeCustomUis = new Map<string, ActiveCustomUi>();
@@ -519,6 +520,17 @@ export class AgentSessionWrapper {
       }
       if (SESSION_BUS_EVENT_TYPES.has(event.type)) {
         broadcastSessionBusEvent(event.type, this.sessionId, event);
+      }
+      // Cache in-flight tool events so a listener that attaches mid-run (SSE
+      // reconnect, or a session opened while a shell command is streaming) can
+      // still render the output that already arrived.
+      const toolCallId = event.toolCallId;
+      if (typeof toolCallId === "string") {
+        if (event.type === "tool_execution_start" || event.type === "tool_execution_update") {
+          this.activeToolEvents.set(toolCallId, event);
+        } else if (event.type === "tool_execution_end") {
+          this.activeToolEvents.delete(toolCallId);
+        }
       }
       this.emit(event);
       notifyRunningChange();
@@ -1232,6 +1244,7 @@ export class AgentSessionWrapper {
     // inside the grace window after a tab reload).
     this.cancelPendingDispose();
     for (const event of this.pendingUiRequests.values()) listener(event);
+    for (const event of this.activeToolEvents.values()) listener(event);
     return () => {
       const i = this.listeners.indexOf(listener);
       if (i !== -1) this.listeners.splice(i, 1);
@@ -1544,15 +1557,39 @@ export class AgentSessionWrapper {
         const currentSessionFile = this.inner.sessionFile;
         if (!sessionManager.isPersisted()) return { cancelled: true };
         if (!currentSessionFile) throw new Error("Persisted session is missing a session file");
-        if (!sessionManager.getEntry(entryId)) throw new Error("Invalid entry ID for forking");
+        const forkedEntry = sessionManager.getEntry(entryId);
+        if (!forkedEntry) throw new Error("Invalid entry ID for forking");
 
         const sessionDir = sessionManager.getSessionDir();
-        const sourceManager = SessionManager.open(currentSessionFile, sessionDir);
-        const forkedPath = sourceManager.createBranchedSession(entryId);
-        if (!forkedPath) throw new Error("Failed to create forked session");
+        let newSessionFile: string;
+        let forkedManager: SessionManager;
 
-        const newSessionId = SessionManager.open(forkedPath, sessionDir).getSessionId();
-        cacheSessionPath(newSessionId, forkedPath);
+        if (!forkedEntry.parentId) {
+          // Fork before the first message: create an empty session linked to this
+          // one. SessionManager.create() may keep the branch in memory until it
+          // has a reason to flush, so materialize the JSONL explicitly below.
+          forkedManager = SessionManager.create(sessionManager.getCwd(), sessionDir, {
+            parentSession: currentSessionFile,
+          });
+          newSessionFile = forkedManager.getSessionFile() as string;
+        } else {
+          forkedManager = SessionManager.open(currentSessionFile, sessionDir);
+          const forkedPath = forkedManager.createBranchedSession(forkedEntry.parentId);
+          if (!forkedPath) throw new Error("Failed to create forked session");
+          newSessionFile = forkedPath;
+        }
+
+        if (!existsSync(newSessionFile)) {
+          const header = forkedManager.getHeader();
+          if (!header) throw new Error("Forked session is missing a session header");
+          const content = [header, ...forkedManager.getEntries()]
+            .map((forkedEntry) => JSON.stringify(forkedEntry))
+            .join("\n") + "\n";
+          writeFileSync(newSessionFile, content, { encoding: "utf8", flag: "wx" });
+        }
+
+        const newSessionId = forkedManager.getSessionId();
+        cacheSessionPath(newSessionId, newSessionFile);
         invalidateSessionListCache();
         return { cancelled: false, newSessionId };
       }
@@ -1958,6 +1995,7 @@ export class AgentSessionWrapper {
     for (const id of Array.from(this.activeCustomUis.keys())) this.closeCustomUi(id, undefined);
     this.pendingUiResponses.clear();
     this.pendingUiRequests.clear();
+    this.activeToolEvents.clear();
     this.rejectAllApprovals("Session closed while approval was pending");
 
     const finishDispose = () => {
@@ -3012,16 +3050,24 @@ export async function startRpcSession(
       : undefined;
     const defaultProvider = services.settingsManager.getDefaultProvider();
     const defaultModelId = services.settingsManager.getDefaultModel();
-    const hasExistingMessages = sessionManager.getBranch().some((entry) => entry.type === "message");
-    const initial = hasExistingMessages
-      ? { scopedModels: [...scope.scopedModels] }
-      : selectInitialModelScope(scope, {
+    const branch = sessionManager.getBranch();
+    const hasExistingMessages = branch.some((entry) => entry.type === "message");
+    const savedModel = hasExistingMessages
+      ? getLatestModelChange(branch as unknown as SessionEntry[])
+      : null;
+    const restoredModel = savedModel
+      ? services.modelRuntime.getModel(savedModel.provider, savedModel.modelId)
+      : undefined;
+    const initial = hasExistingMessages ? null : selectInitialModelScope(scope, {
         ...(effectiveInitialModel ? { requestedModel: effectiveInitialModel } : {}),
         ...(defaultProvider && defaultModelId
           ? { defaultModel: { provider: defaultProvider, modelId: defaultModelId } }
           : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
       });
+    const startupModel = restoredModel && services.modelRuntime.hasConfiguredAuth(restoredModel.provider)
+      ? restoredModel
+      : initial?.model;
     // Hard-timeout the create step: it ignores startController (extension
     // binding / resource discovery can hang), and without this bound the
     // shared start promise would never settle and poison __piStartLocks.
@@ -3030,9 +3076,9 @@ export async function startRpcSession(
     const createPromise = createAgentSessionFromServices({
       services,
       sessionManager,
-      ...(initial.model ? { model: initial.model } : {}),
-      ...(initial.thinkingLevel ? { thinkingLevel: initial.thinkingLevel } : {}),
-      ...(initial.scopedModels.length > 0 ? { scopedModels: initial.scopedModels } : {}),
+      ...(startupModel ? { model: startupModel } : {}),
+      ...(initial?.thinkingLevel ? { thinkingLevel: initial.thinkingLevel } : {}),
+      ...(scope.scopedModels.length > 0 ? { scopedModels: [...scope.scopedModels] } : {}),
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
       customTools: asyncBashTools,
     });

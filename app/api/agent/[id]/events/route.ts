@@ -5,15 +5,18 @@ export const dynamic = "force-dynamic";
 
 // These SDK events are not consumed by the web client and can be emitted for
 // every streamed chunk. Omitting them avoids serializing duplicate payloads.
-const OMITTED_EVENT_TYPES = new Set(["turn_start", "turn_end", "tool_execution_update"]);
+const OMITTED_EVENT_TYPES = new Set(["turn_start", "turn_end"]);
 
 /**
- * Only the `Agent` tool reports meaningful partial results — a subagent's
- * session id and status arrive through onUpdate long before the call
- * completes. Every other tool emits one update per streamed chunk, so those
- * stay dropped.
+ * Tools whose partial results are worth forwarding above the snapshot:
+ * - `Agent`: a subagent's session id and status arrive through onUpdate well
+ *   before the call completes.
+ * - `bash` / `powershell`: the partial output lets an SSE reconnect (or a
+ *   session opened mid-run) still show the shell output that already streamed.
+ * Every other tool emits one update per chunk with nothing new, so those stay
+ * dropped.
  */
-const FORWARDED_UPDATE_TOOLS = new Set(["Agent"]);
+const FORWARDED_UPDATE_TOOLS = new Set(["Agent", "bash", "powershell"]);
 
 function toClientEvent(event: AgentEvent): AgentEvent | null {
   if (event.type === "tool_execution_update") {

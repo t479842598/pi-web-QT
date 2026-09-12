@@ -36,6 +36,8 @@ interface FileData {
   content: string;
   language: string;
   size: number;
+  nextOffset: number;
+  truncated: boolean;
 }
 
 interface SelectedLineRange {
@@ -830,6 +832,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
   const [prevContent, setPrevContent] = useState<string | null>(null);
   const [gitDiff, setGitDiff] = useState<GitFileDiffResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState(false);
   const [viewMode, setViewMode] = useState<"source" | "diff">("source");
@@ -870,8 +873,8 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
     }
   }, [cwd]);
 
-  const fetchContent = useCallback((filePath: string, isRefresh = false) => {
-    return fetch(getFileApiUrl(filePath, "read", sourceSessionId))
+  const fetchContent = useCallback((filePath: string, isRefresh = false, offset = 0) => {
+    return fetch(getFileApiUrl(filePath, "read", sourceSessionId, offset ? { offset } : undefined))
       .then((r) => r.json())
       .then((d: FileData & { error?: string }) => {
         if (d.error) {
@@ -884,6 +887,9 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
             return d;
           });
           setChangeCount((c) => c + 1);
+        } else if (offset) {
+          // Appending a later page: keep the already-shown text (upstream: load more).
+          setData((current) => current ? { ...d, content: current.content + d.content } : d);
         } else {
           setData(d);
         }
@@ -922,7 +928,9 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
       // HTML gets the same rendered-first treatment as markdown: a generated page
       // is usually more useful viewed than read as source. Both have a preview
       // mode already; the source tab stays one click away.
-      if ((d?.language === "markdown" || d?.language === "html") && initialDisplayMode !== "diff") setPreviewMode(true);
+      // A truncated (paged) file is partial text — never auto-preview it, since
+      // rendering half a markdown/HTML document is misleading.
+      if (!d?.truncated && (d?.language === "markdown" || d?.language === "html") && initialDisplayMode !== "diff") setPreviewMode(true);
     }).finally(() => setLoading(false));
     void fetchGitDiff(filePath);
 
@@ -1312,6 +1320,40 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
         )}
         {!editMode && <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />}
       </div>
+
+      {data?.truncated && viewMode === "source" && !editMode && (
+        <div
+          className="file-viewer-load-more"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+            padding: "5px 8px",
+            borderBottom: "1px solid var(--border)",
+            color: "var(--text-dim)",
+            fontSize: 11,
+          }}
+        >
+          <span>{formatSize(data.nextOffset)} / {formatSize(data.size)}</span>
+          <button
+            type="button"
+            disabled={loadingMore}
+            onClick={() => {
+              setLoadingMore(true);
+              void fetchContent(filePath, false, data.nextOffset).finally(() => setLoadingMore(false));
+            }}
+            style={{
+              padding: "2px 10px", fontSize: 11, cursor: "pointer",
+              border: "1px solid var(--border)", borderRadius: 5,
+              background: "var(--bg-hover)", color: "var(--text)",
+              opacity: loadingMore ? 0.6 : 1,
+            }}
+          >
+            {loadingMore ? t("i18n.loading") : t("i18n.loadMore")}
+          </button>
+        </div>
+      )}
 
       {/* Content area */}
       <div ref={contentRef} style={{ flex: 1, overflow: "auto", background: "var(--bg)" }}>

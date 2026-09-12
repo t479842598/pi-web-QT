@@ -1573,6 +1573,7 @@ export const zhCNLocale = {
     "i18n.removing": "移除中…",
     "i18n.delete": "删除",
     "i18n.loading": "加载中...",
+    "i18n.loadMore": "加载更多",
     "i18n.search": "搜索",
     "i18n.refresh": "刷新",
     "i18n.update": "更新",

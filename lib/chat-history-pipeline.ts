@@ -92,8 +92,14 @@ export function buildHistoryPipeline(
   messages: AgentMessage[],
   entryIds: string[],
   messageCwd: string | undefined,
+  /**
+   * In-flight tool results (bash/powershell partial output). Seeded first so a
+   * completed message result — which is authoritative — always overwrites the
+   * partial for the same toolCallId.
+   */
+  activeToolResults?: Map<string, ToolResultMessage>,
 ): HistoryPipeline {
-  const toolResultsMap = new Map<string, ToolResultMessage>();
+  const toolResultsMap = new Map<string, ToolResultMessage>(activeToolResults);
   for (const msg of messages) {
     if (msg.role === "toolResult") {
       toolResultsMap.set((msg as ToolResultMessage).toolCallId, msg as ToolResultMessage);

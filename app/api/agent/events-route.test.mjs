@@ -5,7 +5,9 @@ import test from "node:test";
 const source = await readFile(new URL("./[id]/events/route.ts", import.meta.url), "utf8");
 
 test("agent SSE omits unconsumed events and projects only client fields", () => {
-  assert.match(source, /OMITTED_EVENT_TYPES = new Set\(\["turn_start", "turn_end", "tool_execution_update"\]\)/);
+  assert.match(source, /OMITTED_EVENT_TYPES = new Set\(\["turn_start", "turn_end"\]\)/);
+  // Shell partials are forwarded too, so a reconnect keeps the streamed output.
+  assert.match(source, /FORWARDED_UPDATE_TOOLS = new Set\(\["Agent", "bash", "powershell"\]\)/);
   assert.match(source, /delete clientEvent\.assistantMessageEvent/);
   assert.match(source, /event\.type === "agent_end"/);
   assert.match(source, /event\.willRetry !== undefined/);

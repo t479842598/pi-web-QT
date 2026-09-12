@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, memo, KeyboardEvent } from "react";
+import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, memo, KeyboardEvent } from "react";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
@@ -258,6 +258,107 @@ const CLIENT_JPEG_QUALITY = 0.85;
 
 export function shouldCompressImageFile(file: Pick<File, "size" | "type">): boolean {
   return file.size > CLIENT_IMAGE_COMPRESSION_THRESHOLD_BYTES && file.type !== "image/gif";
+}
+
+/**
+ * Rewrite plain-text occurrences of anchors copied from rich text into markdown
+ * links, so pasting from a browser keeps the destination instead of dropping it.
+ * Returns null when nothing matched (caller then keeps its default paste path).
+ */
+export function replaceLinksWithMarkdown(
+  text: string,
+  links: Iterable<{ label: string; href: string; occurrence: number }>,
+): string | null {
+  let result = "";
+  let searchFrom = 0;
+  let replaced = false;
+
+  for (const { label, href, occurrence } of links) {
+    if (!label || !href) continue;
+    let index = 0;
+    for (let match = 0; match <= occurrence; match++) {
+      index = text.indexOf(label, match ? index + label.length : 0);
+      if (index < 0) break;
+    }
+    if (index < searchFrom) continue;
+    const escapedLabel = label.replace(/([\\[\]])/g, "\\$1");
+    const escapedHref = href.replace(/([\\()])/g, "\\$1");
+    result += `${text.slice(searchFrom, index)}[${escapedLabel}](${escapedHref})`;
+    searchFrom = index + label.length;
+    replaced = true;
+  }
+
+  return replaced ? result + text.slice(searchFrom) : null;
+}
+
+const ANCHORED_MENU_GAP = 8;
+
+export function getUpwardMenuMaxHeight(menuBottom: number, visibleTop: number, gap = ANCHORED_MENU_GAP): number {
+  return Math.max(0, Math.floor(menuBottom - visibleTop - gap));
+}
+
+export function cycleListIndex(index: number, length: number, delta: number): number {
+  if (length <= 0) return 0;
+  return ((index + delta) % length + length) % length;
+}
+
+function getVisibleTopBoundary(element: HTMLElement): number {
+  let visibleTop = window.visualViewport?.offsetTop ?? 0;
+
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const overflowY = window.getComputedStyle(parent).overflowY;
+    if (overflowY === "auto" || overflowY === "scroll" || overflowY === "hidden" || overflowY === "clip") {
+      visibleTop = Math.max(visibleTop, parent.getBoundingClientRect().top + parent.clientTop);
+    }
+  }
+
+  return visibleTop;
+}
+
+/**
+ * Track how much room is actually visible above an upward-opening menu, so a
+ * long list caps to the space above the composer instead of painting through
+ * the session tab bar. Re-measures on layout, viewport, and scroll changes.
+ */
+function subscribeUpwardMenuMaxHeight(
+  menu: HTMLElement,
+  onChange: (height: number) => void,
+): () => void {
+  let frameId: number | null = null;
+  const update = () => {
+    frameId = null;
+    onChange(getUpwardMenuMaxHeight(
+      menu.getBoundingClientRect().bottom,
+      getVisibleTopBoundary(menu),
+    ));
+  };
+  const scheduleUpdate = () => {
+    if (frameId !== null) cancelAnimationFrame(frameId);
+    frameId = requestAnimationFrame(update);
+  };
+
+  update();
+  const parent = menu.parentElement;
+  const layoutContainer = parent?.parentElement;
+  const anchorObserver = typeof ResizeObserver === "undefined" || !parent
+    ? null
+    : new ResizeObserver(scheduleUpdate);
+  if (parent) anchorObserver?.observe(parent);
+  if (layoutContainer) anchorObserver?.observe(layoutContainer);
+  const viewport = window.visualViewport;
+  viewport?.addEventListener("resize", scheduleUpdate);
+  viewport?.addEventListener("scroll", scheduleUpdate);
+  window.addEventListener("resize", scheduleUpdate);
+  window.addEventListener("scroll", scheduleUpdate, true);
+
+  return () => {
+    anchorObserver?.disconnect();
+    viewport?.removeEventListener("resize", scheduleUpdate);
+    viewport?.removeEventListener("scroll", scheduleUpdate);
+    window.removeEventListener("resize", scheduleUpdate);
+    window.removeEventListener("scroll", scheduleUpdate, true);
+    if (frameId !== null) cancelAnimationFrame(frameId);
+  };
 }
 
 function readImageFile(file: Blob, mimeType: string): Promise<{ data: string; mimeType: string }> {
@@ -574,9 +675,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   });
   const [atQuery, setAtQuery] = useState<AtQueryMatch | null>(null);
   const [atMenuOpen, setAtMenuOpen] = useState(false);
+  const [atMenuMaxHeight, setAtMenuMaxHeight] = useState<number | null>(null);
   const [atActiveIndex, setAtActiveIndex] = useState(0);
   const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
   const [historyActiveIndex, setHistoryActiveIndex] = useState(0);
+  const [builtinCommandPending, setBuiltinCommandPending] = useState(false);
+  const builtinCommandPendingRef = useRef(false);
   const [fileIndex, setFileIndex] = useState<{ cwd: string; entries: FileIndexEntry[]; truncated: boolean } | null>(null);
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
@@ -596,6 +700,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const slashCommandsRequestedRef = useRef(false);
   const slashItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const atItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const atMenuRef = useRef<HTMLDivElement>(null);
   const historyItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const fileIndexMetaRef = useRef<{ cwd: string; fetchedAt: number } | null>(null);
   const fileIndexFetchingRef = useRef<string | null>(null);
@@ -909,10 +1014,20 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       return;
     }
     if (!attachedImages.length && msg.startsWith("/") && onBuiltinCommand) {
-      const result = await onBuiltinCommand(msg);
-      if (result.handled) {
-        if (!result.error) clearInput();
-        return;
+      // A built-in command may await a long-running action (e.g. /compact);
+      // ignore a second submit until it settles, or the command runs twice.
+      if (builtinCommandPendingRef.current) return;
+      builtinCommandPendingRef.current = true;
+      setBuiltinCommandPending(true);
+      try {
+        const result = await onBuiltinCommand(msg);
+        if (result.handled) {
+          if (!result.error) clearInput();
+          return;
+        }
+      } finally {
+        builtinCommandPendingRef.current = false;
+        setBuiltinCommandPending(false);
       }
     }
     onSend(msg, attachedImages.length ? attachedImages : undefined);
@@ -1164,6 +1279,20 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     if (!atMenuOpen) return;
     atItemRefs.current[atActiveIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [atActiveIndex, atMenuOpen]);
+
+  // Cap the @ file picker to the space visible above the composer, so a long
+  // result list cannot paint through the session tab bar.
+  useLayoutEffect(() => {
+    if (!atMenuOpen || atQuery === null) {
+      setAtMenuMaxHeight(null);
+      return;
+    }
+    const menu = atMenuRef.current;
+    if (!menu) return;
+    return subscribeUpwardMenuMaxHeight(menu, (nextHeight) => {
+      setAtMenuMaxHeight((current) => current === nextHeight ? current : nextHeight);
+    });
+  }, [atMenuOpen, atQuery]);
 
   const applyHistoryInput = useCallback((text: string) => {
     setValue(text);
@@ -1419,12 +1548,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       if (atMenuOpen && atQuery !== null && !isComposing) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
-          setAtActiveIndex((i) => Math.min(Math.max(0, atMatches.length - 1), i + 1));
+          setAtActiveIndex((i) => cycleListIndex(i, atMatches.length, 1));
           return;
         }
         if (e.key === "ArrowUp") {
           e.preventDefault();
-          setAtActiveIndex((i) => Math.max(0, i - 1));
+          setAtActiveIndex((i) => cycleListIndex(i, atMatches.length, -1));
           return;
         }
         if (e.key === "Escape") {
@@ -1539,6 +1668,42 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     if (!textItem) return;
     const text = e.clipboardData.getData("text/plain");
     if (!text) return;
+    // Rich-text paste: when the clipboard also carries HTML with anchors, keep
+    // the destinations by rewriting the matching plain-text runs as markdown
+    // links. Falls through untouched when there is no HTML or nothing matched.
+    const html = e.clipboardData.getData("text/html");
+    if (html) {
+      const parsed = new DOMParser().parseFromString(html, "text/html");
+      const links = Array.from(parsed.querySelectorAll("a[href]"), (link) => {
+        const label = link.textContent ?? "";
+        const range = parsed.createRange();
+        range.setStart(parsed.body, 0);
+        range.setEndBefore(link);
+        return {
+          label,
+          href: link.getAttribute("href")?.trim() ?? "",
+          occurrence: label ? range.toString().split(label).length - 1 : 0,
+        };
+      });
+      const markdown = replaceLinksWithMarkdown(text, links);
+      if (markdown !== null) {
+        const ta = textareaRef.current;
+        const start = ta?.selectionStart ?? value.length;
+        const end = ta?.selectionEnd ?? value.length;
+        const nextValue = value.slice(0, start) + markdown + value.slice(end);
+        e.preventDefault();
+        setValue(nextValue);
+        setHistoryMenuOpen(false);
+        updateAtQuery(nextValue, start + markdown.length);
+        requestAnimationFrame(() => {
+          if (!ta) return;
+          ta.focus();
+          ta.setSelectionRange(start + markdown.length, start + markdown.length);
+          handleInput();
+        });
+        return;
+      }
+    }
     const lineCount = text.split(/\r?\n/).length;
     const LONG_PASTE_MIN_CHARS = 2000;
     const LONG_PASTE_MIN_LINES = 20;
@@ -1755,9 +1920,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
 
   return (
-    <div
+    <fieldset
+      disabled={builtinCommandPending}
+      aria-busy={builtinCommandPending}
       style={{
         flexShrink: 0,
+        minWidth: 0,
+        margin: 0,
+        border: 0,
         background: "transparent",
         // Clear the iOS home indicator / gesture bar so the send button is
         // never under it.
@@ -1765,6 +1935,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
           ? "0 16px max(15px, env(safe-area-inset-bottom))"
           : "0 16px 15px",
         paddingRight: isMobile ? 16 : 34, // desktop: 16px base + 18px for ChatMinimap alignment
+        opacity: builtinCommandPending ? 0.5 : 1,
+        transition: "opacity 0.15s",
       }}
     >
       {/* Hidden file input */}
@@ -2162,6 +2334,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               : "";
             return (
               <div
+                ref={atMenuRef}
                 style={{
                   position: "absolute",
                   left: 0,
@@ -2173,7 +2346,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   borderRadius: 8,
                   boxShadow: "0 -6px 20px rgba(0,0,0,0.12)",
                   overflow: "hidden",
-                  maxHeight: "min(30vh, 240px)",
+                  boxSizing: "border-box",
+                  display: "flex",
+                  flexDirection: "column",
+                  maxHeight: atMenuMaxHeight === null
+                    ? "min(30vh, 240px)"
+                    : `min(30vh, 240px, ${atMenuMaxHeight}px)`,
                 }}
               >
                 <div
@@ -2186,6 +2364,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                     gap: 8,
                     fontSize: 11,
                     color: "var(--text-dim)",
+                    flexShrink: 0,
                   }}
                 >
                   <span>
@@ -2195,7 +2374,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)" }}>{t("desktop.tabOrEnter")}</span>
                 </div>
-                <div style={{ maxHeight: "calc(min(30vh, 240px) - 24px)", overflowY: "auto", padding: 2 }}>
+                <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: 2 }}>
                   {!indexLoading && atMatches.length === 0 ? (
                     <div style={{ padding: "4px 6px", fontSize: 12, color: "var(--text-dim)" }}>
                       {needsServerSearch && !serverResultInUse ? t("desktop.searching") : t("desktop.noMatchingFiles")}
@@ -3349,6 +3528,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         </div>
       </div>
     </div>
-    </div>
+    </fieldset>
   );
 }));
