@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
-import { ChatCenteredText, ChartBar, Cpu, Database, DeviceMobile, DownloadSimple, Lightning, List, ListBullets, Monitor, Network, Plug, PlugsConnected, Robot, Stack, TerminalWindow, X } from "@phosphor-icons/react";
+import { ChatCenteredText, ChartBar, Cpu, Database, DownloadSimple, Lightning, List, ListBullets, Monitor, Network, Plug, PlugsConnected, Robot, Stack, TerminalWindow, X } from "@phosphor-icons/react";
 import { BackupConfig } from "./BackupConfig";
 import { ChatConfig } from "./ChatConfig";
 import { DisplayConfig } from "./DisplayConfig";
@@ -19,11 +19,10 @@ import { AgentsConfig } from "./AgentsConfig";
 import { ToolsConfig } from "./ToolsConfig";
 import { UsageConfig } from "./UsageConfig";
 import { ServerSwitchConfig } from "./ServerSwitchConfig";
-import { PairDevicePanel } from "./PairDeviceDialog";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 
-export type SettingsTab = "server" | "display" | "chat" | "models" | "skills" | "plugins" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import" | "mcp" | "subagents" | "tools" | "remote";
+export type SettingsTab = "server" | "display" | "chat" | "models" | "skills" | "plugins" | "proxy" | "features" | "logs" | "snippets" | "usage" | "backup" | "import" | "mcp" | "subagents" | "tools";
 
 interface SettingsModalProps {
   initialTab?: SettingsTab;
@@ -41,7 +40,6 @@ interface SettingsModalProps {
  * instead of maintaining a second, drifting list. */
 export const SETTINGS_TABS: { id: SettingsTab; labelKey: string; Icon: typeof Cpu }[] = [
   { id: "server", labelKey: "desktop.server", Icon: PlugsConnected },
-  { id: "remote", labelKey: "pair.tabLabel", Icon: DeviceMobile },
   { id: "display", labelKey: "desktop.display", Icon: Monitor },
   { id: "chat", labelKey: "desktop.chat", Icon: ChatCenteredText },
   { id: "models", labelKey: "desktop.models", Icon: Cpu },
@@ -256,9 +254,6 @@ export function SettingsModal({
 
           <div style={{ display: activeTab === "server" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <ServerSwitchConfig />
-          </div>
-          <div style={{ display: activeTab === "remote" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
-            <PairDevicePanel />
           </div>
           <div style={{ display: activeTab === "display" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <DisplayConfig />

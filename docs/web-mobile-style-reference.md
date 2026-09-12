@@ -56,7 +56,6 @@ ZCode 区分以下状态，pi-web 中继沿用同名语义：
 
 | 状态 | 含义 |
 |------|------|
-| `relayUnavailable` | 中继不可达 |
 | `sessionExpired` | 凭证过期 |
 | `sessionConflict` | 会话冲突 |
 | `kicked` | 被吊销/被顶下线 |
