@@ -1,17 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { ApprovalRequestItem } from "@/hooks/useAgentSession";
-import { CheckIcon } from "@phosphor-icons/react/Check";
-import { ShieldCheckIcon } from "@phosphor-icons/react/ShieldCheck";
+import { extractSubject } from "@/lib/permission";
 import { XIcon } from "@phosphor-icons/react/X";
+import { ShieldCheckIcon } from "@phosphor-icons/react/ShieldCheck";
 
 // ============================================================================
 // ApprovalModal — shown when the agent calls a write-class tool in ask mode.
 // The tool call is genuinely suspended on the server (beforeToolCall hook)
 // until the user picks Allow (runs) or Deny (blocked error back to the agent).
+//
+// Layout and keyboard model follow ZCode's permission dialog: a numbered option
+// list (1..N), arrow/Tab movement, Enter to answer, digits to answer directly.
+// Colors come from pi-web's own theme tokens — ZCode contributes structure only
+// (see docs/web-mobile-style-reference.md).
 // ============================================================================
+
+export type ApprovalScope = "once" | "always";
 
 interface ApprovalModalProps {
   /** The approval request to display (only the first is interactive). */
@@ -19,7 +26,9 @@ interface ApprovalModalProps {
   /** Extra queued requests behind the active one (count badge). */
   queuedCount?: number;
   busy?: boolean;
-  onResolve: (approve: boolean, reason?: string) => void;
+  onResolve: (approve: boolean, reason?: string, scope?: ApprovalScope) => void;
+  /** Escape / the close button: treat as a plain deny rather than a decision. */
+  onDismiss?: () => void;
 }
 
 function formatArgs(args: unknown): string {
@@ -32,23 +41,119 @@ function formatArgs(args: unknown): string {
   }
 }
 
-export function ApprovalModal({ request, queuedCount = 0, busy = false, onResolve }: ApprovalModalProps) {
+/** The literal rule that "always" writes, e.g. `Bash(command:ls)` or `Write(/a.md)`. */
+function ruleForAlways(request: ApprovalRequestItem): string {
+  const subject = extractSubject(request.toolName, request.args);
+  return subject ? `${request.toolName}(${subject})` : request.toolName;
+}
+
+type Option = {
+  key: "allowOnce" | "allowAlways" | "denyOnce" | "denyAlways";
+  labelKey: string;
+  descKey: string;
+  /** Scope suffix shown on the right (what the choice remembers). */
+  scopeKey?: string;
+  run: (reason?: string) => void;
+};
+
+export function ApprovalModal({ request, queuedCount = 0, busy = false, onResolve, onDismiss }: ApprovalModalProps) {
   const { t } = useI18n();
   const [reason, setReason] = useState("");
-  const reasonRef = useRef<HTMLTextAreaElement>(null);
   const [showReason, setShowReason] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     if (request) {
       setReason("");
       setShowReason(false);
+      setActiveIndex(0);
     }
   }, [request?.id]);
+
+  const resolve = useCallback((approve: boolean, scope: ApprovalScope, extraReason?: string) => {
+    onResolve(approve, extraReason, scope);
+  }, [onResolve]);
+
+  const options: Option[] = request ? [
+    {
+      key: "allowOnce",
+      labelKey: "approval.allow",
+      descKey: "approval.allowOnceDescription",
+      run: () => resolve(true, "once"),
+    },
+    {
+      key: "allowAlways",
+      labelKey: "approval.allowAlways",
+      descKey: "approval.allowAlwaysDescription",
+      scopeKey: "approval.scopeAlways",
+      run: () => resolve(true, "always"),
+    },
+    {
+      key: "denyOnce",
+      labelKey: "approval.deny",
+      descKey: "approval.denyOnceDescription",
+      run: (r) => resolve(false, "once", r?.trim() || undefined),
+    },
+    {
+      key: "denyAlways",
+      labelKey: "approval.denyAlways",
+      descKey: "approval.denyAlwaysDescription",
+      scopeKey: "approval.scopeAlways",
+      run: (r) => resolve(false, "always", r?.trim() || undefined),
+    },
+  ] : [];
+
+  const answer = useCallback((index: number) => {
+    const option = options[index];
+    if (!option) return;
+    option.run(reason);
+  }, [options, reason]);
+
+  // ZCode's keyboard model: digits answer directly, arrows/Tab move, Enter
+  // answers the highlighted row. Escape dismisses (pi-web convention).
+  const onKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (busy) return;
+    const digit = Number(event.key);
+    if (Number.isInteger(digit) && digit >= 1 && digit <= options.length) {
+      event.preventDefault();
+      answer(digit - 1);
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowRight" || (event.key === "Tab" && !event.shiftKey)) {
+      event.preventDefault();
+      setActiveIndex((i) => (i + 1) % options.length);
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowLeft" || (event.key === "Tab" && event.shiftKey)) {
+      event.preventDefault();
+      setActiveIndex((i) => (i - 1 + options.length) % options.length);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      answer(activeIndex);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      (onDismiss ?? (() => resolve(false, "once", "Dismissed")))();
+    }
+  }, [activeIndex, answer, busy, onDismiss, options.length, resolve]);
+
+  useEffect(() => {
+    itemRefs.current[activeIndex]?.focus();
+  }, [activeIndex]);
 
   if (!request) return null;
 
   const argsText = formatArgs(request.args);
   const argsTruncated = argsText.length > 4000;
+  const command = request.args && typeof request.args === "object" && "command" in (request.args as Record<string, unknown>)
+    ? String((request.args as Record<string, unknown>).command ?? "")
+    : "";
+  const alwaysRule = ruleForAlways(request);
 
   return (
     <div
@@ -63,16 +168,17 @@ export function ApprovalModal({ request, queuedCount = 0, busy = false, onResolv
     >
       <div
         role="dialog"
-        aria-modal="false"
-        aria-label="工具调用审批"
+        aria-modal="true"
+        aria-label={t("approval.title")}
+        onKeyDown={onKeyDown}
         style={{
           pointerEvents: "auto",
-          width: "min(380px, 100%)",
-          maxHeight: "min(60vh, 400px)",
+          width: "min(420px, 100%)",
+          maxHeight: "min(70vh, 520px)",
           display: "flex", flexDirection: "column",
           background: "var(--bg-panel)",
-          border: "1px solid color-mix(in srgb, #f59e0b 32%, var(--border))",
-          borderRadius: 12,
+          border: "1px solid var(--border)",
+          borderRadius: 16,
           boxShadow: "0 12px 36px rgba(0,0,0,0.28)",
           animation: "plan-card-in 0.18s ease-out",
           overflow: "hidden",
@@ -81,10 +187,9 @@ export function ApprovalModal({ request, queuedCount = 0, busy = false, onResolv
         {/* Header */}
         <div style={{
           display: "flex", alignItems: "center", gap: 10,
-          padding: "14px 16px",
-          borderBottom: "1px solid var(--border)",
+          padding: "14px 16px 12px",
         }}>
-          <ShieldCheckIcon size={18} weight="fill" color="var(--accent)" aria-hidden="true" />
+          <ShieldCheckIcon size={18} weight="fill" color="var(--accent-orange, #f59e0b)" aria-hidden="true" />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 650, color: "var(--text)" }}>
               {t("approval.title")}
@@ -101,7 +206,7 @@ export function ApprovalModal({ request, queuedCount = 0, busy = false, onResolv
           <button
             type="button"
             aria-label={t("i18n.close")}
-            onClick={() => onResolve(false, "Dismissed")}
+            onClick={() => (onDismiss ?? (() => resolve(false, "once", "Dismissed")))()}
             disabled={busy}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
@@ -116,9 +221,8 @@ export function ApprovalModal({ request, queuedCount = 0, busy = false, onResolv
           </button>
         </div>
 
-        {/* Body */}
-        <div style={{ padding: "14px 16px", overflowY: "auto", flex: 1 }}>
-          {/* Tool badge */}
+        {/* Body: tool + args */}
+        <div style={{ padding: "0 16px", overflowY: "auto", flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
             <span style={{
               display: "inline-flex", alignItems: "center",
@@ -130,20 +234,19 @@ export function ApprovalModal({ request, queuedCount = 0, busy = false, onResolv
             }}>
               {request.toolName}
             </span>
-            {request.args && typeof request.args === "object" && "command" in (request.args as Record<string, unknown>) ? (
+            {command ? (
               <span style={{ fontSize: 11.5, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {String((request.args as Record<string, unknown>).command ?? "")}
+                {command}
               </span>
             ) : null}
           </div>
 
-          {/* Args preview */}
           <div style={{
             background: "var(--bg)",
             border: "1px solid var(--border)",
             borderRadius: 8,
             padding: "10px 12px",
-            maxHeight: 220,
+            maxHeight: 180,
             overflow: "auto",
           }}>
             <pre style={{
@@ -157,7 +260,7 @@ export function ApprovalModal({ request, queuedCount = 0, busy = false, onResolv
             </pre>
           </div>
 
-          {/* Deny reason (optional) */}
+          {/* Deny reason (optional, shared by both deny options) */}
           {showReason && (
             <textarea
               ref={reasonRef}
@@ -176,68 +279,88 @@ export function ApprovalModal({ request, queuedCount = 0, busy = false, onResolv
           )}
         </div>
 
-        {/* Three stacked actions: 上=允许, 中=附理由拒绝, 下=拒绝 */}
-        <div style={{
-          display: "flex", flexDirection: "column", gap: 6,
-          padding: "10px 14px",
-          borderTop: "1px solid var(--border)",
+        {/* Numbered options (ZCode: 1..N, hover/active highlight, scope on the right) */}
+        <div role="listbox" aria-label={t("approval.title")} style={{
+          display: "flex", flexDirection: "column", gap: 4,
+          padding: "12px 12px 4px",
         }}>
-          {/* 上: 允许 */}
-          <button
-            type="button"
-            onClick={() => onResolve(true)}
-            disabled={busy}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              width: "100%", padding: "9px 14px", borderRadius: 8,
-              background: "var(--accent)", color: "var(--accent-fg)",
-              border: "none", fontSize: 12.5, fontWeight: 650,
-              cursor: busy ? "not-allowed" : "pointer",
-              transition: "opacity 0.12s",
-            }}
-            onMouseEnter={(e) => { if (!busy) e.currentTarget.style.opacity = "0.88"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
-          >
-            <CheckIcon size={14} weight="bold" aria-hidden="true" />
-            {t("approval.allow")}
-          </button>
+          {options.map((option, index) => {
+            const active = index === activeIndex;
+            return (
+              <button
+                key={option.key}
+                ref={(node) => { itemRefs.current[index] = node; }}
+                type="button"
+                role="option"
+                aria-selected={active}
+                tabIndex={active ? 0 : -1}
+                disabled={busy}
+                onClick={() => answer(index)}
+                onMouseEnter={() => setActiveIndex(index)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  width: "100%", padding: "8px 10px",
+                  background: active ? "var(--bg-selected)" : "none",
+                  border: "none", borderRadius: 10,
+                  cursor: busy ? "not-allowed" : "pointer",
+                  textAlign: "left",
+                  transition: "background 0.12s",
+                }}
+              >
+                <span style={{
+                  width: 18, flexShrink: 0,
+                  color: active ? "var(--text)" : "var(--text-dim)",
+                  fontSize: 12.5, fontWeight: 600,
+                }}>
+                  {index + 1}.
+                </span>
+                <span style={{ minWidth: 0, flex: 1 }}>
+                  <span style={{
+                    display: "block", fontSize: 12.5, fontWeight: 600,
+                    color: option.key === "denyAlways" ? "var(--status-error)" : "var(--text)",
+                  }}>
+                    {t(option.labelKey)}
+                  </span>
+                  <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginTop: 1, lineHeight: 1.4 }}>
+                    {option.descKey === "approval.allowAlwaysDescription" || option.descKey === "approval.denyAlwaysDescription"
+                      ? t(option.descKey, { rule: alwaysRule })
+                      : t(option.descKey)}
+                  </span>
+                </span>
+                {option.scopeKey && (
+                  <span style={{
+                    flexShrink: 0, fontSize: 10.5, color: "var(--text-dim)",
+                    fontFamily: "var(--font-mono)",
+                    maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {t(option.scopeKey)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
 
-          {/* 中: 附理由拒绝（展开填写框） */}
+        {/* Footer: keyboard hint + reason toggle */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+          padding: "8px 16px 12px",
+        }}>
+          <span style={{ fontSize: 10.5, color: "var(--text-dim)" }}>
+            {t("approval.keyboardHint")}
+          </span>
           <button
             type="button"
             onClick={() => { setShowReason((v) => !v); if (!showReason) requestAnimationFrame(() => reasonRef.current?.focus()); }}
             disabled={busy}
             style={{
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              width: "100%", padding: "9px 14px", borderRadius: 8,
-              background: "none", border: "1px solid var(--border)",
-              color: "var(--text)", fontSize: 12.5, fontWeight: 550,
+              background: "none", border: "none", padding: "4px 6px",
+              color: "var(--text-muted)", fontSize: 11,
               cursor: busy ? "not-allowed" : "pointer",
-              transition: "background 0.12s",
+              textDecoration: "underline",
             }}
-            onMouseEnter={(e) => { if (!busy) e.currentTarget.style.background = "var(--bg-hover)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
           >
-            <XIcon size={13} aria-hidden="true" />
             {showReason ? t("approval.hideReason") : t("approval.denyWithReason")}
-          </button>
-
-          {/* 下: 拒绝 */}
-          <button
-            type="button"
-            onClick={() => onResolve(false, reason.trim() || undefined)}
-            disabled={busy}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              width: "100%", padding: "8px 14px", borderRadius: 8,
-              background: "none", border: "none",
-              color: "var(--text-muted)", fontSize: 12,
-              cursor: busy ? "not-allowed" : "pointer",
-            }}
-            onMouseEnter={(e) => { if (!busy) { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; } }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
-          >
-            {t("approval.deny")}
           </button>
         </div>
       </div>

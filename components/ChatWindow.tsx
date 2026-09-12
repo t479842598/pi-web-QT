@@ -687,9 +687,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           request={approvalRequests[0] ?? null}
           queuedCount={Math.max(0, approvalRequests.length - 1)}
           busy={false}
-          onResolve={(approve, reason) => {
+          onResolve={(approve, reason, scope) => {
             const active = approvalRequests[0];
-            if (active) void resolveApproval(active.id, approve, reason);
+            if (active) void resolveApproval(active.id, approve, reason, scope);
           }}
         />
       )}

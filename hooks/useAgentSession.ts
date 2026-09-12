@@ -12,6 +12,7 @@ import type {
   UserMessage,
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
+import { extractSubject } from "@/lib/permission";
 import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { getToolNamesForPreset, PRESET_PLAN, type ToolEntry } from "@/lib/tool-presets";
@@ -3480,10 +3481,32 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [persistModeSettings]);
 
-  /** Resolve a pending tool-approval request (allow / deny + reason). */
-  const resolveApproval = useCallback(async (id: string, approve: boolean, reason?: string) => {
+  /**
+   * Resolve a pending tool-approval request.
+   *
+   * `scope: "always"` also writes a permission rule so the same call stops
+   * asking: allow → allow list, deny → deny list. The rule is the tool name
+   * plus its extracted subject (e.g. `Bash(command:ls)`), so only that exact
+   * subject is remembered rather than the whole tool.
+   */
+  const resolveApproval = useCallback(async (id: string, approve: boolean, reason?: string, scope?: "once" | "always") => {
     const sid = sessionIdRef.current;
     if (!sid) return;
+    if (scope === "always") {
+      const pending = approvalRequestsRef.current.find((r) => r.id === id);
+      if (pending) {
+        const subject = extractSubject(pending.toolName, pending.args);
+        const rule = subject ? `${pending.toolName}(${subject})` : pending.toolName;
+        const current = modeSettingsRef.current.permissionRules;
+        const list = approve ? current.allow : current.deny;
+        if (!list.includes(rule)) {
+          const next = approve
+            ? { ...current, allow: [...current.allow, rule] }
+            : { ...current, deny: [...current.deny, rule] };
+          void handlePermissionRulesChange(next);
+        }
+      }
+    }
     try {
       await sendAgentCommand(sid, { type: "resolve_approval", id, approve, reason });
     } catch (error) {
@@ -3494,7 +3517,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // would leave the modal stuck on a stale id.
       setApprovalRequests((prev) => prev.filter((r) => r.id !== id));
     }
-  }, []);
+  }, [handlePermissionRulesChange]);
 
   /** Set the active goal text (goal collaboration mode). */
   const setActiveGoalText = useCallback((text: string | null) => {
