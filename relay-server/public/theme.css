@@ -1540,3 +1540,162 @@ html[data-theme="light"] .composer-btn.is-stop {
   max-height: 240px;
   overflow: auto;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Markdown rendering + message action row (ZCode shows rendered markdown and
+   a copy/anchor row under each turn).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.msg-body { white-space: normal; }
+
+.msg-body p { margin: 0 0 12px; }
+.msg-body > *:last-child { margin-bottom: 0; }
+
+.msg-body h1,
+.msg-body h2,
+.msg-body h3,
+.msg-body h4 { margin: 16px 0 8px; font-weight: 600; line-height: 1.35; }
+.msg-body h1 { font-size: var(--text-ui-lg); }
+.msg-body h2 { font-size: var(--text-ui-base); }
+.msg-body h3 { font-size: var(--text-ui-base); }
+
+.msg-body ul,
+.msg-body ol { margin: 0 0 12px; padding-left: 22px; }
+.msg-body li { margin: 2px 0; }
+.msg-body li::marker { color: var(--color-foreground-subtle); }
+
+/* Inline code carries a subtle fill, matching the screenshot's 「biz_code=14」. */
+.msg-body code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--color-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-ui-sm);
+}
+
+.msg-body pre {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-card-border);
+  border-radius: 12px;
+  background: var(--color-card);
+  overflow-x: auto;
+}
+
+.msg-body pre code { padding: 0; background: none; font-size: var(--text-ui-sm); line-height: 1.5; }
+
+.msg-body blockquote {
+  margin: 0 0 12px;
+  padding-left: 12px;
+  border-left: 2px solid var(--color-border);
+  color: var(--color-foreground-subtle);
+}
+
+.msg-body a { color: var(--color-brand); text-decoration: none; }
+.msg-body a:hover { text-decoration: underline; }
+
+.msg-body table { width: 100%; border-collapse: collapse; margin: 0 0 12px; font-size: var(--text-ui-sm); }
+.msg-body th,
+.msg-body td { border: 1px solid var(--color-border); padding: 6px 8px; text-align: left; }
+.msg-body th { background: var(--color-surface); font-weight: 500; }
+
+.msg-body hr { margin: 16px 0; border: none; border-top: 1px solid var(--color-border); }
+
+/* ── Action row ──────────────────────────────────────────────────────────── */
+
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.msg-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Measured: the copy/fork buttons are 24x24 with a 6px radius. */
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-foreground-subtle);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.msg-action:hover { background: var(--color-hover); color: var(--color-foreground); }
+
+.msg-time {
+  margin-left: 4px;
+  font-size: var(--text-ui-base);
+  color: var(--color-foreground-subtle);
+}
+
+@media (pointer: coarse), (max-width: 640px) {
+  .msg-action { position: relative; }
+  .msg-action::after { content: ""; position: absolute; inset: -8px; }
+}
+
+/* ── Composer: placeholder line above, control row below ─────────────────── */
+
+/* ZCode's composer is a single rounded box: the mode/context line sits on top,
+   then the input, then a row of controls with send at the right. */
+.composer-surface { gap: 10px; }
+
+.composer-row { order: 1; }
+.composer-inner { order: 2; }
+
+.composer-inner textarea {
+  /* The textarea keeps its own height; the surface supplies the padding. */
+  padding-bottom: 4px;
+}
+
+/* Send button: filled circle-ish square at the row's right, per the screenshot. */
+.composer-btn.is-primary {
+  background: var(--color-brand);
+  color: #ffffff;
+  border-radius: 10px;
+}
+
+.composer-btn.is-primary:hover { opacity: 0.9; background: var(--color-brand); }
+
+/* ── Composer bottom row (model picker + spacer + send) ──────────────────── */
+
+.composer-surface {
+  /* Input on top, controls below — the order the screenshot shows. */
+  flex-direction: column;
+}
+
+.composer-surface > textarea {
+  order: 1;
+}
+
+.composer-surface > .composer-row {
+  order: 2;
+  margin-top: 2px;
+}
+
+.composer-spacer { flex: 1; }
+
+.composer-menu-slot { display: inline-flex; min-width: 0; }
+
+.composer-select {
+  border: none;
+  background: none;
+  color: var(--color-foreground-subtle);
+  font: inherit;
+  font-size: var(--text-ui-sm);
+  max-width: 58vw;
+  padding: 4px 2px;
+  cursor: pointer;
+  outline: none;
+}
+
+.composer-select:hover { color: var(--color-foreground); }
+
+/* The chat header menu anchors to its slot. */
+.chat-menu-slot { position: relative; display: inline-flex; }
+.chat-menu-slot .menu { top: calc(100% + 6px); right: 0; }

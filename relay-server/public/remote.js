@@ -321,8 +321,17 @@ function projectLabel(project) {
   return project.split("/").filter(Boolean).pop() || project;
 }
 
+/**
+ * A session's display title.
+ *
+ * pi writes the literal placeholder "(no messages)" into `firstMessage` for an
+ * empty session, so showing that field blindly surfaces it as a title. An empty
+ * session should read as a new session instead.
+ */
 function sessionLabel(session) {
-  return session.name || session.firstMessage || session.id || "未命名会话";
+  const first = (session.firstMessage ?? "").trim();
+  const usable = first && !/^\(no messages\)$/i.test(first) ? first : "";
+  return session.name || usable || "新会话";
 }
 
 function timeAgo(value) {
@@ -867,25 +876,127 @@ function indexToolResults(messages) {
 
 // ── Shared pieces (both view modes use the same surfaces) ───────────────────
 
+/**
+ * Render a message body as Markdown.
+ *
+ * Assistant output is Markdown (lists, inline code, emphasis) and ZCode shows
+ * it rendered, so plain text would lose the structure. The HTML goes through an
+ * allowlist rather than being injected raw: the text is model output, and this
+ * page shares an origin with the relay.
+ */
+function renderMarkdown(target, text) {
+  const marked = window.marked;
+  if (!marked || typeof marked.parse !== "function") {
+    target.textContent = text;
+    return;
+  }
+  let html;
+  try {
+    html = marked.parse(text, { breaks: true, gfm: true });
+  } catch {
+    target.textContent = text;
+    return;
+  }
+  target.innerHTML = sanitizeHtml(html);
+}
+
+/** Strip anything executable from rendered HTML, keeping the markdown tags. */
+function sanitizeHtml(html) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const allowed = new Set([
+    "P", "BR", "HR", "EM", "STRONG", "DEL", "CODE", "PRE", "BLOCKQUOTE",
+    "UL", "OL", "LI", "H1", "H2", "H3", "H4", "H5", "H6",
+    "TABLE", "THEAD", "TBODY", "TR", "TH", "TD", "A", "SPAN",
+  ]);
+  const walk = (node) => {
+    for (const child of [...node.children]) {
+      if (!allowed.has(child.tagName)) {
+        // Unwrap an unknown element rather than dropping its text.
+        child.replaceWith(...child.childNodes);
+        walk(node);
+        continue;
+      }
+      for (const attr of [...child.attributes]) {
+        const name = attr.name.toLowerCase();
+        if (child.tagName === "A" && name === "href") {
+          // Only http(s) survives, which also rules out javascript: URLs.
+          if (!/^https?:/i.test(attr.value)) child.removeAttribute("href");
+          else {
+            child.setAttribute("target", "_blank");
+            child.setAttribute("rel", "noreferrer noopener");
+          }
+          continue;
+        }
+        child.removeAttribute(attr.name);
+      }
+      walk(child);
+    }
+  };
+  walk(template.content);
+  return template.innerHTML;
+}
+
+/**
+ * The action row under a turn: copy plus the turn's timestamp.
+ *
+ * ZCode also shows like/dislike/fork here; those need endpoints this relay does
+ * not expose, so only actions that actually work are rendered.
+ */
+function messageActions(text, timestamp) {
+  const row = document.createElement("div");
+  row.className = "msg-actions";
+
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "msg-action";
+  copy.title = "复制";
+  copy.setAttribute("aria-label", "复制");
+  copy.append(icon("copy"));
+  copy.addEventListener("click", () => {
+    Promise.resolve(navigator.clipboard?.writeText(text)).then(() => {
+      copy.replaceChildren(icon("check"));
+      setTimeout(() => copy.replaceChildren(icon("copy")), 1200);
+    }).catch(() => {});
+  });
+  row.append(copy);
+
+  if (timestamp) {
+    const time = document.createElement("span");
+    time.className = "msg-time";
+    time.textContent = timestamp;
+    row.append(time);
+  }
+  return row;
+}
+
+/** Short clock label for a message timestamp, or "" when unknown. */
+function clockOf(timestamp) {
+  const ms = typeof timestamp === "number" ? timestamp : Date.parse(timestamp ?? "");
+  if (!Number.isFinite(ms)) return "";
+  const date = new Date(ms);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 /** A user turn: full-width card, left aligned, top-right corner eased. */
-function userCard(text) {
+function userCard(text, timestamp) {
   const wrapper = document.createElement("div");
   wrapper.className = "msg msg-user";
   const body = document.createElement("div");
   body.className = "msg-body";
-  body.textContent = text;
-  wrapper.append(body);
+  renderMarkdown(body, text);
+  wrapper.append(body, messageActions(text, clockOf(timestamp)));
   return wrapper;
 }
 
 /** Assistant prose: plain text, no bubble — ZCode renders it as prose. */
-function assistantText(text) {
+function assistantText(text, timestamp) {
   const wrapper = document.createElement("div");
   wrapper.className = "msg msg-assistant";
   const body = document.createElement("div");
   body.className = "msg-body";
-  body.textContent = text;
-  wrapper.append(body);
+  renderMarkdown(body, text);
+  wrapper.append(body, messageActions(text, clockOf(timestamp)));
   return wrapper;
 }
 
@@ -966,7 +1077,7 @@ function renderTrajectory(container, messages) {
 
     if (message.role === "user") {
       const text = textOf(message.content);
-      if (text) container.append(userCard(text));
+      if (text) container.append(userCard(text, message.timestamp));
       continue;
     }
 
@@ -978,7 +1089,7 @@ function renderTrajectory(container, messages) {
     }
 
     const text = textOf(message.content);
-    if (text) container.append(assistantText(text));
+    if (text) container.append(assistantText(text, message.timestamp));
   }
 }
 
@@ -997,7 +1108,7 @@ function renderFolded(container, messages) {
 
     if (message.role === "user") {
       const text = textOf(message.content);
-      if (text) container.append(userCard(text));
+      if (text) container.append(userCard(text, message.timestamp));
       continue;
     }
     if (message.role === "toolResult") continue;
@@ -1025,7 +1136,7 @@ function renderFolded(container, messages) {
       container.append(details);
     }
 
-    if (text) container.append(assistantText(text));
+    if (text) container.append(assistantText(text, message.timestamp));
   }
 }
 
@@ -1043,8 +1154,11 @@ async function loadModels() {
   if (models.length === 0) return;
   const defaultId = data.defaultModel?.modelId ?? data.defaultModel?.id ?? null;
 
+  // A native select keeps the platform picker (reliable on a phone) while
+  // rendering as a compact control in the composer's bottom row.
   const select = document.createElement("select");
   select.id = "chat-model";
+  select.className = "composer-select";
   for (const model of models) {
     const value = model.id ?? model.modelId ?? "";
     if (!value) continue;
@@ -1072,6 +1186,7 @@ async function loadModels() {
  */
 function setSendMode(mode) {
   const button = $("chat-send");
+  if (!button) return;
   button.dataset.mode = mode;
   button.classList.toggle("is-stop", mode === "stop");
   button.classList.toggle("is-primary", mode !== "stop");
@@ -1261,7 +1376,6 @@ function stopRun() {
 function toggleViewMode() {
   state.viewMode = state.viewMode === "trajectory" ? "folded" : "trajectory";
   writeStore(VIEW_MODE_KEY, state.viewMode);
-  $("chat-view-toggle").title = state.viewMode === "trajectory" ? "当前：ZCode 轨迹（点击切到 pi-web 折叠）" : "当前：pi-web 折叠（点击切到 ZCode 轨迹）";
   if (state.current) void loadContext(state.current);
 }
 
@@ -1362,9 +1476,44 @@ $("home-search").addEventListener("input", (event) => {
   state.query = event.currentTarget.value;
   renderHome();
 });
-$("chat-web").addEventListener("click", () => { goToFullApp(); });
 $("chat-back").addEventListener("click", () => { state.streamRid = null; show("view-home"); });
-$("chat-view-toggle").addEventListener("click", toggleViewMode);
+/** The session header's "..." menu: view mode and the full-UI hop. */
+function openChatMenu() {
+  const slot = $("chat-menu");
+  const existing = slot.querySelector(".menu");
+  if (existing) { existing.remove(); return; }
+  const menu = document.createElement("div");
+  menu.className = "menu";
+
+  const modeItem = document.createElement("button");
+  modeItem.type = "button";
+  modeItem.className = "menu-item";
+  modeItem.textContent = state.viewMode === "trajectory" ? "改为折叠显示" : "改为轨迹显示";
+  modeItem.addEventListener("click", (event) => {
+    event.stopPropagation();
+    menu.remove();
+    toggleViewMode();
+  });
+
+  const webItem = document.createElement("button");
+  webItem.type = "button";
+  webItem.className = "menu-item";
+  webItem.textContent = "打开完整界面";
+  webItem.addEventListener("click", (event) => {
+    event.stopPropagation();
+    menu.remove();
+    goToFullApp();
+  });
+
+  menu.append(modeItem, webItem);
+  slot.append(menu);
+  document.addEventListener("click", () => menu.remove(), { once: true });
+}
+
+$("chat-more").addEventListener("click", (event) => {
+  event.stopPropagation();
+  openChatMenu();
+});
 $("status-retry").addEventListener("click", () => { state.attempt = 0; connect(); });
 $("chat-send").addEventListener("click", () => {
   if ($("chat-send").dataset.mode === "stop") stopRun();
@@ -1404,7 +1553,6 @@ window.addEventListener("pagehide", () => {
   try { state.socket?.close(); } catch { /* already closed */ }
 });
 
-$("chat-view-toggle").title = state.viewMode === "trajectory" ? "当前：ZCode 轨迹" : "当前：pi-web 折叠";
 applyTheme();
 renderThemeMenu();
 // Follow the OS while in "system" mode, without a reload.
