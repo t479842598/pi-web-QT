@@ -244,6 +244,27 @@
   color: #d97706;
 }
 
+.agents-concurrency-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.agents-concurrency-control input {
+  width: 52px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+}
+
 .agents-feature-actions {
   display: flex;
   flex-shrink: 0;

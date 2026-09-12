@@ -12,7 +12,7 @@ export interface SubagentToolDetails {
   sessionId: string;
   profile: string;
   description: string;
-  status: "starting" | "running" | "completed" | "failed" | "aborted" | "interrupted";
+  status: "starting" | "queued" | "running" | "completed" | "failed" | "aborted" | "interrupted";
   runInBackground: boolean;
   createdAt: string;
   completedAt?: string;
@@ -23,6 +23,7 @@ export type SubagentRunStatus = SubagentToolDetails["status"];
 
 const SUBAGENT_STATUSES: readonly SubagentRunStatus[] = [
   "starting",
+  "queued",
   "running",
   "completed",
   "failed",
