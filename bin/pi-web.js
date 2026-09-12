@@ -8,6 +8,8 @@ const path = require("path");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const fs = require("fs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
+const os = require("os");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { parseLaunchOptions, assessLanExposure } = require("./pi-web-options");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { wireChildProcessLifecycle } = require("./process-lifecycle");
@@ -52,6 +54,51 @@ try {
   }
 }
 
+/**
+ * Load configuration from the user's home, not the install directory.
+ *
+ * A `.env` next to the package is lost on every `npm install -g`
+ * (the install directory is replaced wholesale), which silently drops the
+ * password and host allowlist. Reading from `~/.pi/` keeps the settings across
+ * upgrades. Values already present in the environment win, so a supervisor can
+ * still override a single variable.
+ */
+function loadUserEnv() {
+  const candidates = [
+    path.join(os.homedir(), ".pi", "agent", "pi-web.env"),
+    path.join(os.homedir(), ".pi", "pi-web.env"),
+  ];
+  const file = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!file) return null;
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  const applied = [];
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator === -1) continue;
+    const key = trimmed.slice(0, separator).trim();
+    let value = trimmed.slice(separator + 1).trim();
+    // Strip one layer of matching quotes, as dotenv does.
+    if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+      value = value.slice(1, -1);
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    if (process.env[key] !== undefined) continue;
+    process.env[key] = value;
+    applied.push(key);
+  }
+  return { file, applied };
+}
+
+// Before option parsing, so a port or host recorded in the file takes effect.
+const userEnv = loadUserEnv();
+
 let launchOptions;
 try {
   launchOptions = parseLaunchOptions();
@@ -65,6 +112,11 @@ if (launchOptions.help) {
   process.exit(0);
 }
 const { port, hostname, openBrowser } = launchOptions;
+
+if (userEnv) {
+  // Names only — never echo values into a log that may be captured.
+  console.log(`Loaded ${userEnv.applied.length} setting(s) from ${userEnv.file}${userEnv.applied.length ? `: ${userEnv.applied.join(", ")}` : ""}`);
+}
 
 // Apply the same heap cap as the npm scripts so `pi-web` (production entry)
 // never lets the V8 heap balloon to Next.js's auto 50%-of-RAM default.

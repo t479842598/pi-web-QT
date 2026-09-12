@@ -540,9 +540,13 @@ function buildProjectGroup(project, sessions) {
   wrapper.className = "group";
 
   const expanded = state.expanded.has(project);
-  const card = document.createElement("button");
-  card.type = "button";
+
+  // The card is a div, not a button: it hosts a "new session" action, and a
+  // button inside a button is invalid and swallows the inner click.
+  const card = document.createElement("div");
   card.className = "card";
+  card.setAttribute("role", "button");
+  card.setAttribute("tabindex", "0");
   card.setAttribute("aria-expanded", String(expanded));
 
   const row = document.createElement("div");
@@ -583,11 +587,30 @@ function buildProjectGroup(project, sessions) {
   updated.textContent = `更新于 ${timeAgo(new Date(latestTime(sessions)).toISOString())}`;
   card.append(updated);
 
-  card.addEventListener("click", () => {
+  // Start a session here — ZCode puts the same affordance on each workspace
+  // card (onStartDraftInWorkspace) rather than only in a global bar.
+  const newSession = document.createElement("button");
+  newSession.type = "button";
+  newSession.className = "icon-btn card-action";
+  newSession.title = `在「${projectLabel(project)}」新建会话`;
+  newSession.setAttribute("aria-label", newSession.title);
+  newSession.append(icon("plus"));
+  newSession.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void startNewSession(project);
+  });
+  card.append(newSession);
+
+  const toggle = () => {
     if (state.expanded.has(project)) state.expanded.delete(project);
     else state.expanded.add(project);
+    state.defaultsApplied = true;
     saveExpanded();
     renderHome();
+  };
+  card.addEventListener("click", toggle);
+  card.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(); }
   });
 
   wrapper.append(card);
@@ -604,10 +627,66 @@ function buildProjectGroup(project, sessions) {
       const ordered = [...sessions].sort((a, b) => sessionTime(b) - sessionTime(a));
       for (const session of ordered) list.append(sessionRow(session));
     }
+    // A trailing action keeps "new session" reachable when the list is long.
+    const addRow = document.createElement("li");
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.className = "session-row session-row-new";
+    addButton.append(icon("plus"));
+    const addLabel = document.createElement("span");
+    addLabel.className = "session-main";
+    const addTitle = document.createElement("span");
+    addTitle.className = "session-title";
+    addTitle.textContent = "新建会话";
+    addLabel.append(addTitle);
+    addButton.append(addLabel);
+    addButton.addEventListener("click", () => { void startNewSession(project); });
+    addRow.append(addButton);
+    list.append(addRow);
     wrapper.append(list);
   }
 
   return wrapper;
+}
+
+/**
+ * Create an empty session in a project and open it.
+ *
+ * `ensure_session` creates the session without sending a prompt, so the user
+ * lands in an empty conversation ready to type — the same flow as the desktop
+ * sidebar's "new session in this project".
+ */
+async function startNewSession(project) {
+  if (project === "__subagents__") return;
+  showLoading(true);
+  try {
+    const response = await state.tunnel.request({
+      method: "POST",
+      path: "/api/agent/new",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd: project, type: "ensure_session" }),
+    });
+    const data = parseJson(response);
+    if (!response.status || response.status >= 400 || !data?.sessionId) {
+      setHomeStatus(data?.error ? `新建失败：${data.error}` : "新建会话失败");
+      return;
+    }
+    // Refresh so the new session appears in the list once it has content.
+    await loadHome().catch(() => {});
+    const created = state.sessions.find((session) => session.id === data.sessionId);
+    await openChat(created ?? {
+      id: data.sessionId,
+      cwd: project,
+      projectRoot: project,
+      name: "新会话",
+      firstMessage: "",
+      messageCount: 0,
+    });
+  } catch (error) {
+    setHomeStatus(`新建失败：${error.message}`);
+  } finally {
+    showLoading(false);
+  }
 }
 
 function buildTimelineView(sessions) {
@@ -988,31 +1067,67 @@ async function sendMessage() {
     });
 
     // Wait for the run to settle, then stop reading the stream.
-    await waitForSettled(() => settled, STREAM_TIMEOUT_MS);
+    //
+    // The stream is deliberately NOT awaited: it is a long-lived SSE that the
+    // server may hold open after the run ends, so awaiting it kept the send
+    // button stuck on "stop" forever. `detach` stops the chunk handler and the
+    // request is simply left to finish on its own.
+    //
+    // Two signals are accepted, because a terminal SSE event can be missed:
+    // the stream's own done event, or the server no longer reporting the
+    // session as running.
+    await waitForSettled(() => settled, STREAM_TIMEOUT_MS, async () => !(await sessionStillRunning(session.id)));
     state.tunnel.detach(stream.rid);
-    await stream.catch(() => {});
+    stream.catch(() => {});
   } catch (error) {
     if (body.textContent.length === 0) body.textContent = `[发送失败：${error.message}]`;
   } finally {
+    // Re-enable the composer BEFORE re-syncing: loadContext is another tunnel
+    // round trip, and awaiting it first left the button stuck on "stop" until
+    // that request returned.
     setSendMode("send");
     $("chat-status").textContent = "";
     state.streamRid = null;
     // Re-sync from the session file so the final text and tool calls are exact.
-    if (state.current?.id === session.id) await loadContext(session).catch(() => {});
+    if (state.current?.id === session.id) void loadContext(session).catch(() => {});
   }
 }
 
-/** Poll a flag without holding a timer that outlives the page. */
-function waitForSettled(isSettled, timeoutMs) {
+/**
+ * Wait until the run is over.
+ *
+ * `isSettled` is the stream's own signal. `isIdle` is an optional fallback
+ * polled against the server, so a missed terminal event cannot leave the
+ * composer disabled. Either one ends the wait.
+ */
+function waitForSettled(isSettled, timeoutMs, isIdle) {
   return new Promise((resolve) => {
     const started = Date.now();
     const timer = setInterval(() => {
-      if (isSettled() || Date.now() - started > timeoutMs) {
-        clearInterval(timer);
-        resolve();
-      }
-    }, 400);
+      void (async () => {
+        if (isSettled()) { clearInterval(timer); resolve(); return; }
+        if (Date.now() - started > timeoutMs) { clearInterval(timer); resolve(); return; }
+        if (isIdle && await isIdle().catch(() => false)) { clearInterval(timer); resolve(); }
+      })();
+    }, 1200);
   });
+}
+
+/**
+ * Is this session still running, according to the server?
+ *
+ * A terminal SSE event can be missed (dropped socket, backgrounded tab), so the
+ * composer also asks the server directly before re-enabling send.
+ */
+async function sessionStillRunning(sessionId) {
+  try {
+    const response = await state.tunnel.request({ path: "/api/agent/running", timeoutMs: 8_000 });
+    const data = parseJson(response);
+    const ids = Array.isArray(data?.runningSessionIds) ? data.runningSessionIds : [];
+    return ids.includes(sessionId);
+  } catch {
+    return false;
+  }
 }
 
 function stopRun() {
