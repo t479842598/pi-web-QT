@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useState, type FormEvent } from "react";
 import { I18nProvider, useI18n } from "@/hooks/useI18n";
 
@@ -41,34 +40,33 @@ function LoginForm() {
     <main className="web-login-page">
       <div className="web-login-shell">
         <header className="web-login-brand">
-          <Image src="/icon.png" width={52} height={52} alt="" priority />
-          <div>
-            <h1>Pi Web</h1>
+          {/* A plain <img>, not next/image: this page must render its mark even
+              when the image optimizer is unreachable (bare server, tunnels). */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/favicon.svg" width={56} height={56} alt="" />
+          <div className="web-login-brand-copy">
+            <h1>{t("auth.brand")}</h1>
             <p>{t("auth.prompt")}</p>
           </div>
         </header>
+
         <form className="web-login-form" onSubmit={submit}>
-          <div className="web-login-composer">
-            <label className="web-login-label" htmlFor="web-login-password">{t("auth.password")}</label>
-            <input
-              id="web-login-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder={t("auth.password")}
-              autoComplete="current-password"
-              autoFocus
-              required
-              disabled={busy}
-            />
-            <button type="submit" disabled={busy || !password}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <line x1="2" y1="7" x2="11" y2="7" />
-                <polyline points="7.5 3 12 7 7.5 11" />
-              </svg>
-              {busy ? t("auth.loggingIn") : t("auth.logIn")}
-            </button>
-          </div>
+          <input
+            id="web-login-password"
+            className="web-login-password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder={t("auth.password")}
+            aria-label={t("auth.password")}
+            autoComplete="current-password"
+            autoFocus
+            required
+            disabled={busy}
+          />
+          <button type="submit" className="web-login-submit" disabled={busy || !password}>
+            {busy ? t("auth.loggingIn") : t("auth.logIn")}
+          </button>
           <p className="web-login-error" role="alert" aria-live="polite">{error}</p>
         </form>
       </div>

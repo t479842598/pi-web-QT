@@ -1593,6 +1593,7 @@ export const zhCNLocale = {
     "i18n.delete": "删除",
     "i18n.loading": "加载中...",
     "i18n.loadMore": "加载更多",
+    "auth.brand": "Pi Agent Web",
     "auth.prompt": "登录后继续使用",
     "auth.password": "密码",
     "auth.logIn": "登录",

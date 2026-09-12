@@ -1593,6 +1593,7 @@ export const enLocale = {
     "i18n.delete": "Delete",
     "i18n.loading": "Loading...",
     "i18n.loadMore": "Load more",
+    "auth.brand": "Pi Agent Web",
     "auth.prompt": "Sign in to continue",
     "auth.password": "Password",
     "auth.logIn": "Sign in",
