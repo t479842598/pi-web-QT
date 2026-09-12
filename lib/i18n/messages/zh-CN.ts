@@ -649,6 +649,7 @@ export const zhCNLocale = {
     "agentSwitcher.noFamily": "当前会话没有子代理族谱",
   "agentSwitcher.noMatches": "没有匹配的子代理",
     "agentSwitcher.status.starting": "正在启动",
+    "agentSwitcher.status.queued": "排队中",
     "agentSwitcher.status.running": "运行中",
     "agentSwitcher.status.completed": "已完成",
     "agentSwitcher.status.failed": "失败",

@@ -31,6 +31,7 @@ function formatRelativeTime(value: string, locale: string): string {
 
 function statusColor(status: SubagentSessionStatus): string {
   if (status === "running" || status === "starting") return "var(--accent)";
+  if (status === "queued") return "var(--text-dim)";
   if (status === "completed") return "var(--status-success)";
   if (status === "failed") return "var(--status-error)";
   if (status === "aborted") return "var(--status-warning)";
@@ -43,6 +44,15 @@ function StatusIcon({ status }: { status: SubagentSessionStatus }) {
       <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
         <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (status === "queued") {
+    // Queued is waiting for a slot, not finished — a clock reads better than
+    // the completed check mark the default branch would draw.
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
       </svg>
     );
   }

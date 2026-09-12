@@ -109,7 +109,3 @@ progress.md
 
 .playwright-mcp/
 .zcode/plans/
-
-# relay-server installs its own deps in deployment
-/relay-server/node_modules/
-/relay-server/tokens.json

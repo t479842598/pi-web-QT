@@ -29,6 +29,7 @@ interface Props {
 
 function statusColor(status: SubagentSessionStatus): string {
   if (status === "running" || status === "starting") return "var(--accent)";
+  if (status === "queued") return "var(--text-dim)";
   if (status === "completed") return "var(--status-success)";
   if (status === "failed") return "var(--status-error)";
   if (status === "aborted") return "var(--status-warning)";
@@ -39,6 +40,8 @@ function statusLabelKey(status: SubagentSessionStatus): string {
   switch (status) {
     case "starting":
       return "agentSwitcher.status.starting";
+    case "queued":
+      return "agentSwitcher.status.queued";
     case "running":
       return "agentSwitcher.status.running";
     case "failed":

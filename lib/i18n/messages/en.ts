@@ -649,6 +649,7 @@ export const enLocale = {
     "agentSwitcher.noFamily": "No agent family for this session",
   "agentSwitcher.noMatches": "No matching agents",
     "agentSwitcher.status.starting": "Starting",
+    "agentSwitcher.status.queued": "Queued",
     "agentSwitcher.status.running": "Running",
     "agentSwitcher.status.completed": "Completed",
     "agentSwitcher.status.failed": "Failed",

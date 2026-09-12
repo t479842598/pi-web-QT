@@ -1722,6 +1722,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (!sid) return;
     let disposed = false;
     let renewing = false;
+    // Rebuilding closes the stream, which releases the lease, and the new
+    // stream re-acquires it. A renewal landing inside that window sees
+    // `renewed === 0` again and would rebuild forever, so only allow one
+    // rebuild per renewal interval.
+    let rebuiltAt = 0;
 
     const renewLease = async () => {
       if (disposed || renewing) return;
@@ -1738,9 +1743,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           && result.renewed === 0
           && sessionIdRef.current === sid
           && sessionPropIdRef.current === sid
+          && Date.now() - rebuiltAt >= SESSION_LEASE_RENEW_INTERVAL_MS
         ) {
+          rebuiltAt = Date.now();
           closeEvents();
-          void ensureEventsConnected(sid);
+          void ensureEventsConnected(sid).catch(() => false);
         }
       } catch {
         // Retry on the next interval; the SSE connection stays the primary path.
