@@ -191,8 +191,10 @@ function setTheme(next) {
 }
 
 /** Theme switcher in the top bar, mirroring ZCode's theme menu. */
-function renderHomeTheme() {
-  const slot = $("home-theme");
+function renderThemeSlot(slotId) {
+  const slot = $(slotId);
+  if (!slot) return;
+  slot.replaceChildren();
   slot.replaceChildren();
   const button = document.createElement("button");
   button.type = "button";
@@ -237,7 +239,8 @@ function buildThemeMenu() {
 }
 
 function renderThemeMenu() {
-  renderHomeTheme();
+  renderThemeSlot("home-theme");
+  renderThemeSlot("chat-theme");
 }
 
 function show(view) {
@@ -750,7 +753,7 @@ async function openChat(session) {
   state.streamCarry = "";
   show("view-chat");
   $("chat-title").textContent = sessionLabel(session);
-  $("chat-status").textContent = "";
+  $("chat-branch").textContent = "";
   $("chat-messages").replaceChildren();
   $("chat-input").value = "";
   setSendMode("send");
@@ -809,6 +812,12 @@ function scrollToBottom() {
   container.scrollTop = container.scrollHeight;
 }
 
+/** Split an assistant turn's blocks by kind, keeping their original order. */
+function blocksOf(content) {
+  if (!Array.isArray(content)) return [];
+  return content.filter((block) => block && typeof block === "object");
+}
+
 function textOf(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -831,70 +840,167 @@ function toolCallsOf(content) {
   return content.filter((block) => block && block.type === "toolCall");
 }
 
+/** Result text for a tool call, tolerating either shape pi stores. */
+function toolResultText(result) {
+  if (!result) return "";
+  const text = textOf(result.content);
+  if (text) return text;
+  if (typeof result.content === "string") return result.content;
+  return JSON.stringify(result.content ?? {}, null, 2);
+}
+
+/**
+ * Index every tool result in the transcript by its tool call id.
+ *
+ * Results arrive as their own `toolResult` messages, so a call and its output
+ * are only connected through `toolCallId`; without this index the output would
+ * never be shown.
+ */
+function indexToolResults(messages) {
+  const byId = new Map();
+  for (const message of messages) {
+    if (!message || message.role !== "toolResult") continue;
+    if (typeof message.toolCallId === "string") byId.set(message.toolCallId, message);
+  }
+  return byId;
+}
+
+// ── Shared pieces (both view modes use the same surfaces) ───────────────────
+
+/** A user turn: full-width card, left aligned, top-right corner eased. */
+function userCard(text) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "msg msg-user";
+  const body = document.createElement("div");
+  body.className = "msg-body";
+  body.textContent = text;
+  wrapper.append(body);
+  return wrapper;
+}
+
+/** Assistant prose: plain text, no bubble — ZCode renders it as prose. */
+function assistantText(text) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "msg msg-assistant";
+  const body = document.createElement("div");
+  body.className = "msg-body";
+  body.textContent = text;
+  wrapper.append(body);
+  return wrapper;
+}
+
+/**
+ * A reasoning block: bare summary text when collapsed, and when opened a thin
+ * left rule over dimmed, height-capped text — matching ZCode's treatment.
+ */
+function reasoningBlock(thinking, { open = false } = {}) {
+  const details = document.createElement("details");
+  details.className = "reasoning";
+  if (open) details.open = true;
+
+  const summary = document.createElement("summary");
+  summary.textContent = "思考";
+
+  const body = document.createElement("div");
+  body.className = "reasoning-body";
+  body.textContent = thinking;
+
+  details.append(summary, body);
+  return details;
+}
+
+/**
+ * A tool call: borderless summary row, with the payload and its result inside
+ * a card once expanded.
+ */
+function toolBlock(call, result) {
+  const details = document.createElement("details");
+  details.className = "tool";
+
+  const summary = document.createElement("summary");
+  const kind = document.createElement("span");
+  kind.className = "tool-kind";
+  kind.textContent = "工具";
+  const name = document.createElement("span");
+  name.className = "tool-name";
+  name.textContent = call.toolName ?? "unknown";
+  summary.append(kind, name);
+
+  const card = document.createElement("div");
+  card.className = "tool-card";
+  const input = document.createElement("pre");
+  input.textContent = JSON.stringify(call.input ?? {}, null, 2);
+  card.append(input);
+
+  // The output is the reason to expand a tool row, so it lives inside.
+  if (result) {
+    const resultBlock = document.createElement("div");
+    resultBlock.className = result.isError ? "tool-result is-error" : "tool-result";
+    const label = document.createElement("span");
+    label.className = "tool-result-label";
+    label.textContent = result.isError ? "结果 · 失败" : "结果";
+    const output = document.createElement("pre");
+    output.textContent = toolResultText(result).slice(0, 8000);
+    const resultCard = document.createElement("div");
+    resultCard.className = "tool-card";
+    resultCard.append(label, output);
+    details.append(summary, card, resultCard);
+    return details;
+  }
+
+  details.append(summary, card);
+  return details;
+}
+
 // ── ZCode trajectory mode ───────────────────────────────────────────────────
 
 /**
- * Render messages as a colour-coded timeline: user, assistant text, reasoning
- * and tool calls each become their own entry. This mirrors ZCode's trajectory
- * view rather than pi-web's grouped process panel.
+ * Render the transcript as a timeline: reasoning, tool calls and text each
+ * appear in order, with the same surfaces the folded mode uses.
  */
 function renderTrajectory(container, messages) {
-  for (const message of messages) {
-    if (!message || message.role === "toolResult") continue;
+  const results = indexToolResults(messages);
 
-    const thinking = thinkingOf(message.content);
-    if (thinking) {
-      container.append(trajectoryEntry("reasoning", "推理", thinking));
+  for (const message of messages) {
+    if (!message || typeof message !== "object" || message.role === "toolResult") continue;
+
+    if (message.role === "user") {
+      const text = textOf(message.content);
+      if (text) container.append(userCard(text));
+      continue;
     }
 
+    const thinking = thinkingOf(message.content);
+    if (thinking) container.append(reasoningBlock(thinking, { open: true }));
+
     for (const call of toolCallsOf(message.content)) {
-      container.append(trajectoryEntry(
-        "tool-call",
-        `工具 · ${call.toolName ?? "unknown"}`,
-        JSON.stringify(call.input ?? {}, null, 2),
-        true,
-      ));
+      container.append(toolBlock(call, results.get(call.toolCallId)));
     }
 
     const text = textOf(message.content);
-    if (!text) continue;
-    container.append(message.role === "user"
-      ? trajectoryEntry("user", "你", text)
-      : trajectoryEntry("assistant", "助手", text));
+    if (text) container.append(assistantText(text));
   }
-}
-
-function trajectoryEntry(kind, label, body, mono = false) {
-  const wrapper = document.createElement("div");
-  wrapper.className = `traj traj-${kind}`;
-
-  const head = document.createElement("div");
-  head.className = "traj-head";
-  head.textContent = label;
-
-  const content = document.createElement("div");
-  content.className = mono ? "traj-body is-mono" : "traj-body";
-  content.textContent = body;
-
-  wrapper.append(head, content);
-  return wrapper;
 }
 
 // ── pi-web folded mode ──────────────────────────────────────────────────────
 
 /**
- * Render messages the way pi-web does: assistant turns collapse their working
- * steps (reasoning + tool calls) into one expandable group, with the final
- * answer left visible.
+ * Render the way pi-web does: an assistant turn collapses its working steps
+ * (reasoning + tool calls) into one expandable group, leaving the final answer
+ * visible.
  */
 function renderFolded(container, messages) {
+  const results = indexToolResults(messages);
+
   for (const message of messages) {
-    if (!message || message.role === "toolResult") continue;
+    if (!message || typeof message !== "object") continue;
+
     if (message.role === "user") {
       const text = textOf(message.content);
-      if (text) container.append(foldedBubble("msg-user", "你", text));
+      if (text) container.append(userCard(text));
       continue;
     }
+    if (message.role === "toolResult") continue;
 
     const thinking = thinkingOf(message.content);
     const tools = toolCallsOf(message.content);
@@ -904,43 +1010,23 @@ function renderFolded(container, messages) {
       const details = document.createElement("details");
       details.className = "process";
       const summary = document.createElement("summary");
-      const parts = [
+      summary.textContent = [
+        "处理过程",
         thinking ? "思考" : null,
         tools.length > 0 ? `${tools.length} 个工具` : null,
       ].filter(Boolean).join(" · ");
-      summary.textContent = `处理过程 · ${parts}`;
       details.append(summary);
 
       const steps = document.createElement("div");
       steps.className = "process-steps";
-      if (thinking) steps.append(trajectoryEntry("reasoning", "推理", thinking));
-      for (const call of tools) {
-        steps.append(trajectoryEntry(
-          "tool-call",
-          `工具 · ${call.toolName ?? "unknown"}`,
-          JSON.stringify(call.input ?? {}, null, 2),
-          true,
-        ));
-      }
+      if (thinking) steps.append(reasoningBlock(thinking, { open: true }));
+      for (const call of tools) steps.append(toolBlock(call, results.get(call.toolCallId)));
       details.append(steps);
       container.append(details);
     }
 
-    if (text) container.append(foldedBubble("msg-assistant", "助手", text));
+    if (text) container.append(assistantText(text));
   }
-}
-
-function foldedBubble(className, label, text) {
-  const wrapper = document.createElement("div");
-  wrapper.className = `msg ${className}`;
-  const role = document.createElement("span");
-  role.className = "msg-role";
-  role.textContent = label;
-  const body = document.createElement("div");
-  body.className = "msg-body";
-  body.textContent = text;
-  wrapper.append(role, body);
-  return wrapper;
 }
 
 // ── Composer ────────────────────────────────────────────────────────────────
@@ -979,10 +1065,19 @@ async function loadModels() {
   row.append(select);
 }
 
+/**
+ * Switch the send button between "send" and "stop".
+ *
+ * ZCode swaps the icon and fills the stop button, rather than relabelling text.
+ */
 function setSendMode(mode) {
   const button = $("chat-send");
-  button.textContent = mode === "stop" ? "停止" : "发送";
   button.dataset.mode = mode;
+  button.classList.toggle("is-stop", mode === "stop");
+  button.classList.toggle("is-primary", mode !== "stop");
+  button.title = mode === "stop" ? "停止生成" : "发送";
+  button.setAttribute("aria-label", button.title);
+  button.replaceChildren(icon(mode === "stop" ? "square" : "send"));
 }
 
 function showLoading(visible) {
@@ -1007,22 +1102,40 @@ async function sendMessage() {
   setSendMode("stop");
 
   const container = $("chat-messages");
-  if (state.viewMode === "trajectory") {
-    container.append(trajectoryEntry("user", "你", text));
-  } else {
-    container.append(foldedBubble("msg-user", "你", text));
-  }
+  container.append(userCard(text));
 
-  // Streaming target: appended as deltas arrive, replaced wholesale at the end.
-  const pending = state.viewMode === "trajectory"
-    ? trajectoryEntry("assistant", "助手", "")
-    : foldedBubble("msg-assistant", "助手", "");
-  const body = state.viewMode === "trajectory"
-    ? pending.querySelector(".traj-body")
-    : pending.querySelector(".msg-body");
-  container.append(pending);
-  $("chat-status").textContent = "思考中…";
+  // Live region for the running turn. Reasoning and tool calls are rendered as
+  // they stream in — previously only the final text updated, so the user saw
+  // nothing until the whole run finished.
+  const live = document.createElement("div");
+  live.className = "msg msg-assistant";
+  live.style.display = "flex";
+  live.style.flexDirection = "column";
+  live.style.gap = "12px";
+  const liveSteps = document.createElement("div");
+  liveSteps.style.display = "flex";
+  liveSteps.style.flexDirection = "column";
+  liveSteps.style.gap = "12px";
+  const liveBody = document.createElement("div");
+  liveBody.className = "msg-body";
+  live.append(liveSteps, liveBody);
+  container.append(live);
+  $("chat-branch").textContent = "思考中…";
   scrollToBottom();
+
+  /** Redraw the streaming steps from the latest assistant message. */
+  const liveResults = new Map();
+  const renderLive = (message, results) => {
+    const thinking = thinkingOf(message?.content);
+    const calls = toolCallsOf(message?.content);
+    const signature = `${thinking.length}:${calls.map((c) => c.toolCallId).join(",")}`;
+    if (signature === renderLive.lastSignature) return;
+    renderLive.lastSignature = signature;
+    liveSteps.replaceChildren();
+    if (thinking) liveSteps.append(reasoningBlock(thinking, { open: true }));
+    for (const call of calls) liveSteps.append(toolBlock(call, results.get(call.toolCallId)));
+  };
+  renderLive.lastSignature = "";
 
   let carry = "";
   let settled = false;
@@ -1032,7 +1145,7 @@ async function sendMessage() {
     const stream = state.tunnel.request({
       path: `/api/agent/${encodeURIComponent(session.id)}/events`,
       timeoutMs: STREAM_TIMEOUT_MS,
-      onHead: () => { $("chat-status").textContent = "生成中…"; },
+      onHead: () => { $("chat-branch").textContent = "生成中…"; },
       onChunk: (chunk) => {
         carry += chunk;
         const parts = carry.split("\n\n");
@@ -1047,11 +1160,14 @@ async function sendMessage() {
             if (!event || typeof event !== "object") continue;
             if (event.type === "message_update" || event.type === "message_end") {
               const next = textOf(event.message?.content);
-              if (next) { body.textContent = next; scrollToBottom(); }
+              if (next) { liveBody.textContent = next; scrollToBottom(); }
+              // Reasoning and tool calls stream in too, so the running turn
+              // shows its work instead of appearing empty until completion.
+              renderLive(event.message, liveResults);
             } else if (event.type === "prompt_done" || event.type === "agent_settled") {
               settled = true;
             } else if (event.type === "error") {
-              body.textContent += `\n[错误：${event.message ?? "未知"}]`;
+              liveBody.textContent += `\n[错误：${event.message ?? "未知"}]`;
             }
           }
         }
@@ -1080,13 +1196,13 @@ async function sendMessage() {
     state.tunnel.detach(stream.rid);
     stream.catch(() => {});
   } catch (error) {
-    if (body.textContent.length === 0) body.textContent = `[发送失败：${error.message}]`;
+    if (liveBody.textContent.length === 0) liveBody.textContent = `[发送失败：${error.message}]`;
   } finally {
     // Re-enable the composer BEFORE re-syncing: loadContext is another tunnel
     // round trip, and awaiting it first left the button stuck on "stop" until
     // that request returned.
     setSendMode("send");
-    $("chat-status").textContent = "";
+    $("chat-branch").textContent = "";
     state.streamRid = null;
     // Re-sync from the session file so the final text and tool calls are exact.
     if (state.current?.id === session.id) void loadContext(session).catch(() => {});
@@ -1139,7 +1255,7 @@ function stopRun() {
     body: JSON.stringify({ type: "abort" }),
   }).catch(() => {});
   setSendMode("send");
-  $("chat-status").textContent = "已请求停止";
+  $("chat-branch").textContent = "已请求停止";
 }
 
 function toggleViewMode() {
@@ -1267,6 +1383,10 @@ $("pane-close").addEventListener("click", () => $("chat-main").removeAttribute("
 $("pane-backdrop").addEventListener("click", () => $("chat-main").removeAttribute("inert"));
 
 $("chat-input").addEventListener("keydown", (event) => {
+  // Enter sends, Shift+Enter breaks the line — but never while an IME is
+  // composing: a Chinese/Japanese user pressing Enter to accept a candidate
+  // would otherwise fire the message off mid-word.
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     void sendMessage();
@@ -1286,7 +1406,7 @@ window.addEventListener("pagehide", () => {
 
 $("chat-view-toggle").title = state.viewMode === "trajectory" ? "当前：ZCode 轨迹" : "当前：pi-web 折叠";
 applyTheme();
-renderHomeTheme();
+renderThemeMenu();
 // Follow the OS while in "system" mode, without a reload.
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   if (state.theme === "system") applyTheme();

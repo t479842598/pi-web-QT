@@ -36,6 +36,10 @@
   --color-brand: #0ea5e9;
   --color-destructive: #e03131;
   --color-success: #16a34a;
+  /* Session page surface tones (measured from ZCode). */
+  --color-header: #f8f8f8;
+  --color-surface: rgba(0, 0, 0, 0.03);
+  --color-input-border: rgba(13, 13, 13, 0.15);
   --page-margin: 12px;
 }
 
@@ -53,6 +57,9 @@
     --color-hover: rgba(255, 255, 255, 0.04);
     --color-destructive: #ff5c5c;
     --color-success: #3fb950;
+    --color-header: #202020;
+    --color-surface: rgba(255, 255, 255, 0.05);
+    --color-input-border: rgba(255, 255, 255, 0.15);
   }
 }
 
@@ -1072,6 +1079,9 @@ html[data-theme="light"] {
   --color-hover: rgba(0, 0, 0, 0.04);
   --color-destructive: #e03131;
   --color-success: #16a34a;
+  --color-header: #f8f8f8;
+  --color-surface: rgba(0, 0, 0, 0.03);
+  --color-input-border: rgba(13, 13, 13, 0.15);
 }
 
 html[data-theme="dark"] {
@@ -1087,6 +1097,9 @@ html[data-theme="dark"] {
   --color-hover: rgba(255, 255, 255, 0.04);
   --color-destructive: #ff5c5c;
   --color-success: #3fb950;
+  --color-header: #202020;
+  --color-surface: rgba(255, 255, 255, 0.05);
+  --color-input-border: rgba(255, 255, 255, 0.15);
 }
 
 .menu-item.is-active { font-weight: 600; }
@@ -1142,3 +1155,388 @@ html[data-theme="dark"] {
 
 .session-row-new:hover .session-title,
 .session-row-new:active .session-title { color: var(--color-brand); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Session page — every value below is measured from ZCode's remote session
+   page at 390px, so the two stay comparable.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Two stacked bars (44px + 48px) ──────────────────────────────────────── */
+
+.chat-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 8px;
+  flex-shrink: 0;
+  background: var(--color-header);
+  border-bottom: 1px solid var(--color-border);
+  padding-top: env(safe-area-inset-top);
+}
+
+.chat-nav-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-ui-base);
+  font-weight: 500;
+  line-height: 21px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 8px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chat-head-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-ui-base);
+  font-weight: 600;
+  line-height: 21px;
+}
+
+.chat-head-title > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-head-extra {
+  flex-shrink: 0;
+  font-weight: 400;
+  color: var(--color-foreground-subtle);
+}
+
+/* 28px buttons (ZCode's header/composer size), 8px radius. */
+.icon-btn-lg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-foreground-subtle);
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.icon-btn-lg:hover { background: var(--color-hover); color: var(--color-foreground); }
+.icon-btn-lg::after { content: ""; position: absolute; inset: -8px; }
+.icon-btn-lg { position: relative; }
+
+/* ── Message column ──────────────────────────────────────────────────────── */
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  /* Measured: 20px between turns, 56px above the first, 20px below the last. */
+  gap: 20px;
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 56px 16px 20px;
+}
+
+/* Assistant output is plain prose in ZCode — no bubble, no border, no radius.
+   The shared `.msg` block sets a radius and padding, so both are reset here. */
+.msg-assistant {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: var(--text-ui-base);
+  line-height: 21px;
+}
+
+/* A user turn is a full-width card, left aligned, with only the top-right
+   corner eased — the opposite of the usual "me on the right" convention. */
+.msg-user {
+  align-self: stretch;
+  max-width: 100%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px 2px 12px 12px;
+  padding: 12px 16px;
+  font-size: var(--text-ui-base);
+  line-height: 21px;
+}
+
+/* ZCode has no "you / assistant" label; styling carries the distinction. */
+.msg-role { display: none; }
+
+.msg-body { white-space: pre-wrap; word-break: break-word; }
+.msg-body > *:first-child { margin-top: 0; }
+.msg-body > *:last-child { margin-bottom: 0; }
+
+/* ── Reasoning: bare text when collapsed, a thin rule when open ──────────── */
+
+.reasoning {
+  font-size: var(--text-ui-base);
+  line-height: 21px;
+}
+
+.reasoning > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--color-foreground-subtle);
+}
+
+.reasoning > summary::-webkit-details-marker { display: none; }
+
+.reasoning > summary::before {
+  content: "▸";
+  flex-shrink: 0;
+  font-size: 10px;
+  transition: transform 150ms ease-out;
+}
+
+.reasoning[open] > summary::before { content: "▾"; }
+
+/* Measured: 1px left rule, 14px inset, capped at 240px of scroll. */
+.reasoning-body {
+  margin: 6px 0 0 8px;
+  padding-left: 14px;
+  border-left: 1px solid var(--color-border);
+  max-height: 240px;
+  overflow-y: auto;
+  color: var(--color-foreground-subtlest);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--text-ui-base);
+  line-height: 21px;
+}
+
+/* ── Tool calls: borderless summary row, card only when expanded ─────────── */
+
+.tool {
+  font-size: var(--text-ui-base);
+  line-height: 21px;
+}
+
+.tool > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--color-foreground-subtlest);
+}
+
+.tool > summary::-webkit-details-marker { display: none; }
+.tool > summary::before { content: "▸"; flex-shrink: 0; font-size: 10px; }
+.tool[open] > summary::before { content: "▾"; }
+
+.tool-kind {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.tool-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Measured: expanded content is a 12px card with 16px padding. */
+.tool-card {
+  margin-top: 8px;
+  border: 1px solid var(--color-card-border);
+  border-radius: 12px;
+  background: var(--color-card);
+  padding: 12px 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.tool-card pre {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-ui-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-card + .tool-card { margin-top: 8px; }
+
+.tool-result-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--text-ui-xs);
+  color: var(--color-foreground-subtlest);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tool-result.is-error .tool-card {
+  border-color: color-mix(in srgb, var(--color-destructive) 40%, transparent);
+}
+
+.tool-result.is-error .tool-result-label { color: var(--color-destructive); }
+
+/* ── Composer: one rounded surface (measured 16px radius) ────────────────── */
+
+.composer {
+  flex-shrink: 0;
+  background: var(--color-background);
+  padding: 0 16px 16px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+.composer-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  border: 1px solid var(--color-input-border);
+  border-radius: 16px;
+  background: var(--color-card);
+  padding: 12px;
+}
+
+.composer-inner {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.composer textarea {
+  flex: 1;
+  min-width: 0;
+  /* Measured: min 40px, max 160px, 14px/20px. */
+  min-height: 40px;
+  max-height: 160px;
+  resize: none;
+  border: none;
+  background: none;
+  color: var(--color-foreground);
+  padding: 0;
+  font: inherit;
+  /* 16px avoids the iOS focus zoom while the visual line height stays 20px. */
+  font-size: 16px;
+  line-height: 20px;
+  outline: none;
+}
+
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.composer-row select {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-card);
+  color: var(--color-foreground);
+  padding: 4px 6px;
+  font: inherit;
+  font-size: var(--text-ui-sm);
+  max-width: 62vw;
+}
+
+/* 28px, 8px radius — ZCode's composer button size. */
+.composer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-foreground-subtle);
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.composer-btn:hover { background: var(--color-hover); }
+.composer-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.composer-btn.is-primary {
+  background: var(--color-brand);
+  color: #ffffff;
+}
+
+.composer-btn.is-primary:hover { background: var(--color-brand); opacity: 0.9; }
+
+/* Stop uses a flat grey fill in ZCode, not an accent colour. */
+.composer-btn.is-stop {
+  background: rgb(54, 54, 54);
+  color: #ffffff;
+}
+
+html[data-theme="light"] .composer-btn.is-stop {
+  background: rgb(214, 214, 214);
+  color: var(--color-foreground);
+}
+
+@media (pointer: coarse), (max-width: 640px) {
+  .composer-btn::after { content: ""; position: absolute; inset: -8px; }
+  .composer-btn { position: relative; }
+}
+
+/* ── Trajectory mode reuses the same surfaces ────────────────────────────── */
+
+/* ZCode has no colour-coded cards; the trajectory view keeps the same plain
+   rows, with the border rule reserved for an expanded reasoning body. */
+.traj {
+  border-left: none;
+  border-radius: 0;
+  padding: 0;
+  background: none;
+  font-size: var(--text-ui-base);
+  line-height: 21px;
+}
+
+.traj-head {
+  margin-bottom: 2px;
+  font-size: var(--text-ui-xs);
+  color: var(--color-foreground-subtlest);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.traj-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--text-ui-base);
+  line-height: 21px;
+}
+
+.traj-body.is-mono {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-card-border);
+  border-radius: 12px;
+  background: var(--color-card);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-ui-sm);
+  max-height: 240px;
+  overflow: auto;
+}
