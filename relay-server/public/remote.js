@@ -877,6 +877,33 @@ function indexToolResults(messages) {
 // ── Shared pieces (both view modes use the same surfaces) ───────────────────
 
 /**
+ * Strip pi's injected mode/policy blocks from a user message.
+ *
+ * pi prepends system-prompt blocks (`<delivery-profile>…`, `<goal-profile>…`,
+ * the legacy "You are in PLAN MODE." heading) to the prompt as part of the user
+ * message. They are instructions to the agent, not something the person typed,
+ * and ZCode does not show them — this mirrors `stripModeInstructionBlocks` in
+ * the app's own `lib/modes.ts` (the relay page is a standalone bundle and
+ * cannot import it).
+ */
+function stripInjectedBlocks(text) {
+  if (!text) return "";
+  let value = text.replace(/^\uFEFF/, "");
+  const before = value;
+  value = value.replace(/<(?:economy|delivery|goal)-profile>\n?[\s\S]*?<\/(?:economy|delivery|goal)-profile>\n*(?:Goal:\s*[^\n]*\n?)?/g, "");
+  if (value === before) {
+    const truncated = /^\s*<(?:economy|delivery|goal)-profile>\s*/.exec(value);
+    if (truncated) {
+      const after = value.slice(truncated[0].length);
+      const m = after.match(/^[^.]*?\.\s+([\s\S]*)$/);
+      value = m ? m[1] : "";
+    }
+  }
+  value = value.replace(/^You are in PLAN MODE\.[\s\S]*?\n(?=\n|$)/, "");
+  return value.replace(/^\s*\n/, "").trimStart();
+}
+
+/**
  * Render a message body as Markdown.
  *
  * Assistant output is Markdown (lists, inline code, emphasis) and ZCode shows
@@ -984,8 +1011,11 @@ function userCard(text, timestamp) {
   wrapper.className = "msg msg-user";
   const body = document.createElement("div");
   body.className = "msg-body";
-  renderMarkdown(body, text);
-  wrapper.append(body, messageActions(text, clockOf(timestamp)));
+  // Injected instruction blocks are the agent's briefing, not the user's words,
+  // and ZCode does not show them.
+  const visible = stripInjectedBlocks(text);
+  renderMarkdown(body, visible);
+  wrapper.append(body, messageActions(visible, clockOf(timestamp)));
   return wrapper;
 }
 
@@ -1001,16 +1031,21 @@ function assistantText(text, timestamp) {
 }
 
 /**
- * A reasoning block: bare summary text when collapsed, and when opened a thin
- * left rule over dimmed, height-capped text — matching ZCode's treatment.
+ * A reasoning block.
+ *
+ * ZCode shows one summary line for the whole thought and keeps it collapsed;
+ * the body opens on tap. Rendering it expanded made the transcript read as a
+ * wall of internal monologue.
  */
-function reasoningBlock(thinking, { open = false } = {}) {
+function reasoningBlock(thinking, { open = false, durationMs } = {}) {
   const details = document.createElement("details");
   details.className = "reasoning";
   if (open) details.open = true;
 
   const summary = document.createElement("summary");
-  summary.textContent = "思考";
+  summary.textContent = durationMs && durationMs > 0
+    ? `思考 · ${Math.max(1, Math.round(durationMs / 1000))} 秒`
+    : "思考";
 
   const body = document.createElement("div");
   body.className = "reasoning-body";
@@ -1018,6 +1053,52 @@ function reasoningBlock(thinking, { open = false } = {}) {
 
   details.append(summary, body);
   return details;
+}
+
+/**
+ * Approximate how long a thought took.
+ *
+ * pi does not timestamp thinking blocks, so the gap to the previous message is
+ * the only signal. ZCode shows "思考 · N 秒" in the summary, and a rough figure
+ * beats none.
+ */
+function thinkingDurationMs(message, messages) {
+  const own = typeof message.timestamp === "number" ? message.timestamp : Date.parse(message.timestamp ?? "");
+  if (!Number.isFinite(own)) return 0;
+  const index = messages.indexOf(message);
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const prev = messages[i];
+    const prevTs = typeof prev?.timestamp === "number" ? prev.timestamp : Date.parse(prev?.timestamp ?? "");
+    if (Number.isFinite(prevTs)) return Math.max(0, own - prevTs);
+  }
+  return 0;
+}
+
+/** A short verb for a tool, so the row matches ZCode's "查阅 / 编辑" labels. */
+function toolVerb(toolName) {
+  const name = (toolName ?? "").toLowerCase();
+  if (name === "bash" || name === "bash_io") return "运行";
+  if (name === "read" || name === "read_file") return "查阅";
+  if (name === "write" || name === "edit" || name === "apply_patch") return "编辑";
+  if (name === "grep" || name === "glob" || name === "search") return "搜索";
+  if (name === "webfetch" || name === "websearch") return "抓取";
+  if (name === "task") return "子代理";
+  return "工具";
+}
+
+/**
+ * The one-line description beside a tool verb.
+ *
+ * ZCode shows the command or path here, not the whole argument object, so the
+ * row stays a readable summary instead of a JSON blob.
+ */
+function toolSummaryText(call) {
+  const input = call.input ?? {};
+  for (const key of ["command", "path", "file_path", "pattern", "query", "url", "description"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value.trim().slice(0, 120);
+  }
+  return call.toolName ?? "unknown";
 }
 
 /**
@@ -1031,16 +1112,27 @@ function toolBlock(call, result) {
   const summary = document.createElement("summary");
   const kind = document.createElement("span");
   kind.className = "tool-kind";
-  kind.textContent = "工具";
+  // A short verb reads like ZCode's "查阅 / 编辑 / 运行" labels.
+  kind.textContent = toolVerb(call.toolName);
   const name = document.createElement("span");
   name.className = "tool-name";
-  name.textContent = call.toolName ?? "unknown";
+  name.textContent = toolSummaryText(call);
   summary.append(kind, name);
+
+  // A failed call is visible without expanding.
+  if (result?.isError) {
+    const failed = document.createElement("span");
+    failed.className = "tool-failed";
+    failed.textContent = "失败";
+    summary.append(failed);
+  }
 
   const card = document.createElement("div");
   card.className = "tool-card";
   const input = document.createElement("pre");
-  input.textContent = JSON.stringify(call.input ?? {}, null, 2);
+  // Prefer the actual command/args over a JSON wrapper.
+  const raw = toolSummaryText(call);
+  input.textContent = raw !== call.toolName ? raw : JSON.stringify(call.input ?? {}, null, 2);
   card.append(input);
 
   // The output is the reason to expand a tool row, so it lives inside.
@@ -1082,7 +1174,7 @@ function renderTrajectory(container, messages) {
     }
 
     const thinking = thinkingOf(message.content);
-    if (thinking) container.append(reasoningBlock(thinking, { open: true }));
+    if (thinking) container.append(reasoningBlock(thinking, { durationMs: thinkingDurationMs(message, messages) }));
 
     for (const call of toolCallsOf(message.content)) {
       container.append(toolBlock(call, results.get(call.toolCallId)));
@@ -1130,7 +1222,7 @@ function renderFolded(container, messages) {
 
       const steps = document.createElement("div");
       steps.className = "process-steps";
-      if (thinking) steps.append(reasoningBlock(thinking, { open: true }));
+      if (thinking) steps.append(reasoningBlock(thinking, { durationMs: thinkingDurationMs(message, messages) }));
       for (const call of tools) steps.append(toolBlock(call, results.get(call.toolCallId)));
       details.append(steps);
       container.append(details);
@@ -1247,7 +1339,7 @@ async function sendMessage() {
     if (signature === renderLive.lastSignature) return;
     renderLive.lastSignature = signature;
     liveSteps.replaceChildren();
-    if (thinking) liveSteps.append(reasoningBlock(thinking, { open: true }));
+    if (thinking) liveSteps.append(reasoningBlock(thinking));
     for (const call of calls) liveSteps.append(toolBlock(call, results.get(call.toolCallId)));
   };
   renderLive.lastSignature = "";

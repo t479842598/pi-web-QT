@@ -1699,3 +1699,36 @@ html[data-theme="light"] .composer-btn.is-stop {
 /* The chat header menu anchors to its slot. */
 .chat-menu-slot { position: relative; display: inline-flex; }
 .chat-menu-slot .menu { top: calc(100% + 6px); right: 0; }
+
+/* ── Compact process rows (ZCode keeps these to one line each) ───────────── */
+
+/* Reasoning and tool rows are quiet, single-line entries: the transcript should
+   read as the conversation, not as an audit log. */
+.reasoning > summary,
+.tool > summary {
+  min-height: 24px;
+  font-size: var(--text-ui-base);
+  line-height: 21px;
+}
+
+.reasoning > summary { color: var(--color-foreground-subtle); }
+
+.tool > summary { color: var(--color-foreground-subtle); }
+
+.tool-failed {
+  flex-shrink: 0;
+  margin-left: 4px;
+  color: var(--color-destructive);
+}
+
+/* The expanded bodies are secondary; keep them visually recessed. */
+.reasoning-body,
+.tool-card {
+  font-size: var(--text-ui-sm);
+}
+
+/* Group consecutive process rows so a run of tools reads as one block. */
+.msg-assistant > .reasoning + .tool,
+.msg-assistant > .tool + .tool {
+  margin-top: -8px;
+}
