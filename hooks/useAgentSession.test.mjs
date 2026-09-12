@@ -261,3 +261,23 @@ test("restoring a running session does not clear an SSE snapshot", () => {
   assert.match(restoreSource, /dispatch\(\{ type: "resume" \}\)/);
   assert.doesNotMatch(restoreSource, /dispatch\(\{ type: "start" \}\)/);
 });
+
+test("renews the selected-session lease and keeps its stream out of the grace window", () => {
+  assert.match(source, /const SESSION_LEASE_RENEW_INTERVAL_MS = 30_000/);
+  const leaseSource = source.slice(
+    source.indexOf("const renewLease = async ()"),
+    source.indexOf("}, [closeEvents, ensureEventsConnected, session?.id]);"),
+  );
+  assert.match(leaseSource, /\/api\/agent\/\$\{encodeURIComponent\(sid\)\}\/lease/);
+  assert.match(leaseSource, /result\.renewed === 0/);
+  assert.match(leaseSource, /closeEvents\(\);\s*\n\s*void ensureEventsConnected\(sid\)/);
+
+  // The selected session's stream must not be scheduled for closing: doing so
+  // would drop the lease and let idle eviction reap the session.
+  const closeSource = source.slice(
+    source.indexOf("const scheduleEventStreamClose = useCallback"),
+    source.indexOf("const finishPromptWithoutStream"),
+  );
+  assert.match(closeSource, /if \(sessionPropIdRef\.current === sid\)/);
+  assert.match(closeSource, /cancelEventStreamGrace\(\);\s*\n\s*return;/);
+});

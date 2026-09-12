@@ -1,5 +1,6 @@
 import { invalidateSessionListCache, resolveSessionPath } from "@/lib/session-reader";
 import { getRpcSession, startRpcSession, type AgentEvent } from "@/lib/rpc-manager";
+import { acquireSessionLivenessLease } from "@/lib/session-liveness";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,9 @@ export async function GET(
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
+      // Holding a lease for the lifetime of this stream keeps the selected
+      // session alive while the browser keeps renewing it (POST .../lease).
+      const releaseLease = acquireSessionLivenessLease(id).release;
       const encode = (data: unknown) => {
         const text = `data: ${JSON.stringify(data)}\n\n`;
         controller.enqueue(encoder.encode(text));
@@ -142,6 +146,7 @@ export async function GET(
 
       // Cleanup when client disconnects
       function cleanup() {
+        releaseLease();
         clearInterval(heartbeat);
         clearTimeout(coalesceTimer);
         clearTimeout(idleTimeout);

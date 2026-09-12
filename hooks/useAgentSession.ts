@@ -305,6 +305,10 @@ const EVENT_STREAM_IDLE_GRACE_MS = 120_000;
 // global /api/events bus takes over, so OTHER clients' changes still reach an
 // idle tab in seconds without a manual refresh.
 const AGENT_STATE_RECONCILE_MS = 15_000;
+// Selected-session lease renewal. The server-side lease (90s TTL) keeps the
+// session alive while the browser is on it; renewing every 30s leaves two
+// missed intervals of slack before the lease lapses.
+const SESSION_LEASE_RENEW_INTERVAL_MS = 30_000;
 // The server heartbeats every 30s. If a nominally-OPEN direct SSE has carried
 // no frame for ~3 periods, treat it as a half-open zombie and rebuild it.
 const EVENT_STREAM_ZOMBIE_MS = 95_000;
@@ -873,6 +877,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // silent for ~3 periods, the connection is a zombie and must be rebuilt.
   const lastEventFrameAtRef = useRef(0);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
+  // The session the component is CURRENTLY rendering, which is not the same as
+  // sessionIdRef (that tracks what is loaded and can lag across a switch). The
+  // lease logic needs this to avoid renewing a session the user already left.
+  const sessionPropIdRef = useRef<string | null>(session?.id ?? null);
+  sessionPropIdRef.current = session?.id ?? null;
   const agentRunningRef = useRef(false);
   const sdkAgentActiveRef = useRef(false);
   const rpcPromptPendingRef = useRef(false);
@@ -1639,6 +1648,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [onAgentEnd]);
 
   const scheduleEventStreamClose = useCallback((sid: string) => {
+    // The session the user is looking at is kept alive by its lease: closing
+    // the stream would drop the lease and let idle eviction reap it, so the
+    // grace window must not run for it.
+    if (sessionPropIdRef.current === sid) {
+      cancelEventStreamGrace();
+      return;
+    }
     cancelEventStreamGrace();
     eventStreamGraceActiveRef.current = true;
     const generation = eventStreamGraceGenerationRef.current;
@@ -1695,6 +1711,54 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
     eventStreamGraceTimerRef.current = setTimeout(() => void checkServerIdle(), EVENT_STREAM_IDLE_GRACE_MS);
   }, [cancelEventStreamGrace, closeEvents]);
+
+  // Keep the selected session warm while it is open, even when the agent is
+  // idle. Renewing the server-side lease stops pi-web's idle eviction from
+  // tearing down a session the user is simply looking at. If the lease has
+  // lapsed (renewed === 0) the SSE stream is gone too, so rebuild it.
+  useEffect(() => {
+    const sid = session?.id;
+    if (!sid) return;
+    let disposed = false;
+    let renewing = false;
+
+    const renewLease = async () => {
+      if (disposed || renewing) return;
+      renewing = true;
+      try {
+        const response = await fetch(`/api/agent/${encodeURIComponent(sid)}/lease`, {
+          method: "POST",
+          cache: "no-store",
+        });
+        if (!response.ok || disposed) return;
+        const result = await response.json() as { renewed?: number };
+        if (
+          !disposed
+          && result.renewed === 0
+          && sessionIdRef.current === sid
+          && sessionPropIdRef.current === sid
+        ) {
+          closeEvents();
+          void ensureEventsConnected(sid);
+        }
+      } catch {
+        // Retry on the next interval; the SSE connection stays the primary path.
+      } finally {
+        renewing = false;
+      }
+    };
+
+    const interval = setInterval(() => void renewLease(), SESSION_LEASE_RENEW_INTERVAL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void renewLease();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [closeEvents, ensureEventsConnected, session?.id]);
 
   const finishPromptWithoutStream = useCallback(async (sid: string | null = sessionIdRef.current, runId = promptRunIdRef.current) => {
     // A slow reconciliation response from a previous run must never settle the
