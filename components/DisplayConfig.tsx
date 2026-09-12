@@ -253,6 +253,30 @@ export function DisplayConfig() {
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState<string | null>(null);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
+  const [webAuthEnabled, setWebAuthEnabled] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+
+  useEffect(() => {
+    void fetch("/api/web-auth")
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: { enabled?: boolean } | null) => setWebAuthEnabled(data?.enabled === true))
+      .catch(() => {});
+  }, []);
+
+  const logOut = useCallback(async () => {
+    setLoggingOut(true);
+    setLogoutError("");
+    try {
+      const response = await fetch("/api/web-auth", { method: "DELETE" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      window.location.replace("/login");
+    } catch {
+      setLogoutError(t("auth.logoutFailed"));
+    } finally {
+      setLoggingOut(false);
+    }
+  }, [t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -478,6 +502,25 @@ export function DisplayConfig() {
           })}
         </div>
       </ConfigSection>
+
+      {/* ── Browser session ── */}
+      {webAuthEnabled && (
+        <ConfigSection title={t("auth.prompt")} description={t("desktop.accessDescription")}>
+          <div style={tagGroupStyle}>
+            <button
+              type="button"
+              disabled={loggingOut}
+              onClick={() => void logOut()}
+              style={tagStyle(false, hoveredTag === "logout")}
+              onMouseEnter={() => setHoveredTag("logout")}
+              onMouseLeave={() => setHoveredTag(null)}
+            >
+              {loggingOut ? t("auth.loggingOut") : t("auth.logOut")}
+            </button>
+          </div>
+          {logoutError && <p role="alert" style={{ margin: "8px 0 0", color: "var(--status-error)", fontSize: 12 }}>{logoutError}</p>}
+        </ConfigSection>
+      )}
     </div>
   );
 }
