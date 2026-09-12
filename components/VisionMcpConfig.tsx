@@ -30,7 +30,7 @@ const primaryButtonStyle: React.CSSProperties = {
   border: "none",
   borderRadius: 6,
   background: "var(--accent)",
-  color: "#fff",
+  color: "var(--accent-fg)",
   cursor: "pointer",
   fontSize: 12,
 };

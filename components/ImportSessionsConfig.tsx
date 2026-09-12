@@ -338,7 +338,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
           style={{
             display: "inline-flex", alignItems: "center", gap: 7,
             padding: "8px 14px", background: "var(--accent)", border: "none",
-            borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 600,
+            borderRadius: 6, color: "var(--accent-fg)", fontSize: 12, fontWeight: 600,
             cursor: "pointer", alignSelf: "flex-start",
           }}
         >
@@ -489,7 +489,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 7,
                   padding: "8px 14px", background: "var(--accent)", border: "none",
-                  borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 600,
+                  borderRadius: 6, color: "var(--accent-fg)", fontSize: 12, fontWeight: 600,
                   cursor: selectedProjects.size === 0 ? "not-allowed" : "pointer",
                   alignSelf: "flex-start",
                   opacity: selectedProjects.size === 0 ? 0.5 : 1,

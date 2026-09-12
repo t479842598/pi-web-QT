@@ -364,7 +364,7 @@ export function ProxyConfig() {
             borderRadius: 6,
             border: "none",
             background: "var(--accent)",
-            color: "#fff",
+            color: "var(--accent-fg)",
             fontSize: 13,
             fontWeight: 500,
             cursor: saving ? "not-allowed" : "pointer",

@@ -113,7 +113,7 @@ function ProviderUsageContent({ providerId, enabled }: { providerId: string; ena
       </div>
 
       {!report && !error && <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{t("providerUsage.notQueried")}</span>}
-      {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+      {error && <span style={{ fontSize: 12, color: "var(--status-error)" }}>{error}</span>}
       {report && (
         <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", columnGap: 14, rowGap: 8, alignItems: "baseline", minWidth: 0, width: "min(100%, 420px)", maxWidth: "100%", fontSize: 12 }}>
           {report.buckets.map((bucket) => (

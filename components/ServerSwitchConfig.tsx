@@ -50,7 +50,7 @@ export function ServerSwitchConfig() {
             display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
             padding: "10px 16px", borderRadius: 10,
             background: "linear-gradient(135deg, var(--accent), var(--accent-hover, var(--accent)))",
-            color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", border: "none",
+            color: "var(--accent-fg)", fontSize: 14, fontWeight: 600, cursor: "pointer", border: "none",
           }}
         >
           <ArrowCounterClockwise size={16} />

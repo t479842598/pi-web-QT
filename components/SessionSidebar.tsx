@@ -2450,7 +2450,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             <button
                               onClick={() => void handleRemoveWorktree(wt.path, true)}
                               disabled={wtBusy}
-                              style={{ padding: "3px 9px", background: "var(--status-error)", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
+                              style={{ padding: "3px 9px", background: "var(--status-error)", border: "none", borderRadius: 5, color: "var(--accent-fg)", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
                             >
                               {t("desktop.force")}
                             </button>
@@ -2594,7 +2594,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             background: "var(--accent)",
                             border: "none",
                             borderRadius: 5,
-                            color: "#fff",
+                            color: "var(--accent-fg)",
                             fontSize: 11,
                             fontWeight: 600,
                             cursor: wtBusy || !wtNewBranch.trim() ? "not-allowed" : "pointer",
@@ -3264,7 +3264,7 @@ const SessionItem = memo(function SessionItem({
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
                 height: 30, padding: "0 11px",
                 background: "var(--accent)", border: "none",
-                borderRadius: 6, color: "#fff",
+                borderRadius: 6, color: "var(--accent-fg)",
                 cursor: "pointer", fontSize: 12, fontWeight: 600,
                 whiteSpace: "nowrap",
               }}
@@ -3570,7 +3570,7 @@ const SessionItem = memo(function SessionItem({
                         display: "inline-flex", alignItems: "center", gap: 4,
                         padding: "5px 10px", borderRadius: 6,
                         background: "var(--status-error)", border: "none",
-                        color: "#fff", fontSize: 11.5, fontWeight: 600,
+                        color: "var(--accent-fg)", fontSize: 11.5, fontWeight: 600,
                         cursor: autoNaming ? "default" : "pointer",
                       }}
                     >

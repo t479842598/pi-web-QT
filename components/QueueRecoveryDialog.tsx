@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { PendingRecoveryItem, QueueEntry, QueueEntryInput } from "@/lib/queue-store";
 import { downloadQueueExport, parseQueueImport } from "@/lib/queue-export";
@@ -33,6 +34,10 @@ export function QueueRecoveryDialog({
   useEffect(() => {
     setSelected(new Set(items.map((item) => item.id)));
   }, [items]);
+
+  // Escape is the keyboard dismiss affordance for every modal here (backdrop
+  // clicks deliberately do not dismiss). Suppressed while a submit is running.
+  useEscapeKey(!busy, onDismiss);
 
   const selectedItems = items.filter((item) => selected.has(item.id));
   const allSelected = selectedItems.length === items.length && items.length > 0;

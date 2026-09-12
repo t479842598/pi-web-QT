@@ -109,7 +109,7 @@ export function DesktopServerHint() {
           display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
           padding: "8px 12px", borderRadius: 9,
           background: "var(--accent)", border: "none",
-          color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer",
+          color: "var(--accent-fg)", fontSize: 13, fontWeight: 600, cursor: "pointer",
         }}
       >
         {t("desktop.serverHintAction")}

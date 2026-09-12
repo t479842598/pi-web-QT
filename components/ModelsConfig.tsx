@@ -544,12 +544,12 @@ export function ThinkingLevelMapEditor({
         };
         const btnActive: React.CSSProperties = {
           background: "var(--accent)",
-          color: "#fff",
+          color: "var(--accent-fg)",
           fontWeight: 600,
         };
         const btnActiveDisabled: React.CSSProperties = {
           background: "var(--status-error)",
-          color: "#fff",
+          color: "var(--accent-fg)",
           fontWeight: 600,
         };
 
@@ -858,10 +858,18 @@ function ModelDetail({
                 maxWidth: 260,
                 height: 24,
                 padding: "0 8px",
-                border: `1px solid ${testState.phase === "error" ? "#fecaca" : testState.phase === "success" ? "#bbf7d0" : "var(--border)"}`,
+                border: `1px solid ${
+                  testState.phase === "error" ? "var(--status-error-border)"
+                  : testState.phase === "success" ? "var(--status-success-border)"
+                  : "var(--border)"
+                }`,
                 borderRadius: 4,
-                background: testState.phase === "error" ? "#fee2e2" : testState.phase === "success" ? "#dcfce7" : "#e5e7eb",
-                color: "#111827",
+                background: testState.phase === "error" ? "var(--status-error-bg)"
+                  : testState.phase === "success" ? "var(--status-success-bg)"
+                  : "var(--bg-hover)",
+                color: testState.phase === "error" ? "var(--status-error)"
+                  : testState.phase === "success" ? "var(--status-success)"
+                  : "var(--text)",
                 fontSize: 11,
                 display: "inline-flex",
                 alignItems: "center",

@@ -187,7 +187,9 @@ export function ModeControls({
     height: 24,
     background: active ? "var(--bg-hover)" : "none",
     border: "none",
-    borderRadius: 6,
+    // The toolbar normalizes its buttons to 4px with !important; matching it
+    // here keeps the value in this file honest instead of silently overridden.
+    borderRadius: 4,
     color: activeColor,
     cursor: disabled ? "not-allowed" : "pointer",
     fontSize: 12,

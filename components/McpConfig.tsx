@@ -301,7 +301,7 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                     border: "none",
                     borderRadius: 6,
                     background: "var(--accent)",
-                    color: "#fff",
+                    color: "var(--accent-fg)",
                     cursor: "pointer",
                     fontSize: 12,
                     flexShrink: 0,
@@ -500,7 +500,7 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                         border: "none",
                         borderRadius: 6,
                         background: "var(--accent)",
-                        color: "#fff",
+                        color: "var(--accent-fg)",
                         cursor: saving ? "wait" : "pointer",
                         fontSize: 12,
                       }}

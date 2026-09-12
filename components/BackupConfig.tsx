@@ -493,7 +493,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
             )}
             {report.needsRestart.length > 0 && (
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#fbbf24", marginBottom: 4 }}>🔄 {t("desktop.backupReportRestart")}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--status-warning)", marginBottom: 4 }}>🔄 {t("desktop.backupReportRestart")}</div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.6, fontFamily: "var(--font-mono)" }}>
                   {report.needsRestart.join("\n")}
                 </div>
@@ -517,7 +517,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
               </div>
             )}
             {report.needsRestart.length > 0 && (
-              <p style={{ margin: 0, fontSize: 11, color: "#fbbf24", lineHeight: 1.5 }}>
+              <p style={{ margin: 0, fontSize: 11, color: "var(--status-warning)", lineHeight: 1.5 }}>
                 {t("desktop.backupRestartHint")}
               </p>
             )}
