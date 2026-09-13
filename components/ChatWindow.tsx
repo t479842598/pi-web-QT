@@ -1628,6 +1628,7 @@ function ExtensionDialog({
           {request.method === "input" && (
             <input
               autoFocus
+              className="extension-input"
               value={value}
               placeholder={request.placeholder}
               onChange={(e) => setValue(e.target.value)}

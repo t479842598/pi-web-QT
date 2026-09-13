@@ -299,7 +299,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
           display: "flex", alignItems: "center", justifyContent: "flex-end",
           gap: 6, marginTop: 3,
         }}>
-          <div style={{
+          <div className="msg-actions" style={{
             display: "flex", gap: 3,
             opacity: hovered ? 1 : 0,
             pointerEvents: hovered ? "auto" : "none",

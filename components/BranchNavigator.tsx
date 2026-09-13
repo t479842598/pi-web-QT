@@ -245,7 +245,14 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
     if (!anchor) return;
     const update = () => {
       const rect = anchor.getBoundingClientRect();
-      setDropdownPos({ top: rect.bottom, left: rect.left, width: rect.width });
+      // Clamp the fixed dropdown to the viewport: on a phone the anchor can be
+      // a 36px icon button, which made long branch labels overflow off-screen.
+      const margin = 8;
+      const minReadableWidth = 180;
+      const left = Math.max(margin, Math.min(rect.left, window.innerWidth - margin - minReadableWidth));
+      const available = window.innerWidth - margin - left;
+      const width = Math.min(Math.max(rect.width, Math.min(minReadableWidth, available)), available);
+      setDropdownPos({ top: rect.bottom, left, width });
     };
     update();
     const ro = new ResizeObserver(update);

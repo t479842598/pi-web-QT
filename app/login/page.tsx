@@ -28,6 +28,16 @@ function LoginForm() {
         setError(response.status === 401 ? t("auth.invalidPassword") : t("auth.loginFailed"));
         return;
       }
+      // The server accepted the password, but browsers can still refuse the
+      // Set-Cookie (blocked third-party/cookie settings, private mode). Without
+      // this check the user lands back on /login after the redirect with no
+      // explanation — verify the session actually stuck before navigating.
+      const verify = await fetch("/api/web-auth", { cache: "no-store" });
+      const status = await verify.json().catch(() => null) as { authenticated?: boolean } | null;
+      if (!status?.authenticated) {
+        setError(t("auth.cookieNotSaved"));
+        return;
+      }
       window.location.replace(safeDestination());
     } catch {
       setError(t("auth.loginFailed"));

@@ -515,7 +515,9 @@ export function CodeBlock({ code, lang, headerAction, isStreaming }: { code: str
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div style={{
+      <div
+        className="markdown-code-actions"
+        style={{
         position: "absolute",
         top: 6,
         right: 8,

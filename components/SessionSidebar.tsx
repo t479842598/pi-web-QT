@@ -1615,7 +1615,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           <PathLabel text={compactProjectLabel} style={{ flex: 1, minWidth: 0, color: "inherit", direction: "ltr", fontFamily: "inherit" }} />
           <CaretDown size={12} weight="regular" style={{ flexShrink: 0, transition: "transform 0.12s", transform: workspaceProjectDropdownOpen === "title" ? "rotate(180deg)" : "none" }} aria-hidden="true" />
         </button>
-        <AnimatedDropdown open={workspaceProjectDropdownOpen === "title"} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "min(38vh, 300px)" }}>
+        <AnimatedDropdown open={workspaceProjectDropdownOpen === "title"} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: "min(320px, calc(88vw - 16px))", zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "min(38vh, 300px)" }}>
           {projectSearch}
           {projectList}
           {projectActions}
@@ -1714,7 +1714,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           >
             <Plus size={14} aria-hidden="true" />
           </button>
-          <AnimatedDropdown open={addTabDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "min(38vh, 300px)" }}>
+          <AnimatedDropdown open={addTabDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: "min(320px, calc(88vw - 16px))", zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "min(38vh, 300px)" }}>
             <div className="scroll-overlay" style={{ maxHeight: "min(32vh, 240px)", flex: 1, minHeight: 0, padding: "4px" }}>
               {addTabCandidates.length > 0 && (
                 <div style={{ padding: "5px 8px 3px", fontSize: 10, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
@@ -1811,7 +1811,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       >
         <GitBranch size={14} weight="regular" aria-hidden="true" />
       </button>
-      <AnimatedDropdown open={workspaceWorktreeDropdownOpen === "title"} style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden" }}>
+      <AnimatedDropdown open={workspaceWorktreeDropdownOpen === "title"} style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, width: "min(320px, calc(88vw - 16px))", zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden" }}>
         <div className="scroll-overlay" style={{ maxHeight: "min(40vh, 300px)" }}>
           {worktreeState?.worktrees.map((wt) => {
             const isCurrent = samePath(wt.path, selectedCwd ?? "") || (wt.isMain && !worktreeState.worktrees.some((w) => samePath(w.path, selectedCwd ?? "")));
@@ -1911,7 +1911,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             <PathLabel text={isLargeWorkspaceControl ? currentProjectLabel : compactProjectLabel} style={{ flex: 1, minWidth: 0, color: "inherit", direction: "ltr", fontFamily: "inherit" }} />
             <CaretDown size={12} weight="regular" style={{ flexShrink: 0, transition: "transform 0.12s", transform: isProjectDropdownOpen ? "rotate(180deg)" : "none" }} aria-hidden="true" />
           </button>
-          <AnimatedDropdown open={isProjectDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "min(38vh, 300px)" }}>
+          <AnimatedDropdown open={isProjectDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: "min(320px, calc(88vw - 16px))", zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "min(38vh, 300px)" }}>
             {projectSearch}
             {projectList}
             {projectActions}
@@ -1968,7 +1968,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {isLargeWorkspaceControl && <span className="worktree-title-label"><PathLabel text={compactWorktreeLabel ?? ""} style={{ flex: 1, minWidth: 0, color: "inherit", direction: "ltr", fontFamily: "inherit" }} /></span>}
               {showWorktreeSwitcher && <CaretDown size={12} weight="regular" style={{ flexShrink: 0, transition: "transform 0.12s", transform: isWorktreeDropdownOpen ? "rotate(180deg)" : "none" }} aria-hidden="true" />}
             </button>
-            <AnimatedDropdown open={showWorktreeSwitcher && isWorktreeDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 320, zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden" }}>
+            <AnimatedDropdown open={showWorktreeSwitcher && isWorktreeDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: "min(320px, calc(88vw - 16px))", zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden" }}>
               <div className="scroll-overlay" style={{ maxHeight: "min(40vh, 300px)" }}>
                 {worktreeState?.worktrees.map((wt) => {
                   const isCurrent = samePath(wt.path, selectedCwd ?? "") || (wt.isMain && !worktreeState.worktrees.some((w) => samePath(w.path, selectedCwd ?? "")));

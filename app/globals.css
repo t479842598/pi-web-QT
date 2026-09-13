@@ -218,6 +218,15 @@ html.dark {
   :root {
     --app-viewport-height: 100vh;
   }
+
+  /* With viewport-fit=cover the home-screen webview starts under the notch.
+     The title bar keeps its 48px content row and grows by the top inset so
+     its controls stay below the status area (border-box: padding eats the
+     added height, not the 48px). Inline height needs !important. */
+  .app-title-bar {
+    height: calc(48px + env(safe-area-inset-top)) !important;
+    padding-top: env(safe-area-inset-top) !important;
+  }
 }
 
 .catppuccin-file-icon {
@@ -917,6 +926,14 @@ pre, code {
   }
   .chat-input-toolbar {
     padding: 6px 12px;
+    /* Attach + mode + model + thinking + tools + compact + send at coarse
+       36px hit areas exceed a 320–375px row; the inline comment claims the
+       actions row wraps but no flex-wrap was ever set. Wrap on phones so
+       nothing gets clipped (desktop rows are wide enough, so never wrap). */
+    flex-wrap: wrap;
+  }
+  .chat-input-toolbar-actions {
+    flex-wrap: wrap;
   }
 
   .chat-input-shell > .chat-input-streaming-actions {
@@ -1759,7 +1776,8 @@ span.token.table {
 /* Touch devices have no hover state; keep message action buttons visible
    and tappable (inline styles are overridden via !important). */
 @media (hover: none) {
-  .msg-actions {
+  .msg-actions,
+  .markdown-code-actions {
     opacity: 1 !important;
     pointer-events: auto !important;
   }
@@ -1779,6 +1797,19 @@ span.token.table {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   position: relative;
+}
+/* On a phone the nowrap row (stats button with 4 token chips + branch/system/
+   compact/sound icons) is wider than the composer column. Wrap the row
+   (overflow-x would clip the absolutely-positioned popovers, so wrap only).
+   The button-height overrides live below the .session-info-bar-button base
+   rule — same specificity means source order decides. */
+@media (max-width: 640px) {
+  .session-info-bar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 26px;
+    row-gap: 2px;
+  }
 }
 
 /* Outer wrapper from ChatWindow: padding mirrors ChatInput column
@@ -1818,6 +1849,20 @@ span.token.table {
   font-family: var(--font-mono);
   white-space: nowrap;
   transition: background 0.12s, color 0.12s;
+}
+/* Let the stats button break its token chips onto a second line on a phone.
+   Must stay AFTER the base rule above: same specificity, source order wins. */
+@media (max-width: 640px) {
+  .session-info-bar-button {
+    height: auto;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .session-info-bar-button.is-stats {
+    flex-wrap: wrap;
+    white-space: normal;
+    justify-content: flex-end;
+  }
 }
 .session-info-bar-button:hover {
   background: var(--bg-hover);
@@ -1861,6 +1906,15 @@ span.token.table {
   pointer-events: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   z-index: 50;
+}
+/* On a phone a long nowrap compaction error ran past the left edge of the
+   viewport. Clamp to the screen and let the text wrap (desktop keeps nowrap). */
+@media (max-width: 640px) {
+  .session-info-bar-compact-error {
+    max-width: min(88vw, 420px);
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
 }
 
 .session-info-bar-token-chip {
@@ -2008,11 +2062,12 @@ span.token.table {
   width: max-content;
   max-width: min(92vw, 620px);
 }
-/* On a phone the 360px/340px floors are wider than the viewport once the
-   composer padding is subtracted, so the popover ran off the right edge. */
+/* On a phone the 360px/340px/520px floors are wider than the viewport once
+   the composer padding is subtracted, so the popover ran off the right edge. */
 @media (max-width: 640px) {
   .session-info-bar-popover.is-session,
-  .session-info-bar-popover.is-branches {
+  .session-info-bar-popover.is-branches,
+  .session-info-bar-popover.is-system {
     min-width: 0;
     max-width: calc(100vw - 16px);
   }
@@ -2269,7 +2324,7 @@ span.token.table {
 @media (max-width: 640px) {
   .workspace-project-control {
     max-width: min(36vw, 140px) !important;
-    font-size: 10px !important;
+    font-size: 11px !important;
   }
   .workspace-project-control.workspace-project-control-large {
     max-width: min(100%, 320px) !important;
@@ -2277,7 +2332,7 @@ span.token.table {
   }
   .workspace-worktree-control {
     max-width: min(36vw, 140px) !important;
-    font-size: 10px !important;
+    font-size: 11px !important;
   }
   .workspace-panel-splitter {
     display: none !important;
@@ -2374,22 +2429,38 @@ span.token.table {
   }
 }
 
-/* Mobile settings inputs previously forced 16px to stop iOS Safari zooming on
-   focus, but that made every field look oversized next to the 11–13px labels
-   and truncated the title-model select. The primary mobile target is the
-   Android Tauri APK (no focus-zoom), so drop to 14px for a readable, compact
-   form; allow selects to shrink and ellipsize instead of overflowing. iOS
-   Safari may still nudge zoom on focus — an accepted tradeoff for correct
-   layout. Desktop is untouched (media query is mobile-only). */
+/* iOS Safari auto-zooms the page when a focused <input> is below 16px, and
+   remote-phone usage in a real mobile browser is now a primary target, so
+   every mobile form control sits at 16px (was 14px, which accepted the zoom
+   in exchange for compactness). Selects shrink and ellipsize instead of
+   overflowing. Desktop is untouched (media query is mobile-only). */
 @media (max-width: 767px) {
   .settings-modal input,
   .settings-modal select,
-  .settings-modal textarea {
-    font-size: 14px !important;
+  .settings-modal textarea,
+  .models-config-panel input,
+  .models-config-panel select,
+  .models-config-panel textarea,
+  .config-panel-surface input,
+  .config-panel-surface select,
+  .config-panel-surface textarea,
+  .sidebar-container input,
+  .sidebar-container select,
+  .sidebar-container textarea,
+  .extension-input,
+  .file-editor-textarea {
+    font-size: 16px !important;
   }
-  .settings-modal select {
+  .settings-modal select,
+  .models-config-panel select,
+  .config-panel-surface select {
     min-width: 0 !important;
     max-width: 100% !important;
+  }
+  /* Cost-per-million grid: four 1fr columns collapse to ~70px on a phone,
+     not enough for cacheRead/cacheWrite labels + number spinners. */
+  .models-cost-grid {
+    grid-template-columns: 1fr 1fr !important;
   }
 }
 
@@ -2494,6 +2565,12 @@ span.token.table {
     min-width: 44px;
     min-height: 36px;
   }
+  /* The 36px buttons (plus the container's 1px borders) make the floating
+     panel 38px tall; at the base top:-22px its bottom edge covers the
+     textarea's first line. Float it fully above the shell instead. */
+  .chat-input-shell > .chat-input-streaming-actions {
+    top: -38px;
+  }
   /* Session info bar: push/stash/sound/compact are icon-only 22px buttons. */
   .session-info-bar-button {
     min-width: 32px;
@@ -2503,6 +2580,30 @@ span.token.table {
   .file-tab-close {
     min-width: 28px;
     min-height: 28px;
+  }
+  /* Message copy/fork/navigate actions are 22px boxes. Some of these buttons
+     ARE .msg-actions themselves, so match the element, not just descendants. */
+  .msg-actions button,
+  button.msg-actions {
+    min-width: 32px;
+    min-height: 32px;
+  }
+  /* FileViewer status-bar chips (source/diff toggle, edit, @, download)
+     are 20px; the bar now wraps on narrow screens, so growing them is safe. */
+  .file-viewer-status-bar button {
+    min-width: 32px;
+    min-height: 32px;
+  }
+}
+
+/* Sidebar / file-tree / settings-modal icon buttons are inline-sized at
+   18–26px (no shared class to target). Grow them on touch phones via the
+   container; min-* only ever grows the small ones. Gated to phone widths so
+   a coarse-pointer laptop (Windows tablet) keeps its compact sidebar rows. */
+@media (pointer: coarse) and (max-width: 640px) {
+  .sidebar-container button {
+    min-width: 32px;
+    min-height: 32px;
   }
 }
 
@@ -2675,6 +2776,15 @@ span.token.table {
   padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
   place-items: center;
   background: var(--bg);
+}
+/* Phone landscape: the centered grid row is taller than ~390px of viewport,
+   and grid centering clips the overflow at both ends with no way to scroll
+   back to the top. Switch to a scrollable top-aligned layout instead. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .web-login-page {
+    place-items: start center;
+    overflow: auto;
+  }
 }
 
 .web-login-shell {

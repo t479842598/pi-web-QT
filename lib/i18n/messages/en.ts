@@ -1600,6 +1600,7 @@ export const enLocale = {
     "auth.loggingIn": "Signing in...",
     "auth.invalidPassword": "Incorrect password",
     "auth.loginFailed": "Sign-in failed. Please try again.",
+    "auth.cookieNotSaved": "The password was accepted, but the browser refused to save the session cookie. Allow cookies for this site or leave private/incognito mode, then try again.",
     "auth.logOut": "Sign out",
     "auth.loggingOut": "Signing out...",
     "auth.logoutFailed": "Sign-out failed. Please try again.",

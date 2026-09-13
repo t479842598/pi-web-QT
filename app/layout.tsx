@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import "./settings.css";
@@ -13,6 +13,15 @@ import "@fontsource/ia-writer-quattro/700.css";
 import "@fontsource/ia-writer-quattro/700-italic.css";
 import "@fontsource/lilex";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Required for env(safe-area-inset-*) to resolve to non-zero values on iOS:
+  // without cover, the notch/home-indicator avoidances written throughout
+  // globals.css silently compute to 0 in standalone (home-screen) mode.
+  viewportFit: "cover",
+};
 
 export const metadata: Metadata = {
   title: "Pi Agent Web",

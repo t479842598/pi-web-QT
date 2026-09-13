@@ -548,6 +548,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <div
+        className="file-viewer-status-bar"
         style={{
           display: "flex",
           alignItems: "center",
@@ -558,9 +559,16 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
+          // On a phone the path + metadata + action controls do not fit one
+          // 390px row; let the bar wrap instead of pushing controls out.
+          flexWrap: "wrap",
+          rowGap: 4,
         }}
       >
-        <span style={{ fontFamily: "var(--font-mono)" }} title={filePath}>
+        <span
+          style={{ fontFamily: "var(--font-mono)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: "0 1 auto" }}
+          title={filePath}
+        >
           {getRelativeFilePath(filePath, cwd)}
         </span>
         <span style={{ marginLeft: "auto" }}>{ext || t("desktop.image")}</span>
@@ -661,6 +669,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <div
+        className="file-viewer-status-bar"
         style={{
           display: "flex",
           alignItems: "center",
@@ -671,9 +680,16 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
+          // On a phone the path + metadata + action controls do not fit one
+          // 390px row; let the bar wrap instead of pushing controls out.
+          flexWrap: "wrap",
+          rowGap: 4,
         }}
       >
-        <span style={{ fontFamily: "var(--font-mono)" }} title={filePath}>
+        <span
+          style={{ fontFamily: "var(--font-mono)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: "0 1 auto" }}
+          title={filePath}
+        >
           {getRelativeFilePath(filePath, cwd)}
         </span>
         <span style={{ marginLeft: "auto" }}>{ext || t("desktop.audio")}</span>
@@ -775,6 +791,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <div
+        className="file-viewer-status-bar"
         style={{
           display: "flex",
           alignItems: "center",
@@ -785,9 +802,13 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
+          // On a phone the path + metadata + action controls do not fit one
+          // 390px row; let the bar wrap instead of pushing controls out.
+          flexWrap: "wrap",
+          rowGap: 4,
         }}
       >
-        <span style={{ fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={filePath}>
+        <span style={{ fontFamily: "var(--font-mono)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={filePath}>
           {getRelativeFilePath(filePath, cwd)}
         </span>
         <span style={{ marginLeft: "auto" }}>{ext === "docx" ? t("desktop.docxPreview") : "pdf"}</span>
@@ -1146,6 +1167,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Status bar */}
       <div
+        className="file-viewer-status-bar"
         style={{
           display: "flex",
           alignItems: "center",
@@ -1156,9 +1178,16 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
+          // On a phone the path + metadata + action controls do not fit one
+          // 390px row; let the bar wrap instead of pushing controls out.
+          flexWrap: "wrap",
+          rowGap: 4,
         }}
       >
-        <span style={{ fontFamily: "var(--font-mono)" }} title={filePath}>
+        <span
+          style={{ fontFamily: "var(--font-mono)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: "0 1 auto" }}
+          title={filePath}
+        >
           {getRelativeFilePath(filePath, cwd)}
         </span>
         <span style={{ marginLeft: "auto" }}>{data.language}</span>
@@ -1430,6 +1459,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
               </div>
               <textarea
                 ref={draftTextareaRef}
+                className="file-editor-textarea"
                 value={draftContent}
                 onChange={(e) => setDraftContent(e.target.value)}
                 onScroll={handleDraftScroll}

@@ -1600,6 +1600,7 @@ export const zhCNLocale = {
     "auth.loggingIn": "正在登录...",
     "auth.invalidPassword": "密码不正确",
     "auth.loginFailed": "登录失败，请重试。",
+    "auth.cookieNotSaved": "密码正确，但浏览器没有保存登录状态（Cookie 被拒绝）。请允许本站使用 Cookie，或退出无痕/隐私模式后重试。",
     "auth.logOut": "退出登录",
     "auth.loggingOut": "正在退出...",
     "auth.logoutFailed": "退出失败，请重试。",
