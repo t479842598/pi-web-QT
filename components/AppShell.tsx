@@ -42,7 +42,7 @@ import { getSessionFamily } from "@/lib/session-family";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { ProjectTrustStatus } from "@/lib/api-types";
-import { stripModeInstructionBlocks } from "@/lib/modes";
+import { sessionDisplayTitle } from "@/lib/session-display-title";
 import { useDesktopChrome, useWindowDrag } from "./desktop";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
@@ -691,10 +691,20 @@ export function AppShell() {
   }, [fileTabs]);
 
   const sessionTitle = selectedSession
-    // 恢复的最小 SessionInfo 没有 name：回退到 ChatWindow 加载后回传的真实标题
-    ? stripModeInstructionBlocks(selectedSession.name || sessionStats?.sessionName) ||
-      selectedSession.firstMessage.slice(0, 50) ||
-      selectedSession.id.slice(0, 12)
+    // 恢复的最小 SessionInfo 没有 name：回退到 ChatWindow 加载后回传的真实标题。
+    // 空会话的 firstMessage 是 pi 的字面量占位符，归一化后兜底显示项目名。
+    ? sessionDisplayTitle(
+        {
+          name: selectedSession.name || sessionStats?.sessionName || undefined,
+          firstMessage: selectedSession.firstMessage,
+          id: selectedSession.id,
+        },
+        (selectedSession.cwd ?? activeCwd ?? "")
+          .replace(/[\\/]+$/, "")
+          .split(/[\\/]/)
+          .filter(Boolean)
+          .pop(),
+      )
     : (() => {
         // No session selected (fresh project / right after switching a tab):
         // show the current project's name in the title instead.

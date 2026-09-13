@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { sessionDisplayTitle } from "@/lib/session-display-title";
 import { formatTokenCount } from "@/lib/token-format";
 import type { UsageReport } from "@/app/api/usage/route";
 
@@ -188,7 +189,7 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
               (report?.sessions ?? []).slice(0, 12).map((s) => (
                 <div key={s.path} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderBottom: "1px solid var(--border)" }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {s.name ?? s.firstMessage ?? s.id}
+                    {sessionDisplayTitle({ name: s.name, firstMessage: s.firstMessage, id: s.id })}
                   </span>
                   <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
                     {formatToken(s.tokens)}

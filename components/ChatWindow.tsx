@@ -593,6 +593,17 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       onAudioUnlock={unlockAudio}
       draftKey={session?.id ?? (newSessionCwd ? `new:${newSessionCwd}` : undefined)}
       cwd={session?.cwd ?? newSessionCwd}
+      topCenterControl={showScrollToBottom ? (
+        <button
+          type="button"
+          className="chat-input-top-center"
+          onClick={scrollToBottomAfterProcessExpansion}
+          title={t("desktop.scrollToBottom")}
+          aria-label={t("desktop.scrollToBottom")}
+        >
+          <ArrowDownIcon size={16} weight="bold" aria-hidden="true" />
+        </button>
+      ) : undefined}
     />
   );
 
@@ -1304,43 +1315,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-[var(--bg)] to-transparent"
             />
           )}
-          {showScrollToBottom && (
-            <button
-              type="button"
-              onClick={() => scrollToBottomAfterProcessExpansion()}
-              title={t("desktop.scrollToBottom")}
-              aria-label={t("desktop.scrollToBottom")}
-              style={{
-                position: "absolute",
-                bottom: 14,
-                right: 18,
-                zIndex: 20,
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "5px 10px",
-                border: "1px solid var(--border)",
-                borderRadius: 999,
-                background: "color-mix(in srgb, var(--bg-panel) 92%, transparent)",
-                color: "var(--text-muted)",
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: "pointer",
-                boxShadow: "0 4px 14px rgba(0,0,0,0.14)",
-                backdropFilter: "blur(4px)",
-                transition: "color 0.12s, border-color 0.12s, background 0.12s",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = "var(--accent)";
-                e.currentTarget.style.borderColor = "var(--accent)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = "var(--text-muted)";
-                e.currentTarget.style.borderColor = "var(--border)";
-              }}
-            >
-              <ArrowDownIcon size={12} weight="bold" aria-hidden="true" />
-              {t("desktop.scrollToBottom")}
-            </button>
-          )}
+          {/* Scroll-to-bottom moved into the composer's top-center slot
+              (topCenterControl below): the old bottom-right pill collided with
+              the streaming steer/queue panel floating over the same corner. */}
         </div>
         {isMobile ? null : (
           <ChatMinimap

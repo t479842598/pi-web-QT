@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { I18nProvider, useI18n } from "@/hooks/useI18n";
 
 function safeDestination(): string {
@@ -13,6 +13,18 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Why the auth gate bounced the user here (set by proxy.ts's 307):
+  // "invalid" = a session cookie came back but failed validation (expired or
+  // password rotated); "missing" = no cookie at all, i.e. the browser dropped
+  // site data (private mode, tracking prevention, clear-on-exit). After mount
+  // only, so SSR stays clean.
+  const [bounceHint, setBounceHint] = useState("");
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("reason");
+    if (reason === "invalid") setBounceHint(t("auth.sessionExpired"));
+    else if (reason === "missing") setBounceHint(t("auth.sessionMissing"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -78,6 +90,7 @@ function LoginForm() {
             {busy ? t("auth.loggingIn") : t("auth.logIn")}
           </button>
           <p className="web-login-error" role="alert" aria-live="polite">{error}</p>
+          {bounceHint && !error && <p className="web-login-hint">{bounceHint}</p>}
         </form>
       </div>
     </main>

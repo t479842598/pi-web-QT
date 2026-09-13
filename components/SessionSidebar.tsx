@@ -27,7 +27,7 @@ import {
 } from "@/lib/sidebar-projects-view";
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { samePath } from "@/lib/paths";
-import { stripModeInstructionBlocks } from "@/lib/modes";
+import { sessionDisplayTitle } from "@/lib/session-display-title";
 import { showBrowserNotification } from "@/lib/browser-notifications";
 
 /** Settings sections surfaced as sidebar-footer shortcuts. Kept small on
@@ -3081,7 +3081,7 @@ const SessionItem = memo(function SessionItem({
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [titleModels]);
 
-  const title = stripModeInstructionBlocks(session.name) || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
+  const title = sessionDisplayTitle(session);
   const hasMessages = session.messageCount > 0
     || (session.id === selectedSessionId && (selectedSessionStats?.userMessages ?? 0) > 0);
 
@@ -3800,7 +3800,7 @@ function SessionCompactRow({
   const [forkTooltipPos, setForkTooltipPos] = useState<{ top: number; left: number } | null>(null);
   const rowRef = useRef<HTMLDivElement>(null);
 
-  const title = stripModeInstructionBlocks(session.name) || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
+  const title = sessionDisplayTitle(session);
   const parentSession = session.parentSessionId ? allSessions.find((s) => s.id === session.parentSessionId) : undefined;
 
   const startRename = (e: React.MouseEvent) => {
@@ -4030,7 +4030,7 @@ function SessionCompactRow({
           </div>
           {forkTooltip && forkTooltipPos && (() => {
             const parentTitle = parentSession
-              ? (stripModeInstructionBlocks(parentSession.name) || parentSession.firstMessage.slice(0, 30) || parentSession.id.slice(0, 8))
+              ? sessionDisplayTitle(parentSession).slice(0, 30)
               : "";
             return (
               <div style={{ position: "fixed", top: forkTooltipPos.top, left: forkTooltipPos.left, zIndex: 3000, background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px", boxShadow: "0 6px 20px rgba(0,0,0,0.2)", fontSize: 10.5, color: "var(--text-muted)", whiteSpace: "nowrap", pointerEvents: "none", animation: "plan-card-in 0.12s ease-out" }}>

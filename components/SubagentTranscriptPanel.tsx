@@ -120,7 +120,11 @@ export function SubagentTranscriptPanel({ sessionId, label, running = false, onO
           </div>
         )}
         {!loading && !error && visible.length === 0 && (
-          <div style={{ color: "var(--text-dim)", fontSize: 12 }}>{t("subagent.transcriptEmpty")}</div>
+          <div style={{ color: "var(--text-dim)", fontSize: 12 }}>
+            {/* A just-started run has no persisted messages yet; saying so reads
+                better than the generic empty state while it keeps polling. */}
+            {running ? t("subagent.transcriptWaiting") : t("subagent.transcriptEmpty")}
+          </div>
         )}
         {visible.map((message, idx) => (
           <MessageView

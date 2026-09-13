@@ -118,6 +118,12 @@ interface Props {
   cwd?: string | null;
   /** Task board feature flag — when disabled, skip the tasks SSE connection. */
   tasksBoardEnabled?: boolean;
+  /**
+   * Rendered as a slot centered on the composer's top border line (e.g. the
+   * chat's scroll-to-bottom control). Kept inside the shell so it always
+   * straddles the real top edge regardless of what renders above the shell.
+   */
+  topCenterControl?: React.ReactNode;
 }
 
 export interface ChatInputHandle {
@@ -578,6 +584,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   draftKey,
   cwd,
   tasksBoardEnabled = true,
+  topCenterControl,
 }: Props, ref) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
@@ -2502,6 +2509,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             } as React.CSSProperties}
           >
           {isStreaming && <div className="chat-input-streaming-overlay hatch-45" aria-hidden="true" />}
+          {topCenterControl}
           {isStreaming && (onSteer || onFollowUp) && (
             <div className="chat-input-streaming-actions">
               {onSteer && (

@@ -799,11 +799,15 @@ pre, code {
   position: relative;
   z-index: 1;
 }
-/* Streaming queue controls float from the composer’s top-right corner. */
+/* Streaming queue controls float from the composer's top-right corner. The
+   panel's vertical MIDLINE sits exactly on the composer's top border line
+   (top:0 + translateY(-50%)), so it straddles the edge no matter how tall its
+   buttons grow; no hard-coded half-height offsets to keep in sync. */
 .chat-input-shell > .chat-input-streaming-actions {
   position: absolute;
   z-index: 2;
-  top: -22px;
+  top: 0;
+  transform: translateY(-50%);
   right: 20px;
   display: flex;
   align-items: stretch;
@@ -812,6 +816,33 @@ pre, code {
   border-radius: 7px;
   background: var(--bg-panel);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+}
+/* Top-center slot straddling the composer's top border (scroll-to-bottom).
+   Declared after the `> :not(.chat-input-streaming-overlay)` rule above so
+   absolute positioning wins the equal-specificity cascade. */
+.chat-input-shell > .chat-input-top-center {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+  transition: color 0.12s, border-color 0.12s;
+}
+.chat-input-shell > .chat-input-top-center:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .chat-input-streaming-action {
   display: flex;
@@ -2063,13 +2094,32 @@ span.token.table {
   max-width: min(92vw, 620px);
 }
 /* On a phone the 360px/340px/520px floors are wider than the viewport once
-   the composer padding is subtracted, so the popover ran off the right edge. */
+   the composer padding is subtracted, so the popover ran off the right edge.
+   (Fixed positioning + insets now clamp it from SessionInfoBar on mobile.) */
 @media (max-width: 640px) {
   .session-info-bar-popover.is-session,
   .session-info-bar-popover.is-branches,
   .session-info-bar-popover.is-system {
     min-width: 0;
     max-width: calc(100vw - 16px);
+  }
+}
+/* Phones: three side-by-side stat columns each get ~1/3 of an already narrow
+   panel, so the nowrap values were clipped mid-number. Stack them instead;
+   full-width columns cannot bleed into each other, so the anti-bleed
+   overflow:hidden on .session-stats-column is relaxed. */
+@media (max-width: 640px) {
+  .session-stats-side-by-side {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .session-stats-column {
+    flex: none;
+    width: 100%;
+    overflow: visible;
+  }
+  .session-stats-compact-grid {
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
   }
 }
 .session-info-bar-popover.is-branches {
@@ -2565,11 +2615,12 @@ span.token.table {
     min-width: 44px;
     min-height: 36px;
   }
-  /* The 36px buttons (plus the container's 1px borders) make the floating
-     panel 38px tall; at the base top:-22px its bottom edge covers the
-     textarea's first line. Float it fully above the shell instead. */
-  .chat-input-shell > .chat-input-streaming-actions {
-    top: -38px;
+  /* The midline positioning (top:0 + translateY(-50%)) scales with the taller
+     touch buttons by itself; no hard-coded offset to override here. The lower
+     half covers the textarea's first line by design. */
+  .chat-input-shell > .chat-input-top-center {
+    width: 44px;
+    height: 44px;
   }
   /* Session info bar: push/stash/sound/compact are icon-only 22px buttons. */
   .session-info-bar-button {
@@ -2904,6 +2955,16 @@ span.token.table {
   font-size: 12px;
   line-height: 17px;
   text-align: center;
+}
+
+/* Non-error bounce explanation (session expired / browser dropped the cookie). */
+.web-login-hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.55;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 /* Phones: a little more room for the field, button, and touch targets. */

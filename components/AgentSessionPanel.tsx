@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { sessionDisplayTitle } from "@/lib/session-display-title";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
 
 interface Props {
@@ -13,7 +14,7 @@ interface Props {
 }
 
 function sessionTitle(session: SessionInfo): string {
-  return session.name || session.firstMessage || session.id.slice(0, 12);
+  return sessionDisplayTitle(session);
 }
 
 function formatRelativeTime(value: string, locale: string): string {

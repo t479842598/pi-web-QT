@@ -221,23 +221,28 @@ export function AppTitleBar({
         </div>
 
         {/* Center zone: active session title + branch chip + worktree switcher.
-            Absolutely positioned over the area right of the sidebar (the
-            sidebar width is excluded via --pi-titlebar-sidebar-offset), so the
-            title is centered in the chat region itself, not the whole window.
-            maxWidth keeps it clear of the right-zone buttons. */}
+            Desktop: absolutely positioned over the area right of the sidebar
+            (the sidebar width is excluded via --pi-titlebar-sidebar-offset), so
+            the title centers in the chat region itself. Mobile: an in-flow flex
+            child between the toggle and the right-zone icons — left aligned,
+            never overlapped, and free of the desktop-only 320px right reserve
+            that squeezed it down to "(no …". */}
         <div
           className="app-title-drag"
           style={{
-            position: "absolute",
-            left: "var(--pi-titlebar-sidebar-offset, 0px)",
-            right: 0,
-            top: 0,
-            bottom: 0,
-            minWidth: 0,
+            ...(isMobile
+              ? { position: "relative" as const, flex: "1 1 auto", minWidth: 0 }
+              : {
+                  position: "absolute" as const,
+                  left: "var(--pi-titlebar-sidebar-offset, 0px)",
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                }),
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
-            padding: "0 12px",
+            justifyContent: isMobile ? "flex-start" : "center",
+            padding: isMobile ? "0 8px 0 4px" : "0 12px",
             overflow: "hidden",
             userSelect: "none",
           }}
@@ -245,13 +250,13 @@ export function AppTitleBar({
           {sessionTitle && (
             <button
               type="button"
+              className="app-no-drag"
               onClick={() => { if (isMobile) setTitleModalOpen(true); }}
-              title={isMobile ? sessionTitle : undefined}
               style={{
                 display: "block",
                 flex: "0 1 auto",
                 minWidth: 0,
-                maxWidth: "calc(100% - 320px)",
+                maxWidth: isMobile ? "100%" : "calc(100% - 320px)",
                 fontSize: 12,
                 fontWeight: 500,
                 color: "var(--text-muted)",
@@ -281,10 +286,11 @@ export function AppTitleBar({
 
         {/* Right zone: task board / file panel / theme / settings buttons.
             窗口控制已由悬浮灵动岛（DynamicIsland）承担，不再占用本行宽度；
-            窄窗口时本区收缩、overflow:hidden 从左侧裁掉功能钮，功能区最末
-            的「设置」始终保留。marginLeft:auto 把它钉在右缘（中区已改为绝对
-            定位不再撑开），position/zIndex 保证按钮浮在中区拖拽层之上可点击。 */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, minWidth: 0, height: "100%", flexShrink: 1, overflow: "hidden", marginLeft: "auto", position: "relative", zIndex: 1 }}>
+            桌面窄窗口时本区收缩、overflow:hidden 从左侧裁掉功能钮，功能区最末
+            的「设置」始终保留。移动端本区 flexShrink:0 不可收缩，让中间的标题
+            （已改为流内子元素）自行截断。marginLeft:auto 把它钉在右缘，
+            position/zIndex 保证按钮浮在中区拖拽层之上可点击。 */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, minWidth: 0, height: "100%", flexShrink: isMobile ? 0 : 1, overflow: "hidden", marginLeft: "auto", position: "relative", zIndex: 1 }}>
 
         {/* Task board toggle — desktop only, hidden when the feature is off */}
         {!isMobile && tasksBoardEnabled && (
@@ -352,8 +358,9 @@ export function AppTitleBar({
           </button>
         )}
 
-        {/* 刷新会话 — 浏览器端保留在标题栏；桌面壳由灵动岛承担（避免重复按钮） */}
-        {!desktopShell && (
+        {/* 刷新会话 — 浏览器端保留在标题栏；桌面壳由灵动岛承担（避免重复按钮）。
+            移动端隐藏：与底部新增的圆形回底按钮功能重复，且少一个易误触入口。 */}
+        {!desktopShell && !isMobile && (
         <button
           className="app-no-drag"
           type="button"

@@ -1,3 +1,4 @@
+import { sessionDisplayTitle } from "./session-display-title";
 import type { SessionInfo } from "./types";
 
 /**
@@ -142,7 +143,7 @@ export function saveCollapsedProjects(keys: Set<string>, storage: StorageLike | 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
 export function sessionTitle(session: SessionInfo): string {
-  return session.name || session.firstMessage?.slice(0, 50) || session.id;
+  return sessionDisplayTitle(session);
 }
 
 /** Same fuzzy rule the legacy search box uses: case-insensitive substring on

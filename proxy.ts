@@ -115,6 +115,14 @@ export function proxy(request: NextRequest) {
 
   const loginUrl = new URL("/login", request.url);
   loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+  // Tell the login page WHY it is showing: a session cookie that failed
+  // validation (expired / password rotated) vs no cookie at all (Safari
+  // cleared site data, private mode, or cookie blocking). This is what makes
+  // the recurring "Safari forgot my login" reports diagnosable in the field.
+  loginUrl.searchParams.set(
+    "reason",
+    request.cookies.get(PI_WEB_SESSION_COOKIE)?.value ? "invalid" : "missing",
+  );
   return NextResponse.redirect(loginUrl, 307);
 }
 

@@ -20,8 +20,10 @@ import { formatCNY } from "@/lib/deepseek-pricing";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionTreeNode } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
+import { clampPopoverPlacement } from "@/lib/popover-layout";
 import { formatTokenCount } from "@/lib/token-format";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BranchNavigator } from "./BranchNavigator";
@@ -94,8 +96,53 @@ export function SessionInfoBar({
   lastTurnUsage,
 }: SessionInfoBarProps) {
   const { t: translate } = useI18n();
+  const isMobile = useIsMobile();
   const [activePanel, setActivePanel] = useState<"system" | "session" | "branches" | null>(null);
   const closePanel = useCallback(() => setActivePanel(null), []);
+
+  // On phones the bar wraps, so the anchor button can sit anywhere in the row
+  // and an `absolute; right: 0` popover runs off the screen edge. While a
+  // panel is open, pin it to the viewport (full width minus insets, parked
+  // just above the anchor) and re-measure on resize/rotation.
+  const popoverHostRef = useRef<HTMLElement | null>(null);
+  const [mobilePlacement, setMobilePlacement] = useState<React.CSSProperties | null>(null);
+  const measureMobilePlacement = useCallback(() => {
+    const host = popoverHostRef.current;
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    const placement = clampPopoverPlacement(rect.top, { width: window.innerWidth, height: window.innerHeight });
+    setMobilePlacement({
+      position: "fixed",
+      left: placement.left,
+      right: placement.right,
+      width: placement.width,
+      bottom: placement.bottom,
+      minWidth: 0,
+      maxWidth: placement.width,
+      maxHeight: placement.maxHeight,
+      overflowY: "auto",
+    });
+  }, []);
+  const activePanelRef = useRef<"system" | "session" | "branches" | null>(null);
+  const togglePanel = useCallback((panel: "system" | "session" | "branches", button: HTMLElement) => {
+    if (activePanelRef.current === panel) {
+      activePanelRef.current = null;
+      setActivePanel(null);
+      setMobilePlacement(null);
+      popoverHostRef.current = null;
+      return;
+    }
+    activePanelRef.current = panel;
+    popoverHostRef.current = button.closest(".session-info-bar-popover-host");
+    setActivePanel(panel);
+    if (isMobile) measureMobilePlacement();
+    else setMobilePlacement(null);
+  }, [isMobile, measureMobilePlacement]);
+  useEffect(() => {
+    if (!activePanel || !mobilePlacement) return;
+    window.addEventListener("resize", measureMobilePlacement);
+    return () => window.removeEventListener("resize", measureMobilePlacement);
+  }, [activePanel, mobilePlacement, measureMobilePlacement]);
 
   // Copy state for session file / id
   const [copiedField, setCopiedField] = useState<SessionCopyField | null>(null);
@@ -223,7 +270,7 @@ export function SessionInfoBar({
           <button
             type="button"
             className={`session-info-bar-button${activePanel === "branches" ? " is-active" : ""}`}
-            onClick={() => setActivePanel((cur) => (cur === "branches" ? null : "branches"))}
+            onClick={(event) => togglePanel("branches", event.currentTarget)}
             title={translate("desktop.branches")}
             aria-label={translate("desktop.branches")}
             aria-pressed={activePanel === "branches"}
@@ -233,7 +280,7 @@ export function SessionInfoBar({
           {activePanel === "branches" && (
             <>
               <div className="session-info-bar-popover-cover" onClick={closePanel} />
-              <div className="session-info-bar-popover is-branches">
+              <div className="session-info-bar-popover is-branches" style={mobilePlacement ?? undefined}>
                 <div className="session-info-bar-popover-header">
                   <span className="session-info-bar-popover-title">
                     {translate("desktop.branches")}
@@ -272,7 +319,7 @@ export function SessionInfoBar({
           <button
             type="button"
             className={`session-info-bar-button${activePanel === "system" ? " is-active" : ""}`}
-            onClick={() => setActivePanel((cur) => (cur === "system" ? null : "system"))}
+            onClick={(event) => togglePanel("system", event.currentTarget)}
             title={translate("desktop.systemPrompt")}
             aria-label={translate("desktop.systemPrompt")}
             aria-pressed={activePanel === "system"}
@@ -282,7 +329,7 @@ export function SessionInfoBar({
           {activePanel === "system" && (
             <>
               <div className="session-info-bar-popover-cover" onClick={closePanel} />
-              <div className="session-info-bar-popover is-system">
+              <div className="session-info-bar-popover is-system" style={mobilePlacement ?? undefined}>
                 <div className="session-info-bar-popover-header">
                   <span className="session-info-bar-popover-title">
                     {translate("desktop.systemPrompt")}
@@ -344,7 +391,7 @@ export function SessionInfoBar({
           <button
             type="button"
             className={`session-info-bar-button is-stats${activePanel === "session" ? " is-active" : ""}`}
-            onClick={() => setActivePanel((cur) => (cur === "session" ? null : "session"))}
+            onClick={(event) => togglePanel("session", event.currentTarget)}
             title={tooltip || translate("desktop.sessionInfo")}
             aria-label={translate("desktop.sessionInfo")}
             aria-pressed={activePanel === "session"}
@@ -404,7 +451,7 @@ export function SessionInfoBar({
           {activePanel === "session" && sessionStats && (
             <>
               <div className="session-info-bar-popover-cover" onClick={closePanel} />
-              <div className="session-info-bar-popover is-session">
+              <div className="session-info-bar-popover is-session" style={mobilePlacement ?? undefined}>
                 <div className="session-stats-body">
                   {(() => {
                     const tok = sessionStats.tokens;

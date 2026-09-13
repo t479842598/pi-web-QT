@@ -9,6 +9,7 @@ import {
   Minimize2, Plus, Search, Sparkles, Trash2, X,
 } from "lucide-react";
 import type { SessionInfo } from "@/lib/types";
+import { sessionDisplayTitle } from "@/lib/session-display-title";
 import { useI18n } from "@/hooks/useI18n";
 import {
   buildArchived, buildProjectGroups, buildSessionGroups, buildTimeline, filterVisibleSessions,
@@ -666,7 +667,7 @@ function PanelSessionRow({
   const [autoNaming, setAutoNaming] = useState(false);
   const [autoNameError, setAutoNameError] = useState<string | null>(null);
   const autoNameControllerRef = useRef<AbortController | null>(null);
-  const title = session.name || session.firstMessage?.slice(0, 50) || session.id;
+  const title = sessionDisplayTitle(session);
   const hasMessages = session.messageCount > 0;
 
   // 生成标题 — calls the model via the auto-name endpoint, which uses the
@@ -817,7 +818,7 @@ function PanelArchivedRow({ session, folderName, onUnarchive, onDeleteForever }:
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
-  const title = session.name || session.firstMessage?.slice(0, 50) || session.id;
+  const title = sessionDisplayTitle(session);
   return (
     <div
       onMouseEnter={() => setHovered(true)}

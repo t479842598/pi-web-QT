@@ -22,7 +22,10 @@ function clearSessionCookie(response: NextResponse, request: Request): void {
     name: PI_WEB_SESSION_COOKIE,
     value: "",
     httpOnly: true,
-    sameSite: "strict",
+    // Lax, not Strict: Strict withholds the cookie on any cross-site-initiated
+    // top-level navigation (opening a link from a chat app), which bounced
+    // Safari users straight back to /login even with a valid 30-day session.
+    sameSite: "lax",
     secure: isSecureRequest(request),
     path: "/",
     maxAge: 0,
@@ -68,7 +71,9 @@ export async function POST(request: NextRequest) {
     name: PI_WEB_SESSION_COOKIE,
     value: createWebSessionToken(password),
     httpOnly: true,
-    sameSite: "strict",
+    // Lax keeps the session alive across cross-site entries (chat-app links);
+    // Strict made every such navigation look like a logged-out reload.
+    sameSite: "lax",
     secure: isSecureRequest(request),
     path: "/",
     maxAge: PI_WEB_SESSION_MAX_AGE,
