@@ -633,19 +633,27 @@ export function AppTitleBar({
 
       {/* Full session-title popover — the title bar truncates long titles,
           especially on mobile; click the title to read it in full. */}
+      {/* Full session-title popover — the title bar truncates long titles,
+          especially on mobile; click the title to read it in full. Every tap
+          closes it (overlay, card, ×): there is no Escape key on a phone, so
+          an overlay without click-to-dismiss could only be escaped by reload. */}
       {titleModalOpen && sessionTitle && (
         <div
+          className="app-no-drag"
+          onClick={() => setTitleModalOpen(false)}
           style={{
             position: "fixed", inset: 0, zIndex: 3000,
             display: "flex", alignItems: "flex-start", justifyContent: "center",
             paddingTop: 48,
             background: "rgba(0,0,0,0.35)",
+            cursor: "pointer",
           }}
         >
           <div
             role="dialog"
             aria-label={sessionTitle}
             style={{
+              position: "relative",
               maxWidth: "min(560px, calc(100vw - 32px))",
               maxHeight: "min(60vh, 400px)",
               overflow: "auto",
@@ -653,15 +661,45 @@ export function AppTitleBar({
               border: "1px solid var(--border)",
               borderRadius: 12,
               boxShadow: "0 16px 40px rgba(0,0,0,0.3)",
-              padding: "14px 18px",
+              padding: "14px 40px 14px 18px",
               fontSize: 13,
               lineHeight: 1.6,
               color: "var(--text)",
               wordBreak: "break-word",
               whiteSpace: "pre-wrap",
+              cursor: "default",
             }}
           >
             {sessionTitle}
+            <button
+              type="button"
+              aria-label={translate("i18n.close")}
+              title={translate("i18n.close")}
+              onClick={(e) => { e.stopPropagation(); setTitleModalOpen(false); }}
+              style={{
+                position: "sticky",
+                top: 0,
+                float: "right",
+                marginLeft: 8,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 24,
+                height: 24,
+                padding: 0,
+                border: "none",
+                borderRadius: 5,
+                background: "none",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                fontSize: 14,
+                lineHeight: 1,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "none"; }}
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}
