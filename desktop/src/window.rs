@@ -40,7 +40,7 @@ fn is_shell_page(url: &url::Url) -> bool {
         && url.port().is_none()
         && url.username().is_empty()
         && url.password().is_none()
-        && matches!(url.path(), "/" | "/index.html" | "/loading.html")
+        && matches!(url.path(), "" | "/" | "/index.html" | "/loading.html")
         && url.query().is_none()
 }
 

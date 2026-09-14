@@ -123,7 +123,7 @@ fn desktop_server_navigation_only_allows_the_authorized_origin() {
     use window::{NavigationAction, ServerNavigation};
     let parse = |raw: &str| url::Url::parse(raw).unwrap();
     let mut navigation = ServerNavigation::default();
-    for startup in ["tauri://localhost/index.html", "http://tauri.localhost/loading.html"] {
+    for startup in ["tauri://localhost", "tauri://localhost/", "tauri://localhost/index.html", "http://tauri.localhost/", "http://tauri.localhost/loading.html"] {
         assert_eq!(navigation.check(&parse(startup)), NavigationAction::Allow);
     }
     navigation.authorize(&parse("http://127.0.0.1:39001/?piweb_connected=1")).unwrap();
@@ -132,7 +132,7 @@ fn desktop_server_navigation_only_allows_the_authorized_origin() {
     for forbidden in [
         "piweb-switch://other-server-id", "piweb-switch://local", "piweb-switch://manage?server=other",
         "http://127.0.0.1:39002/", "http://localhost:39001/", "https://example.test/",
-        "tauri://localhost/index.html", "http://tauri.localhost/index.html",
+        "tauri://localhost", "tauri://localhost/", "tauri://localhost/index.html", "http://tauri.localhost/index.html",
         "http://pi:pw@127.0.0.1:39001/", "data:text/html,test", "javascript:alert(1)",
     ] {
         assert_eq!(navigation.check(&parse(forbidden)), NavigationAction::Block, "accepted {forbidden}");
