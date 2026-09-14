@@ -10,6 +10,30 @@ pub const DEFAULT_USERNAME: &str = "pi";
 pub const LOCAL_SERVER_ID: &str = "local";
 const CONFIG_FILE: &str = "config.json";
 
+/// Shared URL boundary for saved connections, navigation and credential forwarding.
+/// Reject userinfo (including an empty `@`) and parser-normalized control characters.
+/// This helper is pure: it never reads credentials or contacts the server.
+pub(crate) fn parse_server_url(value: &str) -> Result<url::Url, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("请填写服务器地址".into());
+    }
+    if value.chars().any(|c| c.is_control()) || value.contains('\\') {
+        return Err("服务器地址包含无效字符".into());
+    }
+    let parsed = url::Url::parse(value).map_err(|_| "服务器地址无效".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("服务器地址必须使用 http:// 或 https://".into());
+    }
+    let authority = value.split_once("://")
+        .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or_default())
+        .ok_or_else(|| "服务器地址必须使用 http:// 或 https://".to_string())?;
+    if authority.is_empty() || authority.contains('@') || !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("服务器地址不能包含用户名或密码，请使用独立的账号密码输入框".into());
+    }
+    Ok(parsed)
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Server {
     pub id: String,
@@ -36,6 +60,40 @@ pub struct Server {
 }
 
 impl Server {
+    /// Update a connection without carrying a stored password across origins.
+    /// Empty password means “keep” only for the same scheme/host/effective port.
+    /// Validate first so a rejected edit leaves the old entry untouched.
+    pub(crate) fn update_connection(
+        &mut self,
+        base_url: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<(), String> {
+        let next = parse_server_url(base_url)?;
+        let same_origin = parse_server_url(&self.base_url)
+            .map(|previous| previous.origin() == next.origin())
+            .unwrap_or(false);
+        if !same_origin {
+            // A different server must receive a fresh WebView origin, not the old
+            // origin's localStorage/service worker and cached credentials.
+            self.proxy_port = None;
+        }
+        if password.is_empty() {
+            if !same_origin {
+                self.clear_password();
+            }
+        } else {
+            self.set_password(password);
+        }
+        self.base_url = next.as_str().trim_end_matches('/').to_string();
+        self.username = if username.trim().is_empty() {
+            DEFAULT_USERNAME.to_string()
+        } else {
+            username.trim().to_string()
+        };
+        Ok(())
+    }
+
     /// 取密码：明文配置。
     pub fn password(&self) -> Option<String> {
         if !self.has_password {

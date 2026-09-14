@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type MutableRefObject, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from "react";
 import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
+import { measureCommittedMessageRows, measureMessageRow } from "@/lib/virtualized-message-layout";
 
 /**
  * Virtualized renderer for the message list.
@@ -48,19 +49,36 @@ export function VirtualizedMessageList({
    * header shifts every row by that amount unless it is passed as scrollMargin. */
   headerHeight?: number;
 }) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const committedKeysRef = useRef(itemKeys);
+  const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
+  // The parent's host ref attaches after this child's layout effects on mount.
+  useEffect(() => {
+    setScrollElement(scrollElementRef.current);
+  }, [scrollElementRef]);
+
   // TanStack Virtual's API returns non-memoizable functions; React Compiler
   // would skip this component anyway. Keep it a leaf: stable props in, rows
   // out, and route virtualizer queries through the ref for consumers.
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer<HTMLElement, Element>({
     count: items.length,
-    getScrollElement: () => scrollElementRef.current,
+    getScrollElement: () => scrollElement ?? scrollElementRef.current,
     estimateSize: useCallback(() => estimateSize, [estimateSize]),
     overscan,
     getItemKey: useCallback((index: number) => itemKeys[index] ?? `idx-${index}`, [itemKeys]),
     scrollMargin: headerHeight,
-    // Items only ever grow at the tail (streaming) or are fully replaced
-    // (branch switch) — never reordered, so index keys are stable.
+    measureElement: (node, _entry, instance) => {
+      const index = instance.indexFromElement(node);
+      const key = node.getAttribute("data-item-key");
+      const expectedKey = instance.options.getItemKey(index);
+      const list = listRef.current;
+      if (!list || !node.isConnected || node.parentElement !== list || key !== expectedKey
+        || key !== committedKeysRef.current[index] || !list.getClientRects().length) {
+        return instance.itemSizeCache.get(expectedKey) ?? estimateSize;
+      }
+      return measureMessageRow(node);
+    },
   });
 
   // Scroll-position adjustments on item size change: the virtualizer
@@ -88,39 +106,76 @@ export function VirtualizedMessageList({
 
   if (virtualizerRef) virtualizerRef.current = virtualizer;
 
-  // NOTE: do NOT call virtualizer.measure() here. It clears the item size
-  // cache, dropping every measured row back to the estimate; mounted rows
-  // whose DOM size has not changed are never re-reported by ResizeObserver,
-  // so their real sizes stay lost. The total height then shrinks to
-  // count×estimate while the user is reading (or streaming), the browser
-  // clamps scrollTop to the new max, and the viewport bounces to the
-  // bottom. Newly mounted rows measure themselves via measureElement /
-  // ResizeObserver — nothing needs to be forced here.
+  // Keep offscreen measurements: clearing the cache shrinks the scroll range
+  // to estimates and can clamp the user's reading position to the bottom.
+  const measureMountedRows = useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const measurements = measureCommittedMessageRows(list, committedKeysRef.current);
+    for (const { index, size } of measurements) {
+      if (virtualizer.options.getItemKey(index) === committedKeysRef.current[index]) {
+        virtualizer.resizeItem(index, size);
+      }
+    }
+  }, [virtualizer]);
+
+  useLayoutEffect(() => {
+    committedKeysRef.current = itemKeys;
+    measureMountedRows();
+  }, [itemKeys, items, measureMountedRows]);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    // ResizeObserver can pause in background tabs. Local expand/collapse and
+    // streaming DOM edits still need to update offsets before the next paint.
+    const observer = new MutationObserver((records) => {
+      const contentChanged = records.some((record) => record.type !== "attributes"
+        || (record.target !== list && record.target.parentNode !== list));
+      if (contentChanged) measureMountedRows();
+    });
+    observer.observe(list, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "hidden", "open", "src", "width", "height"],
+    });
+    const onVisible = () => {
+      if (document.visibilityState === "visible") measureMountedRows();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    list.addEventListener("load", measureMountedRows, true);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", onVisible);
+      list.removeEventListener("load", measureMountedRows, true);
+    };
+  }, [measureMountedRows]);
 
   // The chat opens at the bottom; position the viewport at the newest items
   // right after first paint so scrolling down shows the tail, not the top.
   // (useAgentSession also calls scrollToBottom once messages load; this guards
   // the very first paint before that effect runs.) scrollToIndex follows the
   // row measurements as they refine, unlike a raw scrollTop on the estimate.
-  // NOTE: the effect intentionally does NOT list `virtualizer` as a dep —
-  // tanstack creates a fresh object each render, so listing it would cause
-  // this effect to fire on every render instead of only when items change.
-  // initialScrollDoneRef prevents re-execution regardless of render count.
+  // initialScrollDoneRef prevents later content updates from pulling a reader
+  // back to the tail. The virtualizer instance itself is stable across renders.
   const initialScrollDoneRef = useRef(false);
   const virtualizerRefStable = useRef(virtualizer);
   virtualizerRefStable.current = virtualizer;
   useEffect(() => {
     if (initialScrollDoneRef.current || items.length === 0) return;
-    const el = scrollElementRef.current;
-    if (!el) return;
+    if (!scrollElement) return;
     initialScrollDoneRef.current = true;
     virtualizerRefStable.current.scrollToIndex(items.length - 1, { align: "end" });
-  }, [items.length, scrollElementRef]);
+  }, [items.length, scrollElement]);
 
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
     <div
+      ref={listRef}
+      className="virtualized-message-list"
       style={{
         position: "relative",
         width: "100%",
@@ -132,6 +187,7 @@ export function VirtualizedMessageList({
         <div
           key={item.key}
           data-index={item.index}
+          data-item-key={item.key}
           ref={virtualizer.measureElement}
           style={{
             position: "absolute",
@@ -140,7 +196,7 @@ export function VirtualizedMessageList({
             width: "100%",
             minWidth: 0,
             overflow: "hidden",
-            transform: `translateY(${item.start}px)`,
+            transform: `translateY(${item.start - headerHeight}px)`,
           }}
         >
           {items[item.index]}

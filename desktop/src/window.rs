@@ -12,9 +12,74 @@ use crate::AppState;
 
 pub const CONNECT_LABEL: &str = "connect";
 
-/// 连接管理气泡脚本源码：编译期内嵌，点击时直接 eval 进当前窗口，
-/// 省去 `<script src>` 的一次 HTTP 往返（点击即弹）。
-const MANAGER_JS: &str = include_str!("../ui/manager/manager.js");
+/// A server WebView may navigate only within the origin selected by native code.
+/// Loopback is not a trust signal: password-protected remote servers use it too.
+#[cfg(not(mobile))]
+#[derive(Debug, Default)]
+pub(crate) struct ServerNavigation {
+    origin: Option<url::Origin>,
+    remote_started: bool,
+}
+
+#[cfg(not(mobile))]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum NavigationAction {
+    Allow,
+    OpenConnect,
+    Block,
+}
+
+#[cfg(not(mobile))]
+fn is_shell_page(url: &url::Url) -> bool {
+    let local_origin = match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "http" | "https" => url.host_str() == Some("tauri.localhost"),
+        _ => false,
+    };
+    local_origin
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && matches!(url.path(), "/" | "/index.html" | "/loading.html")
+        && url.query().is_none()
+}
+
+#[cfg(not(mobile))]
+impl ServerNavigation {
+    pub(crate) fn authorize(&mut self, url: &url::Url) -> Result<(), String> {
+        self.origin = Some(crate::config::parse_server_url(url.as_str())?.origin());
+        Ok(())
+    }
+
+    pub(crate) fn check(&mut self, url: &url::Url) -> NavigationAction {
+        if url.scheme() == "piweb-switch" {
+            return if url.host_str() == Some("manage")
+                && matches!(url.path(), "" | "/")
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.port().is_none()
+                && url.query().is_none()
+                && url.fragment().is_none()
+            {
+                NavigationAction::OpenConnect
+            } else {
+                // Server IDs from an untrusted page must never select credentials.
+                NavigationAction::Block
+            };
+        }
+        if !self.remote_started && is_shell_page(url) {
+            return NavigationAction::Allow;
+        }
+        if crate::config::parse_server_url(url.as_str()).is_ok()
+            && self.origin.as_ref() == Some(&url.origin())
+        {
+            self.remote_started = true;
+            NavigationAction::Allow
+        } else {
+            NavigationAction::Block
+        }
+    }
+}
 
 /// 服务器窗口 label。
 pub fn server_label(id: &str) -> String {
@@ -85,7 +150,7 @@ pub fn center_traffic_lights(win: &WebviewWindow) {
 /// 凭据不放入 URL（fetch 规范禁止子资源 URL 携带 userinfo）。
 /// 带凭据的服务器请用 [`window_url`]（经本地代理注入 Basic Auth）。
 pub fn build_url(server: &Server) -> String {
-    let base = url::Url::parse(&server.base_url)
+    let base = crate::config::parse_server_url(&server.base_url)
         .unwrap_or_else(|_| url::Url::parse(crate::config::DEFAULT_LOCAL_URL).unwrap());
     let mut u = base;
     u.query_pairs_mut().append_pair("piweb_connected", "1");
@@ -231,58 +296,36 @@ fn create_shell_window(
     // on_web_resource_request 只作用于 tauri:// 资源，无法拦截外部 http(s)，
     // 早期"请求头注入"方案在两个平台都未生效过（WebView2 弹凭据框 /
     // WKWebView 白屏）。URL 保持干净 —— 不带 userinfo。
-    // 网页端右上角「切换服务器」走 piweb-switch:// 自定义导航：
-    //   piweb-switch://manage -> 打开连接页
-    //   piweb-switch://<id>   -> 当前窗口导航到该服务器
+    // Only native actions may select a server/credential origin. Remote content
+    // can open the local connection page, but cannot switch by ID or return to a
+    // privileged shell document. Keep the Windows local-page-first construction.
+    let navigation = std::sync::Arc::new(std::sync::Mutex::new(ServerNavigation::default()));
     builder = builder.on_navigation({
         let app_handle = app.clone();
-        let label_owner = label.to_string();
+        let navigation = navigation.clone();
         move |url| {
-            let s = url.as_str();
-            if let Some(rest) = s.strip_prefix("piweb-switch://") {
-                if rest == "manage" {
-                    // 连接管理改为当前窗口内的气泡浮层，不再创建第二个 WebView2 窗口
-                    // （Windows 上第二窗口的 controller 创建/渲染在本机环境不稳定）。
-                    // 往当前服务器窗口注入 /manager/manager.js（本机后端静态托管），
-                    // 由它在已就绪的页面里叠加弹层并直连 Tauri 命令。
+            let action = navigation.lock().unwrap().check(url);
+            match action {
+                NavigationAction::Allow => true,
+                NavigationAction::Block => false,
+                NavigationAction::OpenConnect => {
                     let app_for_main = app_handle.clone();
-                    let label_for_main = label_owner.clone();
                     let app_inner = app_for_main.clone();
                     if let Err(e) = app_for_main.run_on_main_thread(move || {
-                        if let Some(w) = app_inner.get_webview_window(&label_for_main) {
-                            // 直接 eval 内嵌脚本；脚本自带「已打开则复用」守卫，重复点击安全。
-                            let _ = w.eval(MANAGER_JS);
+                        if let Err(e) = open_connect_window(&app_inner) {
+                            eprintln!("[desktop] 打开连接管理失败: {e}");
                         }
                     }) {
-                        eprintln!("[desktop] 注入连接管理气泡失败: {e}");
+                        eprintln!("[desktop] 打开连接管理失败: {e}");
                     }
-                } else if !rest.is_empty() {
-                    let state = app_handle.state::<AppState>();
-                    let cfg = state.config.lock().unwrap().clone();
-                    if let Some(srv) = cfg.find(rest) {
-                        let target = window_url(&app_handle, &srv);
-                        if let Ok(u) = url::Url::parse(&target) {
-                            if let Some(w) = app_handle.get_webview_window(&label_owner) {
-                                let _ = w.navigate(u);
-                                let _ = w.set_title(&srv.name);
-                                // 窗口已改指向新服务器：同步注册表（否则
-                                // focus_existing/菜单按旧 id 重复建窗、标题错乱）
-                                state
-                                    .server_windows
-                                    .lock()
-                                    .unwrap()
-                                    .insert(srv.id.clone(), label_owner.clone());
-                            }
-                        }
-                    }
+                    false
                 }
-                false // 阻止原始导航
-            } else {
-                true
             }
         }
     });
     let win = builder.build()?;
+    app.state::<AppState>().server_navigation.lock().unwrap()
+        .insert(label.to_string(), navigation);
     #[cfg(target_os = "macos")]
     {
         center_traffic_lights(&win);
@@ -296,7 +339,7 @@ fn create_shell_window(
                 let runner = handle.clone();
                 let h = handle.clone();
                 let l = label.clone();
-                runner.run_on_main_thread(move || {
+                let _ = runner.run_on_main_thread(move || {
                     if let Some(w) = h.get_webview_window(&l) {
                         center_traffic_lights(&w);
                     }
@@ -317,10 +360,26 @@ fn create_shell_window(
     // 上 External 初始导航丢失导致白屏。
     if let Some(raw) = target_url {
         if let Ok(u) = url::Url::parse(raw) {
-            let _ = win.navigate(u);
+            navigate_server(app, &win, u)?;
         }
     }
     Ok(win)
+}
+
+/// Navigate only after a trusted Rust caller has explicitly authorized the target.
+/// This is not an IPC command and cannot be invoked by a server page.
+#[cfg(not(mobile))]
+pub(crate) fn navigate_server(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    url: url::Url,
+) -> tauri::Result<()> {
+    let navigation = app.state::<AppState>().server_navigation.lock().unwrap()
+        .get(window.label()).cloned()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::PermissionDenied, "not a server window"))?;
+    navigation.lock().unwrap().authorize(&url)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    window.navigate(url)
 }
 
 /// 打开（或聚焦）服务器主窗口。
@@ -332,7 +391,7 @@ pub fn open_server_window(app: &AppHandle, server: &Server) -> tauri::Result<Web
         // 已存在：重新导航到最新 URL（用户改过地址/密码后点「连接」，旧窗口
         // 停留在旧内容或 401 页），并同步标题
         if let Ok(u) = url::Url::parse(&url) {
-            let _ = w.navigate(u);
+            navigate_server(app, &w, u)?;
         }
         let _ = w.set_title(&server.name);
         let _ = w.show();
@@ -374,7 +433,9 @@ pub fn open_connect_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     .title("Pi Web — 连接管理")
     .inner_size(920.0, 660.0)
     .min_inner_size(640.0, 480.0)
-    .resizable(true);
+    .resizable(true)
+    // Connection management must never turn into a remote browsing window.
+    .on_navigation(is_shell_page);
     // 主题联动：连接页窗口同样跟随已保存主题。
     if let Some(theme) = crate::theme::stored_theme(app) {
         win_builder = crate::theme::apply_theme_to_builder(win_builder, theme);
@@ -387,9 +448,8 @@ pub fn open_connect_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let win = win_builder.build()?;
     let _ = win.show();
     let _ = win.set_focus();
-    // 主界面右上角「连接远程」已改为当前窗口内气泡（/manager/manager.js），
-    // 此连接窗口仅保留给托盘/启动回退等路径；页面为壳内 index.html（连接页），
-    // 不导航到后端，避免 Windows 第二 WebView2 窗口的不稳定。
+    // 所有连接管理入口都使用这个壳内页面，绝不把密码表单放进服务器文档。
+    // 只加载本地 index.html，不在第二个 WebView2 上执行远程初始导航。
     Ok(win)
 }
 
@@ -551,7 +611,10 @@ fn navigate_or_open(app: &AppHandle, server: &Server) {
     let url = window_url(app, server);
     if let Some(w) = app.get_webview_window(&label) {
         if let Ok(u) = url::Url::parse(&url) {
-            let _ = w.navigate(u);
+            if let Err(e) = navigate_server(app, &w, u) {
+                eprintln!("[desktop] 服务器导航失败: {e}");
+                return;
+            }
         }
         let _ = w.set_title(&server.name);
         let _ = w.show();

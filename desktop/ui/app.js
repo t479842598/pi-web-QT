@@ -42,10 +42,12 @@ function renderList() {
         <div class="srv-user">用户名：${escapeHtml(s.username || "pi")}</div>
       </div>
       <div class="srv-actions">
-        <button class="ghost mini act-open" data-id="${s.id}">连接</button>
-        <button class="ghost mini danger act-del" data-id="${s.id}">删除</button>
+        <button class="ghost mini act-open">连接</button>
+        <button class="ghost mini act-edit">编辑</button>
+        <button class="ghost mini danger act-del">删除</button>
       </div>`;
     li.querySelector(".act-open").addEventListener("click", () => connect(s.id));
+    li.querySelector(".act-edit").addEventListener("click", () => openFormFor(s));
     li.querySelector(".act-del").addEventListener("click", () => remove(s.id));
     ul.appendChild(li);
   }
@@ -123,8 +125,8 @@ function openFormFor(srv) {
   $("inp-user").value = srv.username || "pi";
   $("inp-pass").value = "";
   $("form-hint").textContent = srv.has_password
-    ? "已保存密码，可直接连接；如需更换请重新输入。"
-    : "该服务器尚未保存密码，请输入账号密码后连接。";
+    ? "已保存密码；留空仅在协议、主机和端口不变时保留旧密码。更换服务器地址后请重新输入密码。"
+    : "该服务器未保存密码；如需认证请填写，无密码服务器可直接连接。";
   $("inp-user").focus();
   window.scrollTo({ top: 0, behavior: "smooth" });
   // 记录待连接 id：表单提交时若 URL 未改动则走更新而非新增

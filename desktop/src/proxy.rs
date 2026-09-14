@@ -18,7 +18,7 @@
 //!   hop-by-hop 头；注入实时 `Authorization`
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 
 use futures_util::StreamExt;
 use http_body_util::{BodyExt, StreamBody};
@@ -31,8 +31,17 @@ use tauri::{AppHandle, Manager};
 use crate::config::Server;
 use crate::AppState;
 
-/// 代理注册表值：server_id -> 本地端口（挂 AppState，进程生命周期内复用）。
-pub type ProxyMap = Mutex<HashMap<String, u16>>;
+/// Each listening port is bound to one upstream origin for its entire lifetime.
+/// Retired listeners stay bound and reject requests so old pages/service workers
+/// can never acquire the credentials of a newly selected server.
+pub struct ProxyEntry {
+    port: u16,
+    upstream_origin: String,
+    revoked: AtomicBool,
+    require_port_binding: bool,
+}
+
+pub type ProxyMap = Mutex<HashMap<String, Arc<ProxyEntry>>>;
 
 /// Basic Auth 凭据值（base64("user:pass")），转发时注入 Authorization 头。
 pub fn basic_auth_value(server: &Server) -> Option<String> {
@@ -47,7 +56,7 @@ pub fn basic_auth_value(server: &Server) -> Option<String> {
 /// - origin: `scheme://host[:port]`（重写 Origin 头用）
 /// - authority: `host[:port]`（重写 Host 头用；仅非默认端口带 :port）
 pub(crate) fn upstream_parts(base_url: &str) -> Option<(String, String)> {
-    let u = url::Url::parse(base_url).ok()?;
+    let u = crate::config::parse_server_url(base_url).ok()?;
     let host = u.host_str()?;
     let default_port = match u.scheme() {
         "https" => 443,
@@ -88,7 +97,12 @@ pub(crate) fn upstream_url(base_url: &str, path_and_query: &str) -> String {
 
 /// 请求侧不转发的头（小写）。
 /// content-length：请求体用流式（chunked）重传，旧长度与重传实长冲突会使 POST 破包。
-const REQ_DROP: [&str; 7] = [
+// Basic injection is the sole authentication transport. Browser cookies are
+// host-scoped (not port-scoped), so never forward ANY cookie to another server.
+// This client deliberately has no cookie store; upstream Set-Cookie is dropped too.
+const REQ_DROP: [&str; 9] = [
+    "cookie",
+    "cookie2",
     "host",
     "origin",
     "referer",
@@ -141,7 +155,9 @@ fn is_navigation(headers: &[(String, String)]) -> bool {
 /// 响应侧不透传的头（小写；分帧相关头由 hyper 重新生成）。
 /// alt-svc：Cloudflare 等上游返回 `h3=":443"` 广告 HTTP/3，透传会给 WebView2
 /// 造成 "尝试 QUIC 连 127.0.0.1:443" 的误导 → 导航挂起白屏，必须剔除。
-const RESP_DROP: [&str; 6] = [
+const RESP_DROP: [&str; 8] = [
+    "set-cookie",
+    "set-cookie2",
     "connection",
     "keep-alive",
     "transfer-encoding",
@@ -204,34 +220,74 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-/// 校验进入代理的请求是否来自本代理入口（Host 必须是本机环回地址）。
-/// 阻止本机其他端口的页面（DNS 重绑定 / same-site 端口扫描）借代理凭据访问上游。
-fn host_allowed(host: &str) -> bool {
-    let h = host.rsplit_once(':').map_or(host, |(h, _)| h);
-    h == "127.0.0.1" || h == "localhost" || h == "[::1]"
+/// Check the ORIGINAL browser headers before loading credentials or rewriting Origin.
+/// Same-site is not same-origin: another loopback port must not borrow this proxy's
+/// password. Native navigation and headerless local scripts remain supported.
+fn request_allowed(headers: &hyper::HeaderMap, port: u16) -> bool {
+    // Repeated security headers must not be reduced to an arbitrary first value.
+    for name in ["host", "origin", "sec-fetch-site"] {
+        if headers.get_all(name).iter().count() > 1 {
+            return false;
+        }
+    }
+    let Some(host) = headers.get("host").and_then(|value| value.to_str().ok()) else {
+        return false;
+    };
+    if !["127.0.0.1", "localhost", "[::1]"].iter()
+        .any(|hostname| host == format!("{hostname}:{port}"))
+    {
+        return false;
+    }
+    if let Some(site) = headers.get("sec-fetch-site") {
+        if !matches!(site.to_str(), Ok("same-origin" | "none")) {
+            return false;
+        }
+    }
+    if let Some(origin) = headers.get("origin") {
+        let Ok(origin) = origin.to_str() else { return false; };
+        let Ok(url) = crate::config::parse_server_url(origin) else { return false; };
+        let expected = url::Url::parse(&format!("http://{host}")).unwrap();
+        // Match the web guard's known Chromium port-omission compatibility,
+        // only with browser-provided same-origin evidence; explicit ports stay exact.
+        let omitted_port = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) == Some("same-origin")
+            && url.scheme() == expected.scheme()
+            && url.host_str() == expected.host_str()
+            && url.port().is_none();
+        if url.path() != "/" || url.query().is_some() || url.fragment().is_some()
+            || (url.origin() != expected.origin() && !omitted_port)
+        {
+            return false;
+        }
+    }
+    true
 }
 
 /// 处理单个代理请求：读配置 → 转发 → 流式回写。
 async fn handle_request(
     request: hyper::Request<Incoming>,
     load_server: &ServerLoader,
+    entry: &ProxyEntry,
 ) -> hyper::Response<http_body_util::combinators::BoxBody<bytes::Bytes, std::io::Error>> {
-    // 仅接受打向本代理入口（127.0.0.1[:port]）的请求
-    let incoming_host = request
-        .headers()
-        .get("host")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
-    if !host_allowed(&incoming_host) {
-        return html_response(403, "禁止访问：该地址不对外提供服务。");
+    if entry.revoked.load(Ordering::SeqCst) {
+        return html_response(403, "服务器地址已变更，请从壳内连接页重新连接。");
+    }
+    if !request_allowed(request.headers(), entry.port) {
+        return html_response(403, "禁止访问：请求并非来自当前代理页面。");
     }
     let Some(server) = load_server() else {
+        entry.revoked.store(true, Ordering::SeqCst);
         return html_response(503, "该服务器配置已被删除，请回到连接页重新连接。");
     };
     let Some((origin, authority)) = upstream_parts(&server.base_url) else {
+        entry.revoked.store(true, Ordering::SeqCst);
         return html_response(502, "服务器地址无效，请在连接页检查后重试。");
     };
+    if origin != entry.upstream_origin
+        || (entry.require_port_binding && server.proxy_port != Some(entry.port))
+    {
+        entry.revoked.store(true, Ordering::SeqCst);
+        return html_response(403, "服务器地址已变更，请从壳内连接页重新连接。");
+    }
 
     let (parts, body) = request.into_parts();
     let incoming: Vec<(String, String)> = parts
@@ -314,7 +370,7 @@ fn html_response(
 }
 
 /// 启动一个代理实例，返回本地端口。
-/// `load_server` 在**每次请求**时调用以读取最新配置（URL/用户名/密码实时生效）。
+/// `load_server` 在启动时固定 origin；请求时仅更新同一 origin 的配置/凭据。
 #[cfg(test)]
 pub(crate) fn spawn_proxy<F>(load_server: F) -> Result<u16, String>
 where
@@ -327,11 +383,26 @@ where
 /// `preferred`：优先绑定该固定端口（保证 WebView origin 稳定，localStorage
 /// 偏好不因端口变化丢失）；端口被占用时自动回退随机端口。
 /// `load_server` 在**每次请求**时调用以读取最新配置。
+#[cfg(test)]
 pub(crate) fn spawn_proxy_on<F>(preferred: Option<u16>, load_server: F) -> Result<u16, String>
 where
     F: Fn() -> Option<Server> + Send + Sync + 'static,
 {
-    let (tx, rx) = std::sync::mpsc::channel::<Result<u16, String>>();
+    let server = load_server().ok_or_else(|| "服务器不存在".to_string())?;
+    let (origin, _) = upstream_parts(&server.base_url).ok_or_else(|| "服务器地址无效".to_string())?;
+    spawn_proxy_bound(preferred, origin, false, load_server).map(|entry| entry.port)
+}
+
+fn spawn_proxy_bound<F>(
+    preferred: Option<u16>,
+    upstream_origin: String,
+    require_port_binding: bool,
+    load_server: F,
+) -> Result<Arc<ProxyEntry>, String>
+where
+    F: Fn() -> Option<Server> + Send + Sync + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel::<Result<Arc<ProxyEntry>, String>>();
     let load: ServerLoader = Arc::new(load_server);
     tauri::async_runtime::spawn(async move {
         // 先尝试固定端口；被占则随机（端口冲突只影响本次 origin，不阻断连接）
@@ -359,7 +430,12 @@ where
             let _ = tx.send(Err(e.clone()));
             return;
         }
-        let _ = tx.send(Ok(port.unwrap()));
+        let port = port.unwrap();
+        let entry = Arc::new(ProxyEntry {
+            port, upstream_origin, require_port_binding,
+            revoked: AtomicBool::new(false),
+        });
+        let _ = tx.send(Ok(entry.clone()));
         // accept 循环：每连接独立 task（keep-alive 由 hyper 处理；SSE 长连接
         // 占住单个连接的 task，不影响其他连接）
         loop {
@@ -374,13 +450,15 @@ where
                 }
             };
             let load = load.clone();
+            let entry = entry.clone();
             tauri::async_runtime::spawn(async move {
                 let _ = hyper::server::conn::http1::Builder::new()
                     .serve_connection(
                         TokioIo::new(stream),
                         service_fn(move |req| {
                             let load = load.clone();
-                            async move { Ok::<_, std::convert::Infallible>(handle_request(req, &load).await) }
+                            let entry = entry.clone();
+                            async move { Ok::<_, std::convert::Infallible>(handle_request(req, &load, &entry).await) }
                         }),
                     )
                     .await;
@@ -391,53 +469,53 @@ where
         .map_err(|e| format!("代理启动超时: {e}"))?
 }
 
-/// 确保指定服务器的本地代理在运行（复用已有端口），返回端口。
-/// 端口首次分配后写入配置持久化——后续启动/重连复用同一端口，
-/// 保证 WebView origin 稳定（主题/收藏模型/折叠状态等 localStorage 不丢）。
+/// Shared registry logic, also exercised with in-memory server fixtures.
+/// Reuse requires BOTH the immutable upstream origin and saved port identity.
+pub(crate) fn ensure_proxy_for_server<F>(
+    proxies: &ProxyMap,
+    server: &mut Server,
+    load_server: F,
+) -> Result<u16, String>
+where
+    F: Fn() -> Option<Server> + Send + Sync + 'static,
+{
+    let (origin, _) = upstream_parts(&server.base_url).ok_or_else(|| "服务器地址无效".to_string())?;
+    let mut registry = proxies.lock().unwrap();
+    if let Some(entry) = registry.get(&server.id) {
+        if entry.upstream_origin == origin && server.proxy_port == Some(entry.port)
+            && !entry.revoked.load(Ordering::SeqCst)
+        {
+            return Ok(entry.port);
+        }
+        entry.revoked.store(true, Ordering::SeqCst);
+        server.proxy_port = None;
+    }
+    let entry = spawn_proxy_bound(server.proxy_port, origin, true, load_server)?;
+    server.proxy_port = Some(entry.port);
+    let port = entry.port;
+    registry.insert(server.id.clone(), entry);
+    Ok(port)
+}
+
+/// Same-origin reconnects retain browser preferences. A changed origin gets a
+/// fresh port and permanently retires the old listener before any new navigation.
 pub fn ensure_proxy(app: &AppHandle, server_id: &str) -> Result<u16, String> {
     let state = app.state::<AppState>();
-    {
-        let proxies = state.proxies.lock().unwrap();
-        if let Some(&port) = proxies.get(server_id) {
-            return Ok(port);
-        }
-    }
     let id = server_id.to_string();
     let app_handle = app.clone();
     let load = move || {
-        app_handle
-            .state::<AppState>()
-            .config
-            .lock()
-            .unwrap()
-            .find(&id)
-            .cloned()
+        app_handle.state::<AppState>().config.lock().unwrap().find(&id).cloned()
     };
-    // 优先复用持久化的固定端口
-    let preferred = {
-        let cfg = state.config.lock().unwrap();
-        cfg.find(server_id).and_then(|s| s.proxy_port)
-    };
-    let port = spawn_proxy_on(preferred, load)?;
-    // 持久化实际端口（首启分配或回退端口时写回，保证下次复用）
-    let snapshot = {
-        let mut cfg = state.config.lock().unwrap();
-        let changed = cfg
-            .find_mut(server_id)
-            .map(|s| {
-                if s.proxy_port == Some(port) {
-                    false
-                } else {
-                    s.proxy_port = Some(port);
-                    true
-                }
-            })
-            .unwrap_or(false);
-        if changed { Some(cfg.clone()) } else { None }
-    };
+    // Keep configuration stable while selecting/registering its port. The spawned
+    // listener does not load the configuration until an actual request arrives.
+    let mut cfg = state.config.lock().unwrap();
+    let server = cfg.find_mut(server_id).ok_or_else(|| "服务器不存在".to_string())?;
+    let previous_port = server.proxy_port;
+    let port = ensure_proxy_for_server(&state.proxies, server, load)?;
+    let snapshot = if previous_port != Some(port) { Some(cfg.clone()) } else { None };
+    drop(cfg);
     if let Some(cfg) = snapshot {
         let _ = cfg.save(app);
     }
-    state.proxies.lock().unwrap().insert(server_id.to_string(), port);
     Ok(port)
 }

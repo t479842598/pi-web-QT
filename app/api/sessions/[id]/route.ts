@@ -17,11 +17,12 @@ import {
   openSessionCached,
   readSessionHeader,
 } from "@/lib/session-reader";
-import { abortSubagent, getRpcSession, getRpcSessionInfos, broadcastSessionBusEvent } from "@/lib/rpc-manager";
+import { abortSubagent, beginRpcSessionMutation, getRpcSession, getRpcSessionInfos, broadcastSessionBusEvent } from "@/lib/rpc-manager";
 import { mutateSettingsJson } from "@/lib/settings-lock";
 import { getAgentDir } from "@/lib/session-reader";
 import { setSessionArchived, dropSessionArchiveEntry } from "@/lib/session-archive";
 import { removeQueue } from "@/lib/queue-store";
+import { goalSidecarPath } from "@/lib/goal-engine";
 import { computeSessionDetails } from "@/lib/session-details";
 import { computeSessionStats } from "@/lib/session-stats";
 import type { SessionEntry } from "@/lib/types";
@@ -188,7 +189,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  // Fence the target before the first async file lookup. New starts fail closed;
+  // already-started SDK work loses persistence before it can return late.
+  const barriers = [beginRpcSessionMutation([id])];
+  const removedIds: string[] = [];
   try {
+    await barriers[0].ready;
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
@@ -205,6 +211,12 @@ export async function DELETE(
         parentSessionId = undefined;
       }
     }
+
+    // Quiesce the parent before discovering its descendants. Otherwise an
+    // active parent could spawn another child after the catalogue snapshot.
+    try { await abortSubagent(id); } catch { /* ordinary session */ }
+    getRpcSession(id)?.revokePersistenceForDeletion();
+    await getRpcSession(id)?.shutdown().catch(() => undefined);
 
     // Re-attach all direct children to this session's parent (cascade
     // re-parent). Two discovery sources: same-directory siblings (cheap,
@@ -261,6 +273,11 @@ export async function DELETE(
         pendingDelete.push(childId);
       }
     }
+    // Close admission for the whole discovered descendant set before yielding
+    // again; no process-wide lock is held for unrelated conversations.
+    const descendantsBarrier = beginRpcSessionMutation([...deletedSessionIds].filter((deletedId) => deletedId !== id));
+    barriers.push(descendantsBarrier);
+    await descendantsBarrier.ready;
     const deletedPaths = new Map<string, string>([[id, filePath]]);
     for (const deletedId of deletedSessionIds) {
       const sessionPath = sessionPaths.get(deletedId);
@@ -311,6 +328,12 @@ export async function DELETE(
         // that skip the reparent rewrite (the child would keep pointing at a
         // deleted file and become an orphan).
         if (typeof preview.id === "string" && preview.id) {
+          const childBarrier = beginRpcSessionMutation([preview.id]);
+          barriers.push(childBarrier);
+          await childBarrier.ready;
+          // abort() drains SDK message_end handlers, including their deferred
+          // transcript appends, before shutdown/dispose and the atomic rewrite.
+          await getRpcSession(preview.id)?.drainForSessionRewrite();
           await getRpcSession(preview.id)?.shutdown().catch(() => undefined);
         }
         // Re-read after shutdown so late appends are included in the rewrite.
@@ -339,6 +362,7 @@ export async function DELETE(
     for (const deletedId of [...deletedSessionIds].reverse()) {
       if (deletedId === id) continue;
       try { await abortSubagent(deletedId); } catch { /* idle or completed */ }
+      getRpcSession(deletedId)?.revokePersistenceForDeletion();
       await getRpcSession(deletedId)?.shutdown().catch(() => undefined);
     }
     // Best-effort: a failing extension shutdown hook must not block the
@@ -351,9 +375,13 @@ export async function DELETE(
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      // Drop the queue sidecar and the archive entry so a hard delete leaves no
-      // orphan state behind (both are best-effort: the session is already gone).
+      removedIds.push(deletedId);
+      // Sidecars must go after runtime shutdown; its final callbacks can persist
+      // state until that point. In particular a running goal must not survive.
       try { removeQueue(deletedPath); } catch { /* sidecar absent */ }
+      try { unlinkSync(goalSidecarPath(deletedPath)); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
       await dropSessionArchiveEntry(getAgentDir(), deletedId).catch(() => undefined);
       invalidateOpenSessionCache(deletedPath);
       invalidateSessionPathCache(deletedId);
@@ -362,5 +390,7 @@ export async function DELETE(
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
+  } finally {
+    for (const barrier of barriers.reverse()) barrier.finish(removedIds);
   }
 }

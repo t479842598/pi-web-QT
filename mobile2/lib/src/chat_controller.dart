@@ -67,8 +67,9 @@ class ChatController extends ChangeNotifier {
   PiSession? selectedSession;
   PiModel? selectedModel;
   String? activeSessionId;
-  /// openSession/newChat 的代际计数：快速切换会话时，晚到的旧请求结果
-  /// （getSession 乱序返回）不得覆盖新会话内容。
+
+  /// Every session-scoped async operation belongs to one open/new-chat
+  /// generation, even when a draft has not received its server id yet.
   int _openGeneration = 0;
   String? draftCwd;
   ChatMessage? streamingMessage;
@@ -100,10 +101,12 @@ class ChatController extends ChangeNotifier {
   int? contextTokens;
   int? maxContextTokens;
   int? totalTokens;
+
   /// 会话累计消耗 token（来自 get_session_stats 的 tokens 结构）。
   int? tokenInput;
   int? tokenOutput;
   int? tokenTotal;
+
   /// 流式每秒 token 速率（由输出文本长度估算，约 4 字符/token，对齐网页端）。
   double? tokenRate;
   int _rateLastChars = 0;
@@ -182,14 +185,11 @@ class ChatController extends ChangeNotifier {
     if (_tasksTimerRunning) return;
     _tasksTimerRunning = true;
     _tasksTimer?.cancel();
-    _tasksTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) {
-        if (tasks.any((t) => t.status.isActive)) {
-          refreshTasks();
-        }
-      },
-    );
+    _tasksTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (tasks.any((t) => t.status.isActive)) {
+        refreshTasks();
+      }
+    });
   }
 
   void stopTasksPolling() {
@@ -206,7 +206,11 @@ class ChatController extends ChangeNotifier {
 
   /// Deletes a task (left-swipe → red action, with worktree).
   Future<void> deleteTask(PiTask task, {bool deleteWorktree = true}) async {
-    await api.deleteTask(task.id, task.projectRoot, deleteWorktree: deleteWorktree);
+    await api.deleteTask(
+      task.id,
+      task.projectRoot,
+      deleteWorktree: deleteWorktree,
+    );
     tasks.removeWhere((t) => t.id == task.id);
     _notify();
   }
@@ -243,10 +247,14 @@ class ChatController extends ChangeNotifier {
   /// + tokens). Called from message_end / prompt_done / openSession.
   Future<void> refreshSessionStats() async {
     final sessionId = activeSessionId;
-    if (sessionId == null || sessionId.isEmpty || loadingStats) return;
+    if (_disposed || sessionId == null || sessionId.isEmpty || loadingStats) {
+      return;
+    }
+    final openGen = _openGeneration;
     loadingStats = true;
     try {
       final stats = await api.getSessionStats(sessionId);
+      if (!_isCurrent(openGen)) return;
       final value = _extractStats(stats);
       if (value != null) {
         final (ctx, max, total) = value;
@@ -258,13 +266,16 @@ class ChatController extends ChangeNotifier {
       // Mobile networks drop; keep the previous values rather than flashing
       // an error.
     } finally {
-      loadingStats = false;
-      _notify();
+      if (_isCurrent(openGen)) {
+        loadingStats = false;
+        _notify();
+      }
     }
   }
 
-  (int? contextTokens, int? maxContextTokens, int? totalTokens)?
-  _extractStats(Map<String, dynamic> raw) {
+  (int? contextTokens, int? maxContextTokens, int? totalTokens)? _extractStats(
+    Map<String, dynamic> raw,
+  ) {
     // get_session_stats returns nested shapes depending on the pi version.
     final direct = raw['stats'];
     final stats = direct is Map ? Map<String, dynamic>.from(direct) : raw;
@@ -307,11 +318,12 @@ class ChatController extends ChangeNotifier {
   /// clear the `running` flag.
   Future<void> _reconcileNow() async {
     final id = activeSessionId;
-    if (id == null || !running || _reconciling) return;
+    if (_disposed || id == null || !running || _reconciling) return;
+    final openGen = _openGeneration;
     _reconciling = true;
     try {
       final state = await api.getAgentState(id);
-      if (_disposed || activeSessionId != id || !running) return;
+      if (!_isCurrent(openGen) || activeSessionId != id || !running) return;
       if (state == null) {
         // Network failure — count consecutive failures but don't kill running
         // yet (user may be on flaky mobile data).
@@ -370,7 +382,7 @@ class ChatController extends ChangeNotifier {
         unawaited(_refreshRunSnapshot());
       }
     } finally {
-      _reconciling = false;
+      if (_isCurrent(openGen)) _reconciling = false;
     }
   }
 
@@ -407,8 +419,39 @@ class ChatController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  bool _isCurrent(int generation) =>
+      !_disposed && generation == _openGeneration;
+
+  int _beginSessionChange() {
+    _openGeneration += 1;
+    // Dropping the shared future does not cancel it. Its result and every
+    // continuation must still check the generation before touching this view.
+    _ensureSessionInFlight = null;
+    unawaited(_closeEvents());
+    _stopReconcileTimer();
+    _disposeStreamThrottle();
+    _reconnectAttempts = 0;
+    _reconciling = false;
+    _snapshotInFlight = false;
+    loadingMessages = false;
+    loadingModels = false;
+    loadingSkills = false;
+    loadingSlashCommands = false;
+    loadingStats = false;
+    changingModel = false;
+    compacting = false;
+    contextTokens = maxContextTokens = totalTokens = null;
+    tokenInput = tokenOutput = tokenTotal = null;
+    _resetTokenRate();
+    goalStatus = goalText = null;
+    goalElapsedSeconds = 0;
+    return _openGeneration;
+  }
+
   Future<void> initialize() async {
+    final openGen = _openGeneration;
     await refreshSessions();
+    if (!_isCurrent(openGen)) return;
     // Kick off model/skill catalogs in the background once a working directory
     // is known; the UI does not block on them at startup.
     final cwd = draftCwd;
@@ -423,10 +466,13 @@ class ChatController extends ChangeNotifier {
   }
 
   Future<void> refreshSessions() async {
+    if (_disposed) return;
+    final openGen = _openGeneration;
     loadingSessions = true;
-    notifyListeners();
+    _notify();
     try {
       final loaded = await api.getSessions();
+      if (_disposed) return;
       loaded.sort((a, b) {
         final byDirectory = a.cwd.toLowerCase().compareTo(b.cwd.toLowerCase());
         return byDirectory != 0
@@ -436,15 +482,17 @@ class ChatController extends ChangeNotifier {
       sessions
         ..clear()
         ..addAll(loaded);
-      draftCwd ??= knownCwds.firstOrNull;
+      if (_isCurrent(openGen)) draftCwd ??= knownCwds.firstOrNull;
       // Refresh project aliases in the background; failures degrade silently.
       unawaited(loadProjectAliases());
     } catch (cause) {
-      error = _errorText(cause);
+      if (_isCurrent(openGen)) error = _errorText(cause);
       rethrow;
     } finally {
-      loadingSessions = false;
-      _notify();
+      if (!_disposed) {
+        loadingSessions = false;
+        _notify();
+      }
     }
   }
 
@@ -547,11 +595,19 @@ class ChatController extends ChangeNotifier {
     if (id != null) _markSessionRunning(id, value);
   }
 
+  int _modelsRequest = 0;
+  int _skillsRequest = 0;
+
   Future<void> loadModels(String cwd, {PiModel? preferred}) async {
+    if (_disposed) return;
+    final openGen = _openGeneration;
+    final request = ++_modelsRequest;
+    bool isCurrent() => _isCurrent(openGen) && request == _modelsRequest;
     loadingModels = true;
-    notifyListeners();
+    _notify();
     try {
       final catalog = await api.getModels(cwd);
+      if (!isCurrent()) return;
       models
         ..clear()
         ..addAll(catalog.models);
@@ -561,19 +617,26 @@ class ChatController extends ChangeNotifier {
           catalog.defaultModel ??
           models.firstOrNull;
     } catch (cause) {
-      error = _errorText(cause);
+      if (isCurrent()) error = _errorText(cause);
     } finally {
-      loadingModels = false;
-      _notify();
+      if (isCurrent()) {
+        loadingModels = false;
+        _notify();
+      }
     }
   }
 
   Future<void> loadSkills(String cwd) async {
+    if (_disposed) return;
+    final openGen = _openGeneration;
+    final request = ++_skillsRequest;
+    bool isCurrent() => _isCurrent(openGen) && request == _skillsRequest;
     loadingSkills = true;
     skillsError = null;
-    notifyListeners();
+    _notify();
     try {
       final catalog = await api.getSkills(cwd);
+      if (!isCurrent()) return;
       skills
         ..clear()
         ..addAll(catalog.skills);
@@ -582,27 +645,34 @@ class ChatController extends ChangeNotifier {
         ..addAll(catalog.diagnostics);
       projectSkillResourcesLoaded = catalog.projectResourcesLoaded;
     } catch (cause) {
-      skillsError = _errorText(cause);
+      if (isCurrent()) skillsError = _errorText(cause);
     } finally {
-      loadingSkills = false;
-      _notify();
+      if (isCurrent()) {
+        loadingSkills = false;
+        _notify();
+      }
     }
   }
 
   Future<void> selectModel(PiModel model) async {
-    if (changingModel || model == selectedModel) return;
+    if (_disposed || changingModel || model == selectedModel) return;
+    final openGen = _openGeneration;
+    final sessionId = activeSessionId;
     changingModel = true;
-    notifyListeners();
+    _notify();
     try {
-      final sessionId = activeSessionId;
+      if (!_isCurrent(openGen)) return;
       if (sessionId != null) await api.setModel(sessionId, model);
+      if (!_isCurrent(openGen)) return;
       selectedModel = model;
       error = null;
     } catch (cause) {
-      error = _errorText(cause);
+      if (_isCurrent(openGen)) error = _errorText(cause);
     } finally {
-      changingModel = false;
-      _notify();
+      if (_isCurrent(openGen)) {
+        changingModel = false;
+        _notify();
+      }
     }
   }
 
@@ -613,19 +683,19 @@ class ChatController extends ChangeNotifier {
       api.createDirectory(parentPath, name);
 
   Future<void> openSession(PiSession session) async {
-    final openGen = ++_openGeneration;
-    // 同步部分：立即切换会话状态（不再 await _closeEvents —— 旧 SSE 订阅
-    // cancel 可能挂起，导致会话“一直加载中”/输入框禁用）。
-    unawaited(_closeEvents());
-    _stopReconcileTimer();
+    if (_disposed) return;
+    // Switch synchronously; a slow cancellation of the old SSE subscription
+    // must not block the new view or later take ownership of its connection.
+    final openGen = _beginSessionChange();
     if (activeSessionId != session.id) {
       slashCommands.clear();
       slashCommandsForSessionId = null;
     }
     selectedSession = session;
     activeSessionId = session.id;
-    _ensureSessionInFlight = null;
     draftCwd = session.cwd;
+    collaborationMode = 'normal';
+    thinkingLevel = 'off';
     streamingMessage = null;
     running = session.running;
     agentPhase = null;
@@ -638,7 +708,8 @@ class ChatController extends ChangeNotifier {
       _lastEventAt = DateTime.now();
       _startReconcileTimer();
     }
-    notifyListeners();
+    _notify();
+    if (!_isCurrent(openGen)) return;
     unawaited(loadCollaborationMode(sessionId: session.id));
     unawaited(loadThinkingLevel());
     unawaited(refreshSessionStats());
@@ -660,9 +731,7 @@ class ChatController extends ChangeNotifier {
         api.getAgentState(session.id),
       ]);
       // 期间若有更新的 openSession/newChat，丢弃本次结果（防旧内容覆盖）
-      if (openGen != _openGeneration) {
-        return;
-      }
+      if (!_isCurrent(openGen)) return;
       final probe = results[3];
       if (probe is Map<String, dynamic> && probe['running'] is bool) {
         final probeRunning = probe['running'] as bool;
@@ -687,22 +756,22 @@ class ChatController extends ChangeNotifier {
       } else if (snapshot is String) {
         error = snapshot;
       }
-      if (running) await _connectEvents(session.id);
+      if (running) await _connectEvents(session.id, openGen);
     } catch (cause) {
-      error = _errorText(cause);
+      if (_isCurrent(openGen)) error = _errorText(cause);
     } finally {
-      loadingMessages = false;
-      _notify();
+      if (_isCurrent(openGen)) {
+        loadingMessages = false;
+        _notify();
+      }
     }
   }
 
   Future<void> newChat(String cwd, {PiModel? model}) async {
-    _openGeneration += 1;
-    unawaited(_closeEvents());
-    _stopReconcileTimer();
+    if (_disposed) return;
+    final openGen = _beginSessionChange();
     selectedSession = null;
     activeSessionId = null;
-    _ensureSessionInFlight = null;
     draftCwd = cwd;
     messages.clear();
     streamingMessage = null;
@@ -716,9 +785,10 @@ class ChatController extends ChangeNotifier {
     collaborationMode = 'normal';
     // 同步状态已切换（消息已清空）：立即通知 UI 刷新，避免加载模型/技能
     // 期间界面继续显示上一个会话的消息（“切换会话显示旧内容”）。
-    notifyListeners();
-    await Future.wait([loadModels(cwd, preferred: model), loadSkills(cwd)]);
     _notify();
+    if (!_isCurrent(openGen)) return;
+    await Future.wait([loadModels(cwd, preferred: model), loadSkills(cwd)]);
+    if (_isCurrent(openGen)) _notify();
   }
 
   /// 一键调用模型生成会话标题（对齐网页端 auto-name），成功后刷新列表。
@@ -729,32 +799,39 @@ class ChatController extends ChangeNotifier {
 
   /// 重命名会话（set_session_name 命令），成功后刷新会话列表。
   Future<void> renameSession(String sessionId, String name) async {
+    if (_disposed) return;
+    final openGen = _openGeneration;
     await api.sendAgentCommand(sessionId, {
       'type': 'set_session_name',
       'name': name,
     });
     await refreshSessions();
+    if (!_isCurrent(openGen) || activeSessionId != sessionId) return;
     selectedSession = sessions
         .where((session) => session.id == sessionId)
         .firstOrNull;
-    notifyListeners();
+    _notify();
   }
 
   Future<void> deleteSession(PiSession session) async {
-    if (!deletingSessionIds.add(session.id)) return;
-    notifyListeners();
-    final deletingActiveSession = activeSessionId == session.id;
+    if (_disposed || !deletingSessionIds.add(session.id)) return;
+    final openGen = _openGeneration;
+    _notify();
     try {
       await api.deleteSession(session.id);
-      if (deletingActiveSession) await _closeEvents();
+      if (_disposed) return;
       sessions.removeWhere((item) => item.id == session.id);
-      if (deletingActiveSession) {
+      if (!_isCurrent(openGen)) return;
+      if (activeSessionId == session.id) {
+        _beginSessionChange();
         selectedSession = null;
         activeSessionId = null;
         draftCwd = session.cwd;
         messages.clear();
         streamingMessage = null;
         running = false;
+        agentPhase = null;
+        liveToolSteps.clear();
         status = null;
         slashCommands.clear();
         slashCommandsForSessionId = null;
@@ -768,8 +845,10 @@ class ChatController extends ChangeNotifier {
         // the follow-up refresh temporarily fails.
       }
     } catch (cause) {
-      error = _errorText(cause);
-      _notify();
+      if (_isCurrent(openGen)) {
+        error = _errorText(cause);
+        _notify();
+      }
       rethrow;
     } finally {
       deletingSessionIds.remove(session.id);
@@ -785,6 +864,8 @@ class ChatController extends ChangeNotifier {
     List<PiImageAttachment> images = const [],
     String? queueMode,
   }) async {
+    if (_disposed) return;
+    final openGen = _openGeneration;
     final message = text.trim();
     if (message.isEmpty && images.isEmpty) return;
     if (message.length > 200000) {
@@ -805,11 +886,18 @@ class ChatController extends ChangeNotifier {
         : imageLabel.isEmpty
         ? message
         : '$message\n\n$imageLabel';
-    messages.add(ChatMessage(role: 'user', text: textContent, queued: queued));
+    final pendingMessage = ChatMessage(
+      role: 'user',
+      text: textContent,
+      queued: queued,
+    );
+    messages.add(pendingMessage);
     if (queued) {
-      // Enqueue against the live run; the run itself is untouched.
+      // Enqueue against the captured session, never whichever view is active
+      // after creation resolves. A failed enqueue owns only its placeholder.
       try {
-        final sessionId = await _ensureSession();
+        final sessionId = await _ensureSession(openGen);
+        if (!_isCurrent(openGen) || sessionId == null) return;
         await api.sendPrompt(
           sessionId,
           message,
@@ -817,10 +905,11 @@ class ChatController extends ChangeNotifier {
           streamingBehavior: queueMode == 'followUp' ? 'followUp' : 'steer',
         );
       } catch (cause) {
-        messages.removeLast();
+        if (!_isCurrent(openGen)) return;
+        messages.remove(pendingMessage);
         error = _errorText(cause);
       }
-      _notify();
+      if (_isCurrent(openGen)) _notify();
       return;
     }
     running = true;
@@ -830,10 +919,13 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final sessionId = await _ensureSession();
-      await _connectEvents(sessionId);
+      final sessionId = await _ensureSession(openGen);
+      if (!_isCurrent(openGen) || sessionId == null) return;
+      if (!await _connectEvents(sessionId, openGen)) return;
+      if (!_isCurrent(openGen)) return;
       await api.sendPrompt(sessionId, message, images: images);
     } catch (cause) {
+      if (!_isCurrent(openGen)) return;
       running = false;
       _stopReconcileTimer();
       error = _errorText(cause);
@@ -842,32 +934,41 @@ class ChatController extends ChangeNotifier {
   }
 
   Future<List<PiSlashCommand>> loadSlashCommands() async {
-    if (loadingSlashCommands) return slashCommands;
+    if (_disposed || loadingSlashCommands) return slashCommands;
+    final openGen = _openGeneration;
     loadingSlashCommands = true;
-    notifyListeners();
+    _notify();
     try {
+      if (!_isCurrent(openGen)) return const [];
       final cwd = draftCwd;
       if (cwd != null && cwd.isNotEmpty) await loadSkills(cwd);
-      final sessionId = await _ensureSession();
+      final sessionId = await _ensureSession(openGen);
+      if (!_isCurrent(openGen) || sessionId == null) return const [];
       if (slashCommandsForSessionId == sessionId) {
         return slashCommands;
       }
       final loaded = await api.getSlashCommands(sessionId);
+      if (!_isCurrent(openGen)) return const [];
       slashCommands
         ..clear()
         ..addAll(loaded);
       slashCommandsForSessionId = sessionId;
       return slashCommands;
     } catch (cause) {
+      if (!_isCurrent(openGen)) return const [];
       error = _errorText(cause);
       return slashCommands;
     } finally {
-      loadingSlashCommands = false;
-      _notify();
+      if (_isCurrent(openGen)) {
+        loadingSlashCommands = false;
+        _notify();
+      }
     }
   }
 
   Future<BuiltinCommandResult> executeBuiltinCommand(String text) async {
+    if (_disposed) return const BuiltinCommandResult(handled: true);
+    final openGen = _openGeneration;
     final match = RegExp(
       r'^/([^\s]+)(?:\s+([\s\S]*))?$',
     ).firstMatch(text.trim());
@@ -890,7 +991,10 @@ class ChatController extends ChangeNotifier {
       );
     }
     try {
-      final sessionId = await _ensureSession();
+      final sessionId = await _ensureSession(openGen);
+      if (!_isCurrent(openGen) || sessionId == null) {
+        return const BuiltinCommandResult(handled: true);
+      }
       switch (command) {
         case 'compact':
           compacting = true;
@@ -898,11 +1002,20 @@ class ChatController extends ChangeNotifier {
           status = _tr('正在压缩对话上下文…');
           notifyListeners();
           try {
+            if (!_isCurrent(openGen)) {
+              return const BuiltinCommandResult(handled: true);
+            }
             await api.sendAgentCommand(sessionId, {
               'type': 'compact',
               if (args.isNotEmpty) 'customInstructions': args,
             }, timeout: const Duration(minutes: 10));
+            if (!_isCurrent(openGen)) {
+              return const BuiltinCommandResult(handled: true);
+            }
             final snapshot = await api.getSession(sessionId);
+            if (!_isCurrent(openGen)) {
+              return const BuiltinCommandResult(handled: true);
+            }
             messages
               ..clear()
               ..addAll(snapshot.messages);
@@ -911,15 +1024,23 @@ class ChatController extends ChangeNotifier {
               message: _tr('已压缩对话上下文'),
             );
           } finally {
-            compacting = false;
-            running = false;
-            status = null;
-            _stopReconcileTimer();
-            notifyListeners();
+            if (_isCurrent(openGen)) {
+              compacting = false;
+              running = false;
+              status = null;
+              _stopReconcileTimer();
+              _notify();
+            }
           }
         case 'reload':
           await api.sendAgentCommand(sessionId, {'type': 'reload'});
+          if (!_isCurrent(openGen)) {
+            return const BuiltinCommandResult(handled: true);
+          }
           final snapshot = await api.getSession(sessionId);
+          if (!_isCurrent(openGen)) {
+            return const BuiltinCommandResult(handled: true);
+          }
           messages
             ..clear()
             ..addAll(snapshot.messages);
@@ -932,8 +1053,14 @@ class ChatController extends ChangeNotifier {
               loadSkills(cwd),
             ]);
           }
+          if (!_isCurrent(openGen)) {
+            return const BuiltinCommandResult(handled: true);
+          }
           await loadSlashCommands();
-          notifyListeners();
+          if (!_isCurrent(openGen)) {
+            return const BuiltinCommandResult(handled: true);
+          }
+          _notify();
           return BuiltinCommandResult(handled: true, message: _tr('已重新加载会话资源'));
         case 'name':
           if (args.isEmpty) {
@@ -946,7 +1073,13 @@ class ChatController extends ChangeNotifier {
             'type': 'set_session_name',
             'name': args,
           });
+          if (!_isCurrent(openGen)) {
+            return const BuiltinCommandResult(handled: true);
+          }
           await refreshSessions();
+          if (!_isCurrent(openGen)) {
+            return const BuiltinCommandResult(handled: true);
+          }
           selectedSession = sessions
               .where((session) => session.id == sessionId)
               .firstOrNull;
@@ -959,6 +1092,9 @@ class ChatController extends ChangeNotifier {
           final stats = await api.sendAgentCommand(sessionId, {
             'type': 'get_session_stats',
           });
+          if (!_isCurrent(openGen)) {
+            return const BuiltinCommandResult(handled: true);
+          }
           return BuiltinCommandResult(
             handled: true,
             details: const JsonEncoder.withIndent('  ').convert(stats),
@@ -967,6 +1103,9 @@ class ChatController extends ChangeNotifier {
           final data = await api.sendAgentCommand(sessionId, {
             'type': 'get_last_assistant_text',
           });
+          if (!_isCurrent(openGen)) {
+            return const BuiltinCommandResult(handled: true);
+          }
           final copyText = data is Map ? data['text']?.toString() ?? '' : '';
           if (copyText.isEmpty) {
             return BuiltinCommandResult(
@@ -981,37 +1120,42 @@ class ChatController extends ChangeNotifier {
           );
       }
     } catch (cause) {
+      if (!_isCurrent(openGen)) {
+        return const BuiltinCommandResult(handled: true);
+      }
       return BuiltinCommandResult(handled: true, error: _errorText(cause));
     }
     return const BuiltinCommandResult(handled: false);
   }
 
-  Future<String>? _ensureSessionInFlight;
+  Future<String?>? _ensureSessionInFlight;
 
-  Future<String> _ensureSession() async {
+  Future<String?> _ensureSession(int openGen) async {
+    if (!_isCurrent(openGen)) return null;
     final existing = activeSessionId;
     if (existing != null) return existing;
     final cwd = draftCwd?.trim();
     if (cwd == null || cwd.isEmpty) {
       throw PiApiException(_tr('请先选择工作目录'));
     }
-    // Reuse an in-flight creation so concurrent callers (send + slash-command
-    // loading) never create two sessions for the same directory.
+    // Share creation only within this draft's generation. An invalidated
+    // result returns null so callers cannot send or subscribe to a new view.
     final inFlight = _ensureSessionInFlight;
     if (inFlight != null) return inFlight;
-    final future = _createSession(cwd);
+    final future = _createSession(cwd, openGen);
     _ensureSessionInFlight = future;
     try {
       return await future;
     } finally {
-      if (identical(_ensureSessionInFlight, future)) {
+      if (_isCurrent(openGen) && identical(_ensureSessionInFlight, future)) {
         _ensureSessionInFlight = null;
       }
     }
   }
 
-  Future<String> _createSession(String cwd) async {
+  Future<String?> _createSession(String cwd, int openGen) async {
     final sessionId = await api.createSession(cwd, model: selectedModel);
+    if (!_isCurrent(openGen)) return null;
     activeSessionId = sessionId;
     _notify();
     return sessionId;
@@ -1036,11 +1180,10 @@ class ChatController extends ChangeNotifier {
   /// Reads the current thinking level from the server state.
   Future<void> loadThinkingLevel() async {
     final id = activeSessionId;
-    if (id == null) return;
+    if (_disposed || id == null) return;
+    final openGen = _openGeneration;
     final state = await api.getAgentState(id);
-    if (_disposed || state == null) return;
-    // Ignore stale responses after a quick session switch.
-    if (id != activeSessionId) return;
+    if (!_isCurrent(openGen) || state == null) return;
     final raw = state['state'] is Map
         ? (state['state'] as Map)['thinkingLevel']
         : null;
@@ -1052,17 +1195,20 @@ class ChatController extends ChangeNotifier {
 
   /// Sets the thinking level for the active session.
   Future<void> setThinkingLevel(String level) async {
-    if (!thinkingLevels.contains(level)) return;
+    if (_disposed || !thinkingLevels.contains(level)) return;
     final id = activeSessionId;
     if (id == null) return;
+    final openGen = _openGeneration;
     try {
       await api.sendAgentCommand(id, {
         'type': 'set_thinking_level',
         'level': level,
       });
+      if (!_isCurrent(openGen)) return;
       thinkingLevel = level;
       _notify();
     } catch (cause) {
+      if (!_isCurrent(openGen)) return;
       error = _errorText(cause);
       _notify();
     }
@@ -1077,12 +1223,13 @@ class ChatController extends ChangeNotifier {
   /// Loads the current collaboration mode for a session (or the global
   /// default when no session is active yet).
   Future<void> loadCollaborationMode({String? sessionId}) async {
+    if (_disposed) return;
+    final openGen = _openGeneration;
     final session = sessionId ?? activeSessionId;
     try {
       // Reuse the api's HTTP client via a raw GET.
       final response = await api.getRaw(_modesUri(session: session));
-      if (_disposed || response == null) return;
-      // Ignore stale responses after a quick session switch.
+      if (!_isCurrent(openGen) || response == null) return;
       if (session != null && session != activeSessionId) return;
       final raw = response['collaborationMode'];
       if (raw is String && const {'normal', 'plan', 'goal'}.contains(raw)) {
@@ -1098,11 +1245,15 @@ class ChatController extends ChangeNotifier {
   /// session (or global default when no session is active). Returns false on
   /// failure so callers can skip success toasts.
   Future<bool> setCollaborationMode(String mode) async {
-    if (!const {'normal', 'plan', 'goal'}.contains(mode)) return false;
+    if (_disposed || !const {'normal', 'plan', 'goal'}.contains(mode)) {
+      return false;
+    }
+    final openGen = _openGeneration;
     final session = activeSessionId;
     try {
       final uri = _modesUri(session: session);
       final ok = await api.putJson(uri, {'collaborationMode': mode});
+      if (!_isCurrent(openGen)) return false;
       if (!ok) {
         error = _tr('切换协作模式失败');
         _notify();
@@ -1112,6 +1263,7 @@ class ChatController extends ChangeNotifier {
       _notify();
       return true;
     } catch (cause) {
+      if (!_isCurrent(openGen)) return false;
       error = _errorText(cause);
       _notify();
       return false;
@@ -1124,24 +1276,28 @@ class ChatController extends ChangeNotifier {
   /// user has not sent anything yet). Mirrors the web client's goal flow.
   Future<bool> startGoal(String goalText) async {
     final text = goalText.trim();
-    if (text.isEmpty) return false;
+    if (_disposed || text.isEmpty) return false;
+    final openGen = _openGeneration;
     try {
-      final sessionId = await _ensureSession();
+      final sessionId = await _ensureSession(openGen);
+      if (!_isCurrent(openGen) || sessionId == null) return false;
       final data = await api.sendAgentCommand(sessionId, {
         'type': 'goal_start',
         'goalText': text,
       });
+      if (!_isCurrent(openGen)) return false;
       final state = data is Map ? data['goalState'] : null;
       if (state is Map) {
         _applyGoalState(Map<String, dynamic>.from(state));
       } else {
         goalStatus = 'running';
-        goalText = text;
+        this.goalText = text;
       }
       collaborationMode = 'goal';
       _notify();
       return true;
     } catch (cause) {
+      if (!_isCurrent(openGen)) return false;
       error = _errorText(cause);
       _notify();
       return false;
@@ -1154,15 +1310,18 @@ class ChatController extends ChangeNotifier {
 
   Future<void> _sendGoalCommand(String type) async {
     final id = activeSessionId;
-    if (id == null) return;
+    if (_disposed || id == null) return;
+    final openGen = _openGeneration;
     try {
       final data = await api.sendAgentCommand(id, {'type': type});
+      if (!_isCurrent(openGen)) return;
       final state = data is Map ? data['goalState'] : null;
       if (state is Map) {
         _applyGoalState(Map<String, dynamic>.from(state));
       }
       _notify();
     } catch (cause) {
+      if (!_isCurrent(openGen)) return;
       error = _errorText(cause);
       _notify();
     }
@@ -1218,10 +1377,12 @@ class ChatController extends ChangeNotifier {
 
   Future<void> stop() async {
     final id = activeSessionId;
-    if (id == null) return;
+    if (_disposed || id == null) return;
+    final openGen = _openGeneration;
     try {
       if (compacting) {
         await api.sendAgentCommand(id, {'type': 'abort_compaction'});
+        if (!_isCurrent(openGen)) return;
         compacting = false;
         running = false;
         status = null;
@@ -1231,6 +1392,7 @@ class ChatController extends ChangeNotifier {
         await api.abort(id);
       }
     } catch (cause) {
+      if (!_isCurrent(openGen)) return;
       error = _errorText(cause);
       _notify();
     }
@@ -1265,41 +1427,60 @@ class ChatController extends ChangeNotifier {
     _connected = null;
     final subscription = _eventSubscription;
     _eventSubscription = null;
-    await subscription?.cancel();
+    try {
+      await subscription?.cancel();
+    } catch (_) {
+      // The old stream is already invalidated; cleanup cannot affect a new view.
+    }
   }
 
-  Future<void> _connectEvents(String sessionId) async {
+  Future<bool> _connectEvents(String sessionId, int openGen) async {
+    if (!_isCurrent(openGen) || activeSessionId != sessionId) return false;
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    // Reserve ownership BEFORE awaiting cancellation. Otherwise an old connect
+    // can resume after a session switch and invalidate the new session's SSE.
+    final generation = ++_streamGeneration;
+    bool isCurrent() =>
+        _isCurrent(openGen) &&
+        activeSessionId == sessionId &&
+        generation == _streamGeneration;
+    final pending = _connected;
+    if (pending != null && !pending.isCompleted) pending.complete();
+    final connected = Completer<void>();
+    _connected = connected;
     final oldSubscription = _eventSubscription;
     _eventSubscription = null;
     await oldSubscription?.cancel();
+    if (!isCurrent()) return false;
 
-    final generation = ++_streamGeneration;
-    final connected = Completer<void>();
-    _connected = connected;
     final stream = await api.events(sessionId);
-    if (_disposed || generation != _streamGeneration) {
-      // A newer connect/close took over while the HTTP request was in flight.
-      // Drain the stream so the underlying socket is released instead of
-      // leaking until the server times out.
-      stream.drain<void>().catchError((Object _) {});
-      return;
+    if (!isCurrent()) {
+      // SSE may never end: drain would keep the obsolete socket alive forever.
+      // Subscribe only to cancel it, without forwarding any stale events.
+      unawaited(
+        stream
+            .listen(null, onError: (Object _) {})
+            .cancel()
+            .catchError((Object _) {}),
+      );
+      return false;
     }
     _eventSubscription = stream.listen(
       (event) {
-        if (generation == _streamGeneration) _handleEvent(event);
+        if (isCurrent()) _handleEvent(event);
       },
       onError: (Object cause) {
-        if (generation != _streamGeneration) return;
+        if (!isCurrent()) return;
         if (!connected.isCompleted) connected.completeError(cause);
-        _recoverEventStream(sessionId, generation);
+        _recoverEventStream(sessionId, openGen, generation);
       },
       onDone: () {
-        if (generation != _streamGeneration) return;
+        if (!isCurrent()) return;
         if (!connected.isCompleted) {
           connected.completeError(PiApiException(_tr('事件流意外断开')));
         }
-        _recoverEventStream(sessionId, generation);
+        _recoverEventStream(sessionId, openGen, generation);
       },
       cancelOnError: false,
     );
@@ -1307,15 +1488,20 @@ class ChatController extends ChangeNotifier {
       const Duration(seconds: 5),
       onTimeout: () {},
     );
-    if (!_disposed && generation == _streamGeneration) {
-      _reconnectAttempts = 0;
-      status = null;
-      _notify();
-    }
+    if (!isCurrent()) return false;
+    _reconnectAttempts = 0;
+    status = null;
+    _notify();
+    return true;
   }
 
-  void _recoverEventStream(String sessionId, int generation) {
-    if (_disposed || generation != _streamGeneration || !running) return;
+  void _recoverEventStream(String sessionId, int openGen, int generation) {
+    if (!_isCurrent(openGen) ||
+        activeSessionId != sessionId ||
+        generation != _streamGeneration ||
+        !running) {
+      return;
+    }
     // Give up after a bounded number of retries; a server that stays down
     // should not keep the app polling every few seconds forever.
     if (_reconnectAttempts >= 6) {
@@ -1334,13 +1520,17 @@ class ChatController extends ChangeNotifier {
     final delaySeconds = (1 << _reconnectAttempts.clamp(0, 3));
     _reconnectAttempts += 1;
     _reconnectTimer = Timer(Duration(seconds: delaySeconds), () async {
-      if (_disposed || activeSessionId != sessionId || !running) return;
+      if (!_isCurrent(openGen) ||
+          activeSessionId != sessionId ||
+          generation != _streamGeneration ||
+          !running) {
+        return;
+      }
+      final reconnectGeneration = _streamGeneration + 1;
       try {
-        await _connectEvents(sessionId);
+        await _connectEvents(sessionId, openGen);
       } catch (_) {
-        if (!_disposed && running) {
-          _recoverEventStream(sessionId, _streamGeneration);
-        }
+        _recoverEventStream(sessionId, openGen, reconnectGeneration);
       }
     });
   }
@@ -1506,9 +1696,10 @@ class ChatController extends ChangeNotifier {
   /// so concurrent callers (prompt_done + agent_settled + reconcile) do not
   /// fire overlapping requests or race on `messages`/`sessions`.
   Future<void> _refreshRunSnapshot() async {
-    if (_snapshotInFlight) return;
+    if (_disposed || _snapshotInFlight) return;
     final id = activeSessionId;
     if (id == null) return;
+    final openGen = _openGeneration;
     _snapshotInFlight = true;
     try {
       // Refresh the conversation and the session list in parallel; neither
@@ -1520,7 +1711,7 @@ class ChatController extends ChangeNotifier {
       // The user may have switched sessions or disposed the controller while
       // these requests were in flight; never let a stale snapshot clobber
       // the active conversation.
-      if (_disposed || id != activeSessionId) return;
+      if (!_isCurrent(openGen) || id != activeSessionId) return;
       final snapshot = results[0] as SessionSnapshot;
       messages
         ..clear()
@@ -1538,12 +1729,12 @@ class ChatController extends ChangeNotifier {
         ..addAll(loaded);
       selectedSession = sessions.where((item) => item.id == id).firstOrNull;
     } catch (cause) {
-      if (_disposed) return;
+      if (!_isCurrent(openGen)) return;
       error ??= _errorText(cause);
     } finally {
-      _snapshotInFlight = false;
+      if (_isCurrent(openGen)) _snapshotInFlight = false;
     }
-    if (!_disposed) notifyListeners();
+    if (_isCurrent(openGen)) _notify();
   }
 
   String _errorText(Object value) {
@@ -1571,12 +1762,11 @@ class ChatController extends ChangeNotifier {
     _stopReconcileTimer();
     _disposeStreamThrottle();
     stopTasksPolling();
-    // Invalidate any in-flight event stream so late callbacks (onDone, timer
-    // retries) are discarded instead of touching disposed state.
-    _streamGeneration += 1;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-    _eventSubscription?.cancel();
+    // Invalidate creation, HTTP callbacks and SSE handshakes together. Closing
+    // also releases pending handshake waiters instead of leaving a 5s timeout.
+    _openGeneration += 1;
+    _ensureSessionInFlight = null;
+    unawaited(_closeEvents());
     api.close();
     super.dispose();
   }

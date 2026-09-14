@@ -417,7 +417,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [loading, error]);
   // NOTE: item keys are passed to VirtualizedMessageList as a plain prop array
   // rendered in the same commit — NOT via a ref read inside getItemKey. A
   // ref-backed callback lets an interrupted/concurrent render publish keys for
@@ -1089,18 +1089,36 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     // Subagent runs render as their own persistent rows instead
                     // of collapsing into the process card.
                     splitProcessSegments(liveProcessBlocks).forEach((segment, segmentIdx) => {
+                      const segmentRefIdx = visibleRefIndexByMessage.get(segment.blocks[0].origin.sourceMessageIndex) ?? processRefIdx;
                       if (segment.kind === "subagent" && segment.subagent) {
                         pushRendered(
                           <SubagentRunRow key={subagentItemKey(segment.subagent.toolCallId)} run={segment.subagent} onOpenSubagent={onOpenSubagent} sessionRun={subagentRuns?.get(subagentSessionId(segment.subagent))} />,
-                          processRefIdx,
+                          segmentRefIdx,
                           subagentItemKey(segment.subagent.toolCallId),
+                        );
+                        return;
+                      }
+                      if (segment.kind === "output") {
+                        const firstBlock = segment.blocks[0];
+                        const outputRefIdx = visibleRefIndexByMessage.get(firstBlock.origin.sourceMessageIndex);
+                        pushRendered(
+                          <MessageView
+                            message={{ role: "assistant", provider: "", model: "", content: segment.blocks as AssistantMessage["content"] }}
+                            isStreaming={firstBlock.origin.sourceMessageIndex === messages.length}
+                            cwd={messageCwd}
+                            onOpenFile={onOpenFile}
+                            onQuoteReply={handleQuoteReply}
+                            onOpenSession={onOpenSession}
+                          />,
+                          outputRefIdx,
+                          `output-${firstBlock.id}`,
                         );
                         return;
                       }
                       pushRendered(
                         <div
                           key={liveProcessSegmentKey(userIdx, segmentIdx)}
-                          ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
+                          ref={segmentRefIdx === undefined ? undefined : (el) => { messageRefs.current[segmentRefIdx] = el; }}
                         >
                           <ProcessGroup
                             blocks={segment.blocks}
@@ -1111,7 +1129,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                             tokenRate={tokenRate}
                           />
                         </div>,
-                        processRefIdx,
+                        segmentRefIdx,
                         liveProcessSegmentKey(userIdx, segmentIdx),
                       );
                     });
@@ -1164,18 +1182,34 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   // Subagent runs are hoisted out of the collapsed group so
                   // each is a persistent row of its own.
                   item.processSegments.forEach((segment, segmentIdx) => {
+                    const segmentRefIdx = visibleRefIndexByMessage.get(segment.blocks[0].origin.sourceMessageIndex) ?? processRefIdx;
                     if (segment.kind === "subagent" && segment.subagent) {
                       pushRendered(
                         <SubagentRunRow key={subagentItemKey(segment.subagent.toolCallId)} run={segment.subagent} onOpenSubagent={onOpenSubagent} sessionRun={subagentRuns?.get(subagentSessionId(segment.subagent))} />,
-                        processRefIdx,
+                        segmentRefIdx,
                         subagentItemKey(segment.subagent.toolCallId),
+                      );
+                      return;
+                    }
+                    if (segment.kind === "output") {
+                      const firstBlock = segment.blocks[0];
+                      pushRendered(
+                        <MessageView
+                          message={{ role: "assistant", provider: "", model: "", content: segment.blocks as AssistantMessage["content"] }}
+                          cwd={messageCwd}
+                          onOpenFile={onOpenFile}
+                          onQuoteReply={handleQuoteReply}
+                          onOpenSession={onOpenSession}
+                        />,
+                        visibleRefIndexByMessage.get(firstBlock.origin.sourceMessageIndex),
+                        `output-${firstBlock.id}`,
                       );
                       return;
                     }
                     pushRendered(
                       <div
                         key={`process-group-${userIdx}-${segmentIdx}`}
-                        ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
+                        ref={segmentRefIdx === undefined ? undefined : (el) => { messageRefs.current[segmentRefIdx] = el; }}
                       >
                         <ProcessGroup
                           blocks={segment.blocks}
@@ -1189,7 +1223,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                           sessionId={session?.id ?? sessionIdRef.current ?? undefined}
                         />
                       </div>,
-                      processRefIdx,
+                      segmentRefIdx,
                       processSegmentKey(userIdx, segmentIdx, segment.blocks[0]?.id ?? ""),
                     );
                   });

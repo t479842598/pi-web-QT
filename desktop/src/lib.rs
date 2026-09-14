@@ -28,9 +28,18 @@ pub struct AppState {
     pub local_child: Mutex<Option<std::process::Child>>,
     /// 主窗口（服务器窗口）注册表：server_id -> window label
     pub server_windows: Mutex<HashMap<String, String>>,
+    /// Native-authorized navigation origin for each server WebView.
+    #[cfg(not(mobile))]
+    pub(crate) server_navigation: Mutex<HashMap<String, std::sync::Arc<Mutex<window::ServerNavigation>>>>,
     /// 托盘图标句柄（重建菜单时需要；移动端无托盘）
     #[cfg(not(mobile))]
     pub tray: Mutex<Option<tauri::tray::TrayIcon>>,
+}
+
+// Generate once: macOS embeds a single Info.plist symbol. Tests inspect this
+// context's real resolved ACL without constructing an app or starting a WebView.
+fn app_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -60,6 +69,8 @@ pub fn run() {
         #[cfg(not(mobile))]
         local_child: Mutex::new(None),
         server_windows: Mutex::new(HashMap::new()),
+        #[cfg(not(mobile))]
+        server_navigation: Mutex::new(HashMap::new()),
         #[cfg(not(mobile))]
         tray: Mutex::new(None),
     });
@@ -117,6 +128,7 @@ pub fn run() {
                 let state = window.app_handle().state::<AppState>();
                 let label = window.label().to_string();
                 state.server_windows.lock().unwrap().retain(|_, l| *l != label);
+                state.server_navigation.lock().unwrap().remove(&label);
             }
             #[cfg(mobile)]
             let _ = (window, event);
@@ -150,7 +162,9 @@ pub fn run() {
                                 .find_map(|l| app.get_webview_window(l))
                         });
                     if let Some(w) = target {
-                        let _ = w.navigate(url);
+                        if window::navigate_server(app, &w, url).is_err() {
+                            return;
+                        }
                         let _ = w.set_title(&srv.name);
                         // 同步注册表：该窗口现在展示 sid 服务器（否则重复建窗/聚焦错乱）
                         app.state::<AppState>()
@@ -169,7 +183,7 @@ pub fn run() {
     });
 
     let app = builder
-        .build(tauri::generate_context!())
+        .build(app_context())
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {

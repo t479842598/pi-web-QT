@@ -14,7 +14,7 @@ import type {
 import { normalizeToolCalls } from "@/lib/normalize";
 import { extractSubject } from "@/lib/permission";
 import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
-import { sendAgentCommand } from "@/lib/agent-client";
+import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
 import { getToolNamesForPreset, PRESET_PLAN, type ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionFileStats } from "@/lib/session-stats";
@@ -482,6 +482,7 @@ export interface ChatInputHandle {
   prependText: (text: string) => void;
   addImages: (files: File[]) => void;
   replaceMessage?: (message: import("@/lib/types").UserMessage) => void;
+  restoreSubmission?: (message: import("@/lib/types").UserMessage) => void;
   addFiles?: (files: File[], dataTransfer?: DataTransfer | null) => void;
   /** Current rendered height of the composer (px) — used for scroll keep-out. */
   measureHeight?: () => number;
@@ -2669,9 +2670,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to send message:", e);
       // A failed POST may still have reached the server. Preserve SSE and let
       // reconciliation settle it rather than hiding a real run.
-      if (promptRequestStarted && sentSessionId) {
+      if (promptRequestStarted && sentSessionId && !isPromptRejectedError(e)) {
         void waitForPromptSettlement(sentSessionId, promptRunId);
         return;
+      }
+      injectedModeSignatureRef.current = { sessionKey: "", signature: "" };
+      if (shouldStartGoal) {
+        goalTextRef.current = null;
+        goalLoopRunningRef.current = false;
+        setGoalState((prev) => ({ ...prev, status: "idle", goalText: null }));
       }
       rpcPromptPendingRef.current = false;
       closeEvents();
@@ -2698,7 +2705,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               : prev;
           });
         }
-        opts.chatInputRef?.current?.replaceMessage?.(userMsg as UserMessage);
+        const composer = opts.chatInputRef?.current;
+        if (composer?.restoreSubmission) composer.restoreSubmission(userMsg as UserMessage);
+        else composer?.replaceMessage?.(userMsg as UserMessage);
         addNotice({ type: "error", message: `Failed to send message: ${e instanceof Error ? e.message : String(e)}` });
       }
       optimisticUserMessageKeyRef.current = null;
@@ -2707,7 +2716,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, resetStreamUpdates]);
+  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, resetStreamUpdates, opts.chatInputRef]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;

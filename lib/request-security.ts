@@ -89,15 +89,11 @@ export function isApiRequestHostAllowed(
 }
 
 /**
- * Compare an Origin header against the request's own origin, tolerating the
- * one legitimate case where they differ: Chromium 150+ strips the port from
- * the Origin header for same-origin requests on non-default ports. Scheme and
- * hostname must always match; an explicit Origin port must match exactly. An
- * Origin WITHOUT a port is accepted on the hostname match alone, which keeps
- * legitimate Chromium requests working while still rejecting a same-host
- * service on a different port (its Origin carries that port).
+ * Retain the known port-omission compatibility only with browser-provided
+ * same-origin Fetch Metadata. A bare Origin can also mean a real service on
+ * port 80/443, so a hostname match alone must never authorize another port.
  */
-function originMatchesRequest(origin: string, requestOrigin: string): boolean {
+function originMatchesRequest(origin: string, requestOrigin: string, fetchSite: string | null): boolean {
   let originUrl: URL;
   let requestUrl: URL;
   try {
@@ -108,7 +104,7 @@ function originMatchesRequest(origin: string, requestOrigin: string): boolean {
   }
   if (originUrl.protocol !== requestUrl.protocol) return false;
   if (originUrl.hostname.toLowerCase() !== requestUrl.hostname.toLowerCase()) return false;
-  if (!originUrl.port) return true; // port stripped by Chromium → tolerate
+  if (!originUrl.port) return fetchSite === "same-origin";
   const requestPort = requestUrl.port || (requestUrl.protocol === "https:" ? "443" : "80");
   return originUrl.port === requestPort;
 }
@@ -147,7 +143,10 @@ export function isApiRequestOriginAllowed(request: Request): boolean {
   if (!origin) return true;
 
   const requestOrigin = getRequestOrigin(request);
-  if (requestOrigin !== null && (canonicalOrigin(origin) === requestOrigin || originMatchesRequest(origin, requestOrigin))) return true;
+  if (requestOrigin !== null && (
+    canonicalOrigin(origin) === requestOrigin
+    || originMatchesRequest(origin, requestOrigin, request.headers.get("sec-fetch-site"))
+  )) return true;
 
   return isProxyRewrittenSameOrigin(request, origin);
 }

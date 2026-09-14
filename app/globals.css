@@ -604,6 +604,13 @@ pre, code {
   content-visibility: auto;
   contain-intrinsic-size: auto 320px;
 }
+/* Mounted virtual rows need their actual content height, not a second
+   offscreen placeholder that can poison the list's size cache. */
+.virtualized-message-list .chat-user-message,
+.virtualized-message-list .chat-assistant-message {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
 .chat-assistant-meta {
   display: flex;
   align-items: center;

@@ -41,13 +41,12 @@ export function splitFinalAssistantBlocks(
   options: DisplayOptions = {},
 ): { answerBlocks: AssistantContentBlock[]; processBlocks: AssistantContentBlock[] } {
   const blocks = getDisplayableAssistantBlocks(message, options);
-  const lastProcessIndex = blocks.findLastIndex((block) => !isFinalAnswerBlock(block));
-  if (lastProcessIndex === -1) {
-    return { answerBlocks: blocks, processBlocks: [] };
-  }
+  const lastToolIndex = blocks.findLastIndex((block) => block.type === "toolCall");
+  // Providers may interleave reasoning and output; only a tool call makes
+  // preceding text an intermediate report rather than the final answer.
   return {
-    answerBlocks: blocks.slice(lastProcessIndex + 1),
-    processBlocks: blocks.slice(0, lastProcessIndex + 1),
+    answerBlocks: blocks.filter((block, index) => isFinalAnswerBlock(block) && index > lastToolIndex),
+    processBlocks: blocks.filter((block, index) => !isFinalAnswerBlock(block) || index <= lastToolIndex),
   };
 }
 

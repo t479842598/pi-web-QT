@@ -5,7 +5,7 @@ import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, Slas
 import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
 import type { SnippetItem } from "@/lib/snippet-store";
-import { clearDraft, getDraft, setDraft, type ChatDraftImage, type ChatDraftPastedBlock } from "@/lib/draft-store";
+import { clearDraft, getDraft, isDraftImageWithinLimits, mergeRestoredSubmissionDraft, setDraft, type ChatDraftImage, type ChatDraftPastedBlock } from "@/lib/draft-store";
 import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
 import {
   isBase64ImageWithinLimits,
@@ -130,6 +130,7 @@ export interface ChatInputHandle {
   insertText: (text: string) => void;
   insertIfEmpty: (text: string) => void;
   replaceMessage: (message: UserMessage) => void;
+  restoreSubmission: (message: UserMessage) => void;
   prependText: (text: string) => void;
   addImages: (files: File[]) => void;
   addFiles: (files: File[], dataTransfer?: DataTransfer | null) => void;
@@ -488,9 +489,9 @@ function draftImageToAttachedImage(image: ChatDraftImage): AttachedImage {
   };
 }
 
-function draftImagesToAttachedImages(images: ChatDraftImage[] | undefined): AttachedImage[] {
+export function draftImagesToAttachedImages(images: ChatDraftImage[] | undefined): AttachedImage[] {
   return (images ?? [])
-    .filter(isBase64ImageWithinLimits)
+    .filter(isDraftImageWithinLimits)
     .slice(0, MAX_ATTACHED_IMAGES)
     .map(draftImageToAttachedImage);
 }
@@ -773,6 +774,26 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         ta.style.height = "auto";
         ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
       });
+    },
+    restoreSubmission(message: UserMessage) {
+      const restored = mergeRestoredSubmissionDraft(
+        getUserMessageText(message),
+        getUserMessageDraftImages(message),
+        textareaRef.current?.value ?? valueRef.current,
+        attachedImagesRef.current.map(imageToDraftImage),
+        undefined,
+        pastedBlocksRef.current,
+      );
+      valueRef.current = restored.value;
+      pastedBlocksRef.current = restored.pastedBlocks ?? [];
+      const restoredImages = draftImagesToAttachedImages(restored.images);
+      attachedImagesRef.current.forEach(revokeImagePreview);
+      attachedImagesRef.current = restoredImages;
+      setValue(restored.value);
+      setPastedBlocks(restored.pastedBlocks ?? []);
+      setAttachedImages(restoredImages);
+      setAtQuery(null);
+      if (draftKeyRef.current) setDraft(draftKeyRef.current, restored);
     },
     prependText(text: string) {
       if (!text.trim()) return;

@@ -77,6 +77,145 @@ fn basic_auth_header_none_without_password() {
     assert!(proxy::basic_auth_value(&s).is_none());
 }
 
+#[test]
+fn server_address_updates_bind_saved_password_to_origin() {
+    for address in [
+        "https://other.example.test",
+        "http://pi.example.test",
+        "https://pi.example.test:444",
+    ] {
+        let mut s = server("https://pi.example.test", Some("old-fixture-password"), false);
+        s.update_connection(address, "pi", "").unwrap();
+        assert_eq!(s.password(), None, "cross-origin update must clear credentials: {address}");
+        assert!(!s.has_password);
+    }
+    let mut s = server("https://pi.example.test/base", Some("old-fixture-password"), false);
+    s.update_connection("https://PI.EXAMPLE.TEST:443/other", "pi", "").unwrap();
+    assert_eq!(s.password().as_deref(), Some("old-fixture-password"));
+    s.update_connection("https://other.example.test", "new-user", "new-fixture-password").unwrap();
+    assert_eq!(s.password().as_deref(), Some("new-fixture-password"));
+    assert_eq!(s.username, "new-user");
+}
+
+#[test]
+fn server_addresses_require_http_without_userinfo() {
+    for invalid in [
+        "", "not a URL", "file:///tmp/config", "tauri://localhost/index.html",
+        "javascript:alert(1)", "ftp://example.test", "https://user:pw@example.test",
+        "http://user@example.test", "http://@example.test", "http://:pw@example.test",
+        "http://example.test\\\\@other.test", "http://example.test\n/path",
+    ] {
+        let mut s = server("https://pi.example.test", Some("fixture-password"), false);
+        assert!(s.update_connection(invalid, "pi", "").is_err(), "accepted {invalid:?}");
+        assert_eq!(s.base_url, "https://pi.example.test");
+        assert_eq!(s.password().as_deref(), Some("fixture-password"));
+        assert!(proxy::upstream_parts(invalid).is_none(), "proxy accepted {invalid:?}");
+    }
+    for valid in ["http://localhost:30141", "https://example.test", "http://[::1]:30141"] {
+        let mut s = server("https://pi.example.test", None, false);
+        assert!(s.update_connection(valid, "", "").is_ok());
+        assert_eq!(s.username, "pi");
+    }
+}
+
+#[test]
+fn desktop_server_navigation_only_allows_the_authorized_origin() {
+    use window::{NavigationAction, ServerNavigation};
+    let parse = |raw: &str| url::Url::parse(raw).unwrap();
+    let mut navigation = ServerNavigation::default();
+    for startup in ["tauri://localhost/index.html", "http://tauri.localhost/loading.html"] {
+        assert_eq!(navigation.check(&parse(startup)), NavigationAction::Allow);
+    }
+    navigation.authorize(&parse("http://127.0.0.1:39001/?piweb_connected=1")).unwrap();
+    assert_eq!(navigation.check(&parse("http://127.0.0.1:39001/")), NavigationAction::Allow);
+    assert_eq!(navigation.check(&parse("piweb-switch://manage")), NavigationAction::OpenConnect);
+    for forbidden in [
+        "piweb-switch://other-server-id", "piweb-switch://local", "piweb-switch://manage?server=other",
+        "http://127.0.0.1:39002/", "http://localhost:39001/", "https://example.test/",
+        "tauri://localhost/index.html", "http://tauri.localhost/index.html",
+        "http://pi:pw@127.0.0.1:39001/", "data:text/html,test", "javascript:alert(1)",
+    ] {
+        assert_eq!(navigation.check(&parse(forbidden)), NavigationAction::Block, "accepted {forbidden}");
+    }
+    // A native menu / trusted local connection command explicitly authorizes a new target.
+    navigation.authorize(&parse("https://example.test/")).unwrap();
+    assert_eq!(navigation.check(&parse("https://example.test/login")), NavigationAction::Allow);
+    assert_eq!(navigation.check(&parse("http://127.0.0.1:39001/")), NavigationAction::Block);
+}
+
+#[test]
+fn desktop_capabilities_keep_management_local_and_startup_working() {
+    use tauri::utils::acl::capability::CapabilityFile;
+    let mut local_permissions = std::collections::HashMap::<String, Vec<String>>::new();
+    for entry in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/capabilities")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|v| v.to_str()) != Some("json") { continue; }
+        let file = CapabilityFile::load(path).unwrap();
+        let capabilities = match file {
+            CapabilityFile::Capability(c) => vec![c],
+            CapabilityFile::List(list) | CapabilityFile::NamedList { capabilities: list } => list,
+        };
+        for capability in capabilities {
+            let permissions: Vec<String> = capability.permissions.iter()
+                .map(|permission| permission.identifier().get().to_string()).collect();
+            if capability.remote.is_some() {
+                for permission in &permissions {
+                    assert!([
+                        "core:window:allow-minimize", "core:window:allow-maximize",
+                        "core:window:allow-unmaximize", "core:window:allow-toggle-maximize",
+                        "core:window:allow-is-maximized", "core:window:allow-start-dragging",
+                        "core:window:allow-close", "core:window:allow-set-focus",
+                        "allow-open-connect", "allow-set-ui-theme",
+                    ].contains(&permission.as_str()), "remote capability grants {permission}");
+                }
+            } else if capability.local {
+                for label in capability.windows {
+                    local_permissions.entry(label).or_default().extend(permissions.clone());
+                }
+            }
+        }
+    }
+    for permission in ["allow-list-servers", "allow-save-server", "allow-remove-server", "allow-connect-server", "allow-set-local-password", "allow-start-local", "allow-stop-local"] {
+        assert!(local_permissions["connect"].iter().any(|p| p == permission), "connection page lost {permission}");
+    }
+    for permission in ["allow-retry-startup", "allow-open-connect"] {
+        assert!(local_permissions["server-*"].iter().any(|p| p == permission), "startup lost {permission}");
+    }
+    let source = include_str!("window.rs");
+    assert!(!source.contains("w.eval(MANAGER_JS)"), "never inject management forms into remote content");
+    assert!(source.contains("open_connect_window(&app_inner)"));
+    assert!(source.contains("WebviewUrl::App(start_page.into())"), "keep Windows two-stage startup");
+    assert!(source.contains("--disable-gpu"), "keep Windows software-rendering workaround");
+}
+
+#[test]
+fn desktop_runtime_acl_denies_management_to_all_remote_pages() {
+    use tauri::ipc::Origin;
+    let mut context = crate::app_context();
+    let authority = context.runtime_authority_mut();
+    let management = [
+        "list_servers", "save_server", "remove_server", "probe_local", "start_local",
+        "ensure_local_server", "set_local_password", "set_local_domain", "connect_server",
+        "retry_startup", "quit_app", "stop_local",
+    ];
+    for command in management {
+        assert!(authority.resolve_access(command, "connect", "connect", &Origin::Local).is_some(), "local connection page lost {command}");
+        for address in ["https://remote.example.test/", "http://127.0.0.1:39001/", "http://localhost:39001/manager/"] {
+            let remote = Origin::Remote { url: url::Url::parse(address).unwrap() };
+            for label in ["connect", "server-fixture"] {
+                assert!(authority.resolve_access(command, label, label, &remote).is_none(), "remote {address} can invoke {command} on {label}");
+            }
+        }
+    }
+    for command in ["retry_startup", "open_connect"] {
+        assert!(authority.resolve_access(command, "server-local", "server-local", &Origin::Local).is_some());
+    }
+    for command in ["open_connect", "set_ui_theme", "plugin:window|minimize", "plugin:window|start_dragging"] {
+        let remote = Origin::Remote { url: url::Url::parse("http://127.0.0.1:39001/").unwrap() };
+        assert!(authority.resolve_access(command, "server-fixture", "server-fixture", &remote).is_some(), "remote window lost {command}");
+    }
+}
+
 /* ---------------- 本地反向代理（proxy.rs） ---------------- */
 
 #[test]
@@ -229,6 +368,204 @@ fn proxy_end_to_end_forwards_with_auth() {
     assert_eq!(String::from_utf8(decoded).unwrap(), "pi:secret");
     assert_eq!(host, format!("127.0.0.1:{upstream_port}"));
     assert_eq!(origin, format!("http://127.0.0.1:{upstream_port}"));
+}
+
+#[test]
+fn proxy_origin_change_retires_old_port_before_forwarding_new_credentials() {
+    use std::sync::{Arc, Mutex, mpsc};
+    use std::time::Duration;
+    let make_upstream = || {
+        let upstream = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = upstream.server_addr().to_ip().unwrap().port();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            for req in upstream.incoming_requests() {
+                let auth = req.headers().iter().find(|h| h.field.equiv("authorization"))
+                    .map(|h| h.value.as_str().to_string()).unwrap_or_default();
+                let _ = tx.send(auth);
+                let _ = req.respond(tiny_http::Response::from_string("fixture-ok"));
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), rx)
+    };
+    let (a, received_a) = make_upstream();
+    let (b, received_b) = make_upstream();
+    let mut srv = server(&a, Some("fixture-a"), false);
+    let live = Arc::new(Mutex::new(srv.clone()));
+    let proxies = proxy::ProxyMap::default();
+    let loader = || {
+        let live = live.clone();
+        move || Some(live.lock().unwrap().clone())
+    };
+    let old_port = proxy::ensure_proxy_for_server(&proxies, &mut srv, loader()).unwrap();
+    *live.lock().unwrap() = srv.clone();
+    assert_eq!(proxy::ensure_proxy_for_server(&proxies, &mut srv, loader()).unwrap(), old_port);
+    let request = |port| {
+        match ureq::get(&format!("http://127.0.0.1:{port}/api/fixture"))
+            .timeout(Duration::from_secs(3)).call() {
+            Ok(r) | Err(ureq::Error::Status(_, r)) => r,
+            Err(e) => panic!("fixture request: {e}"),
+        }
+    };
+    assert_eq!(request(old_port).status(), 200);
+    received_a.recv_timeout(Duration::from_secs(3)).unwrap();
+    srv.update_connection(&b, "pi", "").unwrap();
+    assert_eq!(srv.proxy_port, None, "changed origin must not retain browser storage identity");
+    srv.set_password("fixture-b");
+    *live.lock().unwrap() = srv.clone();
+    assert_eq!(request(old_port).status(), 403);
+    assert!(received_b.try_recv().is_err(), "old document/service worker reached the new server");
+    let new_port = proxy::ensure_proxy_for_server(&proxies, &mut srv, loader()).unwrap();
+    *live.lock().unwrap() = srv.clone();
+    assert_ne!(new_port, old_port);
+    assert_eq!(request(new_port).status(), 200);
+    use base64::Engine;
+    assert_eq!(received_b.recv_timeout(Duration::from_secs(3)).unwrap(),
+        format!("Basic {}", base64::engine::general_purpose::STANDARD.encode("pi:fixture-b")));
+    assert_eq!(request(old_port).status(), 403);
+    // Returning to the original origin must not resurrect the retired proxy.
+    srv.update_connection(&a, "pi", "fixture-a-new").unwrap();
+    *live.lock().unwrap() = srv;
+    assert_eq!(request(old_port).status(), 403);
+}
+
+#[test]
+fn proxy_basic_auth_does_not_share_browser_cookies_between_servers() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+    for name in ["fixture-a", "fixture-b"] {
+        let upstream = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let upstream_port = upstream.server_addr().to_ip().unwrap().port();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            for req in upstream.incoming_requests() {
+                let cookies: Vec<_> = req.headers().iter()
+                    .filter(|h| h.field.equiv("cookie") || h.field.equiv("cookie2"))
+                    .map(|h| h.value.as_str().to_string()).collect();
+                let _ = tx.send(cookies);
+                let response = tiny_http::Response::from_string("fixture-ok")
+                    .with_header(tiny_http::Header::from_bytes("Set-Cookie", "pi_web_session=fixture-secret; Path=/; HttpOnly").unwrap())
+                    .with_header(tiny_http::Header::from_bytes("Set-Cookie", "other_session=fixture-other; Path=/").unwrap());
+                let _ = req.respond(response);
+            }
+        });
+        let srv = server(&format!("http://127.0.0.1:{upstream_port}"), Some(name), false);
+        let port = proxy::spawn_proxy(move || Some(srv.clone())).unwrap();
+        for _ in 0..2 {
+            let response = ureq::get(&format!("http://127.0.0.1:{port}/api/fixture"))
+                .set("Cookie", "pi_web_session=other-server-secret; arbitrary_token=private")
+                .set("Cookie2", "$Version=1; legacy_token=private")
+                .timeout(Duration::from_secs(3)).call().unwrap();
+            assert_eq!(response.status(), 200);
+            assert!(response.header("set-cookie").is_none(), "upstream cookies reached shared browser jar");
+            assert!(rx.recv_timeout(Duration::from_secs(3)).unwrap().is_empty(), "browser cookies reached upstream");
+        }
+    }
+}
+
+#[test]
+fn proxy_rejects_foreign_origins_before_loading_credentials_or_forwarding() {
+    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    use std::time::Duration;
+    let upstream = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let upstream_port = upstream.server_addr().to_ip().unwrap().port();
+    let forwarded = Arc::new(AtomicUsize::new(0));
+    let counter = forwarded.clone();
+    std::thread::spawn(move || {
+        for req in upstream.incoming_requests() {
+            counter.fetch_add(1, Ordering::SeqCst);
+            let _ = req.respond(tiny_http::Response::from_string("fixture-upstream"));
+        }
+    });
+    let loaded = Arc::new(AtomicUsize::new(0));
+    let loader_counter = loaded.clone();
+    let srv = server(&format!("http://127.0.0.1:{upstream_port}"), Some("fixture-password"), false);
+    let port = proxy::spawn_proxy(move || {
+        loader_counter.fetch_add(1, Ordering::SeqCst);
+        Some(srv.clone())
+    }).unwrap();
+    // Binding snapshots the upstream once; rejected requests must never reload it.
+    let initial_loads = loaded.load(Ordering::SeqCst);
+    let origin = format!("http://127.0.0.1:{port}");
+    let wrong_port = if port == 65535 { port - 1 } else { port + 1 };
+    let invalid_headers = vec![
+        vec![("Origin", format!("http://127.0.0.1:{wrong_port}")), ("Sec-Fetch-Site", "same-site".into())],
+        vec![("Origin", "http://127.0.0.1".into())],
+        vec![("Origin", "http://127.0.0.1".into()), ("Sec-Fetch-Site", "same-site".into())],
+        vec![("Origin", format!("http://127.0.0.1:{wrong_port}")), ("Sec-Fetch-Site", "same-origin".into())],
+        vec![("Origin", "null".into())],
+        vec![("Origin", "https://untrusted.example.test".into())],
+        vec![("Origin", format!("http://pi:pw@127.0.0.1:{port}"))],
+        vec![("Origin", format!("https://127.0.0.1:{port}"))],
+        vec![("Origin", format!("http://localhost:{port}"))],
+        vec![("Origin", format!("{origin}/unexpected-path"))],
+        vec![("Sec-Fetch-Site", "same-site".into())],
+        vec![("Sec-Fetch-Site", "cross-site".into())],
+        vec![("Origin", origin.clone()), ("Sec-Fetch-Site", "same-site".into())],
+        vec![("Host", format!("127.0.0.1:{wrong_port}")), ("Origin", origin.clone())],
+        vec![("Host", "untrusted.example.test".into())],
+    ];
+    for headers in invalid_headers {
+        for method in ["GET", "POST"] {
+            let mut req = ureq::request(method, &format!("{origin}/api/fixture"))
+                .timeout(Duration::from_secs(3));
+            for (name, value) in &headers { req = req.set(name, value); }
+            let response = match req.call() {
+                Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+                Err(error) => panic!("fixture request failed: {error}"),
+            };
+            assert_eq!(response.status(), 403, "{method} {headers:?}");
+            assert_eq!(loaded.load(Ordering::SeqCst), initial_loads, "rejected request loaded credentials");
+            assert_eq!(forwarded.load(Ordering::SeqCst), 0, "rejected request reached upstream");
+        }
+    }
+}
+
+#[test]
+fn proxy_allows_navigation_scripts_and_same_origin_posts() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+    let upstream = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let upstream_port = upstream.server_addr().to_ip().unwrap().port();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for mut req in upstream.incoming_requests() {
+            let auth = req.headers().iter().find(|h| h.field.equiv("authorization"))
+                .map(|h| h.value.as_str().to_string()).unwrap_or_default();
+            let origin = req.headers().iter().find(|h| h.field.equiv("origin"))
+                .map(|h| h.value.as_str().to_string()).unwrap_or_default();
+            let mut body = String::new();
+            req.as_reader().read_to_string(&mut body).unwrap();
+            tx.send((auth, origin, body)).unwrap();
+            let _ = req.respond(tiny_http::Response::from_string("fixture-ok"));
+        }
+    });
+    let srv = server(&format!("http://127.0.0.1:{upstream_port}"), Some("fixture-password"), false);
+    let port = proxy::spawn_proxy(move || Some(srv.clone())).unwrap();
+    let origin = format!("http://127.0.0.1:{port}");
+    let cases = [
+        ("GET", vec![("Sec-Fetch-Site", "none"), ("Sec-Fetch-Mode", "navigate"), ("Sec-Fetch-Dest", "document")]),
+        ("GET", vec![]),
+        ("POST", vec![]),
+        ("POST", vec![("Origin", origin.as_str()), ("Sec-Fetch-Site", "same-origin")]),
+        ("POST", vec![("Origin", origin.as_str())]),
+        ("POST", vec![("Origin", "http://127.0.0.1"), ("Sec-Fetch-Site", "same-origin")]),
+        ("GET", vec![("Sec-Fetch-Site", "same-origin"), ("Accept", "text/event-stream")]),
+    ];
+    for (method, headers) in cases {
+        let mut req = ureq::request(method, &format!("{origin}/api/fixture"))
+            .timeout(Duration::from_secs(3));
+        for (name, value) in headers { req = req.set(name, value); }
+        let payload = if method == "POST" { "fixture-body" } else { "" };
+        let response = req.send_string(payload).unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.into_string().unwrap(), "fixture-ok");
+        let (auth, forwarded_origin, body) = rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        use base64::Engine;
+        assert_eq!(auth, format!("Basic {}", base64::engine::general_purpose::STANDARD.encode("pi:fixture-password")));
+        assert_eq!(forwarded_origin, format!("http://127.0.0.1:{upstream_port}"));
+        assert_eq!(body, payload);
+    }
 }
 
 /// 导航 401 → 200 + 友好 HTML（WebView2 避免 ERR_INVALID_AUTH_CREDENTIALS 白屏）；

@@ -32,7 +32,7 @@ import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-ty
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem, SessionEntry, SessionInfo, SessionMessageEntry } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS } from "./custom-ui-terminal";
 import { recordErrorLog } from "./error-log";
-import { GoalEngine, GOAL_CONTINUE_INSTRUCTION, loadGoalState, saveGoalState, type GoalRuntimeState } from "./goal-engine";
+import { GoalEngine, buildGoalContinuationPrompt, loadGoalState, saveGoalState, type GoalRuntimeState } from "./goal-engine";
 import { AsyncProcessManager } from "./async-bash";
 
 // ============================================================================
@@ -354,6 +354,9 @@ export class AgentSessionWrapper {
   private lastActivityAt = Date.now();
   private queueMirror: QueueEntry[] = [];
   private queueRecovery: QueueEntry[] = [];
+  private persistenceRevoked = false;
+  /** Detached from the SDK queue, durable until each user message is persisted. */
+  private queueBootstrap: { entries: QueueEntry[]; cancelled: boolean } | null = null;
   private pendingQueueHints: Record<QueueKind, QueueImage[][]> = { steer: [], followUp: [] };
   private queueMutationTail: Promise<void> = Promise.resolve();
   private onDestroyCallback: (() => void) | null = null;
@@ -486,7 +489,7 @@ export class AgentSessionWrapper {
   start(): void {
     this.installApprovalHook();
     this.goalEngine.setOnChanged((state) => {
-      if (this.sessionFile) saveGoalState(this.sessionFile, state);
+      if (this.sessionFile && !this.persistenceRevoked) saveGoalState(this.sessionFile, state);
       this.emit({ type: "goal_state_changed", goalState: state } as AgentEvent);
       broadcastSessionBusEvent("goal_state_changed", this.sessionId, {
         type: "goal_state_changed",
@@ -631,6 +634,11 @@ export class AgentSessionWrapper {
 
   /** Start the next goal turn when nothing else is running. */
   private tryDriveGoalContinuation(): void {
+    const lifecycle = getSessionLifecycle(this.sessionId);
+    if (!this._alive || this.isShuttingDown() || lifecycle.deleted || lifecycle.barriers > 0) {
+      this.cancelGoalContinuation();
+      return;
+    }
     if (!this.goalContinuationPending) return;
     if (!this.goalEngine.isRunning()) {
       this.goalContinuationPending = false;
@@ -673,7 +681,24 @@ export class AgentSessionWrapper {
           finish();
           return;
         }
-        await this.inner.prompt(GOAL_CONTINUE_INSTRUCTION);
+        // Read after admission: goal_edit may have changed the objective while
+        // another prompt held the lock.
+        const goalText = this.goalEngine.getState().goalText;
+        if (!this._alive || this.isShuttingDown() || !goalText) {
+          finish();
+          return;
+        }
+        assertSessionLifecycle(this.sessionId);
+        await this.inner.prompt(buildGoalContinuationPrompt(goalText), {
+          source: "rpc",
+          preflightResult: (success) => {
+            if (!success) return;
+            if (!this._alive || this.isShuttingDown() || !this.goalEngine.isRunning()) {
+              throw new DOMException("Goal continuation cancelled", "AbortError");
+            }
+            assertSessionLifecycle(this.sessionId);
+          },
+        });
         finish();
         this.emit({ type: "prompt_done" });
         // The turn that just ran may itself have requested another one; its
@@ -818,8 +843,8 @@ export class AgentSessionWrapper {
   }
 
   private persistQueue(): void {
-    if (!this.sessionFile) return;
-    const entries = [...this.queueRecovery, ...this.queueMirror];
+    if (!this.sessionFile || this.persistenceRevoked) return;
+    const entries = [...this.queueRecovery, ...(this.queueBootstrap?.entries ?? []), ...this.queueMirror];
     if (entries.length) saveQueue(this.sessionFile, entries); else removeQueue(this.sessionFile);
   }
 
@@ -903,6 +928,8 @@ export class AgentSessionWrapper {
     this.queueMutationTail = new Promise<void>((resolve) => { release = resolve; });
     await previous;
     try {
+      if (!this._alive || this.isShuttingDown()) throw new Error("Session is shutting down");
+      assertSessionLifecycle(this.sessionId);
       return await operation();
     } finally {
       release();
@@ -928,36 +955,130 @@ export class AgentSessionWrapper {
   }
 
   private runAgentContinue(): void {
-    if (this.inner.isStreaming || this.inner.isBashRunning || this.promptRunning) return;
+    if (!this._alive || this.isShuttingDown() || this.queueBootstrap || this.isRunning() || this.promptRunning) return;
     const entries = [...this.queueMirror];
     if (entries.length === 0) return;
+    // Called under withQueueMutation. Checkpoint the detached batch BEFORE
+    // clearQueue emits queue_update; reconciliation now owns only the live
+    // user queue and cannot erase these not-yet-accepted entries.
+    const batch = { entries, cancelled: false };
+    this.queueBootstrap = batch;
     this.queueMirror = [];
     this.persistQueue();
-    this.promptRunning = true;
-    this.promptPhase = "waiting_model";
-    void this.bootstrapQueuedRun(entries);
-  }
-
-  private async bootstrapQueuedRun(entries: QueueEntry[]): Promise<void> {
     this.inner.clearQueue();
     this.pendingQueueHints = { steer: [], followUp: [] };
-    for (const entry of entries) {
-      try {
-        await this.inner.prompt(entry.text, entry.images?.length ? { images: entry.images } : undefined);
-      } catch (error) {
-        this.promptRunning = false;
-        this.promptPhase = null;
-        this.resetIdleTimer();
+    this.pendingPromptCount += 1;
+    this.promptRunning = true;
+    this.promptPhase = "waiting_model";
+    notifyRunningChange();
+    void this.bootstrapQueuedRun(batch);
+  }
+
+  private cancelQueuedRun(): void {
+    const batch = this.queueBootstrap;
+    if (!batch) return;
+    batch.cancelled = true;
+    this.queueRecovery.push(...batch.entries);
+    batch.entries = [];
+    this.persistQueue();
+  }
+
+  private async bootstrapQueuedRun(batch: { entries: QueueEntry[]; cancelled: boolean }): Promise<void> {
+    try {
+      for (const entry of [...batch.entries]) {
+        const releaseAdmission = await this.acquirePromptAdmission();
+        let unsubscribe: (() => void) | undefined;
+        let restoreAppend: (() => void) | undefined;
+        try {
+          if (batch.cancelled || !this._alive || this.isShuttingDown()
+            || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning) break;
+          assertSessionLifecycle(this.sessionId);
+          if (this.extensionUiAbortController.signal.aborted) {
+            this.extensionUiAbortController = new AbortController();
+          }
+          let accepted = false;
+          const accept = () => {
+            accepted = true;
+            releaseAdmission();
+          };
+          let message: Parameters<SessionManager["appendMessage"]>[0] | undefined;
+          let persistedEntryId: string | undefined;
+          let committed = false;
+          const manager = this.inner.sessionManager;
+          const appendMessage = manager.appendMessage;
+          // preflight/message_start acknowledge admission, NOT persistence.
+          // The SDK emits message_end before appendMessage and awaits extension
+          // callbacks first. Confirm only after its actual synchronous write.
+          const trackedAppend: SessionManager["appendMessage"] = function (this: SessionManager, appended) {
+            const id = appendMessage.call(this, appended);
+            if (appended === message) persistedEntryId = id;
+            if (!committed && persistedEntryId && manager.isPersisted()
+              && (manager as unknown as { flushed: boolean }).flushed) {
+              committed = true;
+              batch.entries = batch.entries.filter((candidate) => candidate.id !== entry.id);
+              onCommitted();
+            }
+            return id;
+          };
+          const onCommitted = () => {
+            // Stop may already have returned this in-flight item to recovery.
+            this.queueRecovery = this.queueRecovery.filter((candidate) => candidate.id !== entry.id);
+            this.persistQueue();
+          };
+          manager.appendMessage = trackedAppend;
+          restoreAppend = () => {
+            if (manager.appendMessage === trackedAppend) manager.appendMessage = appendMessage;
+          };
+          unsubscribe = this.inner.subscribe((event) => {
+            if ((event.type === "message_start" || event.type === "message_end")
+              && event.message.role === "user" && !message && (accepted || !batch.cancelled)) {
+              // SDK transformations mutate this same object before persistence.
+              message = event.message;
+              accept();
+              unsubscribe?.();
+              unsubscribe = undefined;
+            }
+          });
+          await this.inner.prompt(entry.text, {
+            ...(entry.images?.length ? { images: entry.images } : {}),
+            source: "rpc",
+            preflightResult: (success) => {
+              if (!success) return;
+              if (batch.cancelled || !this._alive || this.isShuttingDown()) {
+                throw new DOMException("Queued run cancelled", "AbortError");
+              }
+              assertSessionLifecycle(this.sessionId);
+              this.applyExactSystemPrompt();
+              accept();
+            },
+          });
+          // A handled extension command may have no persisted user message;
+          // without durable evidence keep it for an explicit recovery decision.
+        } finally {
+          unsubscribe?.();
+          restoreAppend?.();
+          releaseAdmission();
+        }
+      }
+    } catch (error) {
+      if (!batch.cancelled && this._alive) {
         invalidateSessionListCache();
         this.emit({ type: "prompt_error", errorMessage: error instanceof Error ? error.message : String(error) });
-        this.emit({ type: "prompt_done" });
-        return;
       }
+    } finally {
+      // Failure, Stop, or a concurrent run leaves the rest for a USER decision;
+      // neither wrapper recreation nor a future prompt silently replays it.
+      this.queueRecovery.push(...batch.entries);
+      batch.entries = [];
+      if (this.queueBootstrap === batch) this.queueBootstrap = null;
+      this.persistQueue();
+      this.pendingPromptCount = Math.max(0, this.pendingPromptCount - 1);
+      this.promptRunning = this.pendingPromptCount > 0;
+      if (!this.promptRunning) this.promptPhase = null;
+      this.resetIdleTimer();
+      notifyRunningChange();
+      if (this._alive) this.emit({ type: "prompt_done" });
     }
-    this.promptRunning = false;
-    this.promptPhase = null;
-    this.resetIdleTimer();
-    this.emit({ type: "prompt_done" });
   }
 
   setForceEmptySystemPrompt(force: boolean): void {
@@ -1206,6 +1327,7 @@ export class AgentSessionWrapper {
    *  was already called) it is left untouched. Safe for bash-only sessions
    *  too (no assistant message ever arrives there). */
   persistSessionFileIfMissing(): void {
+    if (this.persistenceRevoked || !this._alive) return;
     const manager = this.inner.sessionManager;
     const sessionFile = manager.getSessionFile();
     if (!sessionFile || existsSync(sessionFile)) return;
@@ -1293,9 +1415,11 @@ export class AgentSessionWrapper {
     // and idle-dispose can destroy the wrapper in between. Fail loudly
     // instead of issuing commands against a disposed AgentSession.
     if (!this._alive) throw new Error("Session is shutting down");
+    assertSessionLifecycle(this.sessionId);
     this.touch();
-    this.resetIdleTimer();
     const type = command.type as string;
+    // Polling is observation, not activity that can extend Stop's deadline.
+    if (!type.startsWith("get_") && type !== "export_queue") this.resetIdleTimer();
     if (type === "prompt" || type === "steer" || type === "follow_up" || type === "requeue_at") {
       const imageError = validateAgentImages(command.images);
       if (imageError) throw new Error(imageError);
@@ -1319,9 +1443,8 @@ export class AgentSessionWrapper {
     if (tracksMutation) this.activeMutatingCommands += 1;
 
     try {
-      // Status reconciliation must not postpone forced cleanup after Stop.
-      if (type !== "get_state") this.resetIdleTimer();
-      if (this.shouldWaitForExtensions(type)) await this.waitForExtensionsBound();
+      if (!this._alive || this.isShuttingDown()) throw new Error("Session is shutting down");
+      assertSessionLifecycle(this.sessionId);
       if (this.sessionReplacement && !allowedDuringReplacement) {
         throw new Error("Session is being copied to a new session");
       }
@@ -1338,6 +1461,8 @@ export class AgentSessionWrapper {
         // this submission starts a run or joins its streaming queue.
         const releaseAdmission = await this.acquirePromptAdmission();
         try {
+          if (!this._alive || this.isShuttingDown()) throw new Error("Session is shutting down");
+          assertSessionLifecycle(this.sessionId);
           if (this.inner.isBashRunning) {
             throw new Error("Cannot send a prompt while a shell command is running");
           }
@@ -1390,6 +1515,8 @@ export class AgentSessionWrapper {
               // validation and extension preflight have accepted the submission.
               preflightResult: (success: boolean) => {
                 if (success) {
+                  if (!this._alive || this.isShuttingDown()) throw new Error("Session is shutting down");
+                  assertSessionLifecycle(this.sessionId);
                   this.applyExactSystemPrompt();
                   acceptPreflight();
                 }
@@ -1440,6 +1567,8 @@ export class AgentSessionWrapper {
       }
 
       case "abort":
+        this.cancelQueuedRun();
+        this.cancelGoalContinuation();
         // Stop must unwind extension commands that have not started the agent yet.
         // 控制器保持 aborted（下一次 prompt 才重建），Stop 后新的 UI 请求一律拒绝。
         this.forceShutdownOnIdle = true;
@@ -1804,33 +1933,35 @@ export class AgentSessionWrapper {
       }
 
       case "steer": {
-        const steerImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        this.hintQueueImages("steer", steerImages);
-        this.promptPhase = "waiting_model";
-        notifyRunningChange();
-        try {
-          await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
-        } finally {
-          // steer/follow_up must clear the phase like prompt does, or the
-          // "waiting for model" spinner lingers after the turn finishes.
-          this.promptPhase = null;
+        return this.withQueueMutation(async () => {
+          const steerImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
+          this.hintQueueImages("steer", steerImages);
+          this.promptPhase = "waiting_model";
           notifyRunningChange();
-        }
-        return null;
+          try {
+            await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
+          } finally {
+            this.promptPhase = null;
+            notifyRunningChange();
+          }
+          return null;
+        });
       }
 
       case "follow_up": {
-        const followImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        this.hintQueueImages("followUp", followImages);
-        this.promptPhase = "waiting_model";
-        notifyRunningChange();
-        try {
-          await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
-        } finally {
-          this.promptPhase = null;
+        return this.withQueueMutation(async () => {
+          const followImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
+          this.hintQueueImages("followUp", followImages);
+          this.promptPhase = "waiting_model";
           notifyRunningChange();
-        }
-        return null;
+          try {
+            await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
+          } finally {
+            this.promptPhase = null;
+            notifyRunningChange();
+          }
+          return null;
+        });
       }
 
       case "get_tools": {
@@ -1983,12 +2114,14 @@ export class AgentSessionWrapper {
   destroy(): void {
     if (!this._alive) return;
     this._alive = false;
+    this.cancelQueuedRun();
+    this.cancelGoalContinuation();
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.cancelPendingDispose();
     if (this.inner.isBashRunning) this.inner.abortBash();
     this.unsubscribe?.();
     // Persist the goal sidecar before tearing down.
-    if (this.sessionFile && this.goalEngine.hasActiveGoal()) {
+    if (this.sessionFile && !this.persistenceRevoked && this.goalEngine.hasActiveGoal()) {
       saveGoalState(this.sessionFile, this.goalEngine.getState());
     }
     for (const pending of this.pendingUiResponses.values()) pending.cancel();
@@ -2036,9 +2169,29 @@ export class AgentSessionWrapper {
       .finally(finishDispose);
   }
 
+  /** DELETE owns this irreversible fence; ordinary shutdown must still permit
+   * already-accepted SDK event callbacks to finish persisting their messages. */
+  revokePersistenceForDeletion(): void {
+    this.persistenceRevoked = true;
+    revokeSessionPersistence(this.inner.sessionManager);
+    this.cancelQueuedRun();
+    this.cancelGoalContinuation();
+  }
+
+  /** AgentSession.abort waits for Agent's awaited message/extension listeners.
+   * A reparent rewrite must drain those writes, unlike deleting the transcript. */
+  async drainForSessionRewrite(): Promise<void> {
+    this.cancelQueuedRun();
+    this.cancelGoalContinuation();
+    this.extensionUiAbortController.abort(new DOMException("Session is being changed", "AbortError"));
+    await this.inner.abort();
+  }
+
   async shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     if (!this._alive) return;
+    this.cancelQueuedRun();
+    this.cancelGoalContinuation();
 
     this.shutdownPromise = (async () => {
       try {
@@ -2418,7 +2571,72 @@ export class AgentSessionWrapper {
 // Session registry
 // ============================================================================
 
+type RpcStartLease = { cancel: (reason: Error) => void; settled: Promise<unknown> };
+type RpcSessionLifecycle = {
+  generation: number;
+  barriers: number;
+  deleted: boolean;
+  starts: Set<RpcStartLease>;
+};
+
+// SessionManager exposes no public close/write-revoke operation. The pinned SDK
+// gates append, rewrite and newSession writes on this field. Revoke it before
+// abandoning async creation, so even SDK code that ignores AbortSignal cannot
+// recreate a file after DELETE (or append from an obsolete generation).
+function revokeSessionPersistence(manager: SessionManager | undefined): void {
+  if (manager) (manager as unknown as { persist: boolean }).persist = false;
+}
+
+function getSessionLifecycle(sessionId: string): RpcSessionLifecycle {
+  globalThis.__piSessionLifecycles ??= new Map();
+  let lifecycle = globalThis.__piSessionLifecycles.get(sessionId);
+  if (!lifecycle) {
+    lifecycle = { generation: 0, barriers: 0, deleted: false, starts: new Set() };
+    globalThis.__piSessionLifecycles.set(sessionId, lifecycle);
+  }
+  return lifecycle;
+}
+
+function assertSessionLifecycle(sessionId: string, generation?: number): void {
+  const lifecycle = getSessionLifecycle(sessionId);
+  if (lifecycle.deleted || lifecycle.barriers > 0
+    || (generation !== undefined && lifecycle.generation !== generation)) {
+    throw new Error("Session was deleted or is being changed; retry after the operation finishes");
+  }
+}
+
+/** Close admission synchronously, then cancel and drain startup promises for
+ * only these sessions. finish() reopens rewritten sessions; deleted ids retain
+ * a tombstone so late requests cannot recreate them from a stale path. */
+export function beginRpcSessionMutation(sessionIds: readonly string[]): {
+  ready: Promise<void>;
+  finish: (deletedIds?: readonly string[]) => void;
+} {
+  const states = [...new Set(sessionIds)].map((id) => [id, getSessionLifecycle(id)] as const);
+  const starts = new Set<RpcStartLease>();
+  for (const [, lifecycle] of states) {
+    lifecycle.generation += 1;
+    lifecycle.barriers += 1;
+    for (const start of lifecycle.starts) starts.add(start);
+  }
+  for (const start of starts) start.cancel(new Error("Session startup cancelled: session is being deleted or changed"));
+  let finished = false;
+  return {
+    ready: Promise.allSettled([...starts].map((start) => start.settled)).then(() => undefined),
+    finish: (deletedIds = []) => {
+      if (finished) return;
+      finished = true;
+      const deleted = new Set(deletedIds);
+      for (const [id, lifecycle] of states) {
+        lifecycle.barriers -= 1;
+        if (deleted.has(id)) lifecycle.deleted = true;
+      }
+    },
+  };
+}
+
 declare global {
+  var __piSessionLifecycles: Map<string, RpcSessionLifecycle> | undefined;
   var __piSessions: Map<string, AgentSessionWrapper> | undefined;
   var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string; created: boolean }>> | undefined;
   var __piStartingSessionCwds: Map<string, number> | undefined;
@@ -2929,6 +3147,9 @@ export async function startRpcSession(
   const { toolNames, initialModel, thinkingLevel, allowInitialModelFallback } = options;
   const registry = getRegistry();
   const locks = getLocks();
+  const lifecycle = getSessionLifecycle(sessionId);
+  const generation = lifecycle.generation;
+  assertSessionLifecycle(sessionId, generation);
 
   const existing = registry.get(sessionId);
   if (existing?.isAlive() && !existing.isShuttingDown()) return { session: existing, realSessionId: sessionId, created: false };
@@ -2940,23 +3161,37 @@ export async function startRpcSession(
     // every later one, since this await happens before the start lock).
     const pending = existing.whenShutdown();
     if (pending) {
-      await Promise.race([
-        pending,
-        new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
-      ]);
+      let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          pending,
+          new Promise<void>((resolve) => { shutdownTimer = setTimeout(resolve, 10_000); }),
+        ]);
+      } finally {
+        clearTimeout(shutdownTimer);
+      }
     }
   }
 
+  assertSessionLifecycle(sessionId, generation);
   const inflight = locks.get(sessionId);
   if (inflight) return inflight;
 
   let sessionManager: SessionManager;
   if (sessionFile) {
+    // SessionManager.open treats an absent path as a NEW session. RPC reopening
+    // must not do that, even after a process restart has discarded tombstones.
+    if (!existsSync(sessionFile)) throw new Error("Session not found");
     sessionManager = SessionManager.open(sessionFile, undefined);
+    if (sessionManager.getSessionId() !== sessionId) throw new Error("Session identity changed");
   } else {
     if (!cwd) throw new Error("cwd is required for a new session");
     sessionManager = SessionManager.create(cwd, undefined);
   }
+  const canonicalId = sessionManager.getSessionId();
+  const canonicalLifecycle = getSessionLifecycle(canonicalId);
+  const canonicalGeneration = canonicalLifecycle.generation;
+  assertSessionLifecycle(canonicalId, canonicalGeneration);
   const sessionCwd = sessionManager.getCwd();
   // Subagent sessions persist a resource snapshot (appendSystemPrompt + tools +
   // loadSkills/loadExtensions) so reopening them restores the exact tool set
@@ -2967,14 +3202,58 @@ export async function startRpcSession(
   const finishStartingSession = trackStartingSession(sessionCwd);
   const startController = new AbortController();
   const startTimeout = setTimeout(() => startController.abort(), START_SESSION_TIMEOUT_MS);
-  // Hard-timeout guard state: the shared start promise must settle within
-  // START_SESSION_HARD_TIMEOUT_MS even if some step hangs forever.
-  let startAbandoned = false;
-  let hardTimer: ReturnType<typeof setTimeout> | undefined;
+  let createTimer: ReturnType<typeof setTimeout> | undefined;
+  let startAbandoned: Error | undefined;
   let startFinished = false;
+  let asyncBashManager: AsyncProcessManager | undefined;
+  let startupInner: AgentSessionLike | undefined;
+  let startupWrapper: AgentSessionWrapper | undefined;
+  let cleanedInner: AgentSessionLike | undefined;
+  let bashCleaned = false;
+  const cleanupAsyncBash = () => {
+    if (!asyncBashManager || bashCleaned) return;
+    bashCleaned = true;
+    try { asyncBashManager.cleanup(); } catch { /* best effort */ }
+  };
+  const cleanupStart = () => {
+    revokeSessionPersistence(sessionManager);
+    const inner = startupInner;
+    if (inner && cleanedInner !== inner) {
+      cleanedInner = inner;
+      if (startupWrapper) startupWrapper.destroy();
+      else {
+        try { inner.dispose(); } catch { /* best effort */ }
+      }
+    }
+    cleanupAsyncBash();
+  };
+  let rejectAbandoned!: (reason: Error) => void;
+  const abandoned = new Promise<never>((_, reject) => { rejectAbandoned = reject; });
+  const lease: RpcStartLease = {
+    settled: Promise.resolve(),
+    cancel: (reason) => {
+      if (startAbandoned) return;
+      startAbandoned = reason;
+      startController.abort(reason);
+      cleanupStart();
+      rejectAbandoned(reason);
+    },
+  };
+  lifecycle.starts.add(lease);
+  canonicalLifecycle.starts.add(lease);
+  const assertStartCurrent = () => {
+    if (startAbandoned) throw startAbandoned;
+    assertSessionLifecycle(sessionId, generation);
+    assertSessionLifecycle(canonicalId, canonicalGeneration);
+  };
   const finishStartOnce = () => {
     if (startFinished) return;
     startFinished = true;
+    clearTimeout(startTimeout);
+    clearTimeout(hardTimer);
+    clearTimeout(createTimer);
+    lifecycle.starts.delete(lease);
+    canonicalLifecycle.starts.delete(lease);
     finishStartingSession();
   };
   const starting = (async () => {
@@ -3031,11 +3310,13 @@ export async function startRpcSession(
       ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
     });
 
+    assertStartCurrent();
     // Async shell (long-command tracking): a per-session process manager plus
     // `bash`/`bash_io` tools injected via customTools. `bash` overrides the
     // SDK's built-in synchronous bash; short commands still return directly.
     const { createAsyncBashTools } = await import("./async-bash");
-    const asyncBashManager = new AsyncProcessManager();
+    assertStartCurrent();
+    asyncBashManager = new AsyncProcessManager();
     const asyncBashTools = createAsyncBashTools(asyncBashManager);
 
     const scope = await resolveVisibleModels(
@@ -3043,6 +3324,7 @@ export async function startRpcSession(
       services.settingsManager.getEnabledModels(),
       { signal: startController.signal },
     );
+    assertStartCurrent();
     const effectiveInitialModel = initialModel && (
       !allowInitialModelFallback
       || scope.visible.some((model) => model.provider === initialModel.provider && model.id === initialModel.modelId)
@@ -3069,11 +3351,9 @@ export async function startRpcSession(
     const startupModel = restoredModel && services.modelRuntime.hasConfiguredAuth(restoredModel.provider)
       ? restoredModel
       : initial?.model;
-    // Hard-timeout the create step: it ignores startController (extension
-    // binding / resource discovery can hang), and without this bound the
-    // shared start promise would never settle and poison __piStartLocks.
-    let createAbandoned = false;
-    let createTimer: ReturnType<typeof setTimeout> | undefined;
+    // Install orphan cleanup BEFORE awaiting the SDK. This step does not
+    // observe AbortSignal; its late writes are fenced by revokeSessionPersistence.
+    assertStartCurrent();
     const createPromise = createAgentSessionFromServices({
       services,
       sessionManager,
@@ -3083,31 +3363,19 @@ export async function startRpcSession(
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
       customTools: asyncBashTools,
     });
-    const { session: inner } = await Promise.race([
-      createPromise,
-      new Promise<never>((_, reject) => {
-        createTimer = setTimeout(() => {
-          createAbandoned = true;
-          // Best effort: cancel network work the create step may have spawned.
-          startController.abort();
-          reject(new Error(`Session startup timed out while binding extensions/resources (${CREATE_SERVICES_HARD_TIMEOUT_MS / 1000}s)`));
-        }, CREATE_SERVICES_HARD_TIMEOUT_MS);
-      }),
-    ]);
-    clearTimeout(createTimer);
-    // If the SDK finishes after the timeout already unwound this start, dispose
-    // the orphan session instead of leaking it. Its rejection needs no handling
-    // here: the race already surfaced it, or it is SDK-internal cleanup.
     void createPromise.then(
-      ({ session: late }) => {
-        if (createAbandoned) {
-          try { late.dispose(); } catch { /* best effort */ }
-        }
+      ({ session: inner }) => {
+        startupInner = inner;
+        if (startAbandoned) cleanupStart();
       },
-      () => { /* already handled via the race */ },
+      () => { /* surfaced by the race below */ },
     );
-    // Kill any background processes this session spawned when the wrapper dies.
-    const cleanupAsyncBash = asyncBashManager.cleanup.bind(asyncBashManager);
+    createTimer = setTimeout(() => {
+      lease.cancel(new Error(`Session startup timed out while binding extensions/resources (${CREATE_SERVICES_HARD_TIMEOUT_MS / 1000}s)`));
+    }, CREATE_SERVICES_HARD_TIMEOUT_MS);
+    const { session: inner } = await Promise.race([createPromise, abandoned]);
+    clearTimeout(createTimer);
+    assertStartCurrent();
 
     try {
 
@@ -3133,6 +3401,7 @@ export async function startRpcSession(
           });
       };
 
+      assertStartCurrent();
       const persistedPreferences = await persistExplicitStartupPreferences(
         services.settingsManager,
         {
@@ -3145,6 +3414,7 @@ export async function startRpcSession(
           supportsThinking: inner.supportsThinking(),
         },
       );
+      assertStartCurrent();
       if (persistedPreferences.modelDefaultChanged) invalidateModelsCache();
 
       // If specific tool names were requested (non-empty), set the active tools to the
@@ -3154,16 +3424,10 @@ export async function startRpcSession(
         inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
       }
 
-      // The hard-timeout guard may have abandoned this start (lock already
-      // released so a fresh attempt could begin). Registering now would put a
-      // zombie wrapper into the registry over the fresh one — dispose and bail.
-      if (startAbandoned) {
-        try { inner.dispose(); } catch { /* best effort */ }
-        try { cleanupAsyncBash(); } catch { /* best effort */ }
-        throw new Error("Session startup abandoned after hard timeout");
-      }
-
+      // No async gap between this generation check and persistence/registration.
+      assertStartCurrent();
       const wrapper = new AgentSessionWrapper(inner, sessionCwd);
+      startupWrapper = wrapper;
       wrapper.setChatOnly(chatOnly);
       wrapper.setSuppressCompletionNotifications(subagentResources !== undefined);
       // When all tools are disabled, clear the system prompt entirely.
@@ -3202,41 +3466,24 @@ export async function startRpcSession(
 
       return { session: wrapper, realSessionId, created: true };
     } catch (error) {
-      // The wrapper was never registered, so nothing else will ever dispose
-      // it — clean up the half-started session and its bash processes here or
-      // they leak for the lifetime of the server process.
-      try { inner.dispose(); } catch { /* best effort */ }
-      try { cleanupAsyncBash(); } catch { /* best effort */ }
+      cleanupStart();
       throw error;
     }
-  })().finally(() => {
-    clearTimeout(startTimeout);
-    clearTimeout(hardTimer);
-    locks.delete(sessionId);
-    finishStartOnce();
+  })().catch((error) => {
+    // Also covers service/model-scope failures before an inner session exists.
+    cleanupStart();
+    throw error;
   });
 
-  // A hung start flow must still release the lock within a bounded time so the
-  // next request retries from scratch instead of awaiting a promise that never
-  // settles (which is how a session becomes permanently unopenable).
-  const guarded = Promise.race([
-    starting,
-    new Promise<never>((_, reject) => {
-      hardTimer = setTimeout(() => {
-        startAbandoned = true;
-        startController.abort();
-        locks.delete(sessionId);
-        finishStartOnce();
-        reject(new Error(`Session startup timed out after ${START_SESSION_HARD_TIMEOUT_MS / 1000}s (extension/resource binding may be hung); the start lock was released — retry the request to start over.`));
-      }, START_SESSION_HARD_TIMEOUT_MS);
-    }),
-  ]);
-  // Swallow the raw start's late settlement so it cannot surface as an
-  // unhandled rejection: after the guard rejects, a late success is harmless
-  // (the abandoned check keeps the zombie wrapper out of the registry) and a
-  // late failure was already reported through the guard.
-  void starting.then(() => { /* registered or abandoned-check bailed */ }, () => { /* already reported */ });
-
+  const hardTimer = setTimeout(() => {
+    lease.cancel(new Error(`Session startup timed out after ${START_SESSION_HARD_TIMEOUT_MS / 1000}s (extension/resource binding may be hung); the start lock was released — retry the request to start over.`));
+  }, START_SESSION_HARD_TIMEOUT_MS);
+  const guarded = Promise.race([starting, abandoned]).finally(() => {
+    // A late old attempt must never delete a newer attempt's lock.
+    if (locks.get(sessionId) === guarded) locks.delete(sessionId);
+    finishStartOnce();
+  });
+  lease.settled = guarded;
   locks.set(sessionId, guarded);
   return guarded;
 }

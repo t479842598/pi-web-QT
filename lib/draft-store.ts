@@ -8,6 +8,12 @@ export interface ChatDraftImage {
   mimeType: string;
 }
 
+export function isDraftImageWithinLimits(value: unknown): value is ChatDraftImage {
+  if (!value || typeof value !== "object") return false;
+  const image = value as Partial<ChatDraftImage>;
+  return isBase64ImageWithinLimits({ type: "image", data: image.data, mimeType: image.mimeType });
+}
+
 /** A folded long paste: the placeholder label embedded in `value` plus the raw
  *  text it must expand back into before sending. */
 export interface ChatDraftPastedBlock {
@@ -106,7 +112,7 @@ export function mergeRestoredSubmissionDraft(
   currentBlocks?: ChatDraftPastedBlock[],
 ): ChatDraft {
   const images = [...(submittedImages ?? []), ...currentImages]
-    .filter(isBase64ImageWithinLimits)
+    .filter(isDraftImageWithinLimits)
     .slice(0, MAX_ATTACHED_IMAGES)
     .map(({ data, mimeType }) => ({ data, mimeType }));
 

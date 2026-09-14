@@ -109,6 +109,12 @@ function acquireEngineLock(): boolean {
 
 // ─── Engine state ───────────────────────────────────────────────────────────
 
+interface MergeIntent {
+  message: string | null;
+  deleteWorktree: boolean;
+  strategy: WorkTaskFolderSettings["mergeStrategy"];
+}
+
 interface LiveRun {
   taskId: number;
   runSeq: number;
@@ -118,6 +124,12 @@ interface LiveRun {
   session: AgentSessionWrapper;
   /** Outstanding requests that need a user response (awaiting_input). */
   pendingRequests: Set<string>;
+  unsubscribe?: () => void;
+  lastAssistant?: { stopReason?: string; errorMessage?: string };
+  promptError?: string;
+  retrying?: boolean;
+  settling?: Promise<void>;
+  mergeIntent?: MergeIntent;
 }
 
 interface EngineState {
@@ -127,6 +139,8 @@ interface EngineState {
   byTask: Map<number, LiveRun>;
   /** Tasks currently being launched (preparing), with ownership token. */
   launching: Map<number, number>;
+  /** Deterministic merge ownership also exists when there is no agent wrapper. */
+  merging?: Map<number, { projectRoot: string; runSeq: number }>;
   /** Per-project pump locks. */
   pumpLocks: Map<string, Promise<void>>;
   reconcileTimer: ReturnType<typeof setInterval> | null;
@@ -163,6 +177,7 @@ export function ensureTaskEngine(): boolean {
     live: new Map(),
     byTask: new Map(),
     launching: new Map(),
+    merging: new Map(),
     pumpLocks: new Map(),
     reconcileTimer: null,
     stopped: false,
@@ -394,6 +409,8 @@ async function launchTask(taskId: number, projectRoot: string): Promise<boolean>
       session,
       pendingRequests: new Set(),
     };
+    const previousRun = eng.byTask.get(taskId);
+    if (previousRun) cleanupRun(previousRun);
     eng.live.set(session.sessionId, run);
     eng.byTask.set(taskId, run);
     attachEventHandlers(run);
@@ -409,8 +426,7 @@ async function launchTask(taskId: number, projectRoot: string): Promise<boolean>
     });
     if (!running) {
       // The task was canceled while preparing; tear the session down.
-      eng.live.delete(session.sessionId);
-      eng.byTask.delete(taskId);
+      cleanupRun(run);
       void session.shutdown().catch(() => undefined);
       return false;
     }
@@ -423,8 +439,11 @@ async function launchTask(taskId: number, projectRoot: string): Promise<boolean>
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const t = loadTask(projectRoot, taskId);
-    if (t && (t.status === "preparing" || t.status === "queued")) {
-      casStatus(taskId, t.runSeq, [t.status], "failed", {
+    const run = eng.byTask.get(taskId);
+    if (run?.runSeq === task.runSeq && t?.status === "running") {
+      failRun(run, message);
+    } else if (t?.runSeq === task.runSeq && (t.status === "preparing" || t.status === "queued")) {
+      casStatus(taskId, task.runSeq, [t.status], "failed", {
         failureReason: "setup_error",
         lastError: message,
         settledAt: nowIso(),
@@ -493,84 +512,121 @@ function buildLaunchPrompt(task: WorkTask, settings: WorkTaskFolderSettings): st
 
 // ─── Session event handling ─────────────────────────────────────────────────
 
-/** Wire a live run's session events to the state machine. Called once after
- *  launch; keeps running for the session's lifetime. */
+/** Identity as well as runSeq matters: task session ids are reused on retry. */
+function currentRunTask(run: LiveRun): WorkTask | null {
+  const eng = getEngineState();
+  if (eng?.live.get(run.connectionId) !== run || eng.byTask.get(run.taskId) !== run) return null;
+  const task = loadTask(run.projectRoot, run.taskId);
+  return task?.runSeq === run.runSeq ? task : null;
+}
+
+function failRun(run: LiveRun, message: string): void {
+  const task = currentRunTask(run);
+  if (!task) return;
+  if (task.status === "merging") {
+    failMerge(task, message);
+    run.mergeIntent = undefined;
+    return;
+  }
+  const failed = casStatus(run.taskId, run.runSeq, ["running", "awaiting_input"], "failed", {
+    failureReason: "agent_error",
+    lastError: message,
+    settledAt: nowIso(),
+    finishedAt: nowIso(),
+  });
+  if (!failed) return;
+  appendTaskEvent(task.projectRoot, { taskId: run.taskId, kind: "failed", actor: "engine", payload: { reason: "agent_error", message } });
+  cleanupRun(run);
+}
+
+/** agent_end is provisional (retry/compaction/extensions may continue). Only a
+ * wrapper-idle prompt_done/agent_settled can complete this generation. */
+function settleRun(run: LiveRun): void {
+  const task = currentRunTask(run);
+  if (!task || !["running", "awaiting_input", "merging"].includes(task.status)) return;
+  if (run.settling || run.session.isRunning()) return;
+  const failure = run.promptError ?? (
+    run.lastAssistant?.stopReason === "error" || run.lastAssistant?.stopReason === "aborted"
+      ? run.lastAssistant.errorMessage || `Agent ended with ${run.lastAssistant.stopReason}`
+      : undefined
+  );
+  if (failure) {
+    failRun(run, failure);
+    return;
+  }
+  if (run.pendingRequests.size || run.retrying) return;
+  if (!run.lastAssistant || run.lastAssistant.stopReason !== "stop") {
+    failRun(run, `Agent did not finish successfully (${run.lastAssistant?.stopReason ?? "no assistant result"})`);
+    return;
+  }
+  run.settling = (task.status === "merging" ? handleMergeEnd(run) : settleToReview(run, task))
+    .catch((error) => failRun(run, error instanceof Error ? error.message : String(error)))
+    .finally(() => { run.settling = undefined; });
+}
+
 function attachEventHandlers(run: LiveRun): void {
-  run.session.onEvent((event) => {
-    const type = event.type as string;
-    void (async () => {
-      const eng = getEngine();
-      const current = eng.live.get(run.connectionId);
-      if (!current || current.taskId !== run.taskId) return;
-
-      const task = loadTask(run.projectRoot, run.taskId);
-      if (!task || task.status !== "running" && task.status !== "awaiting_input" && task.status !== "merging") return;
-
-      switch (type) {
-        case "extension_ui_request": {
-          // confirm / input / select / editor need a user response.
-          const method = (event as { method?: string }).method;
-          const id = (event as { id?: string }).id;
-          if (method && id && ["confirm", "input", "select", "editor"].includes(method)) {
-            run.pendingRequests.add(id);
-            if (task.status === "running") {
-              casStatus(run.taskId, run.runSeq, ["running"], "awaiting_input");
-              appendTaskEvent(task.projectRoot, { taskId: run.taskId, kind: "awaiting_input", actor: "engine", payload: { method, id } });
-            }
+  run.unsubscribe = run.session.onEvent((event) => {
+    const task = currentRunTask(run);
+    if (!task || !["running", "awaiting_input", "merging"].includes(task.status)) return;
+    switch (event.type as string) {
+      case "extension_ui_request": {
+        const method = event.method as string | undefined;
+        const id = event.id as string | undefined;
+        if (method && id && ["confirm", "input", "select", "editor"].includes(method)) {
+          run.pendingRequests.add(id);
+          if (casStatus(run.taskId, run.runSeq, ["running"], "awaiting_input")) {
+            appendTaskEvent(task.projectRoot, { taskId: run.taskId, kind: "awaiting_input", actor: "engine", payload: { method, id } });
           }
-          break;
         }
-        case "extension_ui_response": {
-          const id = (event as { id?: string }).id;
-          if (id && run.pendingRequests.delete(id)) {
-            if (run.pendingRequests.size === 0 && task.status === "awaiting_input") {
-              casStatus(run.taskId, run.runSeq, ["awaiting_input"], "running");
-            }
-          }
-          break;
-        }
-        case "agent_end": {
-          // A turn finished. If the agent asked a question or there are
-          // pending requests, stay; otherwise the run settled.
-          if (run.pendingRequests.size > 0) break;
-          if (task.status === "merging") {
-            handleMergeEnd(run);
-            break;
-          }
-          void settleToReview(run, task);
-          break;
-        }
-        case "prompt_error": {
-          const message = (event as { errorMessage?: string }).errorMessage ?? "agent error";
-          casStatus(run.taskId, run.runSeq, ["running", "awaiting_input"], "failed", {
-            failureReason: "agent_error",
-            lastError: message,
-            settledAt: nowIso(),
-            finishedAt: nowIso(),
-          });
-          appendTaskEvent(task.projectRoot, { taskId: run.taskId, kind: "failed", actor: "engine", payload: { reason: "agent_error", message } });
-          cleanupRun(run);
-          break;
-        }
-        case "agent_start": {
-          // A follow-up turn started (e.g. merge turn or return feedback).
-          if (task.status === "awaiting_input" && run.pendingRequests.size === 0) {
-            casStatus(run.taskId, run.runSeq, ["awaiting_input"], "running");
-          }
-          break;
-        }
-        default:
-          break;
+        break;
       }
-    })();
+      case "extension_ui_response": {
+        const id = event.id as string | undefined;
+        if (id && run.pendingRequests.delete(id) && run.pendingRequests.size === 0) {
+          casStatus(run.taskId, run.runSeq, ["awaiting_input"], "running");
+        }
+        break;
+      }
+      case "message_end": {
+        const message = event.message as { role?: string; stopReason?: string; errorMessage?: string } | undefined;
+        if (message?.role === "assistant") run.lastAssistant = message;
+        break;
+      }
+      case "agent_end": {
+        const messages = event.messages as Array<{ role?: string; stopReason?: string; errorMessage?: string }> | undefined;
+        const assistant = messages?.findLast((message) => message.role === "assistant");
+        if (assistant) run.lastAssistant = assistant;
+        run.retrying = event.willRetry === true;
+        break;
+      }
+      case "auto_retry_start":
+        run.retrying = true;
+        break;
+      case "auto_retry_end":
+        run.retrying = false;
+        if (event.success === false) run.promptError = String(event.finalError ?? "Agent retry failed");
+        break;
+      case "prompt_error":
+        run.promptError = String(event.errorMessage ?? "agent error");
+        settleRun(run);
+        break;
+      case "prompt_done":
+      case "agent_settled":
+        settleRun(run);
+        break;
+      case "agent_start":
+        run.lastAssistant = undefined;
+        run.promptError = undefined;
+        run.retrying = false;
+        if (run.pendingRequests.size === 0) casStatus(run.taskId, run.runSeq, ["awaiting_input"], "running");
+        break;
+    }
   });
 }
 
 /** running → review (with preflight). */
 async function settleToReview(run: LiveRun, task: WorkTask): Promise<void> {
-  const eng = getEngine();
-  const current = eng.live.get(run.connectionId);
-  if (!current || current.taskId !== run.taskId) return;
+  if (!currentRunTask(run)) return;
 
   const updated = casStatus(run.taskId, run.runSeq, ["running", "awaiting_input"], "review", {
     settledAt: nowIso(),
@@ -589,8 +645,8 @@ async function settleToReview(run: LiveRun, task: WorkTask): Promise<void> {
 }
 
 async function runPreflight(run: LiveRun, command: string): Promise<void> {
-  const task = loadTask(run.projectRoot, run.taskId);
-  if (!task) return;
+  const task = currentRunTask(run);
+  if (!task || task.status !== "review") return;
   persist(
     { ...task, preflight: { status: "running", command } },
     "preflight_start",
@@ -599,8 +655,8 @@ async function runPreflight(run: LiveRun, command: string): Promise<void> {
   );
   try {
     const result = await runShellCapture(run.session.cwd, command);
-    const live = loadTask(run.projectRoot, run.taskId);
-    if (!live) return;
+    const live = currentRunTask(run);
+    if (!live || live.status !== "review") return;
     persist(
       {
         ...live,
@@ -616,8 +672,8 @@ async function runPreflight(run: LiveRun, command: string): Promise<void> {
       { command, exitCode: result.code },
     );
   } catch (error) {
-    const task2 = loadTask(run.projectRoot, run.taskId);
-    if (!task2) return;
+    const task2 = currentRunTask(run);
+    if (!task2 || task2.status !== "review") return;
     persist(
       { ...task2, preflight: { status: "failed", command, outputTail: error instanceof Error ? error.message : String(error) } },
       "preflight_failed",
@@ -628,9 +684,11 @@ async function runPreflight(run: LiveRun, command: string): Promise<void> {
 }
 
 function cleanupRun(run: LiveRun): void {
-  const eng = getEngine();
-  eng.live.delete(run.connectionId);
-  eng.byTask.delete(run.taskId);
+  run.unsubscribe?.();
+  run.unsubscribe = undefined;
+  const eng = getEngineState();
+  if (eng?.live.get(run.connectionId) === run) eng.live.delete(run.connectionId);
+  if (eng?.byTask.get(run.taskId) === run) eng.byTask.delete(run.taskId);
 }
 
 // ─── Shell helpers (init command, preflight) ────────────────────────────────
@@ -728,20 +786,21 @@ export async function cancelTask(id: number, projectRoot: string, reason?: strin
   const eng = getEngineState();
   const run = eng?.byTask.get(id);
   if (run && eng) {
-    // Abort the session; the abort lands as a no-op if the turn already ended.
+    // Commit cancellation before abort emits its terminal events.
+    const canceled = casStatus(id, run.runSeq, ["running", "awaiting_input", "preparing", "queued", "merging"], "canceled", {
+      settledAt: nowIso(),
+      finishedAt: nowIso(),
+    });
+    if (!canceled) return;
+    cleanupRun(run);
     await run.session.send({ type: "abort" }).catch(() => undefined);
-    casStatus(id, run.runSeq, ["running", "awaiting_input", "preparing", "queued"], "canceled", {
-      settledAt: nowIso(),
-      finishedAt: nowIso(),
-    });
-    eng.live.delete(run.connectionId);
-    eng.byTask.delete(id);
   } else {
-    casStatus(id, task.runSeq, ["todo", "queued", "preparing"], "canceled", {
+    if (!casStatus(id, task.runSeq, ["todo", "queued", "preparing", "merging"], "canceled", {
       settledAt: nowIso(),
       finishedAt: nowIso(),
-    });
+    })) return;
   }
+  if (eng?.merging?.get(id)?.runSeq === task.runSeq) eng.merging.delete(id);
   appendTaskEvent(projectRoot, {
     taskId: id,
     kind: "canceled",
@@ -820,7 +879,7 @@ export async function reorderTasks(projectRoot: string, orderedIds: number[]): P
 /**
  * Accept a reviewed task that changed nothing (filesChanged === 0): there is
  * no merge to dispatch and no commit to write, so the only decision left is
- * what happens to the (empty) worktree. Settles synchronously to `done`.
+ * what happens to the (empty) worktree. Recheck git before trusting cached stats.
  */
 export async function completeTask(id: number, projectRoot: string, deleteWorktree: boolean): Promise<void> {
   const task = loadTask(projectRoot, id);
@@ -828,120 +887,197 @@ export async function completeTask(id: number, projectRoot: string, deleteWorktr
   if (task.filesChanged !== 0) {
     throw new Error("Task has changes to merge; use merge instead");
   }
-  casStatus(id, task.runSeq, ["review"], "done", {
-    finishedAt: nowIso(),
+  await withMergeLock(projectRoot, async () => {
+    const git = guardedGit(() => ownsTask(task, "review"));
+    const { base, source } = await mergeRefs(task, git);
+    const contained = await git(projectRoot, ["merge-base", "--is-ancestor", source, base], [0, 1]);
+    if (contained.code !== 0) throw new Error("Task has committed changes to merge; use merge instead");
+    if (!casStatus(id, task.runSeq, ["review"], "done", { finishedAt: nowIso() })) return;
+    appendTaskEvent(projectRoot, { taskId: id, kind: "completed", actor: "user", payload: { deleteWorktree } });
+    const run = getEngineState()?.byTask.get(id);
+    if (run?.runSeq === task.runSeq) cleanupRun(run);
+    if (deleteWorktree) await cleanupMergedWorktree(task, source, base);
   });
-  appendTaskEvent(projectRoot, { taskId: id, kind: "completed", actor: "user", payload: { deleteWorktree } });
-  if (deleteWorktree) {
-    try {
-      if (task.worktreePath) {
-        await removeWorktree(projectRoot, task.worktreePath, true).catch(() => undefined);
-      }
-      if (task.workBranch) {
-        await runGitIn(projectRoot, ["branch", "-D", task.workBranch]).catch(() => undefined);
-      }
-    } catch {
-      // Best-effort cleanup.
-    }
-  }
 }
 
 export async function mergeTask(id: number, projectRoot: string, message: string | null, deleteWorktree: boolean): Promise<void> {
   const task = loadTask(projectRoot, id);
   if (!task || task.status !== "review") return;
-
   const eng = getEngineState();
-  const run = eng?.byTask.get(id);
-  const next = { ...task, status: "merging" as WorkTaskStatus };
-  persist(next, "merging", "user", { message, deleteWorktree });
-  appendTaskEvent(projectRoot, { taskId: id, kind: "merge_requested", actor: "user", payload: { message, deleteWorktree } });
+  const previousRun = eng?.byTask.get(id);
+  if (previousRun?.session.isAlive() && previousRun.session.isRunning()) {
+    throw new Error("Task session is still running");
+  }
+  const intent: MergeIntent = { message, deleteWorktree, strategy: loadEffectiveSettings(projectRoot).mergeStrategy };
+  const merging = casStatus(id, task.runSeq, ["review"], "merging", {
+    runSeq: task.runSeq + 1,
+    lastError: null,
+    mergeCommit: null,
+    finishedAt: null,
+  });
+  if (!merging) return;
+  appendTaskEvent(projectRoot, { taskId: id, kind: "merge_requested", actor: "user", payload: { ...intent, baseBranch: task.baseBranch } });
 
+  let run: LiveRun | undefined;
   try {
-    if (run) {
-      // Agent-driven merge: send a follow-up prompt in the same session.
+    if (previousRun && eng && previousRun.runSeq === task.runSeq && previousRun.session.isAlive()) {
+      cleanupRun(previousRun);
+      run = { ...previousRun, runSeq: merging.runSeq, pendingRequests: new Set(), lastAssistant: undefined, promptError: undefined, retrying: false, settling: undefined, mergeIntent: intent };
+      eng.live.set(run.connectionId, run);
+      eng.byTask.set(id, run);
+      attachEventHandlers(run);
+      // Preserve agent-assisted preparation, including selecting only task files
+      // and an automatic commit message. The engine owns the deterministic base
+      // merge: merging base INTO the worktree never updates the base branch.
       const mergePrompt =
-        `Merge your changes into the base branch (${task.baseBranch ?? "the current base"}).\n` +
+        `Prepare your task changes for integration into the base branch (${task.baseBranch ?? "unknown"}).\n` +
         `Rules:\n` +
-        `- Work ONLY in this worktree; run git merge/commit from this worktree directory.\n` +
-        `- Do NOT commit unrelated changes that exist in other checkouts — commit only the files your task changed.\n` +
-        `- Do NOT touch or push other branches.\n` +
-        (message ? `Use this commit message: "${message}"\n` : "Write a concise commit message yourself.\n") +
-        (deleteWorktree ? "After merging, the worktree may be cleaned up." : "Keep the worktree after merging.");
+        `- Work ONLY in this worktree on branch ${task.workBranch}.\n` +
+        `- Review and commit only the files changed for this task; do not commit unrelated work.\n` +
+        `- Do NOT merge, switch, update, push, or delete other branches or worktrees.\n` +
+        `- The engine will merge your committed task branch into the recorded base after you finish successfully.\n` +
+        (message ? `Use this commit message: ${JSON.stringify(message)}\n` : "Write a concise commit message yourself.\n") +
+        (deleteWorktree ? "The engine may remove the clean worktree after verified integration." : "Keep the worktree after integration.");
       await run.session.send({ type: "prompt", message: mergePrompt });
-      // The merge turn's agent_end lands → done (see handleMergeEnd).
     } else {
-      // No live session: do a plain git merge (squash) via shell.
-      await gitMergeShell(projectRoot, task, message, deleteWorktree);
+      if (previousRun) cleanupRun(previousRun);
+      await finishMerge(merging, intent);
     }
   } catch (error) {
-    const message2 = error instanceof Error ? error.message : String(error);
-    const live = loadTask(projectRoot, id);
-    if (live && live.status === "merging") {
-      casStatus(id, live.runSeq, ["merging"], "review", {
-        lastError: `Merge failed: ${message2}`,
-      });
-      appendTaskEvent(projectRoot, { taskId: id, kind: "merge_failed", actor: "engine", payload: { message: message2 } });
-    }
+    failMerge(merging, error instanceof Error ? error.message : String(error));
+    if (run) run.mergeIntent = undefined;
   }
 }
 
-async function gitMergeShell(projectRoot: string, task: WorkTask, message: string | null, deleteWorktree: boolean): Promise<void> {
-  if (!task.worktreePath || !task.workBranch) throw new Error("No worktree to merge");
-  // Safety: never run a shell merge against a dirty main checkout — the
-  // merge could sweep unrelated uncommitted changes into the commit.
-  const status = await runGitCapture(projectRoot, ["status", "--porcelain"]);
-  if (status.output.trim().length > 0) {
-    throw new Error(
-      "Main checkout has uncommitted changes; the agent-driven merge cannot run. Commit or stash them first.",
-    );
-  }
-  const squash = message != null;
-  // Worktree branch → base branch (main repo)
-  await runGitIn(projectRoot, ["merge", squash ? "--squash" : "--no-ff", task.workBranch as string]);
-  if (squash) {
-    const msg = message || `Merge task ${task.id}: ${task.title}`;
-    await runGitIn(projectRoot, ["commit", "-m", msg]);
-  }
-  const commit = await runGitCapture(projectRoot, ["rev-parse", "--short", "HEAD"]);
-  casStatus(task.id, task.runSeq, ["merging"], "done", {
-    mergeCommit: commit.output.trim(),
-    finishedAt: nowIso(),
-  });
-  appendTaskEvent(projectRoot, { taskId: task.id, kind: "merged", actor: "engine", payload: { commit: commit.output.trim() } });
-  if (deleteWorktree && task.worktreePath) {
-    await removeWorktree(projectRoot, task.worktreePath, true).catch(() => undefined);
-  }
-  if (deleteWorktree && task.workBranch) {
-    await runGitIn(projectRoot, ["branch", "-D", task.workBranch as string]).catch(() => undefined);
+function failMerge(task: WorkTask, message: string): void {
+  if (!casStatus(task.id, task.runSeq, ["merging"], "review", { lastError: `Merge failed: ${message}` })) return;
+  appendTaskEvent(task.projectRoot, { taskId: task.id, kind: "merge_failed", actor: "engine", payload: { message } });
+}
+
+function ownsTask(task: WorkTask, status: WorkTaskStatus): boolean {
+  const current = loadTask(task.projectRoot, task.id);
+  return current?.runSeq === task.runSeq && current.status === status;
+}
+
+/** Check ownership before AND after every asynchronous git step. */
+function guardedGit(check: () => boolean) {
+  return async (cwd: string, args: string[], allowedCodes = [0]): Promise<{ code: number | null; output: string }> => {
+    if (!check()) throw new Error("Task run was superseded");
+    const result = await runGitCapture(cwd, args);
+    if (!check()) throw new Error("Task run was superseded");
+    if (!allowedCodes.includes(result.code ?? -1)) throw new Error(result.output.trim() || `git ${args[0]} failed (${result.code})`);
+    return { ...result, output: result.output.trim() };
+  };
+}
+
+type CheckedGit = ReturnType<typeof guardedGit>;
+
+async function requireClean(git: CheckedGit, cwd: string, includeIgnored = false): Promise<void> {
+  const status = await git(cwd, ["status", "--porcelain=v1", "--untracked-files=all", ...(includeIgnored ? ["--ignored"] : [])]);
+  if (status.output) throw new Error(`Checkout has uncommitted or untracked changes: ${cwd}`);
+}
+
+async function mergeRefs(task: WorkTask, git: CheckedGit) {
+  if (!task.worktreePath || !task.workBranch || !task.baseBranch) throw new Error("A worktree and explicit base/work branch are required");
+  const baseRef = `refs/heads/${task.baseBranch}`;
+  const workRef = `refs/heads/${task.workBranch}`;
+  if (baseRef === workRef) throw new Error("Task branch must differ from the base branch");
+  const checkedOut = await git(task.projectRoot, ["symbolic-ref", "-q", "HEAD"]);
+  if (checkedOut.output !== baseRef) throw new Error(`Base checkout must be on branch ${task.baseBranch}; refusing to merge another branch`);
+  const workCheckedOut = await git(task.worktreePath, ["symbolic-ref", "-q", "HEAD"]);
+  if (workCheckedOut.output !== workRef) throw new Error(`Worktree must be on branch ${task.workBranch}`);
+  await requireClean(git, task.projectRoot);
+  await requireClean(git, task.worktreePath);
+  const base = (await git(task.projectRoot, ["rev-parse", "--verify", `${baseRef}^{commit}`])).output;
+  const source = (await git(task.projectRoot, ["rev-parse", "--verify", `${workRef}^{commit}`])).output;
+  return { baseRef, workRef, base, source };
+}
+
+// Serialize base mutations across task sessions, including separate hot-reload
+// module instances. Other checkouts/processes are still checked at each step.
+async function withMergeLock(projectRoot: string, operation: () => Promise<void>): Promise<void> {
+  const global = globalThis as typeof globalThis & { __piTaskMergeLocks?: Map<string, Promise<void>> };
+  const locks = global.__piTaskMergeLocks ??= new Map();
+  const previous = locks.get(projectRoot) ?? Promise.resolve();
+  const pending = previous.catch(() => undefined).then(operation);
+  locks.set(projectRoot, pending);
+  try { await pending; } finally { if (locks.get(projectRoot) === pending) locks.delete(projectRoot); }
+}
+
+async function finishMerge(task: WorkTask, intent: MergeIntent, run?: LiveRun): Promise<void> {
+  const eng = getEngineState();
+  const owners = eng ? (eng.merging ??= new Map()) : undefined;
+  const token = { projectRoot: task.projectRoot, runSeq: task.runSeq };
+  if (!ownsTask(task, "merging")) return;
+  owners?.set(task.id, token);
+  try {
+    await withMergeLock(task.projectRoot, () => integrateMerge(task, intent, run, () => !owners || owners.get(task.id) === token));
+  } finally {
+    if (owners?.get(task.id) === token) owners.delete(task.id);
   }
 }
 
-/** Handle agent_end during a merge turn → done. */
-function handleMergeEnd(run: LiveRun): void {
-  const task = loadTask(run.projectRoot, run.taskId);
-  if (!task || task.status !== "merging") return;
-  const commit = runGitCapture(run.session.cwd, ["rev-parse", "--short", "HEAD"]).then((r) => r.output.trim()).catch(() => null);
-  void commit.then(async (hash) => {
-    const live = loadTask(run.projectRoot, run.taskId);
-    if (!live) return;
-    casStatus(live.id, live.runSeq, ["merging"], "done", {
-      mergeCommit: hash,
-      finishedAt: nowIso(),
-    });
-    appendTaskEvent(live.projectRoot, { taskId: live.id, kind: "merged", actor: "engine", payload: { commit: hash } });
-    // Engine-side cleanup: drop the worktree + branch after an agent-driven
-    // merge so a finished task never leaves the repo cluttered.
-    try {
-      if (live.worktreePath) {
-        await removeWorktree(run.projectRoot, live.worktreePath, true).catch(() => undefined);
+async function integrateMerge(task: WorkTask, intent: MergeIntent, run: LiveRun | undefined, ownsMerge: () => boolean): Promise<void> {
+    const git = guardedGit(() => ownsMerge() && ownsTask(task, "merging") && (!run || !!currentRunTask(run)));
+    const { baseRef, workRef, base, source } = await mergeRefs(task, git);
+    const contained = await git(task.projectRoot, ["merge-base", "--is-ancestor", source, base], [0, 1]);
+    let expectedTree: string | undefined;
+    if (contained.code !== 0) {
+      const commitMessage = intent.message || `Merge task ${task.id}: ${task.title}`;
+      if (intent.strategy === "squash") {
+        await git(task.projectRoot, ["merge", "--squash", "--no-commit", source]);
+        expectedTree = (await git(task.projectRoot, ["write-tree"])).output;
+        const changed = await git(task.projectRoot, ["diff", "--cached", "--quiet"], [0, 1]);
+        if (changed.code === 1) await git(task.projectRoot, ["commit", "-m", commitMessage]);
+      } else {
+        await git(task.projectRoot, ["merge", "--no-ff", "--no-edit", "-m", commitMessage, source]);
       }
-      if (live.workBranch) {
-        await runGitIn(run.projectRoot, ["branch", "-D", live.workBranch as string]).catch(() => undefined);
-      }
-    } catch {
-      // Best-effort cleanup; a leftover worktree is visible in git worktree list.
     }
-  });
+    const commit = (await git(task.projectRoot, ["rev-parse", "--verify", `${baseRef}^{commit}`])).output;
+    if ((await git(task.projectRoot, ["symbolic-ref", "-q", "HEAD"])).output !== baseRef) throw new Error("Base branch changed during merge");
+    if ((await git(task.projectRoot, ["rev-parse", "--verify", `${workRef}^{commit}`])).output !== source) throw new Error("Task branch changed during merge; keeping the worktree");
+    await git(task.projectRoot, ["merge-base", "--is-ancestor", base, commit]);
+    if (expectedTree) {
+      const tree = (await git(task.projectRoot, ["rev-parse", `${commit}^{tree}`])).output;
+      if (tree !== expectedTree) throw new Error("Base commit does not contain the verified squash result");
+    } else {
+      await git(task.projectRoot, ["merge-base", "--is-ancestor", source, commit]);
+    }
+    await requireClean(git, task.projectRoot);
+    await requireClean(git, task.worktreePath!);
+    if (!casStatus(task.id, task.runSeq, ["merging"], "done", { mergeCommit: commit, lastError: null, finishedAt: nowIso() })) return;
+    appendTaskEvent(task.projectRoot, { taskId: task.id, kind: "merged", actor: "engine", payload: { commit, baseBranch: task.baseBranch } });
+    if (run) cleanupRun(run);
+    if (intent.deleteWorktree) await cleanupMergedWorktree(task, source, commit);
+}
+
+/** Delete only after verified integration, without --force/-D. The expected
+ * source SHA makes branch deletion a CAS, including for squash merges. */
+async function cleanupMergedWorktree(task: WorkTask, source: string, commit: string): Promise<void> {
+  const git = guardedGit(() => ownsTask(task, "done"));
+  try {
+    const workRef = `refs/heads/${task.workBranch}`;
+    if ((await git(task.projectRoot, ["rev-parse", "--verify", workRef])).output !== source) throw new Error("Task branch changed after merge");
+    await git(task.projectRoot, ["merge-base", "--is-ancestor", commit, `refs/heads/${task.baseBranch}`]);
+    await requireClean(git, task.worktreePath!, true);
+    if (!ownsTask(task, "done")) return;
+    await removeWorktree(task.projectRoot, task.worktreePath!);
+    if (!ownsTask(task, "done")) return;
+    const worktrees = await listWorktrees(task.projectRoot);
+    if (worktrees.some((worktree) => worktree.branch === task.workBranch)) throw new Error("Task branch is still checked out; keeping it");
+    await git(task.projectRoot, ["update-ref", "-d", workRef, source]);
+  } catch (error) {
+    const current = loadTask(task.projectRoot, task.id);
+    if (!current || current.runSeq !== task.runSeq || current.status !== "done") return;
+    const message = error instanceof Error ? error.message : String(error);
+    persist({ ...current, lastError: `Merged, but cleanup failed: ${message}` }, "cleanup_failed", "engine", { message });
+  }
+}
+
+async function handleMergeEnd(run: LiveRun): Promise<void> {
+  const task = currentRunTask(run);
+  if (!task || task.status !== "merging" || !run.mergeIntent) return;
+  await finishMerge(task, run.mergeIntent, run);
 }
 
 // ─── Reconcile / crash recovery ─────────────────────────────────────────────
@@ -966,7 +1102,9 @@ async function reconcile(): Promise<void> {
     const projectRoot = decodeProjectDir(entry.name);
     for (const task of loadTasks(projectRoot)) {
       const live = eng.byTask.get(task.id);
-      if (!live && (task.status === "running" || task.status === "awaiting_input" || task.status === "merging")) {
+      const merge = eng.merging?.get(task.id);
+      const owned = live?.runSeq === task.runSeq || (task.status === "merging" && merge?.runSeq === task.runSeq && merge.projectRoot === task.projectRoot);
+      if (!owned && (task.status === "running" || task.status === "awaiting_input" || task.status === "merging")) {
         // Worker died (server restart). Mark interrupted.
         casStatus(task.id, task.runSeq, [task.status], "failed", {
           failureReason: "interrupted",

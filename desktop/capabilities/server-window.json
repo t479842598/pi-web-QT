@@ -1,34 +1,41 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "server-window",
-  "description": "服务器主窗口：无边框壳，可最小化/最大化/拖动窗口；仅对本机直连与本地反向代理 URL 开放。授权连接管理气泡所需的自定义命令。",
-  "windows": ["server-*"],
-  "remote": {
-    "urls": ["http://127.0.0.1:*/*", "http://localhost:*/*", "https://*/*", "http://*/*"]
+[
+  {
+    "identifier": "server-window",
+    "description": "不受信任的服务器页面（包括本地凭据代理）：仅窗口控制、主题同步与打开壳内连接页。禁止服务器管理、凭据修改、启停和跨服务器连接。",
+    "windows": ["server-*"],
+    "local": false,
+    "remote": {
+      "urls": ["https://*:*/*", "http://*:*/*"]
+    },
+    "permissions": [
+      "core:window:allow-minimize",
+      "core:window:allow-maximize",
+      "core:window:allow-unmaximize",
+      "core:window:allow-toggle-maximize",
+      "core:window:allow-is-maximized",
+      "core:window:allow-start-dragging",
+      "core:window:allow-close",
+      "core:window:allow-set-focus",
+      "allow-open-connect",
+      "allow-set-ui-theme"
+    ]
   },
-  "permissions": [
-    "core:default",
-    "core:window:allow-minimize",
-    "core:window:allow-maximize",
-    "core:window:allow-unmaximize",
-    "core:window:allow-toggle-maximize",
-    "core:window:allow-is-maximized",
-    "core:window:allow-start-dragging",
-    "core:window:allow-close",
-    "core:window:allow-set-focus",
-    "allow-list-servers",
-    "allow-save-server",
-    "allow-remove-server",
-    "allow-probe-local",
-    "allow-start-local",
-    "allow-ensure-local-server",
-    "allow-set-local-password",
-    "allow-set-local-domain",
-    "allow-connect-server",
-    "allow-open-connect",
-    "allow-retry-startup",
-    "allow-quit-app",
-    "allow-stop-local",
-    "allow-set-ui-theme"
-  ]
-}
+  {
+    "identifier": "server-startup",
+    "description": "服务器窗口的壳内启动等待页：允许重试启动、打开连接页和窗口操作，不向 HTTP 页面继承权限。",
+    "windows": ["server-*"],
+    "local": true,
+    "permissions": [
+      "core:window:allow-minimize",
+      "core:window:allow-maximize",
+      "core:window:allow-unmaximize",
+      "core:window:allow-toggle-maximize",
+      "core:window:allow-is-maximized",
+      "core:window:allow-start-dragging",
+      "core:window:allow-close",
+      "allow-open-connect",
+      "allow-retry-startup",
+      "allow-set-ui-theme"
+    ]
+  }
+]

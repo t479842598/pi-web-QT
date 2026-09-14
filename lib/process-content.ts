@@ -7,6 +7,7 @@ import type {
   ToolResultMessage,
 } from "./types";
 import { isSubagentToolDetails } from "./subagent-tool-details";
+import { getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "./message-display";
 
 export interface BlockOrigin {
   phase: "process" | "result";
@@ -63,7 +64,7 @@ export interface SubagentRunEntry {
  * group is started for whatever comes after.
  */
 export interface ProcessSegment {
-  kind: "group" | "subagent";
+  kind: "group" | "subagent" | "output";
   blocks: ProcessContentBlock[];
   subagent?: SubagentRunEntry;
 }
@@ -94,10 +95,11 @@ export function isSubagentBlock(block: ProcessContentBlock): boolean {
 export function splitProcessSegments(blocks: ProcessContentBlock[]): ProcessSegment[] {
   const segments: ProcessSegment[] = [];
   let pending: ProcessContentBlock[] = [];
+  let pendingKind: "group" | "output" = "group";
 
   const flush = () => {
     if (pending.length === 0) return;
-    segments.push({ kind: "group", blocks: pending });
+    segments.push({ kind: pendingKind, blocks: pending });
     pending = [];
   };
 
@@ -119,6 +121,9 @@ export function splitProcessSegments(blocks: ProcessContentBlock[]): ProcessSegm
       });
       continue;
     }
+    const kind = block.type === "text" || block.type === "image" ? "output" : "group";
+    if (kind !== pendingKind) flush();
+    pendingKind = kind;
     pending.push(block);
   }
   flush();
@@ -132,12 +137,6 @@ interface ConvertMessageOptions {
   toolResults?: Map<string, ToolResultMessage>;
   blocks?: AssistantContentBlock[];
   isStreaming?: boolean;
-}
-
-function displayableAssistantBlocks(message: AssistantMessage, isStreaming: boolean): AssistantContentBlock[] {
-  return (message.content ?? []).filter((block) => (
-    block.type !== "thinking" || block.deferred || isStreaming || block.thinking.trim().length > 0
-  ));
 }
 
 function blockId(entryId: string | undefined, messageIndex: number, blockIndex: number): string {
@@ -175,7 +174,7 @@ export function messageToProcessContentBlocks(
 
   if (message.role !== "assistant") return [];
   const assistant = message as AssistantMessage;
-  const selectedBlocks = options.blocks ?? displayableAssistantBlocks(assistant, isStreaming);
+  const selectedBlocks = options.blocks ?? getDisplayableAssistantBlocks(assistant, { isStreaming });
 
   return selectedBlocks.map((block, localIndex) => {
     const sourceBlockIndex = assistant.content.indexOf(block);
@@ -193,7 +192,9 @@ export function messageToProcessContentBlocks(
       return { id, type: "text", text: block.text, origin: originBase };
     }
     if (block.type === "image") {
-      return { id, type: "image", source: block.source, origin: originBase };
+      const flat = block as unknown as { data?: string; mimeType?: string };
+      const source = block.source ?? { type: "base64" as const, data: flat.data, media_type: flat.mimeType };
+      return { id, type: "image", source, origin: originBase };
     }
     if (block.type === "thinking") {
       return {
@@ -224,10 +225,7 @@ export function splitAssistantContentBlocks(
   message: AssistantMessage,
   options: Omit<ConvertMessageOptions, "phase" | "blocks">,
 ): { processBlocks: ProcessContentBlock[]; resultBlocks: ProcessContentBlock[] } {
-  const blocks = displayableAssistantBlocks(message, options.isStreaming ?? false);
-  const lastProcessIndex = blocks.findLastIndex((block) => block.type !== "text" && block.type !== "image");
-  const processBlocks = lastProcessIndex === -1 ? [] : blocks.slice(0, lastProcessIndex + 1);
-  const resultBlocks = lastProcessIndex === -1 ? blocks : blocks.slice(lastProcessIndex + 1);
+  const { processBlocks, answerBlocks: resultBlocks } = splitFinalAssistantBlocks(message, options);
   return {
     processBlocks: messageToProcessContentBlocks(message, {
       ...options,

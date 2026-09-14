@@ -1,5 +1,5 @@
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, ToolResultMessage } from "./types";
-import { getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "./message-display";
+import { getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "./message-display";
 import {
   collectProcessContentBlocks,
   splitAssistantContentBlocks,
@@ -123,39 +123,38 @@ export function buildHistoryPipeline(
   for (let idx = 0; idx < messages.length;) {
     const msg = messages[idx];
     const startsCompactionTurn = isCompactionBoundary(msg);
-    // A bounded tail can begin in the middle of a turn, after its user message
-    // was paged out. Treat the orphaned assistant/tool messages as a synthetic
-    // turn so stopped sessions still collapse into one ProcessGroup.
+    // Paging can omit a turn's user anchor, but must not change which blocks
+    // are answers. The -1 sentinel suppresses only the missing user row.
     const orphanedPrefix = idx === 0 && msg.role !== "user" && !startsCompactionTurn;
-    if (orphanedPrefix) {
-      let endIdx = 1;
-      while (endIdx < messages.length && messages[endIdx].role !== "user") endIdx += 1;
-      const processIndices = Array.from({ length: endIdx }, (_, offset) => offset)
-        .filter((processIdx) => hasDisplayableProcessMessage(messages[processIdx]));
-      const processBlocks = collectProcessContentBlocks(messages, entryIds, processIndices, toolResultsMap);
-      if (processBlocks.length > 0) {
-        items.push({ kind: "turn", userIdx: -1, endIdx, startsCompactionTurn: false, finalAssistantIdx: -1, visibleProcessIndices: processIndices, processBlocks, processSegments: splitProcessSegments(processBlocks), finalAnswerMessage: null, writtenFiles: undefined });
-        idx = endIdx;
-        continue;
-      }
-    }
     // Non-turn-starting messages render as singles (mirrors the JSX loop).
-    if (msg.role !== "user" && !startsCompactionTurn) {
+    if (msg.role !== "user" && !startsCompactionTurn && !orphanedPrefix) {
       items.push({ kind: "single", idx });
       idx += 1;
       continue;
     }
 
-    const userIdx = idx;
-    let endIdx = userIdx + 1;
+    const userIdx = orphanedPrefix ? -1 : idx;
+    let endIdx = idx + 1;
     while (endIdx < messages.length && messages[endIdx].role !== "user") endIdx += 1;
 
-    const finalAssistantIdx = findFinalAssistantIndex(messages, userIdx, endIdx);
+    const candidateAssistantIdx = findFinalAssistantIndex(messages, userIdx, endIdx);
+    const finalAssistantIdx = orphanedPrefix && candidateAssistantIdx >= 0
+      && !hasFinalAssistantAnswer(messages[candidateAssistantIdx])
+      && !getAssistantErrorMessage(messages[candidateAssistantIdx] as AssistantMessage)
+      ? -1
+      : candidateAssistantIdx;
 
     if (finalAssistantIdx === -1) {
       const processIndices = Array.from({ length: endIdx - userIdx - 1 }, (_, offset) => userIdx + 1 + offset)
         .filter((processIdx) => hasDisplayableProcessMessage(messages[processIdx]));
       const processBlocks = collectProcessContentBlocks(messages, entryIds, processIndices, toolResultsMap);
+      if (orphanedPrefix && processBlocks.length === 0) {
+        for (let singleIdx = 0; singleIdx < endIdx; singleIdx += 1) {
+          if (messages[singleIdx].role !== "toolResult") items.push({ kind: "single", idx: singleIdx });
+        }
+        idx = endIdx;
+        continue;
+      }
       items.push({ kind: "turn", userIdx, endIdx, startsCompactionTurn, finalAssistantIdx, visibleProcessIndices: processIndices, processBlocks, processSegments: splitProcessSegments(processBlocks), finalAnswerMessage: null, writtenFiles: undefined });
       idx = endIdx;
       continue;
@@ -171,7 +170,7 @@ export function buildHistoryPipeline(
     const finalProcessMessage = finalSplit.processBlocks.length > 0
       ? withAssistantBlocks(finalAssistant, finalSplit.processBlocks, { omitUsage: true })
       : null;
-    const finalAnswerMessage = finalSplit.answerBlocks.length > 0
+    const finalAnswerMessage = finalSplit.answerBlocks.length > 0 || getAssistantErrorMessage(finalAssistant)
       ? withAssistantBlocks(finalAssistant, finalSplit.answerBlocks)
       : null;
 

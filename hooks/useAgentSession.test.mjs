@@ -74,7 +74,7 @@ test("prompt completion uses one settlement state machine", () => {
   assert.match(promptDoneSource, /notifyPromptStage\(runId\)/);
   assert.match(promptDoneSource, /scheduleEventStreamClose\(sid\)/);
   assert.match(sendSource, /rpcPromptPendingRef\.current = true/);
-  assert.match(sendSource, /if \(promptRequestStarted && sentSessionId\)/);
+  assert.match(sendSource, /if \(promptRequestStarted && sentSessionId && !isPromptRejectedError\(e\)\)/);
   assert.match(sendSource, /void waitForPromptSettlement\(sentSessionId, promptRunId\)/);
 });
 

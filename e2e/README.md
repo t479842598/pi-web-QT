@@ -39,3 +39,26 @@ Model prompts, live model streaming, and agent execution are outside this suite.
 Failures save a screenshot, Playwright trace, and server log under
 `test-results/e2e/`; CI uploads that directory. Open a trace with
 `npx playwright show-trace test-results/e2e/trace.zip`.
+
+## Isolated virtual-list layout regression
+
+```sh
+node e2e/chat-layout-server.mjs
+```
+
+Open the loopback URL printed by the command. This fixture bundles the actual
+`VirtualizedMessageList` and `MarkdownBody` with production React into memory;
+it neither starts Next.js nor reads session files, model credentials, or `.next`.
+It uses synthetic messages and the list-related content-visibility rules from
+`app/globals.css`.
+
+Use the controls to grow text, expand a row, toggle streaming, change the column
+width, add an extension header, and prepend older messages. `检查布局` reports
+mounted row count and any overlapping adjacent row borders. With the top row in
+view, `headerOffset` should remain zero even with the header enabled. Expansion
+must also settle after returning from a background tab without switching chats.
+
+Stop the fixture with Ctrl+C and close its browser tab after testing. It is a
+focused component regression, not a replacement for full application or native
+WebView smoke tests. The older `run.mjs` pagination sentinel assertions still
+need adaptation to the virtualized message list before that suite can block CI.

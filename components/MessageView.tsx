@@ -815,6 +815,19 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
   if (block.type === "thinking") {
     return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
   }
+  if (block.type === "image") {
+    const flat = block as unknown as { data?: string; mimeType?: string };
+    const src = block.source?.type === "base64"
+      ? `data:${block.source.media_type};base64,${block.source.data}`
+      : block.source?.url ?? (flat.data ? `data:${flat.mimeType};base64,${flat.data}` : "");
+    if (!src) return null;
+    return (
+      <ImagePreview src={src}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="" className="max-h-96 max-w-full rounded object-contain" />
+      </ImagePreview>
+    );
+  }
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
     const result = toolResults?.get(tc.toolCallId);

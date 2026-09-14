@@ -3,9 +3,7 @@
   "identifier": "connect-window",
   "description": "连接页窗口：壳内静态页，可访问全部自定义命令与更新检查",
   "windows": ["connect"],
-  "remote": {
-    "urls": ["http://127.0.0.1:*/*", "http://localhost:*/*"]
-  },
+  "local": true,
   "permissions": [
     "core:default",
     "core:window:allow-show",

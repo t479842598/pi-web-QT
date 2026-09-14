@@ -43,12 +43,16 @@ export const DEFAULT_GOAL_TURNS_LIMIT = 10;
 /** Pause after this many consecutive turns with no host-verifiable progress. */
 export const DEFAULT_GOAL_NO_PROGRESS_LIMIT = 4;
 
-/** Injected via followUp after every goal turn that is not done/blocked. */
+/** Shared continuation guidance; each prompt also includes the current goal body. */
 export const GOAL_CONTINUE_INSTRUCTION =
   `Continue pursuing the active goal. Do the next useful work, then report your disposition:\n` +
   `- "continue" with the next concrete step;\n` +
   `- "complete" only when fully done and verified;\n` +
   `- "blocked" when only the user can unblock you.`;
+
+export function buildGoalContinuationPrompt(goalText: string): string {
+  return `${GOAL_CONTINUE_INSTRUCTION}\n\nCurrent goal:\n${goalText}`;
+}
 
 /** Assistant message markers that end or pause the goal loop. */
 export const GOAL_COMPLETE_MARKERS = ["goal complete", "[goal: complete]", "goal is complete"];

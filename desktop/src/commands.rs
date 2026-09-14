@@ -77,10 +77,8 @@ pub fn save_server(
     password: String,
     id: Option<String>,
 ) -> Result<ServerInfo, String> {
-    let base_url = base_url.trim().trim_end_matches('/').to_string();
-    if base_url.is_empty() {
-        return Err("请填写服务器地址".into());
-    }
+    let base_url = crate::config::parse_server_url(&base_url)?
+        .as_str().trim_end_matches('/').to_string();
     // 用户名为空时回退默认 pi（本机服务/历史配置保持兼容）
     let username = if username.trim().is_empty() {
         crate::config::DEFAULT_USERNAME.to_string()
@@ -98,11 +96,7 @@ pub fn save_server(
             } else {
                 name.trim().to_string()
             };
-            existing.base_url = base_url.clone();
-            existing.username = username.clone();
-            if !password.is_empty() {
-                existing.set_password(&password);
-            }
+            existing.update_connection(&base_url, &username, &password)?;
             srv = existing.clone();
         } else {
             srv = Server {

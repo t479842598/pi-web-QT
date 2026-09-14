@@ -75,20 +75,14 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Development convenience: skip auth during `next dev` for loopback clients
-  // only — `dev:lan` (0.0.0.0) must not silently drop the auth gate for every
-  // device on the network. Production builds always keep the gate.
-  const isDev = process.env.NODE_ENV === "development";
-  const host = request.headers.get("host") ?? "";
-  const isLoopbackHost = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host);
-  const skipAuth = isDev && isLoopbackHost;
+  // Host is supplied by the client, not proof of a loopback connection.
+  // A configured password must be enforced in development and production alike.
 
   // Basic stays valid on EVERY route (page and API), not just /api/*: the Tauri
   // desktop shell injects it into page navigations through its local proxy
   // (desktop/src/proxy.rs), and the Flutter client + memory watchdog send it to
   // APIs. Restricting it to /api/* would break those clients' page loads.
-  const authenticated = skipAuth
-    || isValidBasicAuthorization(request.headers.get("authorization"), password)
+  const authenticated = isValidBasicAuthorization(request.headers.get("authorization"), password)
     || isValidWebSessionToken(request.cookies.get(PI_WEB_SESSION_COOKIE)?.value, password);
 
   if (authenticated) {
