@@ -2,6 +2,14 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.18.8 — 2026-09-25（热修：主界面白屏「应用加载失败」React #321）
+
+v0.18.7 的 v0.9.2 合并收尾里，`components/AppShell.tsx` 出现一处 hook 嵌套手误：`invalidateWorkspaceRestore` 的重复副本、以及「持久化活跃会话」`useEffect` 被物理嵌进了它前面那个 `useEffect` 的回调体内部。于是 `useCallback` / `useEffect` 在渲染期被当作普通函数调用，React 抛出 `Invalid hook call`（生产为 Minified React error #321），被根 `ErrorBoundary` 接住，整个应用变成「应用加载失败」页——侧栏、聊天区全部不可用。
+
+- 把两段代码恢复到组件顶层的正确位置；`invalidateWorkspaceRestore` 只保留其真实副本（原文件第 667 行那处，被 `handleCwdChange` 等方法引用），删掉嵌入的重复定义。
+- 该函数原本从未在嵌套位置生效（内部递进 `workspaceRestoreTokenRef` 与组件层同名 ref 并非同一对象），移除重复副本不改变任何行为。
+- 完整保留 v0.18.7 的上游 v0.9.2/v0.9.3 同步与三项子代理/复制按钮 UI 修复。
+
 ## v0.18.7 — 2026-09-25（同步上游 v0.9.2/v0.9.3：安全加固 + 模型开关 + 长会话性能 + 子代理 UI 修复）
 
 ### 上游同步（v0.9.2 全量合并 + v0.9.3 按功能移植）

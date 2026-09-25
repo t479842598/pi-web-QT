@@ -540,9 +540,13 @@ export function AppShell() {
     const key = `${initialNavigation.requestedCwd ?? ""}|${initialNavigation.sessionId ?? ""}`;
     if (appliedNavigationKeyRef.current === key) return;
     appliedNavigationKeyRef.current = key;
-  const invalidateWorkspaceRestore = useCallback(() => {
-    workspaceRestoreTokenRef.current += 1;
-  }, []);
+
+    // Reset the session-restore gate so the sidebar re-resolves the new URL.
+    setInitialSessionId(initialNavigation.sessionId);
+    setInitialSessionRestored(!initialNavigation.sessionId);
+    if (!initialNavigation.requestedCwd) setInitialCwdStatus("idle");
+    setInitialCwdError(null);
+  }, [initialNavigation]);
 
   // Persist every active-session transition, including new and forked sessions
   // that bypass the sidebar selection handler. Transient sessions do not yet
@@ -562,13 +566,6 @@ export function AppShell() {
     }
     if (newSessionCwd) setTabOpenNewSession(newSessionCwd);
   }, [newSessionCwd, selectedSession]);
-
-    // Reset the session-restore gate so the sidebar re-resolves the new URL.
-    setInitialSessionId(initialNavigation.sessionId);
-    setInitialSessionRestored(!initialNavigation.sessionId);
-    if (!initialNavigation.requestedCwd) setInitialCwdStatus("idle");
-    setInitialCwdError(null);
-  }, [initialNavigation]);
 
   // Validate and adopt a cwd requested via ?cwd= URL parameter, opening a new
   // session in that directory instead of restoring a ?session=.
