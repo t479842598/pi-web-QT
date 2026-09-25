@@ -195,7 +195,11 @@ export function VirtualizedMessageList({
             left: 0,
             width: "100%",
             minWidth: 0,
-            overflow: "hidden",
+            // clip, not hidden: both clip the row's content, but `hidden` makes
+            // this row a scroll container, which traps `position: sticky`
+            // descendants (the message copy cluster) in a box that never
+            // scrolls, hiding them on long turns.
+            overflow: "clip",
             transform: `translateY(${item.start - headerHeight}px)`,
           }}
         >

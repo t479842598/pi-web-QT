@@ -177,6 +177,11 @@ export function AppShell() {
   const mobileToolbarRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
+  // Anchors the top-panel dropdown. Separate from topBarRef on purpose: that ref
+  // is shared with AppTitleBar (committed last wins) and the center column row it
+  // points at collapses to 0 height on desktop, so its `bottom` is not a stable
+  // dropdown origin once the row is hidden.
+  const topPanelAnchorRef = useRef<HTMLDivElement>(null);
   const [titleWorkspaceControlsHost, setTitleWorkspaceControlsHost] = useState<HTMLDivElement | null>(null);
   const [titleRightWorkspaceControlsHost, setTitleRightWorkspaceControlsHost] = useState<HTMLDivElement | null>(null);
   const [welcomeWorkspaceControlsHost, setWelcomeWorkspaceControlsHost] = useState<HTMLDivElement | null>(null);
@@ -348,9 +353,10 @@ export function AppShell() {
   }, [isMobile, isNarrowMobile, selectedSession?.id, newSessionDraftId]);
 
   useEffect(() => {
-    if (!activeTopPanel || !topBarRef.current) return;
+    const anchor = topPanelAnchorRef.current;
+    if (!activeTopPanel || !anchor) return;
     const update = () => {
-      const topBarRect = topBarRef.current!.getBoundingClientRect();
+      const topBarRect = anchor.getBoundingClientRect();
       if (activeTopPanel === "agents") {
         setTopPanelPos({
           top: topBarRect.bottom,
@@ -363,7 +369,7 @@ export function AppShell() {
     };
     update();
     const ro = new ResizeObserver(update);
-    ro.observe(topBarRef.current);
+    ro.observe(anchor);
     return () => ro.disconnect();
   }, [activeTopPanel]);
 
@@ -1953,9 +1959,13 @@ export function AppShell() {
 
       {/* Center: chat */}
       <div inert={rightPanelFullWidth} style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
-        {/* Top bar with sidebar toggle */}
-        <div ref={topBarRef} style={{ flexShrink: 0, background: "var(--bg-panel)" }}>
-        <div style={{ display: "flex", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
+        {/* Top bar — mobile only. On desktop the fork's AppTitleBar already carries
+            the sidebar and file-panel toggles, and the bottom SessionInfoBar carries
+            full history / system prompt / branches / token stats, so upstream's bar
+            stacked a duplicate row under the title bar (user-reported). */}
+        <div ref={topPanelAnchorRef} style={{ flexShrink: 0, background: "var(--bg-panel)" }}>
+        {!isMobile && renderProjectTrustWarning(false)}
+        <div style={{ display: isMobile ? "flex" : "none", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
           <button
             onClick={handleSidebarToggle}
              title={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
@@ -2051,14 +2061,6 @@ export function AppShell() {
               )}
             </div>
           )}
-          {!isMobile && (
-            <>
-              {renderProjectTrustWarning(false)}
-              {renderChatToolbarActions(false)}
-              {renderSessionStatsButton(false)}
-            </>
-          )}
-          {!isMobile && renderMainFileToggle(false)}
           {isMobile && sessionHasBranches && (
             <BranchNavigator
               tree={branchTree}
@@ -2073,8 +2075,12 @@ export function AppShell() {
               hideInlineButton
             />
           )}
-          {/* Top panel dropdown — shared, only one active at a time */}
-          {activeTopPanel && topPanelPos && (
+          {/* Top panel dropdown — mobile only. This whole row (and therefore this
+              dropdown) is display:none on desktop, where AppTitleBar renders its own
+              dropdown for system/session; a fixed child is still hidden by an
+              ancestor's display:none, so leaving it unconditional would silently
+              drop the agents/tools panels on desktop. */}
+          {isMobile && activeTopPanel && topPanelPos && (
             <div style={{
               position: "fixed",
               top: topPanelPos.top,
@@ -2442,6 +2448,28 @@ export function AppShell() {
                 : "M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M3 3l6 6m12-6-6 6M3 21l6-6m12 6-6-6"} />
             </svg>
           </button>
+          {/* Agents 族谱面板开关。合并上游时它曾被「隐藏文件面板」按钮吞掉：
+              同一个按钮既渲染 agent 图标+「子代理」文字，onClick 又只是关闭面板，
+              导致族谱面板再也打不开、且文字被挤进 36px 方形图标按钮里换行截断。 */}
+          <button
+            type="button"
+            onClick={() => setAgentsPanelOpen((v) => !v)}
+            aria-controls="file-panel"
+            aria-pressed={agentsPanelOpen}
+            title={t("agentSwitcher.title")}
+            aria-label={t("agentSwitcher.title")}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0,
+              height: 28, marginRight: 6, padding: "0 10px",
+              border: "1px solid var(--border)", borderRadius: 6,
+              background: agentsPanelOpen ? "var(--bg-selected)" : "transparent",
+              color: agentsPanelOpen ? "var(--text)" : "var(--text-muted)",
+              cursor: "pointer", fontSize: 11, whiteSpace: "nowrap",
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg>
+            {t("agentSwitcher.title")}
+          </button>
           <button
             type="button"
             onClick={() => setRightPanelOpen(false)}
@@ -2458,8 +2486,9 @@ export function AppShell() {
             onMouseEnter={(event) => { event.currentTarget.style.color = "var(--accent)"; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = "var(--text)"; }}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg>
-            {t("agentSwitcher.title")}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
           </button>
 
         </div>

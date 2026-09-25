@@ -751,11 +751,19 @@ pre, code {
 /* Copy/copy-plain buttons float over the content's top-right corner instead of
    occupying a layout row below it. Opacity/pointerEvents are driven inline by
    MessageView's hovered state; on touch devices the .msg-actions media rule
-   below keeps the buttons visible (a hover-only reveal would strand them). */
+   below keeps the buttons visible (a hover-only reveal would strand them).
+
+   sticky, not absolute: an absolute top anchored to the whole turn container
+   scrolls out of view on a long turn, so hovering mid-answer showed nothing.
+   Sticky pins the cluster to the top of the visible area while this turn is on
+   screen. height:0 keeps it out of the flow; the negative margin cancels the
+   container's 10px flex gap so the first text block does not shift down. */
 .chat-copy-float {
-  position: absolute;
-  top: -10px;
-  right: 0;
+  position: sticky;
+  top: 2px;
+  align-self: flex-end;
+  height: 0;
+  margin-bottom: -10px;
   z-index: 4;
   display: flex;
   gap: 4px;
