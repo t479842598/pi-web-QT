@@ -90,7 +90,18 @@ export function ProjectTrustDialog({
             type="button"
             onClick={onConfirmAction}
             disabled={busy}
-            style={{ height: 32, padding: "0 12px", border: "1px solid var(--accent)", borderRadius: 5, background: "var(--accent)", color: "white", cursor: busy ? "wait" : "pointer", opacity: busy ? 0.7 : 1, fontSize: 12, fontWeight: 600 }}
+            style={{
+              height: 32,
+              padding: "0 12px",
+              border: "1px solid var(--accent)",
+              borderRadius: 5,
+              background: "var(--accent)",
+              color: "var(--accent-contrast)",
+              cursor: busy ? "wait" : "pointer",
+              opacity: busy ? 0.7 : 1,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
           >
             {busy ? t("desktop.trustingProject") : t("desktop.trustProject")}
           </button>

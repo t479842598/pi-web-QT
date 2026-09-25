@@ -13,11 +13,6 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  // Why the auth gate bounced the user here (set by proxy.ts's 307):
-  // "invalid" = a session cookie came back but failed validation (expired or
-  // password rotated); "missing" = no cookie at all, i.e. the browser dropped
-  // site data (private mode, tracking prevention, clear-on-exit). After mount
-  // only, so SSR stays clean.
   const [bounceHint, setBounceHint] = useState("");
   useEffect(() => {
     const reason = new URLSearchParams(window.location.search).get("reason");
@@ -25,6 +20,15 @@ function LoginForm() {
     else if (reason === "missing") setBounceHint(t("auth.sessionMissing"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Maps each route failure to a message, including the upstream 429
+  // retry-after handling from the auth throttle.
+  const failureMessage = async (response: Response): Promise<string> => {
+    if (response.status === 401) return t("auth.invalidPassword");
+    if (response.status !== 429) return t("auth.loginFailed");
+    const seconds = Number(response.headers.get("retry-after"));
+    return t("auth.tooManyAttempts", { seconds: Number.isFinite(seconds) && seconds > 0 ? seconds : 1 });
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -37,7 +41,7 @@ function LoginForm() {
         body: JSON.stringify({ password }),
       });
       if (!response.ok) {
-        setError(response.status === 401 ? t("auth.invalidPassword") : t("auth.loginFailed"));
+        setError(await failureMessage(response));
         return;
       }
       // The server accepted the password, but browsers can still refuse the

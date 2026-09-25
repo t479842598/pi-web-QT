@@ -1,7 +1,7 @@
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { invalidateModelsCache } from "@/lib/models-cache";
 import { invalidateAvailableModelsCache } from "@/lib/model-scope";
 import { removeStoredCredentialIfType } from "@/lib/provider-credential-store";
+import { createModelRuntimeWithExtensions } from "@/lib/model-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export async function POST(
   { params }: { params: Promise<{ provider: string }> },
 ) {
   const { provider } = await params;
-  const modelRuntime = await ModelRuntime.create();
+  const modelRuntime = await createModelRuntimeWithExtensions();
   if (!modelRuntime.getProvider(provider)?.auth.oauth) {
     return Response.json({ error: `Unknown provider: ${provider}` }, { status: 400 });
   }

@@ -19,6 +19,10 @@ interface Props {
   onToggle?: () => void;
   /** Whether a session is currently active (used to show appropriate empty reason) */
   hasSession?: boolean;
+  /** When true, hide the inline toggle button (parent renders its own) */
+  hideInlineButton?: boolean;
+  /** Compact visual density for embedded/inline rendering */
+  compact?: boolean;
   /** When true, renders just the tree content without header or border */
   embedded?: boolean;
 }
@@ -44,8 +48,9 @@ export function buildActivePath(nodes: SessionTreeNode[], targetId: string | nul
   return new Set();
 }
 
+// Transcript system messages hold the prompt, not a turn, so they never label a branch.
 function isMessageEntry(entry: SessionEntry): boolean {
-  return entry.type === "message" && "message" in entry;
+  return entry.type === "message" && "message" in entry && entry.message.role !== "system";
 }
 
 // Compress a visible linear chain into the first branching/leaf node.

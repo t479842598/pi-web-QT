@@ -5,8 +5,8 @@ import { PlusIcon } from "@phosphor-icons/react";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
+import type { PluginPackageInfo, PluginStandaloneExtensionInfo, PluginUpdateResult, PluginsResponse } from "@/lib/api-types";
 import { useI18n } from "@/hooks/useI18n";
-import type { PluginPackageInfo, PluginsResponse } from "@/lib/api-types";
 
 type Translate = ReturnType<typeof useI18n>["t"];
 
@@ -24,6 +24,10 @@ export function normalizePluginSourceInput(value: string): string {
 
 function packageKey(pkg: Pick<PluginPackageInfo, "source" | "scope">): string {
   return `${pkg.scope}\0${pkg.source}`;
+}
+
+function extensionKey(extension: PluginStandaloneExtensionInfo): string {
+  return `extension\0${extension.path}`;
 }
 
 function resourceSummary(pkg: PluginPackageInfo, t: Translate): string {
@@ -437,7 +441,11 @@ function PackageDetail({
   actionError,
   actionMessage,
   sessionId,
+  updateStatus,
+  checkingUpdate,
+  updateError,
   onAction,
+  onCheckUpdate,
   onReloadSession,
 }: {
   pkg: PluginPackageInfo;
@@ -446,7 +454,11 @@ function PackageDetail({
   actionError: string | null;
   actionMessage: string | null;
   sessionId: string | null;
+  updateStatus?: PluginUpdateResult;
+  checkingUpdate: boolean;
+  updateError: string | null;
   onAction: (action: PluginAction, pkg: PluginPackageInfo) => void;
+  onCheckUpdate: () => void;
   onReloadSession: () => void;
 }) {
   const { t } = useI18n();
@@ -454,6 +466,9 @@ function PackageDetail({
   const busy = busyKey?.endsWith(key) ?? false;
   const reloadBusy = busyKey === "reload";
   const enabled = !pkg.disabled;
+  const canCheckForUpdates = pkg.canCheckForUpdates;
+  const updateAvailable = updateStatus?.state === "update-available";
+  const description = pkg.description?.trim();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 680 }}>
@@ -507,11 +522,18 @@ function PackageDetail({
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
-            onClick={() => onAction("update", pkg)}
-            disabled={busy || reloadBusy}
-            style={buttonStyle(busy || reloadBusy)}
+            onClick={updateAvailable || !canCheckForUpdates ? () => onAction("update", pkg) : onCheckUpdate}
+            disabled={busy || reloadBusy || checkingUpdate}
+            title={updateAvailable ? t("desktop.updateAvailable") : undefined}
+            style={buttonStyle(busy || reloadBusy || checkingUpdate)}
           >
-            {busyKey === `update:${key}` ? t("desktop.updating") : t("desktop.update")}
+            {busyKey === `update:${key}`
+              ? t("desktop.updating")
+              : checkingUpdate
+                ? t("desktop.checking")
+                : updateAvailable || !canCheckForUpdates
+                  ? t("desktop.update")
+                  : t("desktop.checkUpdates")}
           </button>
           <button
             onClick={onReloadSession}
@@ -540,10 +562,52 @@ function PackageDetail({
           lineHeight: 1.45,
         }}
       >
+        {description && (
+          <>
+            <div style={{ color: "var(--text-dim)" }}>{t("desktop.description")}</div>
+            <div style={{ color: "var(--text-muted)", overflowWrap: "anywhere" }}>
+              {description}
+            </div>
+          </>
+        )}
         <div style={{ color: "var(--text-dim)" }}>{t("desktop.status")}</div>
         <div style={{ color: statusColor(pkg.status), textTransform: "capitalize" }}>{pkg.status}</div>
         <div style={{ color: "var(--text-dim)" }}>{t("desktop.version")}</div>
-        <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{versionSummary(pkg, t)}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{versionSummary(pkg, t)}</span>
+            {updateAvailable && (
+              <span title={updateStatus?.displayName} style={{ fontSize: 11, color: "var(--status-warning)", fontWeight: 600 }}>
+                {t("desktop.updateAvailable")}
+              </span>
+            )}
+            {canCheckForUpdates && (checkingUpdate || (updateStatus && !updateAvailable)) && (
+              <span
+                style={{
+                  fontSize: 11,
+                  color: checkingUpdate
+                    ? "var(--text-dim)"
+                    : updateStatus?.state === "up-to-date"
+                      ? "var(--status-success)"
+                      : updateStatus?.state === "error"
+                        ? "var(--status-error)"
+                        : "var(--text-dim)",
+                }}
+              >
+                {checkingUpdate
+                  ? t("desktop.checking")
+                  : updateStatus?.state === "up-to-date"
+                    ? t("desktop.upToDate")
+                    : updateStatus?.state === "unsupported"
+                      ? t("desktop.automaticChecksUnavailable")
+                      : updateStatus?.message || t("desktop.checkFailed")}
+              </span>
+            )}
+          </div>
+          {updateError && (
+            <span style={{ fontSize: 12, color: "var(--status-error)" }}>{updateError}</span>
+          )}
+        </div>
         <div style={{ color: "var(--text-dim)" }}>{t("desktop.package")}</div>
         <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
           {pkg.packageName ?? t("desktop.unknown")}
@@ -587,6 +651,47 @@ function PackageDetail({
   );
 }
 
+function StandaloneExtensionDetail({ extension }: { extension: PluginStandaloneExtensionInfo }) {
+  const { t } = useI18n();
+  const status = extension.enabled ? "loaded" : "disabled";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 680 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <ScopeTag scope={extension.scope} />
+        <span
+          style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: "var(--text)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {extension.name}
+        </span>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(96px, 130px) minmax(0, 1fr)",
+          gap: "9px 14px",
+          fontSize: 12,
+          lineHeight: 1.45,
+        }}
+      >
+        <div style={{ color: "var(--text-dim)" }}>{t("desktop.status")}</div>
+        <div style={{ color: extension.enabled ? "var(--accent)" : "var(--text-dim)" }}>{status}</div>
+        <div style={{ color: "var(--text-dim)" }}>{t("desktop.installedPath")}</div>
+        <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
+          {shortenPath(extension.path)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PluginsConfig({
   cwd,
   sessionId,
@@ -614,9 +719,16 @@ export function PluginsConfig({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [updateStatuses, setUpdateStatuses] = useState<Record<string, PluginUpdateResult>>({});
+  const [checkingUpdates, setCheckingUpdates] = useState<Set<string>>(new Set());
+  const [checkingAll, setCheckingAll] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   const packages = useMemo(() => data?.packages ?? [], [data?.packages]);
+  const standaloneExtensions = useMemo(() => data?.standaloneExtensions ?? [], [data?.standaloneExtensions]);
   const selectedPackage = packages.find((pkg) => packageKey(pkg) === selected) ?? null;
+  const selectedExtension = standaloneExtensions.find((extension) => extensionKey(extension) === selected) ?? null;
+  const projectResourcesLoaded = data?.projectResourcesLoaded ?? true;
 
   const groupedPackages = useMemo(() => {
     return (["project", "global"] as PluginScope[])
@@ -632,10 +744,17 @@ export function PluginsConfig({
       const next = (await res.json()) as PluginsResponse & { error?: string };
       if (!res.ok || next.error) throw new Error(next.error ?? `HTTP ${res.status}`);
       setData(next);
-      setAddMode((current) => next.packages.length === 0 || current);
+      setAddMode((current) => (next.packages.length === 0 && next.standaloneExtensions.length === 0) || current);
       setSelected((current) => {
-        if (current && next.packages.some((pkg) => packageKey(pkg) === current)) return current;
-        return next.packages[0] ? packageKey(next.packages[0]) : null;
+        if (current && (
+          next.packages.some((pkg) => packageKey(pkg) === current)
+          || next.standaloneExtensions.some((extension) => extensionKey(extension) === current)
+        )) return current;
+        return next.packages[0]
+          ? packageKey(next.packages[0])
+          : next.standaloneExtensions[0]
+            ? extensionKey(next.standaloneExtensions[0])
+            : null;
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -647,6 +766,48 @@ export function PluginsConfig({
   useEffect(() => {
     void loadPlugins();
   }, [loadPlugins]);
+
+  const checkForUpdates = useCallback(async (pkg?: PluginPackageInfo) => {
+    const targets = pkg ? [pkg] : packages.filter((item) => item.canCheckForUpdates);
+    const keys = targets.map(packageKey);
+    if (keys.length === 0) return;
+
+    setUpdateError(null);
+    setCheckingUpdates((current) => new Set([...current, ...keys]));
+    if (!pkg) setCheckingAll(true);
+    try {
+      const res = await fetch("/api/plugins/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cwd,
+          source: pkg?.source,
+          scope: pkg?.scope,
+        }),
+      });
+      const result = (await res.json()) as {
+        updates?: PluginUpdateResult[];
+        error?: string;
+      };
+      if (!res.ok || result.error) throw new Error(result.error ?? `HTTP ${res.status}`);
+      setUpdateStatuses((current) => {
+        const next = { ...current };
+        for (const update of result.updates ?? []) {
+          next[packageKey(update)] = update;
+        }
+        return next;
+      });
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCheckingUpdates((current) => {
+        const next = new Set(current);
+        for (const key of keys) next.delete(key);
+        return next;
+      });
+      if (!pkg) setCheckingAll(false);
+    }
+  }, [cwd, packages]);
 
   const runAction = useCallback(async (action: PluginAction, pkg: PluginPackageInfo) => {
     const key = packageKey(pkg);
@@ -663,9 +824,18 @@ export function PluginsConfig({
       if (!res.ok || next.error) throw new Error(next.error ?? `HTTP ${res.status}`);
       setData(next);
       if (action === "remove") {
-        setSelected(next.packages[0] ? packageKey(next.packages[0]) : null);
-        if (next.packages.length === 0) setAddMode(true);
+        setSelected(next.packages[0]
+          ? packageKey(next.packages[0])
+          : next.standaloneExtensions[0]
+            ? extensionKey(next.standaloneExtensions[0])
+            : null);
+        if (next.packages.length === 0 && next.standaloneExtensions.length === 0) setAddMode(true);
         setActionMessage(t("desktop.packageRemoved"));
+        setUpdateStatuses((current) => {
+          const nextStatuses = { ...current };
+          delete nextStatuses[key];
+          return nextStatuses;
+        });
       } else {
         const messages: Record<Exclude<PluginAction, "remove">, string> = {
           install: t("desktop.packageInstalled"),
@@ -674,6 +844,13 @@ export function PluginsConfig({
           enable: t("desktop.packageEnabled"),
         };
         setActionMessage(messages[action]);
+        if (action === "update") {
+          setUpdateStatuses((current) => {
+            const nextStatuses = { ...current };
+            delete nextStatuses[key];
+            return nextStatuses;
+          });
+        }
       }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -773,12 +950,83 @@ export function PluginsConfig({
                 <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--status-error)" }}>
                   {error}
                 </div>
-              ) : packages.length === 0 ? (
+              ) : packages.length === 0 && standaloneExtensions.length === 0 ? (
                 <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--text-dim)" }}>
                   {t("desktop.noPluginsConfigured")}
                 </div>
               ) : (
-                groupedPackages.map((group) => (
+                <>
+                  {standaloneExtensions.length > 0 && (
+                    <div key="extensions" style={{ marginBottom: 6 }}>
+                      <div
+                        style={{
+                          padding: "4px 8px 3px",
+                          fontSize: 10,
+                          fontWeight: 600,
+                          color: "var(--text-dim)",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {t("i18n.extensions")}
+                      </div>
+                      {standaloneExtensions.map((extension) => {
+                        const key = extensionKey(extension);
+                        const isSelected = !addMode && selected === key;
+                        return (
+                          <div
+                            key={key}
+                            onClick={() => {
+                              setSelected(key);
+                              setAddMode(false);
+                              setActionError(null);
+                              setActionMessage(null);
+                            }}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 7,
+                              padding: "8px 8px",
+                              borderRadius: 5,
+                              cursor: "pointer",
+                              background: isSelected ? "var(--bg-selected)" : "none",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!isSelected) e.currentTarget.style.background = "none";
+                            }}
+                          >
+                            <span
+                              style={{
+                                flexShrink: 0,
+                                width: 7,
+                                height: 7,
+                                borderRadius: "50%",
+                                background: extension.enabled ? "var(--accent)" : "var(--text-dim)",
+                              }}
+                            />
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  fontWeight: isSelected ? 600 : 400,
+                                  color: "var(--text)",
+                                  fontFamily: "var(--font-mono)",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {extension.name}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {groupedPackages.map((group) => (
                   <div key={group.scope} style={{ marginBottom: 6 }}>
                     <div
                       style={{
@@ -869,11 +1117,17 @@ export function PluginsConfig({
                               </div>
                             )}
                           </div>
+                          {updateStatuses[packageKey(pkg)]?.state === "update-available" && (
+                            <span title={t("desktop.updateAvailable")} style={{ flexShrink: 0, fontSize: 12, color: "var(--status-warning)" }}>
+                              ↑
+                            </span>
+                          )}
                         </div>
                       );
                     })}
                   </div>
-                ))
+                  ))}
+                </>
               )}
             </div>
             <div style={{ padding: "8px 6px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
@@ -922,7 +1176,9 @@ export function PluginsConfig({
                 onScopeChange={setInstallScope}
                 onInstall={installPlugin}
               />
-            ) : loading ? null : selectedPackage ? (
+            ) : loading ? null : selectedExtension ? (
+              <StandaloneExtensionDetail extension={selectedExtension} />
+            ) : selectedPackage ? (
               <PackageDetail
                 key={packageKey(selectedPackage)}
                 pkg={selectedPackage}
@@ -931,7 +1187,11 @@ export function PluginsConfig({
                 actionError={actionError}
                 actionMessage={actionMessage}
                 sessionId={sessionId}
+                updateStatus={updateStatuses[packageKey(selectedPackage)]}
+                checkingUpdate={checkingUpdates.has(packageKey(selectedPackage))}
+                updateError={updateError}
                 onAction={runAction}
+                onCheckUpdate={() => void checkForUpdates(selectedPackage)}
                 onReloadSession={reloadSession}
               />
             ) : (
@@ -986,6 +1246,15 @@ export function PluginsConfig({
               </span>
             )}
           </div>
+          {packages.some((pkg) => pkg.canCheckForUpdates) && (
+            <button
+              onClick={() => void checkForUpdates()}
+              disabled={checkingAll || loading || busyKey !== null}
+              style={buttonStyle(checkingAll || loading || busyKey !== null)}
+            >
+              {checkingAll ? t("desktop.checking") : t("desktop.checkUpdates")}
+            </button>
+          )}
           <button onClick={() => void loadPlugins()} disabled={loading || busyKey !== null} style={buttonStyle(loading || busyKey !== null)}>
             {t("desktop.refresh")}
           </button>

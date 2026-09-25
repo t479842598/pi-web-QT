@@ -14,10 +14,16 @@ import {
 } from "@/lib/file-types";
 import { encodeFilePathForApi, getFileDirectory, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { isFileEditingEnabled } from "@/lib/file-editing";
-import { resolveLocalFileHref } from "@/lib/file-links";
+import { parsePdfPageFragment, resolveLocalFileHref } from "@/lib/file-links";
 import { headingId, markdownRehypePlugins, markdownRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
 import { prismTheme } from "@/lib/prism-theme";
 import { CodeBlock, MermaidBlock } from "@/components/MarkdownBody";
+import type {
+  FileViewerDisplayMode as DisplayMode,
+  FileViewerState,
+} from "@/lib/file-viewer-state";
+
+export type { FileViewerState } from "@/lib/file-viewer-state";
 import { parseUnifiedPatch } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
 
@@ -25,10 +31,16 @@ interface Props {
   filePath: string;
   cwd?: string;
   sourceSessionId?: string | null;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, page?: number) => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
-  initialDisplayMode?: "diff";
+  gitRefreshKey?: number;
+  initialDisplayMode?: DisplayMode;
+  /** PDF page to open on first render (`#page=N` from a markdown link). */
+  initialPage?: number;
+  initialState?: FileViewerState;
+  onStateChange?: (state: FileViewerState) => void;
+  watchEnabled?: boolean;
   onFileSaved?: () => void;
 }
 
@@ -728,7 +740,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
-function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
+function DocumentViewer({ filePath, cwd, sourceSessionId, initialPage }: Props) {
   const { t } = useI18n();
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
@@ -737,8 +749,9 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
 
   const ext = getFileExt(filePath);
   const isPdf = ext === "pdf";
+  const pageFragment = isPdf && initialPage && initialPage > 0 ? `#page=${initialPage}` : "";
   const previewUrl = isPdf
-    ? getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined)
+    ? `${getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined)}${pageFragment}`
     : getFileApiUrl(filePath, "preview", sourceSessionId, bust ? { v: bust } : undefined);
 
   useEffect(() => {
@@ -834,7 +847,17 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
-export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMention, onMentionLines, initialDisplayMode, onFileSaved }: Props) {
+export function FileViewer({
+  filePath,
+  cwd,
+  sourceSessionId,
+  onOpenFile,
+  onAtMention,
+  onMentionLines,
+  initialDisplayMode,
+  initialPage,
+  onFileSaved,
+}: Props) {
   if (isImagePath(filePath)) {
     return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
@@ -842,7 +865,7 @@ export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMen
     return <AudioViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
   if (isDocumentPreviewPath(filePath)) {
-    return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+    return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} initialPage={initialPage} />;
   }
   return <TextFileViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onAtMention={onAtMention} onMentionLines={onMentionLines} initialDisplayMode={initialDisplayMode} onFileSaved={onFileSaved} />;
 }
@@ -1557,7 +1580,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
                     const target = event.currentTarget.getAttribute("target");
                     if (target && target !== "_self") return;
                     event.preventDefault();
-                    onOpenFile(linkedFile);
+                    onOpenFile(linkedFile, parsePdfPageFragment(href) ?? undefined);
                   };
 
                   return (

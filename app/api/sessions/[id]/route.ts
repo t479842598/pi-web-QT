@@ -1,73 +1,119 @@
 import { NextResponse } from "next/server";
-import { jsonResponse } from "@/lib/json-response";
 import { existsSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { randomUUID } from "crypto";
-import { join } from "path";
+import { dirname, join } from "path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   attachSessionProjectInfo,
+  listAllSessions,
+  mergeSessionLists,
+  openSessionManager,
   resolveSessionPath,
   resolveSessionIdByPath,
   invalidateSessionPathCache,
   invalidateSessionListCache,
+  invalidateSessionManagerCache,
   invalidateOpenSessionCache,
   buildSessionContext,
-  listAllSessions,
-  mergeSessionLists,
   openSessionCached,
   readSessionHeader,
+  getAgentDir,
 } from "@/lib/session-reader";
+import { sessionPathKey } from "@/lib/session-path";
 import { abortSubagent, beginRpcSessionMutation, getRpcSession, getRpcSessionInfos, broadcastSessionBusEvent } from "@/lib/rpc-manager";
 import { mutateSettingsJson } from "@/lib/settings-lock";
-import { getAgentDir } from "@/lib/session-reader";
 import { setSessionArchived, dropSessionArchiveEntry } from "@/lib/session-archive";
 import { removeQueue } from "@/lib/queue-store";
 import { goalSidecarPath } from "@/lib/goal-engine";
 import { computeSessionDetails } from "@/lib/session-details";
 import { computeSessionStats } from "@/lib/session-stats";
+import { startServerPerf } from "@/lib/perf";
+import { computeSessionRevision } from "@/lib/session-revision";
 import type { SessionEntry } from "@/lib/types";
 import { stripModeInstructionBlocks } from "@/lib/modes";
 
-import { projectTreeForResponse } from "@/lib/project-tree-response";
-import { sessionPathKey } from "@/lib/session-path";
+import { projectTreeForResponse, toSummaryTree } from "@/lib/project-tree";
 import { readSubagentRun, readSubagentSessionResources, SUBAGENT_META_TYPE } from "@/lib/subagents";
 import { readSessionToolSelection } from "@/lib/session-tool-selection";
+import { jsonResponse } from "@/lib/json-response";
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const perf = startServerPerf("GET /api/sessions/[id]");
   try {
+    perf?.span("resolve");
     const rpc = getRpcSession(id);
-    const liveRpc = rpc?.isAlive() ? rpc : undefined;
+    const searchParams = new URL(req.url).searchParams;
+    const force = searchParams.get("force") === "1";
+    const initialView = searchParams.get("view") === "initial";
+
+    // A live wrapper only reflects the appends pi-web itself made. When another
+    // pi process (the TUI) writes the same session file, the in-memory index
+    // stays stale. Only probe on ?force=1 (session mount / page refresh): two
+    // processes writing one JSONL is unsupported, so post-turn reads must not
+    // scan disk. Eviction is idle-only; mid-run the wrapper owns the write path.
+    let liveWrapper = rpc?.isAlive() ? rpc : undefined;
+    let wrapperRebuilt = false;
+    if (force && liveWrapper?.evictIfDiskAhead()) {
+      wrapperRebuilt = true;
+      liveWrapper = undefined;
+    }
+    const liveRpc = liveWrapper;
     // A live wrapper exposes its own session file (null for a transient,
     // not-yet-persisted session); otherwise resolve from the file cache.
-    const filePath = liveRpc ? (liveRpc.sessionFile ?? null) : await resolveSessionPath(id);
-    if (!liveRpc && !filePath) {
+    const resolvedPath = liveRpc ? null : await resolveSessionPath(id);
+    if (!liveRpc && !resolvedPath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
     // A live wrapper's SessionManager sees in-flight entries a cold file read
     // would miss (transient sessions); fall back to the cached file reader.
-    const sm = liveRpc?.inner.sessionManager ?? openSessionCached(filePath!);
+    const sm = liveRpc?.inner.sessionManager ?? openSessionManager(resolvedPath!);
     if (!sm) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
+    perf?.span("open");
+    const filePath = liveRpc?.sessionFile || sm.getSessionFile() || resolvedPath || "";
     const entries = sm.getEntries() as never;
     const allEntries = entries as unknown as SessionEntry[];
     const leafId = sm.getLeafId();
-    const searchParams = new URL(req.url).searchParams;
-    const initialView = searchParams.get("view") === "initial";
-    const tree = initialView ? undefined : projectTreeForResponse(sm.getTree());
+    const summaryTree = searchParams.get("tree") === "summary";
+    const tree = summaryTree
+      ? toSummaryTree(projectTreeForResponse(sm.getTree()))
+      : projectTreeForResponse(sm.getTree());
+    perf?.span("tree");
     const deferThinking = searchParams.has("deferThinking");
     const deferToolResultImages = searchParams.has("deferMedia");
     const rawTail = Number(searchParams.get("tail"));
     const tail = Number.isFinite(rawTail) && rawTail > 0 ? Math.min(rawTail, 1000) : 50;
-    const context = buildSessionContext(entries as never, leafId, { deferThinking, deferToolResultImages, tail, sessionId: id });
-    const details = initialView ? undefined : computeSessionDetails(entries as unknown as SessionEntry[]);
+    const context = buildSessionContext(entries as never, leafId, {
+      deferThinking,
+      deferToolResultImages,
+      tail,
+      sessionId: id, // local: lazy URLs for historical tool-result images
+    });
+    perf?.span("context");
+    const details = initialView ? undefined : computeSessionDetails(allEntries);
     const totalActiveMs = details?.totalActiveMs;
-    const stats = computeSessionStats(entries as unknown as SessionEntry[]);
+    // Cumulative usage over ALL entries, including history compacted away —
+    // the same aggregation the SDK's getSessionStats() uses. Lets the client
+    // keep monotonic token/cost counters across compaction and page reloads.
+    const stats = computeSessionStats(allEntries);
+    perf?.span("stats");
+    // Opaque freshness token for the session view cache. Derived from the
+    // disk fingerprint and the actual read source; null tells the client the
+    // snapshot is unstable and must not be cached as fresh.
+    const latestEntry = allEntries[allEntries.length - 1] as { id?: string } | undefined;
+    const snapshotRevision = computeSessionRevision({
+      filePath,
+      sourceId: liveRpc ? `runtime:${String(liveRpc.inner.sessionId)}` : "disk",
+      entryCount: allEntries.length,
+      latestEntryId: typeof latestEntry?.id === "string" ? latestEntry.id : null,
+      leafId: leafId ?? null,
+    });
     const sessionName = sm.getSessionName();
 
     if (initialView) {
@@ -81,10 +127,10 @@ export async function GET(
       ? await resolveSessionIdByPath(header.parentSession)
       : undefined;
     const subagent = header
-      ? readSubagentRun(entries as never, header.id, filePath ?? "")
+      ? readSubagentRun(allEntries, header.id, filePath ?? "")
       : null;
-    const toolNames = readSubagentSessionResources(entries as never)?.tools
-      ?? readSessionToolSelection(entries as never);
+    const toolNames = readSubagentSessionResources(allEntries)?.tools
+      ?? readSessionToolSelection(allEntries);
     const info = header ? (await attachSessionProjectInfo([{
       path: filePath ?? "",
       id: header.id,
@@ -122,17 +168,39 @@ export async function GET(
       transient: !filePath || !existsSync(filePath),
     }]))[0] : null;
 
-    return jsonResponse(req, {
-      sessionId: id,
-      filePath,
-      info,
-      leafId,
-      tree,
-      context,
-      totalActiveMs,
-      stats,
-      ...(toolNames !== undefined ? { toolNames } : {}),
-    });
+    return perf?.attach(jsonResponse(
+      req,
+      {
+        sessionId: id,
+        filePath,
+        info,
+        leafId,
+        tree,
+        ...(summaryTree ? { treeFormat: "summary" as const } : {}),
+        snapshotRevision,
+        context,
+        stats,
+        totalActiveMs,
+        ...(toolNames !== undefined ? { toolNames } : {}),
+        ...(wrapperRebuilt ? { wrapperRebuilt: true } : {}),
+      },
+    )) ?? jsonResponse(
+      req,
+      {
+        sessionId: id,
+        filePath,
+        info,
+        leafId,
+        tree,
+        ...(summaryTree ? { treeFormat: "summary" as const } : {}),
+        snapshotRevision,
+        context,
+        stats,
+        totalActiveMs,
+        ...(toolNames !== undefined ? { toolNames } : {}),
+        ...(wrapperRebuilt ? { wrapperRebuilt: true } : {}),
+      },
+    );
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
@@ -154,10 +222,11 @@ export async function PATCH(
       if (!filePath) {
         return NextResponse.json({ error: "Session not found" }, { status: 404 });
       }
-      const sm = SessionManager.open(filePath);
+      // PATCH writes via appendSessionInfo — open fresh, bypassing the cache.
+      const sm = openSessionManager(filePath, { mutable: true });
       sm.appendSessionInfo(name.trim());
       // The cached read-only manager for this path is now stale.
-      invalidateOpenSessionCache(filePath);
+      invalidateSessionManagerCache(filePath);
     }
     if (typeof pinned === "boolean") {
       await mutateSettingsJson((settings) => {
@@ -201,7 +270,13 @@ export async function DELETE(
     }
 
     // Read only the bounded header before deleting.
-    const parentSessionPath = readSessionHeader(filePath)?.parentSession;
+    let parentSessionPath: string | undefined;
+    try {
+      parentSessionPath = readSessionHeader(filePath)?.parentSession;
+    } catch (error) {
+      // Empty runtime sessions have a cached path before their first disk write.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     let parentSessionId: string | undefined;
     if (parentSessionPath) {
       try {
@@ -224,23 +299,23 @@ export async function DELETE(
     // other project directories).
     const childPaths = new Set<string>();
     const targetPathKey = sessionPathKey(filePath);
-    const dir = filePath.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
+    const dir = dirname(filePath);
 
     // Deleting a session also deletes every persisted or live subagent below
     // it: a subagent is an implementation detail of its parent, so leaving its
     // transcript behind would surface as an orphan row with a missing root.
-    const allSessions = mergeSessionLists(
+    const sessions = mergeSessionLists(
       await listAllSessions({ force: true }),
       getRpcSessionInfos({ includeTransient: true }),
     );
     const childrenByParent = new Map<string, string[]>();
-    for (const session of allSessions) {
+    for (const session of sessions) {
       if (session.relation?.kind !== "subagent") continue;
       const children = childrenByParent.get(session.relation.parentSessionId) ?? [];
       children.push(session.id);
       childrenByParent.set(session.relation.parentSessionId, children);
     }
-    const sessionPaths = new Map(allSessions.map((session) => [session.id, session.path]));
+    const sessionPaths = new Map(sessions.map((session) => [session.id, session.path]));
     // The catalogue can be stale or scoped to other projects; also read the
     // sibling files directly so a just-created subagent is still found.
     try {
@@ -294,10 +369,13 @@ export async function DELETE(
     }
     const deletedPathKeys = new Set([...deletedPaths.values()].map((path) => sessionPathKey(path)));
 
+    // Re-attach all direct children to this session's parent (cascade re-parent)
+    // Scan sibling files in the same directory
     try {
       const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl") && join(dir, f) !== filePath);
       for (const file of files) {
         const childPath = join(dir, file);
+        if (deletedPathKeys.has(sessionPathKey(childPath))) continue;
         try {
           const header = readSessionHeader(childPath);
           if (header?.type === "session" && header.parentSession && sessionPathKey(header.parentSession) === targetPathKey) {
@@ -353,7 +431,7 @@ export async function DELETE(
           try { unlinkSync(tmpPath); } catch { /* already gone */ }
           throw error;
         }
-        invalidateOpenSessionCache(childPath);
+        invalidateSessionManagerCache(childPath);
       } catch { /* skip malformed / unreadable child */ }
     }
 
@@ -365,10 +443,7 @@ export async function DELETE(
       getRpcSession(deletedId)?.revokePersistenceForDeletion();
       await getRpcSession(deletedId)?.shutdown().catch(() => undefined);
     }
-    // Best-effort: a failing extension shutdown hook must not block the
-    // delete (the wrapper is destroyed in shutdown's finally regardless).
-    try { await abortSubagent(id); } catch { /* ordinary session */ }
-    await getRpcSession(id)?.shutdown().catch(() => undefined);
+
     for (const [deletedId, deletedPath] of deletedPaths) {
       try {
         unlinkSync(deletedPath);
@@ -383,7 +458,7 @@ export async function DELETE(
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
       await dropSessionArchiveEntry(getAgentDir(), deletedId).catch(() => undefined);
-      invalidateOpenSessionCache(deletedPath);
+      invalidateSessionManagerCache(deletedPath);
       invalidateSessionPathCache(deletedId);
     }
     invalidateSessionListCache();

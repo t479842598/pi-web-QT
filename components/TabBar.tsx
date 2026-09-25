@@ -5,6 +5,7 @@ import { X } from "@phosphor-icons/react";
 import { Robot } from "@phosphor-icons/react/Robot";
 import { useI18n } from "@/hooks/useI18n";
 import { getFileIcon } from "./FileIcons";
+import type { FileViewerDisplayMode, FileViewerState } from "@/lib/file-viewer-state";
 
 export interface Tab {
   id: string;
@@ -13,9 +14,13 @@ export interface Tab {
   kind?: "terminal" | "subagent";
   closing?: boolean;
   sourceSessionId?: string | null;
-  initialDisplayMode?: "diff";
+  initialDisplayMode?: FileViewerDisplayMode;
   /** Subagent run shown by a `kind: "subagent"` tab. */
   sessionId?: string;
+  /** PDF page requested by the link that opened this tab (`#page=N`). */
+  page?: number;
+  viewerState?: FileViewerState;
+  viewerRevision?: number;
 }
 
 interface Props {

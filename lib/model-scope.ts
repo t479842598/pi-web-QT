@@ -83,6 +83,13 @@ function hasGlob(pattern: string): boolean {
   return pattern.includes("*") || pattern.includes("?") || pattern.includes("[");
 }
 
+function isSuppressibleUnmatchedGlob(pattern: string): boolean {
+  if (!hasGlob(pattern)) return false;
+  const colonIndex = pattern.lastIndexOf(":");
+  return colonIndex < 0
+    || THINKING_LEVEL_SUFFIXES.has(pattern.slice(colonIndex + 1) as ThinkingLevel);
+}
+
 function exactReferenceMatches(pattern: string, models: readonly Model<Api>[]): Model<Api>[] {
   const normalized = pattern.toLowerCase();
   const canonical = models.filter(
@@ -163,7 +170,15 @@ export async function resolveVisibleModels(
     visible = result.scopedModels.length > 0
       ? result.scopedModels.map((s) => s.model)
       : available;
-    warnings.push(...result.diagnostics.map((d) => d.message));
+    // A leftover valid glob after a model was removed is not a chat-level problem
+    // when other enabledModels entries still matched. Keep exact and malformed
+    // pattern warnings, and keep all no-match warnings for a total miss, where
+    // the UI falls back to every available model and the user needs to know the
+    // scope did not apply. (Ported from upstream v0.9.2.)
+    const totalMiss = scopedModels.length === 0;
+    warnings.push(...result.diagnostics
+      .filter((d) => d.code !== "no-match" || totalMiss || !isSuppressibleUnmatchedGlob(d.pattern))
+      .map((d) => d.message));
     for (const scopedModel of scopedModels) {
       if (scopedModel.thinkingLevel) {
         thinkingLevelPins[`${scopedModel.model.provider}/${scopedModel.model.id}`] = scopedModel.thinkingLevel;

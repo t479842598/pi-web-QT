@@ -236,7 +236,7 @@ test("reconnects active shell output to its streaming tool call", async () => {
   );
   const endSource = source.slice(
     source.indexOf('case "tool_execution_end"'),
-    source.indexOf('case "tool_execution_update"'),
+    source.indexOf('case "entry_appended"'),
   );
 
   assert.match(updateSource, /updateName === "bash" \|\| updateName === "powershell"/);
@@ -295,4 +295,191 @@ test("persistModeSettings syncs the ref so one tick can write both axes", () => 
   const refSyncIndex = persistSource.indexOf("modeSettingsRef.current = next;");
   const setStateIndex = persistSource.indexOf("setModeSettings(next);");
   assert.ok(refSyncIndex >= 0 && setStateIndex >= 0, "both assignments exist");
+});
+
+test("only the session-mount load probes disk for external appends", () => {
+  const loadSessionSource = source.slice(
+    source.indexOf("const loadSession = useCallback"),
+    source.indexOf("const loadContext = useCallback"),
+  );
+  const mountSource = source.slice(
+    source.indexOf("// Load session on mount"),
+    source.indexOf("if (!agentState?.running) {"),
+  );
+  assert.match(loadSessionSource, /options\?: \{ force\?: boolean \}/);
+  assert.match(loadSessionSource, /if \(options\?\.force\) params\.set\("force", "1"\)/);
+  assert.match(loadSessionSource, /if \(d\.wrapperRebuilt\)/);
+  assert.match(mountSource, /loadSession\(session\.id, !cached, true, \{ force: true \}\)/);
+  assert.equal([...source.matchAll(/\{ force: true \}/g)].length, 1);
+});
+
+test("sessions the user never overrode follow pi's configured defaultTools (#700)", () => {
+  const ensureSource = source.slice(
+    source.indexOf("const ensureNewSession = useCallback"),
+    source.indexOf("// Opening the System or Tools panel"),
+  );
+  const loadToolsSource = source.slice(
+    source.indexOf("const loadTools = useCallback"),
+    source.indexOf("const promoteNewSession"),
+  );
+
+  // A new session must omit toolNames entirely rather than pin pi-web's own preset.
+  assert.match(ensureSource, /\.\.\.\(toolNames !== undefined \? \{ toolNames \} : \{\}\),/);
+  assert.doesNotMatch(ensureSource, /^ +toolNames,$/m);
+  assert.match(ensureSource, /sessionToolsPinnedRef\.current = toolNames !== undefined/);
+
+  // An unpinned session keeps saying "configured" instead of borrowing whichever
+  // preset its resolved tools happen to match.
+  assert.match(
+    loadToolsSource,
+    /sessionToolsPinnedRef\.current \? preset : CONFIGURED_TOOL_PRESET/,
+  );
+});
+
+test("tool preset state follows the persisted session selection on reload", () => {
+  const loadSessionSource = source.slice(
+    source.indexOf("const loadSession = useCallback"),
+    source.indexOf("const loadContext = useCallback"),
+  );
+
+  assert.match(
+    loadSessionSource,
+    /sessionToolsPinnedRef\.current = d\.toolNames !== undefined;/,
+  );
+  assert.match(
+    loadSessionSource,
+    /setToolPresetState\(d\.toolNames !== undefined \? getPresetFromToolNames\(d\.toolNames\) : CONFIGURED_TOOL_PRESET\)/,
+  );
+  const changeSource = source.slice(
+    source.indexOf("const handleToolPresetChange = useCallback"),
+    source.indexOf("// ── Plan mode"),
+  );
+  assert.match(changeSource, /setPreferredToolPreset\(preset\)/);
+  assert.match(changeSource, /type: "set_tools",\s*\.\.\.\(toolNames !== undefined \? \{ toolNames \} : \{\}\),/);
+  assert.match(changeSource, /sessionIdRef\.current = activeSessionId/);
+  assert.doesNotMatch(loadToolsSourceLike(), /setPreferredToolPreset/);
+
+  function loadToolsSourceLike() {
+    return source.slice(
+      source.indexOf("const loadTools = useCallback"),
+      source.indexOf("const promoteNewSession"),
+    );
+  }
+});
+
+test("a rejected submission preserves a different run reported by the server", () => {
+  const reconcileSource = source.slice(
+    source.indexOf("const reconcileAgentState = useCallback"),
+    source.indexOf("// Recovery net for missed SSE events"),
+  );
+
+  // The reconcile mirrors the authoritative live-run flags without dropping
+  // the optimistic ones (fork adaptation of the upstream rewrite).
+  assert.match(reconcileSource, /sdkAgentActiveRef\.current = sdkAgentActiveRef\.current \|\| Boolean\(state\.isStreaming\)/);
+  assert.match(reconcileSource, /rpcPromptPendingRef\.current = rpcPromptPendingRef\.current \|\| Boolean\(state\.isPromptRunning\)/);
+  assert.match(reconcileSource, /finishPromptWithoutStream\(sid, runId\)/);
+});
+
+test("opening System or Tools lazily starts a dormant session without sending a prompt", () => {
+  const loadSystemInfoSource = source.slice(
+    source.indexOf("const loadSystemInfo = useCallback"),
+    source.indexOf("const loadSlashCommands = useCallback"),
+  );
+
+  assert.match(loadSystemInfoSource, /sessionIdRef\.current \?\? await ensureNewSession\(\)/);
+  assert.doesNotMatch(loadSystemInfoSource, /promoteNewSession\(\)/);
+  assert.match(loadSystemInfoSource, /sendAgentCommand<AgentStateResponse>\(sid, \{ type: "get_state" \}\)/);
+  assert.match(loadSystemInfoSource, /loadTools\(sid\)/);
+  assert.doesNotMatch(loadSystemInfoSource, /type: "prompt"/);
+  assert.match(loadSystemInfoSource, /setSystemPrompt\(state\.systemPrompt \?\? ""\)/);
+});
+
+test("built-in clone switches to the independent child session", () => {
+  const builtinSource = source.slice(
+    source.indexOf('case "clone"'),
+    source.indexOf("default:", source.indexOf('case "clone"')),
+  );
+
+  assert.match(builtinSource, /type: "clone",\s+leafId: activeLeafId/);
+  assert.match(builtinSource, /agentRunningRef\.current \|\| bashRunningRef\.current/);
+  assert.match(builtinSource, /onSessionForked\?\.\(result\.newSessionId\)/);
+});
+
+test("auto-compact slash command toggles session auto-compaction", () => {
+  const commandSource = source.slice(
+    source.indexOf('case "auto-compact"'),
+    source.indexOf('case "reload"'),
+  );
+  assert.ok(commandSource.length > 0, "auto-compact case not found before reload case");
+  assert.match(commandSource, /sendAgentCommand<AgentStateResponse>\(sid, \{\s*type: "get_state"\s*\}\)/);
+  assert.match(commandSource, /!\(liveState\?\.autoCompactionEnabled \?\? true\)/);
+  assert.match(commandSource, /sendAgentCommand\(sid, \{\s*type: "set_auto_compaction",\s*enabled: nextEnabled,\s*\}\)/);
+  assert.match(commandSource, /setAutoCompactionEnabled\(nextEnabled\)/);
+  assert.doesNotMatch(commandSource, /!autoCompactionEnabled/);
+  // State mirrors the wrapper so the toggle reflects server-side changes too.
+  assert.match(source, /setAutoCompactionEnabled\(liveState\.autoCompactionEnabled \?\? true\)/);
+});
+
+test("transcript system messages never enter the chat", () => {
+  const streamSource = source.slice(
+    source.indexOf('case "message_start"'),
+    source.indexOf('case "message_end"'),
+  );
+  const messageEndSource = source.slice(
+    source.indexOf('case "message_end"'),
+    source.indexOf('case "tool_execution_start"'),
+  );
+
+  // Pi >= 0.86 appends the prompt and tool loadout as system messages. They
+  // are provider input, never conversation.
+  assert.match(streamSource, /if \(isSystemMessageEvent\(event\)\) break;/);
+  assert.match(messageEndSource, /if \(isSystemMessageEvent\(event\)\) break;/);
+  assert.match(messageEndSource, /normalizeToolCalls\(completed\)/);
+});
+
+test("shows the latest streamed tool execution progress in the running phase", () => {
+  const updateSource = source.slice(
+    source.indexOf('case "tool_execution_update"'),
+    source.indexOf('case "tool_execution_end"'),
+  );
+
+  assert.match(updateSource, /getToolExecutionProgress\(event\.partialResult\)/);
+  assert.match(updateSource, /progress: progress \?\? existing\?\.progress/);
+});
+
+test("live wrapper model wins over persisted response metadata", () => {
+  assert.match(source, /model\?: \{ provider: string; id: string \}/);
+  assert.match(source, /syncLiveModel\(liveState\)/);
+  assert.match(source, /syncLiveModel\(state\);[\s\S]*?setIsCompacting\(state\?\.isCompacting/);
+});
+
+test("stale forced-read wrapper rebuilds its event stream", () => {
+  const loadSessionSource = source.slice(
+    source.indexOf("const loadSession = useCallback"),
+    source.indexOf("const loadContext = useCallback"),
+  );
+
+  assert.match(loadSessionSource, /if \(d\.wrapperRebuilt\) \{\s*\/\/ GET \?force=1 just dropped a stale live wrapper[\s\S]*?closeEvents\(\);\s*void connectEvents\(sid\);/);
+});
+
+test("streaming submissions cannot be stranded in an idle direct queue", () => {
+  const queueSource = source.slice(
+    source.indexOf("const handlePromptWithStreamingBehavior = useCallback"),
+    source.indexOf("const handleFollowUp = useCallback"),
+  );
+
+  assert.match(queueSource, /type: "prompt"/);
+  assert.match(queueSource, /streamingBehavior: behavior/);
+  assert.doesNotMatch(queueSource, /type: "steer"/);
+  assert.doesNotMatch(queueSource, /type: "follow_up"/);
+});
+
+test("post-accept prompt errors do not duplicate the user submission", () => {
+  const promptErrorSource = source.slice(
+    source.indexOf('case "prompt_error"'),
+    source.indexOf('case "extension_error"'),
+  );
+
+  assert.match(promptErrorSource, /addNotice/);
+  assert.doesNotMatch(promptErrorSource, /restoreSubmission/);
 });

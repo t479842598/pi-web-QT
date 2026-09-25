@@ -1,28 +1,11 @@
 export async function register(): Promise<void> {
-  if (process.env.NEXT_RUNTIME !== "nodejs") return;
-
-  // Parent-death watchdog (desktop shell only): REMOVED.
-  // Keep-alive: the bundled backend must STAY RUNNING after the desktop shell
-  // (GUI) exits so other clients / browsers can reuse 30141. We therefore no
-  // longer exit when the parent PID disappears. Stop explicitly via the UI
-  // ("关闭本机服务", stop_local) or a password-change restart.
-
-  // Apply proxy settings from ~/.pi/agent/settings.json before the global
-  // Undici dispatcher is created so EnvHttpProxyAgent sees them on boot.
-  const { readProxyConfig, applyProxyEnv } = await import("@/lib/proxy-config");
-  applyProxyEnv(readProxyConfig());
-
-  const { configureHttpDispatcher } = await import("@/lib/http-dispatcher");
-  configureHttpDispatcher();
-
-  // Start the work-task engine (single-process lock; the first server to
-  // register owns it). Import is async so the engine's heavier deps (pi SDK)
-  // don't delay boot when there are no tasks.
-  try {
-    const { ensureTaskEngine } = await import("@/lib/task-engine");
-    ensureTaskEngine();
-  } catch {
-    // Engine startup is best-effort at boot; task commands report
-    // "engine not running" and the next request can retry.
+  // Next builds this file for both the Node and the Edge instrumentation entry.
+  // The Edge graph rejects Node APIs, so `process.on` and undici live in
+  // ./instrumentation-node, reached only through this compile-time-eliminated
+  // NEXT_RUNTIME branch. An early `return` instead of this `if` would leave the
+  // Node calls in the Edge module.
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { registerNodeInstrumentation } = await import("./instrumentation-node");
+    registerNodeInstrumentation();
   }
 }

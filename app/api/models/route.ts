@@ -59,6 +59,12 @@ async function loadModels(cwd: string): Promise<ModelsData> {
       ? { defaultModel: { provider: defaultProvider, modelId: defaultModelId } }
       : {}),
   });
+  const defaultThinkingLevel = initial.thinkingLevel
+    ?? (initial.model
+      ? settings.getModelThinkingLevel(initial.model.provider, initial.model.id)
+      : undefined)
+    ?? settings.getDefaultThinkingLevel()
+    ?? null;
 
   return {
     models: Object.fromEntries(nameMap),
@@ -66,6 +72,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
     defaultModel: initial.model
       ? { provider: initial.model.provider, modelId: initial.model.id }
       : null,
+    defaultThinkingLevel,
     thinkingLevels,
     thinkingLevelMaps,
     thinkingLevelPins: scope.thinkingLevelPins,

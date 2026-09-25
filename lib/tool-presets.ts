@@ -6,9 +6,19 @@ export interface ToolEntry {
   promptGuidelines?: string[];
 }
 
+/** Presets that pin an explicit tool list onto the session. */
 // Upstream names the analysis-only preset "read-only"; this fork exposes the
 // same toolset as "plan" for plan mode — one concept, fork-side name wins.
-export const TOOL_PRESET_VALUES = ["none", "default", "full", "plan"] as const;
+export const CONCRETE_TOOL_PRESET_VALUES = ["none", "plan", "default", "full"] as const;
+export type ConcreteToolPreset = typeof CONCRETE_TOOL_PRESET_VALUES[number];
+
+/**
+ * "configured" is not a tool list: it means "send no override", so pi resolves the
+ * loadout from settings.json defaultTools exactly like the `pi` CLI does. Sessions
+ * left on it stay unpinned and keep following the setting as it changes.
+ */
+export const CONFIGURED_TOOL_PRESET = "configured";
+export const TOOL_PRESET_VALUES = ["configured", "none", "plan", "default", "full"] as const;
 export type ToolPreset = typeof TOOL_PRESET_VALUES[number];
 
 export const PRESET_NONE: string[] = [];
@@ -24,12 +34,16 @@ export function isToolPreset(value: unknown): value is ToolPreset {
   return typeof value === "string" && (TOOL_PRESET_VALUES as readonly string[]).includes(value);
 }
 
-export function getPresetFromTools(tools: ToolEntry[]): ToolPreset {
+export function isConcreteToolPreset(value: unknown): value is ConcreteToolPreset {
+  return typeof value === "string" && (CONCRETE_TOOL_PRESET_VALUES as readonly string[]).includes(value);
+}
+
+export function getPresetFromTools(tools: ToolEntry[]): ConcreteToolPreset {
   const activeTools = tools.filter((t) => t.active);
   return getPresetFromToolNames(activeTools.map((tool) => tool.name));
 }
 
-export function getPresetFromToolNames(toolNames: readonly string[]): ToolPreset {
+export function getPresetFromToolNames(toolNames: readonly string[]): ConcreteToolPreset {
   if (toolNames.length === 0) return "none";
 
   const active = toolNames
@@ -44,7 +58,9 @@ export function getPresetFromToolNames(toolNames: readonly string[]): ToolPreset
   return "default";
 }
 
-export function getToolNamesForPreset(preset: ToolPreset): string[] {
+/** Undefined means "no explicit selection": let pi resolve settings.json defaultTools. */
+export function getToolNamesForPreset(preset: ToolPreset): string[] | undefined {
+  if (preset === CONFIGURED_TOOL_PRESET) return undefined;
   if (preset === "none") return [...PRESET_NONE];
   if (preset === "full") return [...PRESET_FULL];
   if (preset === "plan") return [...PRESET_PLAN];

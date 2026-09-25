@@ -34,7 +34,7 @@ interface AppTitleBarProps {
   tasksBoardEnabled: boolean;
   onToggleTasks: () => void;
   systemPrompt: string | null;
-  activeTopPanel: "system" | "session" | null;
+  activeTopPanel: "agents" | "branches" | "system" | "tools" | "session" | null;
 
   topPanelPos: { top: number; left: number; width: number } | null;
   sessionStats: SessionStatsInfo | null;

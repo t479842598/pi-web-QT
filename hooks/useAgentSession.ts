@@ -15,12 +15,13 @@ import { normalizeToolCalls } from "@/lib/normalize";
 import { extractSubject } from "@/lib/permission";
 import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
 import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
-import { getToolNamesForPreset, PRESET_PLAN, type ToolEntry } from "@/lib/tool-presets";
+import { getToolNamesForPreset, PRESET_PLAN, CONFIGURED_TOOL_PRESET, getPresetFromToolNames, type ToolPreset, type ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionFileStats } from "@/lib/session-stats";
 import { estimateTokens } from "@/lib/token-estimate";
 import type { PendingRecoveryItem, QueueEntry, QueueEntryInput } from "@/lib/queue-store";
 import type { ChatDraftImage } from "@/lib/draft-store";
+import { clearDraft } from "@/lib/draft-store";
 import { createStreamUpdateScheduler, type StreamUpdateScheduler } from "@/lib/stream-update-scheduler";
 import {
   buildModeSystemPrompt,
@@ -35,6 +36,21 @@ import {
   type TokenMode,
   type ToolApprovalMode,
 } from "@/lib/modes";
+import {
+  deleteSessionViewSnapshot,
+  getSessionViewSnapshot,
+  setSessionViewSnapshot,
+} from "@/lib/session-view-cache";
+import { setPreferredToolPreset } from "@/lib/tool-preset-preference";
+import { isSystemMessageEvent } from "@/lib/agent-event-wire";
+import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
+import { updateExtensionWidgets } from "@/lib/extension-widgets";
+import {
+  CHAT_SCROLL_REATTACH_TOLERANCE,
+  CHAT_SCROLL_TAIL_TOLERANCE,
+  getLiveFollowAttached,
+  shouldShowScrollToLatest,
+} from "@/lib/chat-lazy-load";
 
 /**
  * Localize well-known plan-mode extension notifications. The
@@ -60,6 +76,11 @@ export interface SessionInitialData {
   sessionId: string;
   filePath: string;
   leafId: string | null;
+  toolNames?: string[];
+  /** Opaque freshness token for the session view cache (summary tree reads). */
+  snapshotRevision?: string | null;
+  /** "summary" when `tree` carries the body-free navigation format. */
+  treeFormat?: "summary";
   context: {
     messages: AgentMessage[];
     entryIds: string[];
@@ -68,6 +89,10 @@ export interface SessionInitialData {
     thinkingLevel: string;
     model: { provider: string; modelId: string } | null;
   };
+  /** Cumulative usage over ALL session-file entries (incl. compacted history). */
+  stats?: SessionFileStats;
+  /** True when GET ?force=1 dropped a stale live wrapper and rebuilt from disk. */
+  wrapperRebuilt?: boolean;
 }
 
 export interface SessionDetailsData {
@@ -123,6 +148,7 @@ interface LastAssistantTextResponse {
 }
 
 type AgentStateResponse = {
+  model?: { provider: string; id: string };
   contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null;
   systemPrompt?: string;
   thinkingLevel?: string;
@@ -131,6 +157,7 @@ type AgentStateResponse = {
   isBashRunning?: boolean;
   isCompacting?: boolean;
   phase?: "waiting_model" | "running_command" | null;
+  autoCompactionEnabled?: boolean;
   extensionStatuses?: ExtensionStatusItem[];
   extensionWidgets?: ExtensionWidgetItem[];
   queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
@@ -229,7 +256,7 @@ type NoticeAction =
 export type AgentPhase =
   | { kind: "waiting_model" }
   | { kind: "running_command" }
-  | { kind: "running_tools"; tools: { id: string; name: string }[] }
+  | { kind: "running_tools"; tools: { id: string; name: string; progress?: string }[] }
   | null;
 
 export interface CompactResultInfo {
@@ -267,10 +294,16 @@ export interface UseAgentSessionOptions {
   onSystemPromptChange?: (prompt: string | null) => void;
   onSessionStatsPanelOpen?: () => void;
   /** Live subagent activity for this session (Agent tool spawns + completions). */
-  setToolPreset?: (preset: "none" | "default" | "full" | "plan") => void;
+  setToolPreset?: (preset: ToolPreset) => void;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type ConcreteThinkingLevel = Exclude<ThinkingLevelOption, "auto">;
+
+function asConcreteThinkingLevel(value?: string | null): ConcreteThinkingLevel | null {
+  if (!value || value === "auto") return null;
+  return value as ConcreteThinkingLevel;
+}
 
 const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
 const USER_SCROLL_INTENT_MS = 1200;
@@ -329,7 +362,9 @@ const EVENT_STREAM_CONNECT_TIMEOUT_MS = 30_000;
 // stuck true and silently blocking every subsequent send. Give it a hard cap
 // so the failure surfaces through handleSend's catch (error notice + reset).
 const ENSURE_NEW_SESSION_TIMEOUT_MS = 30_000;
-
+const BASH_STATE_RECONCILE_MS = 1_000;
+// Retry temporary model-list failures without requiring a page refresh.
+const MODELS_RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
 /** Known mode-instruction block headers (from lib/modes buildModeSystemPrompt
  *  and the legacy plan block). Used to strip the injected prefix from echoed
  *  user messages so the chat bubble shows only what the user typed. */
@@ -502,6 +537,7 @@ type ModelsResponse = {
   models: Record<string, string>;
   modelList?: ModelEntry[];
   defaultModel?: SelectedModel | null;
+  defaultThinkingLevel?: string | null;
   thinkingLevels?: Record<string, string[]>;
   thinkingLevelMaps?: Record<string, Record<string, string | null>>;
   thinkingLevelPins?: Record<string, string>;
@@ -635,7 +671,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [newSessionModel, setNewSessionModel] = useState<SelectedModel | null>(null);
   const [newSessionDefaultModel, setNewSessionDefaultModel] = useState<SelectedModel | null>(null);
-  const [toolPreset, setToolPreset] = useState<"none" | "default" | "full" | "plan">("full");
+  const [toolPreset, setToolPreset] = useState<ToolPreset>(CONFIGURED_TOOL_PRESET);
   // Plan mode is DERIVED from the collaboration mode, not a second flag.
   // Two independent states used to drift: collaborationMode could be "plan"
   // while planMode stayed false (and vice versa), so the prompt block, the
@@ -796,19 +832,32 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     goalStateRef.current = goalState;
   }, [goalState]);
+  const [autoCompactionEnabled, setAutoCompactionEnabled] = useState(true);
   const goalLoopRunningRef = useRef(false);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption>("auto");
+  const [liveThinkingLevel, setLiveThinkingLevel] = useState<ConcreteThinkingLevel | null>(null);
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; errorMessage?: string } | null>(null);
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
   const [forkingEntryId, setForkingEntryId] = useState<string | null>(null);
   const [currentModelOverride, setCurrentModelOverride] = useState<{ provider: string; modelId: string } | null>(null);
+  const [liveModel, setLiveModel] = useState<{ provider: string; modelId: string } | null>(null);
+  // Upstream v0.9.2: sync the live model from reconcile/agent_end snapshots without
+  // disturbing an explicit pending selection.
+  const syncLiveModel = useCallback((liveState: { model?: { provider?: string; modelId?: string } | null } | null | undefined) => {
+    const m = liveState?.model;
+    if (m && typeof m.provider === "string" && typeof m.modelId === "string") {
+      setLiveModel({ provider: m.provider, modelId: m.modelId });
+    }
+  }, []);
+
   const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [isCompacting, setIsCompacting] = useState(false);
-  const [compactError, setCompactError] = useState<string | null>(null);
+    const [compactError, setCompactError] = useState<string | null>(null);
   const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
   const [promptAnchorActive, setPromptAnchorActive] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommandInfo[]>([]);
   const [slashCommandsLoading, setSlashCommandsLoading] = useState(false);
   const [noticeState, dispatchNotice] = useReducer(noticeReducer, { visible: [], pending: [] });
@@ -879,11 +928,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // silent for ~3 periods, the connection is a zombie and must be rebuilt.
   const lastEventFrameAtRef = useRef(0);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
+  // Mount gate for SSE effects: Strict Mode re-runs effects in declaration
+  // order after a simulated unmount; this ref is set false by the mount-only
+  // effect cleanup and re-true when that effect re-runs.
+  const sessionHookMountedRef = useRef(true);
+  const thinkingLevelPinsRef = useRef<Record<string, string>>({});
+  const defaultThinkingLevelRef = useRef<ConcreteThinkingLevel>("off");
+  const [newSessionDefaultThinkingLevel, setNewSessionDefaultThinkingLevel] = useState<ConcreteThinkingLevel | null>(null);
+  const previousScrollTopRef = useRef(0);
   // The session the component is CURRENTLY rendering, which is not the same as
   // sessionIdRef (that tracks what is loaded and can lag across a switch). The
   // lease logic needs this to avoid renewing a session the user already left.
   const sessionPropIdRef = useRef<string | null>(session?.id ?? null);
   sessionPropIdRef.current = session?.id ?? null;
+  // False while the session carries no tool selection of its own, so its loadout
+  // follows settings.json defaultTools and the picker must say so rather than
+  // labelling it with whichever preset the resolved tools happen to match.
+  const sessionToolsPinnedRef = useRef(false);
   const agentRunningRef = useRef(false);
   const sdkAgentActiveRef = useRef(false);
   const rpcPromptPendingRef = useRef(false);
@@ -898,6 +959,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // one onAgentEnd instead of two.
   const stageNotifiedRef = useRef(false);
   const bashRunningRef = useRef(false);
+  const bashRecoveryIdRef = useRef(0);
   // Guards mount-time running-state restoration: the parallel /state probe and
   // loadSession's own state fetch can both detect the same running session;
   // restoreRunning must apply exactly once per opened session.
@@ -1029,7 +1091,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } satisfies SessionStatsInfo;
   }, [messages, sessionStatsOverride, contextUsage, data?.filePath, data?.totalActiveMs, data?.stats, session?.id, session?.name]);
 
-  const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
+  const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false, options?: { force?: boolean }) => {
     let loadGeneration = sessionLoadGenerationRef.current;
     let messagesLoaded = false;
     try {
@@ -1040,6 +1102,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const loadController = new AbortController();
       sessionLoadControllerRef.current = loadController;
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1", view: "initial" });
+      if (options?.force) params.set("force", "1");
       // 超时兜底：服务端异常/大会话卡住时结束 loading，避免"永远加载中"。
       // 大会话冷启动可能超过 15s，放宽到 30s；超时视为偶发慢，自动重试一次，
       // 两次都超时才向用户给出可读提示（不暴露 "AbortError: Fetch is aborted"）。
@@ -1078,6 +1141,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setHasEarlierMessages(false);
           setError(null);
         }
+        deleteSessionViewSnapshot(sid);
         return null;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1128,9 +1192,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           ? null
           : override;
       });
+      // Tool-preset state follows the persisted selection (#700): a session the
+      // user never overrode keeps saying "configured" instead of borrowing
+      // whichever preset its resolved tools happen to match.
+      sessionToolsPinnedRef.current = d.toolNames !== undefined;
+      setToolPresetState(d.toolNames !== undefined ? getPresetFromToolNames(d.toolNames) : CONFIGURED_TOOL_PRESET);
       setError(null);
-      if (d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
-        setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
+      if (d.wrapperRebuilt) {
+        // GET ?force=1 just dropped a stale live wrapper and rebuilt it: the
+        // old SSE stream belongs to the discarded wrapper, so rebuild it.
+        closeEvents();
+        void connectEvents(sid);
+      }
+      if (!includeState && d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
+        setLiveThinkingLevel(asConcreteThinkingLevel(d.context.thinkingLevel));
       }
 
       messagesLoaded = true;
@@ -1155,14 +1230,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (sessionIdRef.current !== sid || sessionLoadGenerationRef.current !== loadGeneration) return null;
 
         const liveState = agentState.state;
+        syncLiveModel(liveState);
         if (liveState) {
           if (liveState.contextUsage !== undefined) setContextUsage(liveState.contextUsage ?? null);
           if (liveState.systemPrompt !== undefined) setSystemPrompt(liveState.systemPrompt ?? null);
-          if (liveState.thinkingLevel !== undefined) setThinkingLevel((liveState.thinkingLevel as ThinkingLevelOption) ?? "auto");
           if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
           if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
           if (liveState.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(liveState.queuedMessages));
           if (liveState.pendingRecovery !== undefined) setPendingRecovery(liveState.pendingRecovery ?? []);
+          if (liveState.autoCompactionEnabled !== undefined) setAutoCompactionEnabled(liveState.autoCompactionEnabled ?? true);
           if (liveState.goalState !== undefined) {
             const goal = liveState.goalState as GoalRuntimeState | undefined;
             if (goal) {
@@ -1193,7 +1269,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (showLoading && !messagesLoaded && sessionLoadGenerationRef.current === loadGeneration) setLoading(false);
     }
-  }, [setPendingRecovery, setQueuedMessages]);
+  }, [setPendingRecovery, setQueuedMessages, setToolPresetState]);
 
   // Hard UI safety net: auxiliary startup races must never leave the whole
   // conversation behind an infinite loading mask. The initial request already
@@ -1213,19 +1289,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const loadTools = useCallback(async (sid: string) => {
     try {
       const tools = await sendAgentCommand<ToolEntry[]>(sid, { type: "get_tools" });
-      if (tools) {
-        const { getPresetFromTools } = await import("@/lib/tool-presets");
-        const preset = getPresetFromTools(tools);
-        if (preset === "plan" && !planModeRef.current) {
-          // 进入对话时计划模式的只读工具集不恢复——计划是临场模式，入口
-          // 处重置为默认预设，与重置后的协作模式保持一致（会话内正在使用
-          // 计划模式时 /reload 等路径由 planModeRef 保护不重置）。
-          await sendAgentCommand(sid, { type: "set_tools", toolNames: getToolNamesForPreset("default") }).catch(() => {});
-          setToolPresetState("default");
-        } else {
-          setToolPresetState(preset);
-        }
+      if (!tools || !sessionHookMountedRef.current || sessionIdRef.current !== sid) return null;
+      const { getPresetFromTools } = await import("@/lib/tool-presets");
+      const preset = getPresetFromTools(tools);
+      if (sessionToolsPinnedRef.current && preset === "plan" && !planModeRef.current) {
+        // 进入对话时计划模式的只读工具集不恢复——计划是临场模式，入口
+        // 处重置为默认预设，与重置后的协作模式保持一致（会话内正在使用
+        // 计划模式时 /reload 等路径由 planModeRef 保护不重置）。
+        await sendAgentCommand(sid, { type: "set_tools", toolNames: getToolNamesForPreset("default") }).catch(() => {});
+        setToolPresetState("default");
+      } else {
+        // An unpinned session keeps saying "configured" instead of borrowing
+        // whichever preset its resolved tools happen to match (#700).
+        setToolPresetState(sessionToolsPinnedRef.current ? preset : CONFIGURED_TOOL_PRESET);
       }
+      return tools;
     } catch (e) {
       console.error("Failed to load tools:", e);
     }
@@ -1258,7 +1336,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const selectedModel = newSessionModelOverrideRef.current;
       const selectedThinkingLevel = thinkingLevelOverrideRef.current;
       if (selectedModel) setPendingModel(selectedModel);
+      // Undefined means the user never overrode the loadout: omit the field entirely
+      // so pi resolves settings.json defaultTools instead of being pinned to ours (#700).
       const toolNames = getToolNamesForPreset(toolPreset);
+      sessionToolsPinnedRef.current = toolNames !== undefined;
       // Hard timeout so a stalled server (model/provider discovery) cannot
       // leave agentRunning stuck true and silently block all later sends.
       const controller = new AbortController();
@@ -1271,7 +1352,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           body: JSON.stringify({
             cwd: newSessionCwd,
             type: "ensure_session",
-            toolNames,
+            ...(toolNames !== undefined ? { toolNames } : {}),
             ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
             ...(selectedThinkingLevel ? { thinkingLevel: selectedThinkingLevel } : {}),
           }),
@@ -1313,8 +1394,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setPendingModel(result.model);
         if (!selectedModel) setNewSessionDefaultModel(result.model);
       }
-      if (result.thinkingLevel && thinkingLevelOverrideRef.current === selectedThinkingLevel) {
+      if (
+        result.thinkingLevel
+        && thinkingLevelOverrideRef.current === selectedThinkingLevel
+      ) {
         setThinkingLevel(result.thinkingLevel);
+        setLiveThinkingLevel(asConcreteThinkingLevel(result.thinkingLevel));
       }
       return result.sessionId;
     })();
@@ -1326,6 +1411,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       ensuringNewSessionRef.current = null;
     }
   }, [isNew, newSessionCwd, toolPreset]);
+
+  // Opening the System or Tools panel may initialize an otherwise dormant
+  // session. This is deliberately a non-prompt command: it creates no message
+  // or model run, but lets users inspect the exact prompt before sending one.
+  const loadSystemInfo = useCallback(async () => {
+    const sid = sessionIdRef.current ?? await ensureNewSession();
+    if (!sid) return;
+
+    const [state] = await Promise.all([
+      sendAgentCommand<AgentStateResponse>(sid, { type: "get_state" }),
+      loadTools(sid),
+    ]);
+    if (!sessionHookMountedRef.current || sessionIdRef.current !== sid) return;
+    syncLiveModel(state);
+    setSystemPrompt(state.systemPrompt ?? "");
+  }, [ensureNewSession, loadTools, syncLiveModel]);
 
   const loadSlashCommands = useCallback(async () => {
     const sid = sessionIdRef.current ?? await ensureNewSession();
@@ -1593,16 +1694,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
         break;
       case "setWidget":
-        setExtensionWidgets((prev) => {
-          const rest = prev.filter((item) => item.key !== request.widgetKey);
-          return request.widgetLines
-            ? [...rest, {
-                key: request.widgetKey,
-                lines: request.widgetLines,
-                placement: request.widgetPlacement ?? "aboveEditor",
-              }]
-            : rest;
-        });
+        setExtensionWidgets((prev) => updateExtensionWidgets(
+          prev,
+          request.widgetKey,
+          request.widgetLines,
+          request.widgetPlacement,
+        ));
         break;
       case "setTitle":
         if (request.title) document.title = request.title;
@@ -1679,6 +1776,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         ) return;
 
         const state = data.state;
+        syncLiveModel(state);
         const promptActive = Boolean(data.running && state && (state.isStreaming || state.isPromptRunning));
         if (promptActive) {
           eventStreamGraceActiveRef.current = false;
@@ -1712,7 +1810,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     };
 
     eventStreamGraceTimerRef.current = setTimeout(() => void checkServerIdle(), EVENT_STREAM_IDLE_GRACE_MS);
-  }, [cancelEventStreamGrace, closeEvents]);
+  }, [cancelEventStreamGrace, closeEvents, syncLiveModel]);
 
   // Keep the selected session warm while it is open, even when the agent is
   // idle. Renewing the server-side lease stops pi-web's idle eviction from
@@ -1809,6 +1907,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           consecutiveFailures = 0;
           const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
           const state = data.state;
+          syncLiveModel(state);
           const active = Boolean(data.running && state && (state.isStreaming || state.isPromptRunning));
           if (active) {
             idleSince = Date.now(); // 仍在运行：重置窗口，持续等待
@@ -1841,6 +1940,35 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     settleUiStage();
   }, [addNotice, finishPromptWithoutStream, settleUiStage]);
 
+  const waitForBashSettlement = useCallback(async (sid: string) => {
+    const recoveryId = bashRecoveryIdRef.current + 1;
+    bashRecoveryIdRef.current = recoveryId;
+
+    while (
+      bashRunningRef.current
+      && bashRecoveryIdRef.current === recoveryId
+      && sessionIdRef.current === sid
+    ) {
+      await delay(BASH_STATE_RECONCILE_MS);
+      try {
+        const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
+        if (!res.ok) continue;
+        const data = await res.json() as { state?: AgentStateResponse };
+        syncLiveModel(data.state);
+        if (data.state?.isBashRunning) continue;
+
+        await loadSession(sid);
+        if (bashRecoveryIdRef.current !== recoveryId || sessionIdRef.current !== sid) return;
+        bashRunningRef.current = false;
+        setBashRunning(false);
+        setPendingBash(null);
+        return;
+      } catch {
+        // Keep polling while the page is mounted; network recovery is transparent.
+      }
+    }
+  }, [loadSession, syncLiveModel]);
+
   // Reconcile client streaming state with the server. When SSE events are
   // missed (network drop, mobile tab backgrounded, half-open connection),
   // agent_end never arrives and the UI stays in streaming state forever.
@@ -1869,6 +1997,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // flight) — everything in it is stale, drop it.
       if (promptRunIdRef.current !== runId) return;
       const state = data.state;
+      syncLiveModel(state);
       // Mirror the server snapshot before deciding whether to settle. This is
       // the convergence path after a lost SSE terminal event.
       setIsCompacting(state?.isCompacting ?? false);
@@ -1882,7 +2011,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setPendingRecovery(state?.pendingRecovery ?? []);
       const busy = data.running && state
         && (state.isStreaming || state.isPromptRunning || state.isBashRunning || state.isCompacting);
-      if (busy || (!agentRunningRef.current && !streamActiveRef.current)) return;
+      if (busy) {
+        // Mirror the live run flags from the authoritative server snapshot so a
+        // missed SSE start still re-arms the settlement path below.
+        sdkAgentActiveRef.current = sdkAgentActiveRef.current || Boolean(state.isStreaming);
+        rpcPromptPendingRef.current = rpcPromptPendingRef.current || Boolean(state.isPromptRunning);
+        return;
+      }
+      if (!agentRunningRef.current && !streamActiveRef.current) return;
       if (state) {
         if (state.contextUsage !== undefined) setContextUsage(state.contextUsage ?? null);
         if (state.systemPrompt !== undefined) setSystemPrompt(state.systemPrompt ?? null);
@@ -1915,7 +2051,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       optimisticUserMessageKeyRef.current = null;
       settleUiStage();
     }
-  }, [addNotice, finishPromptWithoutStream, setPendingRecovery, setQueuedMessages, settleUiStage]);
+  }, [addNotice, finishPromptWithoutStream, setPendingRecovery, setQueuedMessages, settleUiStage, syncLiveModel]);
 
   // Recovery net for missed SSE events: while the agent is running, verify
   // against the server periodically and whenever the tab returns to the
@@ -2098,6 +2234,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               // fresh state of the current run.
               if (promptRunIdRef.current !== runIdAtEnd) return;
               const state = data?.state;
+              syncLiveModel(state);
               if (state?.contextUsage !== undefined) setContextUsage(state.contextUsage ?? null);
               if (state?.systemPrompt !== undefined) setSystemPrompt(state.systemPrompt ?? null);
               if (state?.extensionStatuses !== undefined) setExtensionStatuses(state.extensionStatuses ?? []);
@@ -2203,6 +2340,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // (e.g. SSE data buffered while the tab was frozen, flushed after
         // reconcile) — they would resurrect a ghost streaming bubble.
         if (!agentRunningRef.current) break;
+        // Transcript system messages (prompt and tool loadout, pi >= 0.86)
+        // are never conversation: keep them out of the chat should one arrive.
+        if (isSystemMessageEvent(event)) break;
         const msg = event.message as Partial<AgentMessage> | undefined;
         if (msg?.role === "user") {
           break;
@@ -2227,6 +2367,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // loadSession already loaded this message from the session file —
         // appending it again would duplicate it.
         if (!agentRunningRef.current) break;
+        if (isSystemMessageEvent(event)) break;
         const completed = event.message as AgentMessage | undefined;
         if (completed && completed.role === "user") {
           // Delivered steering/follow-up messages surface here as user
@@ -2301,22 +2442,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
         break;
       }
-      case "tool_execution_end": {
-        const id = event.toolCallId as string;
-        setActiveToolResults((prev) => {
-          if (!prev.has(id)) return prev;
-          const next = new Map(prev);
-          next.delete(id);
-          return next;
-        });
-        setAgentPhase((prev) => {
-          if (prev?.kind !== "running_tools") return prev;
-          const tools = prev.tools.filter((t) => t.id !== id);
-          if (tools.length === 0) return { kind: "waiting_model" };
-          return { kind: "running_tools", tools };
-        });
-        break;
-      }
       case "tool_execution_update": {
         // Shell partials (bash/powershell): cache the streamed output so an SSE
         // reconnect or a session opened mid-run still shows what already ran.
@@ -2337,6 +2462,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               details: partialResult?.details,
             } as ToolResultMessage);
             return next;
+          });
+        }
+        // Show the latest streamed tool execution progress line in the phase
+        // chip (from getToolExecutionProgress on the partial result).
+        const progress = getToolExecutionProgress(event.partialResult);
+        if (updateId) {
+          setAgentPhase((prev) => {
+            const tools = prev?.kind === "running_tools" ? [...prev.tools] : [];
+            const existing = tools.find((tool) => tool.id === updateId);
+            if (!existing && !progress) return prev;
+            const updated = {
+              id: updateId,
+              name: updateName || existing?.name || "tool",
+              progress: progress ?? existing?.progress,
+            };
+            return {
+              kind: "running_tools",
+              tools: [...tools.filter((tool) => tool.id !== updateId), updated],
+            };
           });
         }
         // Only the Agent tool streams here (see the events route). The partial
@@ -2367,6 +2511,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           const next = [...prev];
           next[existingIdx] = { ...existing, details };
           return next;
+        });
+        break;
+      }
+      case "tool_execution_end": {
+        const id = event.toolCallId as string;
+        setActiveToolResults((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Map(prev);
+          next.delete(id);
+          return next;
+        });
+        setAgentPhase((prev) => {
+          if (prev?.kind !== "running_tools") return prev;
+          const tools = prev.tools.filter((t) => t.id !== id);
+          if (tools.length === 0) return { kind: "waiting_model" };
+          return { kind: "running_tools", tools };
         });
         break;
       }
@@ -2479,6 +2639,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     resetTokenRate,
     setPendingRecovery,
     setQueuedMessages,
+    syncLiveModel,
   ]);
   handleAgentEventRef.current = handleAgentEvent;
 
@@ -2808,6 +2969,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       newSessionModelOverrideRef.current = selectedModel;
       setNewSessionModel(selectedModel);
       setPendingModel(selectedModel);
+      if (thinkingLevelOverrideRef.current === null) {
+        const pinned = thinkingLevelPinsRef.current[`${provider}/${modelId}`];
+        setNewSessionDefaultThinkingLevel(
+          asConcreteThinkingLevel(pinned) ?? defaultThinkingLevelRef.current,
+        );
+      }
       const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
       if (!sid) return;
       try {
@@ -2826,7 +2993,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // entry must not make a successful click look ignored.
     setCurrentModelOverride(selectedModel);
     try {
-      await sendAgentCommand(sid, { type: "set_model", provider, modelId });
+      const selected = await sendAgentCommand<{ provider: string; id: string }>(sid, { type: "set_model", provider, modelId });
+      setLiveModel({ provider: selected.provider, modelId: selected.id });
+      // Pi persists model_change synchronously. Reload the canonical session so
+      // the model, thinking level, and active leaf all advance together.
+      await loadSession(sid);
     } catch (e) {
       console.error("Failed to set model:", e);
       if (modelSwitchIdRef.current === switchId) {
@@ -2837,6 +3008,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         );
         addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
       }
+      // A failed response can still follow a server-side write (for example, a
+      // dropped connection), so let the session file settle the displayed model.
+      await loadSession(sid, false, true);
     }
   }, [addNotice, currentModelOverride, data?.context.model, isNew, setNewSessionModel]);
 
@@ -2953,6 +3127,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           return complete({ handled: true, message: "Compacted context" });
         }
 
+        case "auto-compact": {
+          if (!sid) return complete({ handled: true, error: "No active session" });
+          // Read the live wrapper (this POST starts it if idle) so the toggle
+          // follows settings.json, not the React default of `true`.
+          const liveState = await sendAgentCommand<AgentStateResponse>(sid, { type: "get_state" });
+          const nextEnabled = !(liveState?.autoCompactionEnabled ?? true);
+          await sendAgentCommand(sid, {
+            type: "set_auto_compaction",
+            enabled: nextEnabled,
+          });
+          setAutoCompactionEnabled(nextEnabled);
+          return complete({
+            handled: true,
+            message: nextEnabled
+              ? "Auto-compaction enabled"
+              : "Auto-compaction disabled",
+          });
+        }
+
         case "reload": {
           if (!sid) return complete({ handled: true, error: "No active session to reload" });
           await sendAgentCommand(sid, { type: "reload" });
@@ -2992,6 +3185,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           return complete({ handled: true, message: "Copied last assistant message" });
         }
 
+        case "clone": {
+          if (!sid) return complete({ handled: true, error: "No active session to clone" });
+          if (agentRunningRef.current || bashRunningRef.current) {
+            return complete({ handled: true, error: "Cannot clone while the session is running" });
+          }
+          const result = await sendAgentCommand<{ cancelled?: boolean; newSessionId?: string }>(sid, {
+            type: "clone",
+            leafId: activeLeafId,
+          });
+          if (result?.cancelled || !result?.newSessionId) {
+            return complete({ handled: true, error: "Cannot clone an empty or unsaved session" });
+          }
+          const completed = complete({ handled: true, message: "Cloned current session branch" });
+          onSessionForked?.(result.newSessionId);
+          return completed;
+        }
+
         default:
           return { handled: false };
       }
@@ -3000,7 +3210,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (commandName === "compact") setIsCompacting(false);
     }
-  }, [addNotice, ensureNewSession, isCompacting, loadModels, loadSession, loadSlashCommands, loadTools, promoteNewSession, onSessionStatsPanelOpen]);
+  }, [activeLeafId, addNotice, ensureNewSession, isCompacting, loadModels, loadSession, loadSlashCommands, loadTools, promoteNewSession, onSessionForked, onSessionStatsPanelOpen]);
 
   // Rollback for a failed steer/follow-up/queued-prompt POST. The optimistic
   // agentRunning=true was set before the request; if the command never
@@ -3337,6 +3547,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (!sid) return;
     try {
       await sendAgentCommand(sid, { type: "set_thinking_level", level });
+      if (sessionHookMountedRef.current && sessionIdRef.current === sid) {
+        setLiveThinkingLevel(level);
+      }
     } catch (e) {
       console.error("Failed to set thinking level:", e);
     }
@@ -3344,15 +3557,42 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleToolPresetChange = useCallback(async (preset: "none" | "default" | "full" | "plan") => {
     const toolNames = getToolNamesForPreset(preset);
+    setPreferredToolPreset(preset);
     setToolPresetState(preset);
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
-    if (!sid) return;
+    if (!sid) {
+      sessionToolsPinnedRef.current = toolNames !== undefined;
+      return;
+    }
     try {
-      await sendAgentCommand(sid, { type: "set_tools", toolNames });
+      // Omitting toolNames retracts the session's pin so it follows the configured
+      // defaults again; the server rebuilds the session to resolve them.
+      const result = await sendAgentCommand<{ sessionId?: string; recreated?: boolean }>(sid, {
+        type: "set_tools",
+        ...(toolNames !== undefined ? { toolNames } : {}),
+      });
+      sessionToolsPinnedRef.current = toolNames !== undefined;
+      const activeSessionId = result?.sessionId ?? sid;
+      if (activeSessionId !== sid || result?.recreated) {
+        cancelEventStreamGrace();
+        closeEvents();
+        sessionIdRef.current = activeSessionId;
+      }
+      setSlashCommands([]);
+      setExtensionStatuses([]);
+      setExtensionWidgets([]);
+      const [state] = await Promise.all([
+        sendAgentCommand<AgentStateResponse>(activeSessionId, { type: "get_state" }),
+        loadTools(activeSessionId),
+      ]);
+      if (sessionHookMountedRef.current && sessionIdRef.current === activeSessionId) {
+        setSystemPrompt(state.systemPrompt ?? "");
+        syncLiveModel(state);
+      }
     } catch (e) {
       console.error("Failed to set tools:", e);
     }
-  }, [setToolPresetState]);
+  }, [cancelEventStreamGrace, closeEvents, loadTools, setToolPresetState, syncLiveModel]);
 
   // ── Plan mode ────────────────────────────────────────────────────────────
   // Entering/exiting delegates to the @narumitw/pi-plan-mode extension via the
@@ -3367,7 +3607,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const gen = ++planModeGenRef.current;
     if (next === "plan") {
       // Remember the active preset so exiting plan mode can restore it.
-      prePlanPresetRef.current = toolPreset === "plan" ? "default" : toolPreset;
+      prePlanPresetRef.current = toolPreset === "plan" || toolPreset === "configured" ? "default" : toolPreset;
       if (sid) {
         try {
           // Activate the extension's Plan mode (read-only tools + plan workflow).
@@ -3633,7 +3873,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const container = scrollContainerRef.current;
     if (container) {
       const { scrollTop, clientHeight, scrollHeight } = container;
-      isNearBottomRef.current = scrollTop + clientHeight >= scrollHeight - SCROLL_BOTTOM_THRESHOLD;
+      const isAgentRunning = agentRunningRef.current;
+      const wasAttached = isNearBottomRef.current;
+      const isAttached = getLiveFollowAttached(
+        wasAttached,
+        previousScrollTopRef.current,
+        scrollTop,
+        clientHeight,
+        scrollHeight,
+        isAgentRunning
+          ? CHAT_SCROLL_REATTACH_TOLERANCE
+          : CHAT_SCROLL_TAIL_TOLERANCE,
+      );
+      isNearBottomRef.current = isAttached;
+      previousScrollTopRef.current = scrollTop;
+      const shouldShow = shouldShowScrollToLatest(scrollTop, clientHeight, scrollHeight);
+      setShowScrollToBottom((previous) => (previous === shouldShow ? previous : shouldShow));
+      if (!wasAttached && isAttached && isAgentRunning) {
+        scrollToBottom("auto");
+      }
     }
     // A user-initiated scroll away from the bottom revokes the auto-scroll
     // permission regardless of whether an agent is running. (Previously this
@@ -3659,6 +3917,36 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     mountedRef.current = true;
     if (session) {
       sessionIdRef.current = session.id;
+      // Snapshot fast path (upstream v0.9.2): show the cached history window
+      // immediately, then run the normal read in the background as the
+      // freshness check. Only the settled history fields are restored — no
+      // streaming, queue, or run state — and the background read stays
+      // authoritative.
+      const cached = getSessionViewSnapshot(session.id);
+      if (cached) {
+        setData({
+          sessionId: session.id,
+          filePath: "",
+          leafId: cached.leafId,
+          context: {
+            messages: cached.messages,
+            entryIds: cached.entryIds,
+            oldestEntryId: cached.oldestEntryId,
+            hasMore: cached.hasMore,
+            thinkingLevel: cached.thinkingLevel,
+            model: cached.model,
+          },
+          stats: cached.stats as SessionFileStats,
+          ...(cached.totalActiveMs !== undefined ? { totalActiveMs: cached.totalActiveMs } : {}),
+        });
+        setActiveLeafId(cached.leafId);
+        setMessages(cached.messages);
+        setEntryIds(cached.entryIds);
+        setHistoryCursor(cached.oldestEntryId);
+        setHasEarlierMessages(cached.hasMore);
+        setError(null);
+        setLoading(false);
+      }
       // Sync the persisted approval mode + policy to the live RPC session so
       // the beforeToolCall hook starts with the user's configured posture.
       const approvalMode = toolApprovalModeRef.current;
@@ -3673,6 +3961,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (state.isBashRunning) {
           bashRunningRef.current = true;
           setBashRunning(true);
+          void waitForBashSettlement(session.id);
         }
         loadTools(session.id);
         if (state.isStreaming || state.isPromptRunning) {
@@ -3711,7 +4000,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           }
         } catch { /* loadSession 的 state 路径与兜底重试仍会补上 */ }
       })();
-      loadSession(session.id, true, true).then((agentState) => {
+      loadSession(session.id, !cached, true, { force: true }).then((loadedAgentState) => {
+        const agentState = loadedAgentState as { running: boolean; state?: AgentStateResponse } | null;
         if (agentState?.running && agentState.state) {
           restoreRunning(agentState.state);
         }
@@ -3719,7 +4009,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (agentState.state.isCompacting !== undefined) setIsCompacting(agentState.state.isCompacting);
           if (agentState.state.contextUsage !== undefined) setContextUsage(agentState.state.contextUsage ?? null);
           if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt ?? null);
-          if (agentState.state.thinkingLevel !== undefined) setThinkingLevel((agentState.state.thinkingLevel as ThinkingLevelOption) ?? "auto");
           if (agentState.state.extensionStatuses !== undefined) setExtensionStatuses(agentState.state.extensionStatuses ?? []);
           if (agentState.state.extensionWidgets !== undefined) setExtensionWidgets(agentState.state.extensionWidgets ?? []);
           if (agentState.state.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(agentState.state.queuedMessages));
@@ -3761,6 +4050,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       sessionDetailsControllerRef.current?.abort();
       resetStreamUpdates();
       clearQueueReconcile();
+      bashRecoveryIdRef.current += 1;
       cancelEventStreamGrace();
       closeEvents();
     };
@@ -3970,7 +4260,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const branchTree = data?.tree ?? [];
 
+  const newSessionThinkingLevel = newSessionDefaultThinkingLevel;
+  const isAutoThinkingSelection = isNew && newSessionThinkingLevel === null;
+
   return {
+    isAutoThinkingSelection,
     // State
     data, loading, error, activeLeafId, messages, activeToolResults, entryIds, historyCursor, hasEarlierMessages, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, modelsError, newSessionModel, toolPreset, thinkingLevel,
@@ -3990,6 +4284,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     isNew,
     promptAnchorActive,
     branchTree,
+    autoCompactionEnabled,
     // Refs
     sessionIdRef, eventSourceRef, messagesEndRef, scrollContainerRef,
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,

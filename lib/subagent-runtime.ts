@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike } from "./pi-types";
 import {
-  subagentFinalText,
+  subagentNotificationText,
   subagentToolDetails,
   type ResumeSubagentRequest,
   type StartSubagentRequest,
@@ -32,6 +32,7 @@ import {
 } from "./subagents";
 import type { SessionEntry } from "./types";
 import { buildSubagentPromptPlan } from "./subagent-prompt";
+import { createExactSystemPromptExtension } from "./exact-system-prompt";
 import { appendSubagentInputFiles, loadSubagentInputFiles } from "./subagent-input";
 import { projectTrustReloadOptions } from "./project-trust";
 import { resolveShellTools } from "./powershell-settings";
@@ -80,9 +81,24 @@ type StoredSubagentExecution = {
 declare global {
   var __piSubagentRuns: Map<string, StoredSubagentExecution> | undefined;
   var __piSubagentQueue: SubagentQueue<SubagentRunInfo> | undefined;
+  var __piSubagentConsumedResults: Set<string> | undefined;
 }
 const SUBAGENT_CONTEXT_LIMIT = 50_000;
+const PARENT_IDLE_POLL_MS = 200;
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+/** pi's agent loop records provider failures as an assistant message with `stopReason: "error"` and resolves `prompt()` normally; surface that as a failed run. */
+function lastAssistantError(sessionManager: { getEntries?: () => unknown }): string | undefined {
+  const entries = sessionManager.getEntries?.();
+  if (!Array.isArray(entries)) return undefined;
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i] as { type?: unknown; message?: { role?: unknown; stopReason?: unknown; errorMessage?: unknown } };
+    if (entry?.type !== "message" || entry.message?.role !== "assistant") continue;
+    if (entry.message.stopReason !== "error") return undefined;
+    return typeof entry.message.errorMessage === "string" && entry.message.errorMessage ? entry.message.errorMessage : "Provider returned an error";
+  }
+  return undefined;
+}
 
 function getSubagentRuns(): Map<string, StoredSubagentExecution> {
   if (!globalThis.__piSubagentRuns) globalThis.__piSubagentRuns = new Map();
@@ -92,6 +108,25 @@ function getSubagentRuns(): Map<string, StoredSubagentExecution> {
 function getSubagentQueue(): SubagentQueue<SubagentRunInfo> {
   if (!globalThis.__piSubagentQueue) globalThis.__piSubagentQueue = new SubagentQueue();
   return globalThis.__piSubagentQueue;
+}
+
+/**
+ * Session IDs whose terminal result the parent already collected with `get_subagent_result`.
+ * Only background runs are recorded: a foreground run never notifies, so nothing would ever
+ * clear its entry. `notifyParent` consumes the mark, so the set stays bounded by the
+ * background results still waiting to be delivered.
+ */
+function getConsumedSubagentResults(): Set<string> {
+  if (!globalThis.__piSubagentConsumedResults) globalThis.__piSubagentConsumedResults = new Set();
+  return globalThis.__piSubagentConsumedResults;
+}
+
+function markResultConsumed(sessionId: string): void {
+  getConsumedSubagentResults().add(sessionId);
+}
+
+function takeResultConsumed(sessionId: string): boolean {
+  return getConsumedSubagentResults().delete(sessionId);
 }
 
 function parseSubagentModel(runtime: ModelRuntime, value: string | undefined) {
@@ -361,6 +396,10 @@ export function createSubagentController(
               }
             : {}),
           appendSystemPrompt,
+          // The exact prompt is sent through before_agent_start; see lib/exact-system-prompt.ts.
+          ...(promptPlan.exactSystemPrompt !== undefined
+            ? { extensionFactories: [createExactSystemPromptExtension(() => promptPlan.exactSystemPrompt)] }
+            : {}),
         },
         ...((profile.loadExtensions || profile.loadSkills)
           ? { resourceLoaderReloadOptions: projectTrustReloadOptions(childCwd, agentDir) }
@@ -581,6 +620,7 @@ export function createSubagentController(
   }
 
   async function notifyParent(run: SubagentRunInfo): Promise<void> {
+    if (takeResultConsumed(run.sessionId)) return;
     let parent = dependencies.getSession(run.parentSessionId);
     if (!parent?.isAlive()) {
       const sessionFile = await dependencies.resolveSessionPath(run.parentSessionId);
@@ -588,10 +628,19 @@ export function createSubagentController(
       parent = await dependencies.reopenSession(run.parentSessionId, sessionFile);
     }
     await parent.waitUntilReady();
+    // The parent may still be inside the `get_subagent_result` call that collects this result,
+    // and `deliverAs: "followUp"` would only queue the message until that turn ends anyway.
+    // Hold the notification until the parent is idle and re-check the mark, so a result the
+    // parent already consumed never triggers a duplicate turn.
+    while (parent.isAlive() && parent.isRunning()) {
+      if (takeResultConsumed(run.sessionId)) return;
+      await new Promise<void>((resolve) => { setTimeout(resolve, PARENT_IDLE_POLL_MS); });
+    }
+    if (takeResultConsumed(run.sessionId)) return;
     if (!parent.isAlive()) throw new Error(`Parent session is no longer available: ${run.parentSessionId}`);
     await parent.inner.sendCustomMessage({
       customType: "pi-web:subagent-notification",
-      content: subagentFinalText(run),
+      content: subagentNotificationText(run),
       display: true,
       details: subagentToolDetails(run),
     }, { deliverAs: "followUp", triggerTurn: true });
@@ -611,7 +660,7 @@ export function createSubagentController(
   }
 
   return {
-    extensionRuntime: { start, resume, get, steer, notifyParent },
+    extensionRuntime: { start, resume, get, steer, notifyParent, markResultConsumed },
     get,
     steer,
     abort,

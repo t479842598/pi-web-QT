@@ -262,7 +262,7 @@ export function SettingsModal({
             <ChatConfig />
           </div>
           <div style={{ display: activeTab === "models" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <ModelsConfig embedded sessionId={sessionId} onSavedAction={onModelsSavedAction} onRegisterFlush={registerFlush} />
+            <ModelsConfig embedded sessionId={sessionId} cwd={cwd} onSavedAction={onModelsSavedAction} onRegisterFlush={registerFlush} />
           </div>
           {cwd && (
             <div style={{ display: activeTab === "skills" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>

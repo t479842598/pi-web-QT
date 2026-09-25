@@ -19,6 +19,19 @@ import { ProviderUsageSummary } from "@/components/ProviderUsageSummary";
 import { ApplyNowButton } from "./ApplyNowButton";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
 import type { DiscoveredModel } from "@/lib/model-discovery";
+import {
+  savedModelIds,
+  trackAddedModels,
+  collectModelRenames,
+} from "./models-config-helpers";
+import {
+  EnabledModelsBanner,
+  EnabledModelsProviderSwitch,
+  EnabledModelsSection,
+  useEnabledModels,
+  type EnabledModelsController,
+} from "./EnabledModelsSection";
+import { providerBadgeLabel } from "./enabled-models-helpers";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -108,6 +121,12 @@ type RegisterModelsFlush = (flush: BuiltinFlush) => (() => void) | void;
 
 const API_OPTIONS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai", "mistral-conversations"] as const;
 const CUSTOM_CALL_FORMAT = "__custom__";
+
+function customSelectionExists(config: ModelsJson, selection: Selection): boolean {
+  if (selection.type === "provider") return Boolean(config.providers?.[selection.name]);
+  if (selection.type !== "model") return true;
+  return Boolean(config.providers?.[selection.providerName]?.models?.[selection.index]);
+}
 
 function useModelTranslation() {
   const { t } = useI18n();
@@ -242,11 +261,12 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Provider detail ───────────────────────────────────────────────────────────
 
-function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddModels, onAddModel }: {
+function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddModels, onAddModel, enabledModels }: {
   name: string; provider: ProviderEntry;
   onChange: (p: ProviderEntry) => void; onRename: (n: string) => void; onDelete: () => void;
   onAddModels: (models: DiscoveredModel[]) => void;
   onAddModel: () => void;
+  enabledModels: EnabledModelsController;
 }) {
   const t = useModelTranslation();
   const [editingName, setEditingName] = useState(name);
@@ -341,10 +361,13 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <SectionTitle>{t("desktop.modelsProvider")}</SectionTitle>
-        <button onClick={onDelete}
-          style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "var(--status-error)", cursor: "pointer", fontSize: 11 }}>
-          {t("desktop.delete")}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <EnabledModelsProviderSwitch providerId={name} controller={enabledModels} />
+          <button onClick={onDelete}
+            style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "var(--status-error)", cursor: "pointer", fontSize: 11 }}>
+            {t("desktop.delete")}
+          </button>
+        </div>
       </div>
 
       <Field label={t("desktop.modelsProviderName")}>
@@ -473,7 +496,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
               <button
                 onClick={addSelectedModels}
                 disabled={selectedCount === 0}
-                style={{ height: 28, padding: "0 11px", border: "none", borderRadius: 5, background: selectedCount ? "var(--accent)" : "var(--bg-panel)", color: selectedCount ? "#fff" : "var(--text-dim)", cursor: selectedCount ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
+                style={{ height: 28, padding: "0 11px", border: "none", borderRadius: 5, background: selectedCount ? "var(--accent)" : "var(--bg-panel)", color: selectedCount ? "var(--accent-contrast)" : "var(--text-dim)", cursor: selectedCount ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
               >
                 {selectedCount
                   ? t("desktop.modelsDiscoveryAddSelectedCount", { count: selectedCount })
@@ -483,6 +506,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
           </>
         )}
       </div>
+
     </div>
   );
 }
@@ -856,7 +880,7 @@ function ModelDetail({
               title={testSummary}
               style={{
                 maxWidth: 260,
-                height: 24,
+                height: 28,
                 padding: "0 8px",
                 border: `1px solid ${
                   testState.phase === "error" ? "var(--status-error-border)"
@@ -883,7 +907,7 @@ function ModelDetail({
             </span>
           )}
           <button
-            onClick={handleTest}
+            onClick={testState.phase === "success" ? () => setTestState({ phase: "idle" }) : handleTest}
             disabled={!model.id.trim() || testState.phase === "testing"}
             title={t("desktop.modelsTestConnection")}
             style={{
@@ -1032,11 +1056,13 @@ function OAuthDetail({
   onRefresh,
   onRegisterBuiltinFlush,
   onBuiltinProviderChange,
+  enabledModels,
 }: {
   provider: OAuthProvider;
   onRefresh: () => void;
   onRegisterBuiltinFlush?: RegisterBuiltinFlush;
   onBuiltinProviderChange?: BuiltinProviderChange;
+  enabledModels: EnabledModelsController;
 }) {
   const t = useModelTranslation();
   const [loginState, setLoginState] = useState<OAuthLoginState>({ phase: "idle" });
@@ -1189,7 +1215,7 @@ function OAuthDetail({
       </div>
 
       {/* Status */}
-      <div style={{ minHeight: 48 }}>
+      <div style={{ minHeight: provider.loggedIn && loginState.phase === "idle" ? 0 : 48 }}>
         {loginState.phase === "idle" && (
           <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
             {provider.loggedIn ? t("desktop.modelsAlreadyConnected") : t("desktop.modelsConnectAccount", { provider: provider.name })}
@@ -1244,7 +1270,7 @@ function OAuthDetail({
               <button
                 onClick={() => submitCode(loginState.token, inputValue)}
                 disabled={!inputValue.trim()}
-                style={{ padding: "6px 12px", background: inputValue.trim() ? "var(--accent)" : "var(--bg-panel)", border: "none", borderRadius: 5, color: inputValue.trim() ? "#fff" : "var(--text-dim)", cursor: inputValue.trim() ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 600, flexShrink: 0 }}
+                style={{ padding: "6px 12px", background: inputValue.trim() ? "var(--accent)" : "var(--bg-panel)", border: "none", borderRadius: 5, color: inputValue.trim() ? "var(--accent-contrast)" : "var(--text-dim)", cursor: inputValue.trim() ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 600, flexShrink: 0 }}
               >
                 {t("desktop.submit")}
               </button>
@@ -1314,6 +1340,8 @@ function OAuthDetail({
         onRegisterFlush={onRegisterBuiltinFlush}
         onConfigChange={onBuiltinProviderChange}
       />
+
+      {provider.loggedIn && <EnabledModelsSection providerId={provider.id} controller={enabledModels} />}
     </div>
   );
 }
@@ -1325,11 +1353,13 @@ function ApiKeyDetail({
   onRefresh,
   onRegisterBuiltinFlush,
   onBuiltinProviderChange,
+  enabledModels,
 }: {
   provider: ApiKeyProvider;
   onRefresh: () => void;
   onRegisterBuiltinFlush?: RegisterBuiltinFlush;
   onBuiltinProviderChange?: BuiltinProviderChange;
+  enabledModels: EnabledModelsController;
 }) {
   const t = useModelTranslation();
   const [apiKey, setApiKey] = useState("");
@@ -1468,6 +1498,8 @@ function ApiKeyDetail({
         onRegisterFlush={onRegisterBuiltinFlush}
         onConfigChange={onBuiltinProviderChange}
       />
+
+      {provider.configured && <EnabledModelsSection providerId={provider.id} controller={enabledModels} />}
     </div>
   );
 }
@@ -1794,18 +1826,23 @@ function CustomProviderDialog({
 export function ModelsConfig({
   embedded = false,
   sessionId,
+  cwd = null,
   onCloseAction,
   onSavedAction,
   onRegisterFlush,
 }: {
   embedded?: boolean;
   sessionId?: string | null;
+  cwd?: string | null;
   onCloseAction?: () => void;
   onSavedAction?: () => void;
   onRegisterFlush?: RegisterModelsFlush;
 }) {
   const t = useModelTranslation();
   const isMobile = useIsMobile();
+  // `enabledModels` lives in pi's settings, not models.json, so these switches
+  // apply immediately instead of waiting for this panel's Save button.
+  const enabledModels = useEnabledModels(cwd);
   const [config, setConfig] = useState<ModelsJson>({ providers: {} });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1822,6 +1859,15 @@ export function ModelsConfig({
   const configVersionRef = useRef(0);
   const selectionBusyRef = useRef(false);
   configRef.current = config;
+  /** Provider ids as models.json has them on disk, and where renames moved them. */
+  const savedProvidersRef = useRef<Set<string>>(new Set());
+  const renamesRef = useRef<Map<string, string>>(new Map());
+  /**
+   * Per provider, the model id saved at each slot, or null for a model added
+   * since. Mirroring the draft's array moves is what lets a save tell a rename
+   * from an unrelated edit without guessing.
+   */
+  const savedModelIdsRef = useRef<Map<string, (string | null)[]>>(new Map());
 
   const updateConfigState = useCallback((updater: (previous: ModelsJson) => ModelsJson) => {
     const next = updater(configRef.current);
@@ -1893,6 +1939,11 @@ export function ModelsConfig({
         configRef.current = normalized;
         configVersionRef.current += 1;
         setConfig(normalized);
+        savedProvidersRef.current = new Set(Object.keys(normalized.providers ?? {}));
+        savedModelIdsRef.current = savedModelIds(normalized);
+        setSelection((current) => current && customSelectionExists(normalized, current)
+          ? current
+          : null);
       })
       .catch(() => {
         const empty = { providers: {} };
@@ -1939,6 +1990,22 @@ export function ModelsConfig({
   }, [updateConfigState]);
 
   const renameProvider = useCallback((oldName: string, newName: string) => {
+    // Remember where each saved provider ended up, so the enabledModels entries
+    // can follow it on save instead of pointing at an id that no longer exists.
+    const renames = renamesRef.current;
+    let original = oldName;
+    for (const [from, to] of renames) {
+      if (to !== oldName) continue;
+      original = from;
+      break;
+    }
+    if (original === newName) renames.delete(original);
+    else if (savedProvidersRef.current.has(original)) renames.set(original, newName);
+    const slots = savedModelIdsRef.current.get(oldName);
+    if (slots) {
+      savedModelIdsRef.current.delete(oldName);
+      savedModelIdsRef.current.set(newName, slots);
+    }
     updateConfigState((previous) => {
       const entries = Object.entries(previous.providers ?? {});
       const idx = entries.findIndex(([k]) => k === oldName);
@@ -1955,6 +2022,7 @@ export function ModelsConfig({
   }, [updateConfigState]);
 
   const deleteProvider = useCallback((name: string) => {
+    savedModelIdsRef.current.delete(name);
     const next = updateConfigState((previous) => {
       const providers = { ...(previous.providers ?? {}) };
       delete providers[name];
@@ -1970,6 +2038,7 @@ export function ModelsConfig({
     setSaveError(null);
     try {
       await flushBuiltinModels();
+      trackAddedModels(savedModelIdsRef.current, providerName, 1);
       const next = updateConfigState((previous) => {
         const provider = previous.providers?.[providerName] ?? {};
         const models = [...(provider.models ?? []), { id: "" }];
@@ -1985,6 +2054,12 @@ export function ModelsConfig({
   }, [flushBuiltinModels, updateConfigState]);
 
   const addDiscoveredModels = useCallback((providerName: string, discovered: DiscoveredModel[]) => {
+    const known = new Set((configRef.current.providers?.[providerName]?.models ?? []).map((model) => model.id));
+    trackAddedModels(
+      savedModelIdsRef.current,
+      providerName,
+      discovered.filter((model) => !known.has(model.id)).length,
+    );
     updateConfigState((previous) => {
       const provider = previous.providers?.[providerName] ?? {};
       const models = [...(provider.models ?? [])];
@@ -2013,6 +2088,7 @@ export function ModelsConfig({
     setSaveError(null);
     try {
       await flushBuiltinModels();
+      savedModelIdsRef.current.get(providerName)?.splice(index, 1);
       updateConfigState((previous) => {
         const provider = previous.providers?.[providerName] ?? {};
         const models = [...(provider.models ?? [])];
@@ -2049,12 +2125,21 @@ export function ModelsConfig({
       setSavedOk(true);
       onSavedAction?.();
       setTimeout(() => setSavedOk(false), 2000);
+      // models.json just changed under the switches: providers may have been
+      // renamed, models added, deleted or renamed. Re-verify the stored
+      // patterns against the new catalog and re-read.
+      const renames = [...renamesRef.current].map(([from, to]) => ({ from, to }));
+      const modelRenames = collectModelRenames(configRef.current, savedModelIdsRef.current, renamesRef.current);
+      savedProvidersRef.current = new Set(Object.keys(configRef.current.providers ?? {}));
+      savedModelIdsRef.current = savedModelIds(configRef.current);
+      renamesRef.current.clear();
+      enabledModels.resync(renames, modelRenames);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
     }
-  }, [flushBuiltinModels, onSavedAction, saving]);
+  }, [flushBuiltinModels, onSavedAction, saving, enabledModels]);
 
   const requestClose = useCallback(async () => {
     try {
@@ -2078,6 +2163,11 @@ export function ModelsConfig({
   const customProviders = providers.filter(([providerId]) =>
     !builtinProviderIds.has(providerId),
   );
+  // `12/40` next to a provider makes a narrowed selector visible at a glance.
+  const scopeBadge = (providerId: string) => {
+    const label = providerBadgeLabel(enabledModels.view, providerId);
+    return label ? <span className="models-sidebar-badge">{label}</span> : null;
+  };
   const activeOAuth = oauthProviders.filter((p) => p.loggedIn);
   const visibleApiKeyProviders = apiKeyProviders;
   const activeApiKey = visibleApiKeyProviders.filter((p) => p.configured);
@@ -2106,6 +2196,7 @@ export function ModelsConfig({
           onRefresh={refreshAuthenticationProviders}
           onRegisterBuiltinFlush={registerBuiltinFlush}
           onBuiltinProviderChange={(provider) => updateBuiltinProvider(p.id, provider)}
+          enabledModels={enabledModels}
         />
       );
     }
@@ -2119,6 +2210,7 @@ export function ModelsConfig({
           onRefresh={refreshAuthenticationProviders}
           onRegisterBuiltinFlush={registerBuiltinFlush}
           onBuiltinProviderChange={(provider) => updateBuiltinProvider(p.id, provider)}
+          enabledModels={enabledModels}
         />
       );
     }
@@ -2135,6 +2227,7 @@ export function ModelsConfig({
           onDelete={() => deleteProvider(selection.name)}
           onAddModels={(models) => addDiscoveredModels(selection.name, models)}
           onAddModel={() => { void addModel(selection.name); }}
+          enabledModels={enabledModels}
         />
       );
     }
@@ -2177,6 +2270,8 @@ export function ModelsConfig({
         {/* Global title model setting */}
         <TitleModelSetting />
 
+        <EnabledModelsBanner controller={enabledModels} />
+
         {/* Body */}
         <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
 
@@ -2202,6 +2297,7 @@ export function ModelsConfig({
                   >
                     <ProviderIcon id={p.id} size={16} />
                     <span style={{ fontSize: 12, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                    {scopeBadge(p.id)}
                   </div>
                 );
               })}
@@ -2219,6 +2315,7 @@ export function ModelsConfig({
                   >
                     <ProviderIcon id={p.id} size={16} />
                     <span style={{ fontSize: 12, color: "var(--text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.displayName}</span>
+                    {scopeBadge(p.id)}
                   </div>
                 );
               })}
@@ -2247,6 +2344,7 @@ export function ModelsConfig({
                       <span style={{ fontSize: 12, fontWeight: isProviderSelected ? 600 : 400, color: "var(--text)", fontFamily: "var(--font-mono)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {pName}
                       </span>
+                      {scopeBadge(pName)}
                     </div>
 
                     {/* Model rows */}

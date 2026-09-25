@@ -37,6 +37,7 @@ import { isFileEditingEnabled } from "@/lib/file-editing";
 // 编辑保存的软上限：处理器能接收大 body，但仍需限制，避免失控客户端耗尽内存。
 const MAX_EDIT_CONTENT_BYTES = 16 * 1024 * 1024;
 
+
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
   ".turbo", ".cache", "coverage", ".pytest_cache", ".mypy_cache",
