@@ -1933,7 +1933,14 @@ export function ModelsConfig({
 
   useEffect(() => {
     fetch("/api/models-config")
-      .then((r) => r.json())
+      .then(async (r) => {
+        const d = await r.json() as ModelsJson & { error?: string };
+        // 422 = models.json exists but is unusable. The panel must show the
+        // error and keep saving disabled: the draft would not contain the
+        // file's providers, and a save replaces the whole file (upstream v0.9.3).
+        if (!r.ok || d.error) throw new Error(d.error ?? `HTTP ${r.status}`);
+        return d;
+      })
       .then((d: ModelsJson) => {
         const normalized = d.providers ? d : { ...d, providers: {} };
         configRef.current = normalized;
@@ -1944,12 +1951,16 @@ export function ModelsConfig({
         setSelection((current) => current && customSelectionExists(normalized, current)
           ? current
           : null);
+        setSaveError(null);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         const empty = { providers: {} };
         configRef.current = empty;
         configVersionRef.current += 1;
         setConfig(empty);
+        // Surface why the file could not be shown; saving stays possible only
+        // for a genuinely absent file (empty object), not for a broken one.
+        setSaveError(error instanceof Error ? error.message : String(error));
       })
       .finally(() => setLoading(false));
     refreshAuthenticationProviders();
