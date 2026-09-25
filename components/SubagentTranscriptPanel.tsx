@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { MessageView } from "./MessageView";
-import type { AgentMessage, ToolResultMessage } from "@/lib/types";
+import { ProcessGroup } from "./ProcessGroup";
+import { buildHistoryPipeline, type HistoryPipeline } from "@/lib/chat-history-pipeline";
+import type { AgentMessage, AssistantMessage, ToolResultMessage } from "@/lib/types";
 
 interface Props {
   sessionId: string;
@@ -15,7 +17,7 @@ interface Props {
 }
 
 interface SessionPayload {
-  context?: { messages?: AgentMessage[] };
+  context?: { messages?: AgentMessage[]; entryIds?: string[] };
   error?: string;
 }
 
@@ -25,10 +27,11 @@ const POLL_MS = 2500;
  * Read-only view of a subagent run, hosted as a right-panel tab.
  *
  * The run is a real persisted Pi session, so this reuses `GET /api/sessions`
- * and renders each message with the same `MessageView` as the main chat —
- * tool calls, collapsible thinking, markdown and images all behave the same.
- * It deliberately does not reuse ChatWindow's turn-grouping pipeline: that
- * depends on live streaming state this panel does not have.
+ * and renders through the same turn-grouping pipeline as the main chat:
+ * historical thinking/tool-call groups collapse into a ProcessGroup (compact
+ * after a run, expanded while it streams), only the final answer stays open.
+ * Streaming state is approximated by the `running` prop — good enough to keep
+ * the latest turn open without a second SSE connection.
  */
 export function SubagentTranscriptPanel({ sessionId, label, running = false, onOpenFile }: Props) {
   const { t } = useI18n();
@@ -47,7 +50,7 @@ export function SubagentTranscriptPanel({ sessionId, label, running = false, onO
         if (cancelled) return;
         if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
         setMessages(data.context?.messages ?? []);
-        setEntryIds([]);
+        setEntryIds(data.context?.entryIds ?? []);
         setError(null);
       } catch (err) {
         if (cancelled) return;
@@ -74,6 +77,7 @@ export function SubagentTranscriptPanel({ sessionId, label, running = false, onO
         const data = await res.json() as SessionPayload;
         if (cancelled) return;
         setMessages(data.context?.messages ?? []);
+        setEntryIds(data.context?.entryIds ?? []);
       } catch {
         // A missed poll is not worth surfacing; the next one retries.
       }
@@ -89,9 +93,26 @@ export function SubagentTranscriptPanel({ sessionId, label, running = false, onO
     return map;
   }, [messages]);
 
-  const visible = useMemo(
-    () => messages.filter((m) => m.role === "user" || m.role === "assistant"),
+  // Same pipeline as the main chat: turns, process blocks, subagent rows.
+  const pipeline: HistoryPipeline = useMemo(
+    () => buildHistoryPipeline(messages, entryIds, undefined, toolResults),
+    [messages, entryIds, toolResults],
+  );
+
+  const visibleCount = useMemo(
+    () => messages.filter((m) => m.role === "user" || m.role === "assistant").length,
     [messages],
+  );
+
+  const renderMessage = (idx: number, overrides?: { messageOverride?: AssistantMessage }) => (
+    <MessageView
+      key={`subagent-msg-${idx}`}
+      message={overrides?.messageOverride ?? (messages[idx] as AssistantMessage)}
+      toolResults={pipeline.toolResultsMap}
+      entryId={entryIds[idx]}
+      sessionId={sessionId}
+      onOpenFile={onOpenFile}
+    />
   );
 
   return (
@@ -110,7 +131,7 @@ export function SubagentTranscriptPanel({ sessionId, label, running = false, onO
         )}
       </div>
 
-      <div className="scroll-overlay" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 12px" }}>
+      <div className="scrollbar-subtle scroll-overlay" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 12px" }}>
         {loading && messages.length === 0 && (
           <div style={{ color: "var(--text-dim)", fontSize: 12 }}>{t("subagent.transcriptLoading")}</div>
         )}
@@ -119,23 +140,49 @@ export function SubagentTranscriptPanel({ sessionId, label, running = false, onO
             {t("subagent.transcriptFailed", { error })}
           </div>
         )}
-        {!loading && !error && visible.length === 0 && (
+        {!loading && !error && visibleCount === 0 && (
           <div style={{ color: "var(--text-dim)", fontSize: 12 }}>
             {/* A just-started run has no persisted messages yet; saying so reads
                 better than the generic empty state while it keeps polling. */}
             {running ? t("subagent.transcriptWaiting") : t("subagent.transcriptEmpty")}
           </div>
         )}
-        {visible.map((message, idx) => (
-          <MessageView
-            key={`subagent-msg-${idx}`}
-            message={message}
-            toolResults={toolResults}
-            entryId={entryIds[idx]}
-            sessionId={sessionId}
-            onOpenFile={onOpenFile}
-          />
-        ))}
+        {pipeline.items.map((item, itemIdx) => {
+          if (item.kind === "single") {
+            return (
+              <div key={`single-${item.idx}`}>
+                {renderMessage(item.idx)}
+              </div>
+            );
+          }
+          const { userIdx, endIdx, finalAssistantIdx, finalAnswerMessage } = item;
+          // The live (last) turn keeps its process group expanded while the
+          // subagent runs; every historical turn stays collapsed like main chat.
+          const isLatestTurn = itemIdx === pipeline.items.length - 1;
+          const turnStreaming = running && isLatestTurn;
+          return (
+            <div key={`turn-${userIdx}-${itemIdx}`}>
+              {userIdx >= 0 && renderMessage(userIdx)}
+              {item.processSegments.map((segment, segmentIdx) => (
+                <ProcessGroup
+                  key={`seg-${userIdx}-${segmentIdx}`}
+                  blocks={segment.blocks}
+                  isStreaming={turnStreaming && segmentIdx === item.processSegments.length - 1 && finalAssistantIdx === -1}
+                  defaultExpanded={turnStreaming && segmentIdx === item.processSegments.length - 1 && finalAssistantIdx === -1}
+                  onOpenFile={onOpenFile}
+                />
+              ))}
+              {finalAnswerMessage && renderMessage(finalAssistantIdx, { messageOverride: finalAnswerMessage })}
+              {finalAssistantIdx >= 0 && (() => {
+                const tails = [];
+                for (let renderIdx = finalAssistantIdx + 1; renderIdx < endIdx; renderIdx++) {
+                  tails.push(<div key={`tail-${renderIdx}`}>{renderMessage(renderIdx)}</div>);
+                }
+                return tails;
+              })()}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

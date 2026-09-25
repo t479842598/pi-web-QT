@@ -748,6 +748,23 @@ pre, code {
   gap: 10px;
 }
 
+/* Copy/copy-plain buttons float over the content's top-right corner instead of
+   occupying a layout row below it. Opacity/pointerEvents are driven inline by
+   MessageView's hovered state; on touch devices the .msg-actions media rule
+   below keeps the buttons visible (a hover-only reveal would strand them). */
+.chat-copy-float {
+  position: absolute;
+  top: -10px;
+  right: 0;
+  z-index: 4;
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  backdrop-filter: blur(4px);
+}
+
 .chat-assistant-error {
   display: flex;
   align-items: flex-start;
@@ -2156,6 +2173,13 @@ span.token.table {
 @media (hover: none) {
   .msg-actions,
   .markdown-code-actions {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  /* The floating copy cluster also needs its wrapper revealed on touch
+     (opacity lives on .chat-copy-float, driven by JS hover state). */
+  .chat-copy-float {
     opacity: 1 !important;
     pointer-events: auto !important;
   }

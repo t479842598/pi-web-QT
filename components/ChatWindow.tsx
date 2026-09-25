@@ -1042,6 +1042,21 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               // whose result has not landed yet has none.
               const subagentSessionId = (run: { result?: ToolResultMessage }) =>
                 isSubagentToolDetails(run.result?.details) ? run.result.details.sessionId : "";
+              // Is this subagent still running? The authoritative source is the
+              // session list (`subagentRuns`, refreshed by the agents panel /
+              // sidebar polling); an in-flight tool call with no terminal
+              // result details yet also counts.
+              const isSubagentRunning = (run: { result?: ToolResultMessage }) => {
+                const sid = subagentSessionId(run);
+                if (sid && subagentRuns) {
+                  const record = subagentRuns.get(sid);
+                  if (record) return record.status === "running";
+                }
+                const details = isSubagentToolDetails(run.result?.details) ? run.result.details : null;
+                if (details) return details.status === "running" || details.status === "starting";
+                // No result yet: the call is still in flight.
+                return true;
+              };
               // A turn's process blocks may be split into several groups once
               // subagent rows are hoisted out; derive each group's key from the
               // turn's own key so the "keys stay turn-scoped" rule still holds.
@@ -1238,9 +1253,10 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                       >
                         <ProcessGroup
                           blocks={segment.blocks}
-                          isStreaming={false}
-                          // Historical processing is always compact after a run;
-                          // the user can expand it explicitly from the summary.
+                          // Historical processing is compact after a run — but a
+                          // turn that still has a running subagent must keep its
+                          // group expanded so the live run stays visible (fix 2).
+                          isStreaming={segment.kind === "subagent" && segment.subagent !== undefined && isSubagentRunning(segment.subagent)}
                           defaultExpanded={false}
                           onAutoExpanded={undefined}
                           cwd={messageCwd}

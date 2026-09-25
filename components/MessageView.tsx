@@ -609,11 +609,61 @@ function AssistantMessageView({
       </div>
       )}
 
-      <div className="chat-assistant-content">
+      <div className="chat-assistant-content" style={{ position: "relative" }}>
         {failureMessage && (
           <div className="chat-assistant-error" role="alert">
             <WarningCircleIcon size={13} weight="bold" />
             <span>{failureMessage}</span>
+          </div>
+        )}
+        {/* Copy actions float over the content's top-right corner instead of
+            occupying a layout row below it (fix 3). Hover-revealed on pointer
+            devices; .msg-actions keeps them visible on touch. */}
+        {textContent && !isStreaming && (
+          <div className="chat-copy-float" style={{ opacity: hovered ? 1 : 0, pointerEvents: hovered ? "auto" : "none" }}>
+            <button
+              className="msg-actions"
+              onClick={copyContent}
+              title={t("desktop.copyMessage")}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 24, height: 24,
+                background: "var(--bg-panel)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                color: copied ? "var(--accent)" : "var(--text-dim)",
+                cursor: "pointer",
+                transition: "color 0.12s, border-color 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
+              onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-dim)"; }}
+            >
+              {copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />}
+            </button>
+            <button
+              className="msg-actions"
+              onClick={() => {
+                copyText(markdownToPlainText(textContent)).then(() => {
+                  setCopiedPlain(true);
+                  setTimeout(() => setCopiedPlain(false), 1500);
+                });
+              }}
+              title={t("desktop.copyPlainText")}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 24, height: 24,
+                background: "var(--bg-panel)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                color: copiedPlain ? "var(--accent)" : "var(--text-dim)",
+                cursor: "pointer",
+                transition: "color 0.12s, border-color 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!copiedPlain) e.currentTarget.style.color = "var(--accent)"; }}
+              onMouseLeave={(e) => { if (!copiedPlain) e.currentTarget.style.color = "var(--text-dim)"; }}
+            >
+              {copiedPlain ? <CheckIcon size={12} /> : <ClipboardTextIcon size={12} />}
+            </button>
           </div>
         )}
         {blockItems.map(({ block, originalIndex }) => (
@@ -667,55 +717,9 @@ function AssistantMessageView({
             })()}
           </div>
         )}
-        {textContent && !isStreaming && (
-          <button
-            className="msg-actions"
-            onClick={copyContent}
-            title={t("desktop.copyMessage")}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 22, height: 22,
-              background: "none", border: "none",
-              borderRadius: 5,
-              color: copied ? "var(--accent)" : "var(--text-dim)",
-              cursor: "pointer",
-              opacity: hovered ? 1 : 0,
-              pointerEvents: hovered ? "auto" : "none",
-              transition: "opacity 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
-            onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-dim)"; }}
-          >
-            {copied ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
-          </button>
-        )}
-        {textContent && !isStreaming && (
-          <button
-            className="msg-actions"
-            onClick={() => {
-              copyText(markdownToPlainText(textContent)).then(() => {
-                setCopiedPlain(true);
-                setTimeout(() => setCopiedPlain(false), 1500);
-              });
-            }}
-            title={t("desktop.copyPlainText")}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 22, height: 22,
-              background: "none", border: "none",
-              borderRadius: 5,
-              color: copiedPlain ? "var(--accent)" : "var(--text-dim)",
-              cursor: "pointer",
-              opacity: hovered ? 1 : 0,
-              pointerEvents: hovered ? "auto" : "none",
-              transition: "opacity 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => { if (!copiedPlain) e.currentTarget.style.color = "var(--accent)"; }}
-            onMouseLeave={(e) => { if (!copiedPlain) e.currentTarget.style.color = "var(--text-dim)"; }}
-          >
-            {copiedPlain ? <CheckIcon size={11} /> : <ClipboardTextIcon size={11} />}
-          </button>
-        )}
+        {/* Copy actions moved to the floating top-right corner of the content
+            block (see .chat-copy-float above) — they no longer occupy a layout
+            row here. */}
         {/* Fork: branch this answer into a new session (continues from the
             user turn this answer belongs to). Touch devices get it via the
             .msg-actions media rule; hover devices see it on hover. */}
