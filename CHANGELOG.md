@@ -2,6 +2,26 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.18.7 — 2026-09-25（同步上游 v0.9.2/v0.9.3：安全加固 + 模型开关 + 长会话性能 + 子代理 UI 修复）
+
+### 上游同步（v0.9.2 全量合并 + v0.9.3 按功能移植）
+
+- **安全**：Next.js 升 16.3.6（含 GHSA-vcvr-r3jv-pc5j RCE 修复）、pi 四包升 0.87.1（新模型目录：Opus 5.5、GPT-6 Sol/Luna、Grok 4.7）；`PI_WEB_PASSWORD` 不再泄漏进项目命令环境与终端 shell；登录页 `next` 跳转按 origin 解析校验，拒绝协议相对的跨站目标；`/api/*` 的 Basic 认证与登录表单共享限流（429 + Retry-After），会话 cookie 优先且不受限流影响。
+- **模型配置**：models.json 读取与 pi 同宽（BOM、`//` 注释、尾逗号）；不可读文件抛 `ModelsConfigReadError`（GET 422 / PUT 409），面板显示错误且保存被服务端拒绝——杜绝"空草稿整文件覆盖"。
+- **会话列表**：`listSessionsIncremental` 持久化索引 + `summary=1` 首绘骨架；只读 SessionManager 指纹缓存（上限 12 个/256MB，超大会话不缓存）；`allowStale` 后台重建；invalidate 立即生效。
+- **聊天**：精确系统提示词同时经 `before_agent_start` extension 与状态镜像双通道；`isToolCallExpanded` 持久化展开；PDF `#page=` 深链；searchTarget 高亮；`fork_branch`/`set_auto_retry`/`clone` 命令；会话事件监听器延迟退订（mid-emit 退订不再吞事件）；子代理 provider 错误（stopReason:"error"）计为 failed。
+- **UI**：subtle scrollbars（滚动时才显形）；`computeSessionStats` 全量聚合（含被压缩历史）。
+
+### 三个 UI 修复
+
+- **子代理转录标签页折叠**：复用主对话的轮次分组管线（buildHistoryPipeline + ProcessGroup）——历史轮次的思考/工具调用折叠、最终答案展开、运行中最新轮次实时展开；不再平铺全部消息。
+- **主对话运行中子代理常驻可见**：含运行中子代理的历史轮次自动展开并保持流式样式；行内显示实时状态与耗时。
+- **复制按钮悬浮化**：复制/纯文本复制按钮悬浮在正文右上角（hover 显形，触屏经 .msg-actions 规则常显），不再占用消息底部布局行。
+
+### 验证
+
+- tsc 0 错误；node --test 1645 pass / 0 fail；三遍分角度独立审查（正确性/回归契约/完整性）通过，发现项全部修复。
+
 ## v0.18.6 — 2026-09-14（热修：macOS 独立连接管理窗口白屏）
 
 v0.18.5 的本地客户端实际验收发现：主工作台正常，但新独立「连接管理」窗口白屏。Tauri 会把 `App("index.html")` 简化为 `tauri://localhost`，其路径为空字符串；壳内页面导航白名单只允许 `/` 与显式文件名，误拦了 macOS 的初始导航。
