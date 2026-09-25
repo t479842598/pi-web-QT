@@ -844,10 +844,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [liveModel, setLiveModel] = useState<{ provider: string; modelId: string } | null>(null);
   // Upstream v0.9.2: sync the live model from reconcile/agent_end snapshots without
   // disturbing an explicit pending selection.
-  const syncLiveModel = useCallback((liveState: { model?: { provider?: string; modelId?: string } | null } | null | undefined) => {
-    const m = liveState?.model;
+  const syncLiveModel = useCallback((state: { model?: { provider?: string; modelId?: string } | null; thinkingLevel?: string } | null | undefined) => {
+    const m = state?.model;
     if (m && typeof m.provider === "string" && typeof m.modelId === "string") {
       setLiveModel({ provider: m.provider, modelId: m.modelId });
+    }
+    // The reasoning level of the running/loaded turn rides the same snapshots:
+    // a concrete level updates the live display, "off" reports nothing.
+    if (state?.thinkingLevel !== undefined) {
+      setLiveThinkingLevel(asConcreteThinkingLevel(state.thinkingLevel));
     }
   }, []);
 
@@ -1013,6 +1018,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const displayModel = isNew
     ? (newSessionModel ?? newSessionDefaultModel)
     : currentModel ?? (data?.context.messages.length === 0 ? newSessionDefaultModel : null);
+
+  // Show the reasoning level of the running/loaded turn (#777): an existing
+  // session layers the live snapshot over the persisted context level, while a
+  // new composer keeps the user's explicit selection (or its pin) untouched.
+  const contextThinkingLevel = asConcreteThinkingLevel(
+    data?.context.thinkingLevel && data.context.thinkingLevel !== "off"
+      ? data.context.thinkingLevel
+      : null,
+  );
+  const currentThinkingLevel = liveThinkingLevel ?? contextThinkingLevel;
+  const newSessionThinkingLevel = thinkingLevelOverrideRef.current;
+  const displayThinkingLevel = isNew
+    ? (newSessionThinkingLevel ?? newSessionDefaultThinkingLevel)
+    : currentThinkingLevel ?? (data?.context.messages.length === 0 ? newSessionDefaultThinkingLevel : null);
 
   const sessionStats = useMemo(() => {
     if (sessionStatsOverride) {
@@ -3540,9 +3559,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [addNotice, setQueuedMessages]);
 
   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
-    thinkingLevelOverrideRef.current = level === "auto" ? null : level;
+    if (level === "auto") {
+      // "auto" leaves pi's current setting untouched
+      thinkingLevelOverrideRef.current = null;
+      setThinkingLevel(level);
+      return;
+    }
+    thinkingLevelOverrideRef.current = level;
     setThinkingLevel(level);
-    if (level === "auto") return; // "auto" leaves pi's current setting untouched
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     try {
@@ -4260,14 +4284,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const branchTree = data?.tree ?? [];
 
-  const newSessionThinkingLevel = newSessionDefaultThinkingLevel;
-  const isAutoThinkingSelection = isNew && newSessionThinkingLevel === null;
-
   return {
-    isAutoThinkingSelection,
+    isAutoThinkingSelection: isNew && newSessionThinkingLevel === null,
     // State
     data, loading, error, activeLeafId, messages, activeToolResults, entryIds, historyCursor, hasEarlierMessages, streamState,
-    agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, modelsError, newSessionModel, toolPreset, thinkingLevel,
+    agentRunning, bashRunning, pendingBash, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, modelScopeWarnings, modelsError, newSessionModel, toolPreset, thinkingLevel: displayThinkingLevel ?? thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
     tokenRate,

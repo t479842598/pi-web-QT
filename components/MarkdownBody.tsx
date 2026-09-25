@@ -143,10 +143,14 @@ function buildMarkdownComponents({ isStreaming, cwd, onOpenFile, onQuoteReply, q
       const openFile = onOpenFile;
       if (!filePath || !openFile) {
         const isLocalLink = typeof href === "string" && (href.startsWith("file:") || (!/^https?:/i.test(href) && !href.startsWith("#")));
+        // A linked markdown image must stay a plain link: the provider marks the
+        // subtree so MarkdownImage skips its nested preview button.
         return (
-          <a href={href} {...props} className={linkClass} {...(isLocalLink ? {} : { target: "_blank", rel: "noopener noreferrer" })}>
-            {children}
-          </a>
+          <MarkdownLinkContext.Provider value={true}>
+            <a href={href} {...props} className={linkClass} {...(isLocalLink ? {} : { target: "_blank", rel: "noopener noreferrer" })}>
+              {children}
+            </a>
+          </MarkdownLinkContext.Provider>
         );
       }
 

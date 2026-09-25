@@ -88,13 +88,13 @@ export function AppShell() {
   const searchParams = useSearchParams();
   // Recomputes when the URL changes so SPA navigation between projects
   // (?session=... <-> ?cwd=...) is honored instead of only the initial mount.
-  const [initialNavigationState, setInitialNavigation] = useState(() => getInitialNavigation(searchParams));
+  const [initialNavigation, setInitialNavigation] = useState(() => getInitialNavigation(searchParams));
   // Recomputes when the URL changes so SPA navigation between projects
   // (?session=... <-> ?cwd=...) is honored instead of only the initial mount.
-  const initialNavigation = useMemo(
-    () => (initialNavigationState === getInitialNavigation(searchParams) ? initialNavigationState : initialNavigationState),
-    [initialNavigationState, searchParams],
-  );
+  useEffect(() => {
+    setInitialNavigation(getInitialNavigation(searchParams));
+  }, [searchParams]);
+  const initialNavigationMemo = useMemo(() => initialNavigation, [initialNavigation]);
   const { isDark, toggleTheme } = useTheme();
   const { locale, t } = useI18n();
   const translate = t;
@@ -762,12 +762,12 @@ export function AppShell() {
       // onCwdChange effect firing after setSelectedCwd in the sidebar
       suppressCwdBumpRef.current = true;
     }
-    // Skip the address-bar update when restoring from URL — the param is
-    // already correct. Use history.replaceState (not router.replace): the
-    // router call triggers a Suspense remount loop in production, which reset
-    // the whole UI and lost the workspace.
-    if (!isRestore) {
-      window.history.replaceState(null, "", `?session=${encodeURIComponent(session.id)}`);
+    // Skip router.replace when the URL already has this session — calling
+    // replace in production Next.js triggers a Suspense remount loop.
+    // Tab-memory restore lands on `/` and must write `?session=` so reload
+    // and copy-link keep this session. history.replaceState avoids the loop.
+    if (!isRestore || new URLSearchParams(window.location.search).get("session") !== session.id) {
+      router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     }
   }, [isMobile, selectedSession]);
 
@@ -992,7 +992,8 @@ export function AppShell() {
     setSystemPrompt(null);
     setActiveTopPanel(null);
     if (isMobile) setSidebarOpen(false);
-    window.history.replaceState(null, "", "/");
+    setNewSessionDraftId(null);
+    router.replace(`?cwd=${encodeURIComponent(cwd)}`, { scroll: false });
   }, [router, isMobile]);
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)

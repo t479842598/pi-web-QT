@@ -365,7 +365,13 @@ export async function POST(
     const errors: Array<{ name: string; error: string }> = [];
 
     for (const file of files) {
-      const destination = path.join(directory, file.name);
+      // basename 双重保险 + 边界校验，确保写入目标不越出 realpath 加固的 directory。
+      const destination = path.join(directory, path.basename(file.name));
+      const resolvedUploadDir = path.resolve(directory) + path.sep;
+      if (!path.resolve(destination).startsWith(resolvedUploadDir)) {
+        errors.push({ name: file.name, error: "Invalid path" });
+        continue;
+      }
       if (conflictSet.has(file.name) && strategy === "skip") {
         skipped.push(file.name);
         continue;

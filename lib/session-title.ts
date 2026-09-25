@@ -58,7 +58,11 @@ export function buildSessionTitleAgentOptions(source: Agent): AgentOptions {
   const state = source.state;
   return {
     initialState: {
-      systemPrompt: state.systemPrompt,
+      // Since pi-agent-core 0.87 the Agent prepends a system message replayed
+      // from `systemPrompt` onto the provider context. The title transcript
+      // must stay minimal, so the prompt is dropped and the messages carry
+      // the conversation only.
+      systemPrompt: undefined,
       model: state.model,
       thinkingLevel: state.thinkingLevel,
       tools: createShadowTools(state.tools),

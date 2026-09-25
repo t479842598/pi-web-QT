@@ -15,7 +15,15 @@ const { I18nContext } = await jiti.import("@/hooks/useI18n");
 const i18nValue = {
   locale: "en",
   setLocale() {},
-  t: (key) => key,
+  // Resolve the keys the image preview needs so label assertions see the same
+  // strings the real provider translates (chat.previewImage -> "Preview image").
+  t: (key, params) => {
+    if (key === "chat.previewImage") {
+      const label = "Preview image";
+      return params?.alt ? `${label}: ${params.alt}` : label;
+    }
+    return key;
+  },
   supportedLocales: [],
 };
 

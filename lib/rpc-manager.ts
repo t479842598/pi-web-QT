@@ -10,7 +10,7 @@ import { createQueueEntry, loadQueue, removeQueue, saveQueue, type PendingRecove
 import { invalidateModelsCache } from "./models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
-import { cacheSessionPath, getLatestModelChange, invalidateSessionListCache, resolveSessionPath } from "./session-reader";
+import { cacheSessionPath, getLatestModelChange, invalidateSessionListCache, readLatestSessionEntryId, resolveSessionPath } from "./session-reader";
 import { createSubagentExtension, preferPiWebSubagentExtension } from "./subagent-extension";
 import { listSubagentProfiles, readSubagentRun, readSubagentSessionResources } from "./subagents";
 import { appendSessionToolSelection, readSessionToolSelection, validateSessionToolSelection } from "./session-tool-selection";
@@ -27,6 +27,8 @@ import { persistExplicitStartupPreferences } from "./startup-preferences";
 import { readModeSettings } from "./modes-config";
 import { decide, policyFromStrings, type Policy } from "./permission";
 import { READ_ONLY_TOOL_NAMES } from "./modes";
+import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
+import { createExactSystemPromptExtension } from "./exact-system-prompt";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem, SessionEntry, SessionInfo, SessionMessageEntry } from "./types";
@@ -403,7 +405,9 @@ export class AgentSessionWrapper {
     if (wrapperOptions.chatOnly) this.setChatOnly(true);
     if (wrapperOptions.exactSystemPrompt) {
       this.exactSystemPrompt = wrapperOptions.exactSystemPrompt();
-      this.installExactSystemPromptContinuation();
+      // Since pi 0.86 the exact prompt is projected onto each run by the
+      // inline `before_agent_start` extension only. Do not patch the agent's
+      // turn preparation — the SDK prompt state must stay untouched.
       this.applyExactSystemPrompt();
     }
 
@@ -431,6 +435,21 @@ export class AgentSessionWrapper {
 
   isAlive(): boolean {
     return this._alive;
+  }
+
+  /**
+   * Drop this idle wrapper when the on-disk JSONL has an entry the in-memory
+   * index never saw (another pi process appended). Rechecks isRunning() so a
+   * prompt that started during the probe cannot be disposed.
+   */
+  evictIfDiskAhead(): boolean {
+    if (!this.isAlive() || this.isRunning()) return false;
+    const diskLatestId = readLatestSessionEntryId(this.sessionFile);
+    if (!diskLatestId || this.inner.sessionManager.getEntry(diskLatestId)) return false;
+    if (this.isRunning()) return false;
+    this.destroy();
+    invalidateSessionListCache();
+    return true;
   }
 
   /** Subagent runtime awaits the host session before spawning; the parent is
@@ -1183,19 +1202,19 @@ export class AgentSessionWrapper {
   }
 
   private applyForcedEmptySystemPrompt(): void {
-    if (!this.inner.agent.state) return;
-    if (this.forceEmptySystemPrompt) {
-      this.inner.agent.state.systemPrompt = "";
-    } else if (this.exactSystemPrompt !== null) {
-      this.inner.agent.state.systemPrompt = this.exactSystemPrompt;
-    }
+    // Since pi 0.86 `agent.state.systemPrompt` is a getter replayed from the
+    // transcript and cannot be assigned. The exact/empty prompt reaches the
+    // model through the `before_agent_start` extension (see
+    // lib/exact-system-prompt.ts and the Chat-only prompt swap), so this
+    // reporting hook stays a no-op against the SDK prompt state.
   }
 
   private applyExactSystemPrompt(): void {
-    if (this.forceEmptySystemPrompt) return;
-    if (this.exactSystemPrompt !== null && this.inner.agent.state) {
-      this.inner.agent.state.systemPrompt = this.exactSystemPrompt;
-    }
+    // Since pi 0.86 `agent.state.systemPrompt` is a getter replayed from the
+    // transcript and cannot be assigned. The exact prompt reaches the model
+    // through the `before_agent_start` extension instead (see
+    // lib/exact-system-prompt.ts); this hook remains for the reporting path
+    // and must never touch the SDK prompt state.
   }
 
   private emit(event: AgentEvent): void {
@@ -1213,24 +1232,6 @@ export class AgentSessionWrapper {
         );
       }
     }
-  }
-
-  private installExactSystemPromptContinuation(): void {
-    if (!this.exactSystemPrompt) return;
-    const agent = this.inner.agent as {
-      prepareNextTurnWithContext?: (turn: { context?: unknown }, signal?: AbortSignal) => Promise<{ context?: unknown } | undefined> | { context?: unknown } | undefined;
-    };
-    const previous = agent.prepareNextTurnWithContext;
-    agent.prepareNextTurnWithContext = async (turn: { context?: unknown }, signal?: AbortSignal) => {
-      const prepared = await previous?.(turn, signal);
-      return {
-        ...(prepared as object | undefined),
-        context: {
-          ...((prepared?.context as object | undefined) ?? (turn.context as object | undefined)),
-          systemPrompt: this.exactSystemPrompt,
-        },
-      };
-    };
   }
 
   setActiveToolSelection(toolNames: string[]): void {
@@ -1603,7 +1604,9 @@ export class AgentSessionWrapper {
           contextUsage: contextUsage
             ? { percent: contextUsage.percent, contextWindow: contextUsage.contextWindow, tokens: contextUsage.tokens }
             : null,
-          systemPrompt: this.inner.agent.state?.systemPrompt ?? "",
+          // An exact prompt is projected onto each run by the inline extension;
+          // the SDK state only shows Pi's structured sections.
+          systemPrompt: this.exactSystemPrompt ?? this.inner.agent.state?.systemPrompt ?? "",
           thinkingLevel: this.inner.agent.state?.thinkingLevel ?? "off",
           extensionStatuses: this.getExtensionStatuses(),
           extensionWidgets: this.getExtensionWidgets(),
@@ -1681,44 +1684,72 @@ export class AgentSessionWrapper {
       }
 
       case "fork": {
+        if (this.isSessionRunningForReplacement()) {
+          throw new Error("Cannot fork while the session is running");
+        }
+        return this.withSessionReplacement("fork", async () => {
+          const entryId = command.entryId as string;
+          const sessionManager = this.inner.sessionManager;
+          const currentSessionFile = this.inner.sessionFile;
+          if (!sessionManager.isPersisted()) return { cancelled: true };
+          if (!currentSessionFile) throw new Error("Persisted session is missing a session file");
+          const forkedEntry = sessionManager.getEntry(entryId);
+          if (!forkedEntry) throw new Error("Invalid entry ID for forking");
+
+          const sessionDir = sessionManager.getSessionDir();
+          let newSessionFile: string;
+          let forkedManager: SessionManager;
+
+          if (!forkedEntry.parentId) {
+            // Fork before the first message: create an empty session linked to this
+            // one. SessionManager.create() may keep the branch in memory until it
+            // has a reason to flush, so materialize the JSONL explicitly below.
+            forkedManager = SessionManager.create(sessionManager.getCwd(), sessionDir, {
+              parentSession: currentSessionFile,
+            });
+            newSessionFile = forkedManager.getSessionFile() as string;
+          } else {
+            forkedManager = SessionManager.open(currentSessionFile, sessionDir);
+            const forkedPath = forkedManager.createBranchedSession(forkedEntry.parentId);
+            if (!forkedPath) throw new Error("Failed to create forked session");
+            newSessionFile = forkedPath;
+          }
+
+          if (!existsSync(newSessionFile)) {
+            const header = forkedManager.getHeader();
+            if (!header) throw new Error("Forked session is missing a session header");
+            const content = [header, ...forkedManager.getEntries()]
+              .map((forkedEntry) => JSON.stringify(forkedEntry))
+              .join("\n") + "\n";
+            writeFileSync(newSessionFile, content, { encoding: "utf8", flag: "wx" });
+          }
+
+          const newSessionId = forkedManager.getSessionId();
+          cacheSessionPath(newSessionId, newSessionFile);
+          invalidateSessionListCache();
+          await this.shutdownAfterSessionReplacement("fork");
+          return { cancelled: false, newSessionId };
+        });
+      }
+
+      case "fork_branch": {
+        if (this.isSessionRunningForReplacement()) {
+          throw new Error("Cannot fork while the session is running");
+        }
         const entryId = command.entryId as string;
         const sessionManager = this.inner.sessionManager;
         const currentSessionFile = this.inner.sessionFile;
         if (!sessionManager.isPersisted()) return { cancelled: true };
         if (!currentSessionFile) throw new Error("Persisted session is missing a session file");
-        const forkedEntry = sessionManager.getEntry(entryId);
-        if (!forkedEntry) throw new Error("Invalid entry ID for forking");
+        if (!sessionManager.getEntry(entryId)) throw new Error("Invalid entry ID for forking");
 
         const sessionDir = sessionManager.getSessionDir();
-        let newSessionFile: string;
-        let forkedManager: SessionManager;
+        const sourceManager = SessionManager.open(currentSessionFile, sessionDir);
+        const forkedPath = sourceManager.createBranchedSession(entryId);
+        if (!forkedPath) throw new Error("Failed to create forked session");
 
-        if (!forkedEntry.parentId) {
-          // Fork before the first message: create an empty session linked to this
-          // one. SessionManager.create() may keep the branch in memory until it
-          // has a reason to flush, so materialize the JSONL explicitly below.
-          forkedManager = SessionManager.create(sessionManager.getCwd(), sessionDir, {
-            parentSession: currentSessionFile,
-          });
-          newSessionFile = forkedManager.getSessionFile() as string;
-        } else {
-          forkedManager = SessionManager.open(currentSessionFile, sessionDir);
-          const forkedPath = forkedManager.createBranchedSession(forkedEntry.parentId);
-          if (!forkedPath) throw new Error("Failed to create forked session");
-          newSessionFile = forkedPath;
-        }
-
-        if (!existsSync(newSessionFile)) {
-          const header = forkedManager.getHeader();
-          if (!header) throw new Error("Forked session is missing a session header");
-          const content = [header, ...forkedManager.getEntries()]
-            .map((forkedEntry) => JSON.stringify(forkedEntry))
-            .join("\n") + "\n";
-          writeFileSync(newSessionFile, content, { encoding: "utf8", flag: "wx" });
-        }
-
-        const newSessionId = forkedManager.getSessionId();
-        cacheSessionPath(newSessionId, newSessionFile);
+        const newSessionId = SessionManager.open(forkedPath, sessionDir).getSessionId();
+        cacheSessionPath(newSessionId, forkedPath);
         invalidateSessionListCache();
         return { cancelled: false, newSessionId };
       }
@@ -2068,6 +2099,11 @@ export class AgentSessionWrapper {
         return null;
       }
 
+      case "set_auto_retry": {
+        this.inner.setAutoRetryEnabled?.(command.enabled as boolean);
+        return null;
+      }
+
       case "bash": {
         if (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning) {
           throw new Error("Cannot run a shell command while the session is busy");
@@ -2120,6 +2156,9 @@ export class AgentSessionWrapper {
     this.cancelPendingDispose();
     if (this.inner.isBashRunning) this.inner.abortBash();
     this.unsubscribe?.();
+    // Tell attached SSE listeners to drop this instance so the browser
+    // EventSource errors and reconnects instead of staying OPEN on a dead wrapper.
+    this.emit({ type: "session_shutdown" });
     // Persist the goal sidecar before tearing down.
     if (this.sessionFile && !this.persistenceRevoked && this.goalEngine.hasActiveGoal()) {
       saveGoalState(this.sessionFile, this.goalEngine.getState());
@@ -3281,9 +3320,21 @@ export async function startRpcSession(
     // before the SDK restores the saved model from the session file.
     // Creating services imports project extensions for provider discovery, so
     // gate project resources before repository-controlled code can run.
+    const subagentLoadsResources = Boolean(
+      subagentResources?.loadExtensions || subagentResources?.loadSkills,
+    );
     const trustReloadOptions = subagentResources
-      ? undefined
+      ? subagentLoadsResources
+        ? projectTrustReloadOptions(sessionCwd, agentDir)
+        : undefined
       : projectTrustReloadOptions(sessionCwd, agentDir);
+    // Chat-only sessions and subagents that replace Pi's prompt send an exact
+    // system prompt. The prompt is resolved at prompt time through this inline
+    // extension: it may read the session's context files, which exist only
+    // after the session is created, so the getter is filled in below.
+    const exactSystemPromptRef: { current?: () => string } = {};
+    const exactSystemPromptExtension = createExactSystemPromptExtension(() => exactSystemPromptRef.current?.());
+    const usesExactSystemPrompt = chatOnly || subagentResources?.exactSystemPrompt !== undefined;
     const services = await createAgentSessionServices({
       cwd: sessionCwd,
       agentDir,
@@ -3296,7 +3347,10 @@ export async function startRpcSession(
             noThemes: true,
             noContextFiles: true,
             appendSystemPrompt: subagentResources.appendSystemPrompt,
+            ...(usesExactSystemPrompt ? { extensionFactories: [exactSystemPromptExtension] } : {}),
           }
+        : chatOnly
+          ? { ...CHAT_ONLY_RESOURCE_LOADER_OPTIONS, extensionFactories: [exactSystemPromptExtension] }
         : {
             extensionFactories: [
               createSubagentExtension(
@@ -3334,7 +3388,7 @@ export async function startRpcSession(
     const defaultProvider = services.settingsManager.getDefaultProvider();
     const defaultModelId = services.settingsManager.getDefaultModel();
     const branch = sessionManager.getBranch();
-    const hasExistingMessages = branch.some((entry) => entry.type === "message");
+    const hasExistingMessages = branch.some((entry) => entry.type === "message" && (entry.message as { role?: string }).role !== "system");
     const savedModel = hasExistingMessages
       ? getLatestModelChange(branch as unknown as SessionEntry[])
       : null;
@@ -3440,6 +3494,19 @@ export async function startRpcSession(
         // so reopening the session keeps the exact prompt the profile configured.
         wrapper.setExactSystemPrompt(subagentResources.appendSystemPrompt[0]);
       }
+      // Chat-only / subagent exact prompts are projected onto each run by the
+      // inline extension (registered above via exactSystemPromptRef); the
+      // wrapper mirrors them so get_state reports the effective prompt without
+      // ever assigning the SDK's getter-only prompt state.
+      const exactSystemPrompt = subagentResources?.exactSystemPrompt !== undefined
+        ? subagentResources.exactSystemPrompt!
+        : chatOnly
+          ? (subagentResources
+            ? subagentResources.appendSystemPrompt[0] ?? ""
+            : contextFilesSystemPrompt(inner.resourceLoader.getAgentsFiles().agentsFiles))
+          : null;
+      exactSystemPromptRef.current = exactSystemPrompt === null ? undefined : () => exactSystemPrompt;
+      if (exactSystemPrompt !== null) wrapper.setExactSystemPrompt(exactSystemPrompt);
       wrapper.start();
       wrapper.loadQueueRecovery();
 

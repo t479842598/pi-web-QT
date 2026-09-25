@@ -1314,9 +1314,9 @@ function PatchTextView({ text }: { text: string }) {
               display: "flex",
               background: bg,
               borderLeft: kind === "added"
-                ? "3px solid #22c55e"
+                ? "3px solid var(--status-success)"
                 : kind === "removed"
-                ? "3px solid #f87171"
+                ? "3px solid var(--status-error)"
                 : kind === "hunk"
                 ? "3px solid var(--accent)"
                 : "3px solid transparent",

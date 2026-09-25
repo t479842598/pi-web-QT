@@ -219,6 +219,7 @@ export interface AgentSessionLike {
   getAllTools(): ToolInfo[];
   getActiveToolNames(): string[];
   setActiveToolsByName(names: string[]): void;
+  setAutoRetryEnabled?(enabled: boolean): void;
   abortCompaction(): void;
   getContextUsage(): ContextUsage | undefined;
 }

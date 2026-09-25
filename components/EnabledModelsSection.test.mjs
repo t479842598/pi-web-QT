@@ -127,11 +127,12 @@ test("switches are locked while the scope is not editable", () => {
 test("a custom provider is switched from its header, by one switch and no prose", () => {
   assert.match(source, /export function EnabledModelsProviderSwitch\(\{/);
   assert.match(source, /onChange=\{\(checked\) => controller\.setProvider\(provider\.id, checked\)\}/);
-  // It sits in the detail header, left of the provider's own buttons.
+  // It sits in the detail header, left of the provider's own delete button.
   assert.match(
     modelsConfigSource,
-    /<EnabledModelsProviderSwitch providerId=\{name\} controller=\{enabledModels\} \/>\s*\n\s*<ConfigButton variant="danger"/,
+    /<EnabledModelsProviderSwitch providerId=\{name\} controller=\{enabledModels\} \/>/,
   );
+  assert.match(modelsConfigSource, /<EnabledModelsProviderSwitch providerId=\{name\} controller=\{enabledModels\} \/>[\s\S]{0,120}onClick=\{onDelete\}/);
   // Nothing about it is explained in body text any more.
   assert.doesNotMatch(source, /enabledCustomHint/);
   assert.doesNotMatch(source, /provider\.kind === "custom"/);
@@ -217,7 +218,7 @@ test("the section carries the usage heading font and no rule above it", () => {
 
 test("saving models.json resyncs the switches with the pre-save intent", () => {
   assert.match(modelsConfigSource, /enabledModels\.resync\(renames, modelRenames\)/);
-  assert.match(modelsConfigSource, /collectModelRenames\(config, savedModelIdsRef\.current, renamesRef\.current\)/);
+  assert.match(modelsConfigSource, /collectModelRenames\(configRef\.current, savedModelIdsRef\.current, renamesRef\.current\)/);
   assert.match(modelsConfigSource, /savedProvidersRef\.current\.has\(original\)/);
   // Providers that were fully enabled stay fully enabled across the save.
   assert.match(source, /provider\.enabledCount === provider\.models\.length\)\s*\n\s*\.map\(\(provider\) => provider\.id\)/);
@@ -229,18 +230,16 @@ test("a save landing mid-toggle is queued, not dropped", () => {
 });
 
 test("provider rows carry the scope badge", () => {
-  const sidebar = modelsConfigSource.slice(
-    modelsConfigSource.indexOf("<ConfigSidebar>"),
-    modelsConfigSource.indexOf("</ConfigSidebar>"),
-  );
-  assert.equal(sidebar.match(/\{scopeBadge\(/g)?.length, 3);
+  // The sidebar is inlined in ModelsConfig (no ConfigSidebar wrapper) and one
+  // badge call per provider group: oauth, api-key, and models.json.
+  assert.equal(modelsConfigSource.match(/\{scopeBadge\(/g)?.length, 3);
   assert.match(cssSource, /\.models-sidebar-badge \{/);
   assert.match(cssSource, /\.enabled-models-row \+ \.enabled-models-row \{/);
 });
 
-test("the saved-model slots mirror every move the draft makes", () => {
+test("the saved-model slots mirror every move the draft moves", () => {
   assert.match(modelsConfigSource, /savedModelIdsRef\.current = savedModelIds\(normalized\)/);
-  assert.match(modelsConfigSource, /savedModelIdsRef\.current = savedModelIds\(config\)/);
+  assert.match(modelsConfigSource, /savedModelIdsRef\.current = savedModelIds\(configRef\.current\)/);
   assert.match(modelsConfigSource, /trackAddedModels\(savedModelIdsRef\.current, providerName, 1\)/);
   assert.match(modelsConfigSource, /savedModelIdsRef\.current\.get\(providerName\)\?\.splice\(index, 1\)/);
   assert.match(modelsConfigSource, /savedModelIdsRef\.current\.delete\(name\)/);

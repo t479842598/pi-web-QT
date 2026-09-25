@@ -2953,8 +2953,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 <button
                   onClick={(e) => { if (isStreaming) return; const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setThinkingDropdownRect({ top: rect.top, left: rect.left, width: rect.width }); setThinkingDropdownOpen((v) => !v); }}
                   disabled={isStreaming}
-                  title={t("desktop.changeReasoningLevel", { level: thinkingDisplayLabel })}
-                  aria-label={t("desktop.changeReasoningLevel", { level: thinkingDisplayLabel })}
+                  title={isStreaming
+                    ? t("chat.currentReasoning", { level: thinkingDisplayLabel })
+                    : t("chat.changeReasoning", { level: thinkingDisplayLabel })}
+                  aria-label={t("chat.changeReasoningLabel")}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? 0 : 5,
                     padding: isMobile ? 0 : "0 6px",

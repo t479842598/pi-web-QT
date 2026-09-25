@@ -276,7 +276,14 @@ export function createSubagentController(
           if (canceled()) throw new DOMException("Subagent was stopped before prompt preflight completed", "AbortError");
         });
         const text = inner.getLastAssistantText()?.trim();
-        result = { ...initialRun, status: canceled() ? "aborted" : "completed", completedAt: new Date().toISOString(), ...(text ? { result: text } : {}) };
+        const providerError = canceled() ? undefined : lastAssistantError(inner.sessionManager);
+        result = {
+          ...initialRun,
+          status: canceled() ? "aborted" : providerError ? "failed" : "completed",
+          completedAt: new Date().toISOString(),
+          ...(text ? { result: text } : {}),
+          ...(providerError ? { error: providerError } : {}),
+        };
       } catch (error) {
         const aborted = canceled();
         const text = inner.getLastAssistantText()?.trim();
@@ -506,7 +513,9 @@ export function createSubagentController(
           preflightResult: (success: boolean) => {
             if (!success) return;
             checkCanceled();
-            if (chatOnly && inner.agent.state) inner.agent.state.systemPrompt = profile.systemPrompt;
+            // The exact prompt is projected by the before_agent_start extension
+            // (registered at session creation); the SDK prompt state is a
+            // getter in pi >= 0.86 and must never be assigned.
           },
         }),
         cleanup: () => cleanupWorktree(parent.cwd, isolatedWorktree),

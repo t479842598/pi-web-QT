@@ -31,7 +31,7 @@ test("mount effect probes running state in parallel with the message load", () =
   const mountSource = source.slice(start, end);
 
   const probeStart = mountSource.indexOf("// 并行运行态探测");
-  const probeEnd = mountSource.indexOf("loadSession(session.id, true, true)");
+  const probeEnd = mountSource.indexOf("loadSession(session.id, !cached, true, { force: true })");
   assert.ok(probeStart !== -1 && probeEnd !== -1, "probe block must exist before loadSession");
   const probeSource = mountSource.slice(probeStart, probeEnd);
   assert.match(probeSource, /\/state/, "probe hits the state endpoint");
