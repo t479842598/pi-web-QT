@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { assertModelsConfigBody, mutateModelsConfig, readModelsConfig, type ModelsConfigData } from "@/lib/models-config-store";
+import { ModelsConfigReadError, assertModelsConfigBody, mutateModelsConfig, readModelsConfig, type ModelsConfigData } from "@/lib/models-config-store";
 import { pruneRemovedEnabledModels } from "@/lib/enabled-model-pruning";
 import { invalidateAvailableModelsCache } from "@/lib/model-scope";
 import { isApiRequestAllowed, hasJsonContentType } from "@/lib/request-security";
@@ -48,6 +48,11 @@ export async function GET(req: Request) {
   try {
     return NextResponse.json(readModelsConfig());
   } catch (error) {
+    // 422: the file exists but is unusable — the panel shows the error and
+    // keeps saving disabled instead of presenting an empty draft.
+    if (error instanceof ModelsConfigReadError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }
@@ -84,6 +89,11 @@ export async function PUT(req: Request) {
     }
     return NextResponse.json({ success: true, config: persisted, prunedEnabledModels });
   } catch (error) {
+    // 409: models.json is unreadable, so the draft was not built from it —
+    // writing would silently discard the file's contents.
+    if (error instanceof ModelsConfigReadError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }

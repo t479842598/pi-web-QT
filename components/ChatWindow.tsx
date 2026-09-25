@@ -31,6 +31,7 @@ import { useAudio } from "@/hooks/useAudio";
 import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useScrollbarVisibility } from "@/hooks/useScrollbarVisibility";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { isSubagentToolDetails } from "@/lib/subagent-tool-details";
@@ -521,6 +522,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !agentRunning;
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
+  // Upstream v0.9.3: the chat column's scrollbar stays invisible until the
+  // container scrolls or the pointer moves into it.
+  useScrollbarVisibility(scrollContainerRef, Boolean(session?.id) || !isEmptyNew);
 
   // Memoize the per-turn data pipeline (block splits, process-block
   // collection, written-file extraction) so streaming only recomputes the
@@ -865,7 +869,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           </div>
         </div>
         <div className="relative flex-1 min-h-0 min-w-0">
-          <div ref={scrollContainerRef} className="h-full min-w-0 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div ref={scrollContainerRef} className="scrollbar-subtle h-full min-w-0 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-gutter:stable]">
             <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
             <div style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
               <div ref={virtualListHeaderRef}>

@@ -1369,8 +1369,13 @@ export class AgentSessionWrapper {
     for (const event of this.pendingUiRequests.values()) listener(event);
     for (const event of this.activeToolEvents.values()) listener(event);
     return () => {
-      const i = this.listeners.indexOf(listener);
-      if (i !== -1) this.listeners.splice(i, 1);
+      // Defer the splice past the current emit loop: an SSE stream that
+      // unsubscribes from inside emit() (session_shutdown close) must not hide
+      // that same event from the next listener (upstream v0.9.3, a3f24eab).
+      queueMicrotask(() => {
+        const i = this.listeners.indexOf(listener);
+        if (i !== -1) this.listeners.splice(i, 1);
+      });
       if (this.subscriberCount > 0) this.subscriberCount -= 1;
       this.scheduleDisposeIfIdle();
     };

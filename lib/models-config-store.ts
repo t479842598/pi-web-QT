@@ -44,13 +44,46 @@ function ensureModelsFile(path: string): void {
   }
 }
 
-/** Read and validate the shape used by the models settings UI. */
+/** models.json exists but its contents cannot be used, so it must not be replaced. */
+export class ModelsConfigReadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ModelsConfigReadError";
+  }
+}
+
+/**
+ * Mirrors pi's `stripJsonComments` (utils/json.js, not exported by the SDK):
+ * drops `//` line comments and trailing commas, leaving string literals alone.
+ */
+function stripJsonComments(input: string): string {
+  return input
+    .replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*/g, (match) => (match[0] === '"' ? match : ""))
+    .replace(/"(?:\\.|[^"\\])*"|,(\s*[}\]])/g, (match, tail?: string) => tail ?? (match[0] === '"' ? match : ""));
+}
+
+/**
+ * Read and validate the shape used by the models settings UI. Reads with the
+ * same leniency as pi's loader (BOM, `//` comments, trailing commas): a file
+ * pi accepts must never read as empty here — the panel saves its whole draft,
+ * so an empty read would delete every provider on the next save. Unusable
+ * contents throw (ModelsConfigReadError) instead of being silently replaced.
+ */
 export function readModelsConfig(path = getModelsConfigPath()): ModelsConfigData {
   if (!existsSync(path)) return { providers: {} };
-  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-  if (!isRecord(parsed)) throw new Error("Invalid models.json: expected an object");
+  let parsed: unknown;
+  try {
+    const content = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
+    if (!content.trim()) return { providers: {} };
+    parsed = JSON.parse(stripJsonComments(content));
+  } catch (error) {
+    throw new ModelsConfigReadError(
+      `Failed to read ${path}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!isRecord(parsed)) throw new ModelsConfigReadError("Invalid models.json: expected an object");
   if (parsed.providers !== undefined && !isRecord(parsed.providers)) {
-    throw new Error("Invalid models.json: providers must be an object");
+    throw new ModelsConfigReadError("Invalid models.json: providers must be an object");
   }
   return parsed;
 }
