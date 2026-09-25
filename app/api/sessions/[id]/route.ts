@@ -20,6 +20,7 @@ import {
   getAgentDir,
 } from "@/lib/session-reader";
 import { sessionPathKey } from "@/lib/session-path";
+import { samePath } from "@/lib/paths";
 import { abortSubagent, beginRpcSessionMutation, getRpcSession, getRpcSessionInfos, broadcastSessionBusEvent } from "@/lib/rpc-manager";
 import { mutateSettingsJson } from "@/lib/settings-lock";
 import { setSessionArchived, dropSessionArchiveEntry } from "@/lib/session-archive";
@@ -399,7 +400,10 @@ export async function DELETE(
         // A subagent descendant is deleted below, not re-parented.
         if (deletedPathKeys.has(sessionPathKey(childPath))) continue;
         const preview = readSessionHeader(childPath);
-        if (!preview || preview.parentSession !== filePath) continue;
+        // samePath, not raw equality: Windows case/slash differences between
+        // the recorded parentSession and this filePath would otherwise skip
+        // the rewrite and orphan the fork (AGENTS.md path convention).
+        if (!preview?.parentSession || !samePath(preview.parentSession, filePath)) continue;
         // Stop the child's wrapper FIRST: rewriting the file underneath a
         // live session races its appendFileSync and loses tail messages. The
         // shutdown can reject when the extension runner errors — never let

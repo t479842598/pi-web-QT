@@ -1054,6 +1054,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 }
                 const details = isSubagentToolDetails(run.result?.details) ? run.result.details : null;
                 if (details) return details.status === "running" || details.status === "starting";
+                // A terminal result without subagent details (dispatch failed,
+                // legacy session, killed mid-run then reloaded) is NOT running:
+                // treating it so would pin the historical group permanently
+                // expanded with streaming styling.
+                if (run.result) return false;
                 // No result yet: the call is still in flight.
                 return true;
               };

@@ -64,7 +64,7 @@
     "lucide-react": "^1.37.0",
     "mammoth": "^1.12.0",
     "mermaid": "^11.16.1",
-    "next": "16.3.5",
+    "next": "16.3.6",
     "node-pty": "1.2.0-beta.15",
     "proper-lockfile": "4.1.2",
     "qrcode": "^1.5.4",
@@ -78,13 +78,13 @@
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "semver": "7.8.0",
-    "undici": "^8.10.0"
+    "semver": "7.8.5",
+    "undici": "^8.11.0"
   },
   "overrides": {
-    "undici": "^8.10.0",
+    "undici": "^8.11.0",
     "@earendil-works/pi-coding-agent": {
-      "undici": "^8.10.0"
+      "undici": "^8.11.0"
     },
     "intersection-observer": "npm:noop2@2.0.0",
     "node-domexception": "npm:@profoundlogic/node-domexception@1.0.2"
