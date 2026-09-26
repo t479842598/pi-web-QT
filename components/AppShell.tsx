@@ -1959,13 +1959,14 @@ export function AppShell() {
 
       {/* Center: chat */}
       <div inert={rightPanelFullWidth} style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
-        {/* Top bar — mobile only. On desktop the fork's AppTitleBar already carries
-            the sidebar and file-panel toggles, and the bottom SessionInfoBar carries
-            full history / system prompt / branches / token stats, so upstream's bar
-            stacked a duplicate row under the title bar (user-reported). */}
+        {/* Upstream's second chat toolbar row is hidden on every viewport (the
+            phone's remote session showed it after the desktop fix): its buttons
+            duplicate AppTitleBar (sidebar / file-panel toggles) and the bottom
+            SessionInfoBar (history / system prompt / branches / token stats);
+            generate-title lives in the sidebar and Agents in the right panel. */}
         <div ref={topPanelAnchorRef} style={{ flexShrink: 0, background: "var(--bg-panel)" }}>
         {!isMobile && renderProjectTrustWarning(false)}
-        <div style={{ display: isMobile ? "flex" : "none", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
+        <div style={{ display: "none", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
           <button
             onClick={handleSidebarToggle}
              title={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
