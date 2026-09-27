@@ -13,7 +13,8 @@ import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trus
 import { cacheSessionPath, getLatestModelChange, invalidateSessionListCache, readLatestSessionEntryId, resolveSessionPath } from "./session-reader";
 import { createSubagentExtension, preferPiWebSubagentExtension } from "./subagent-extension";
 import { listSubagentProfiles, readSubagentRun, readSubagentSessionResources } from "./subagents";
-import { appendSessionToolSelection, readSessionToolSelection, validateSessionToolSelection } from "./session-tool-selection";
+import { appendClearedSessionToolSelection, appendSessionToolSelection, readSessionToolSelection, validateSessionToolSelection } from "./session-tool-selection";
+import { crossesChatOnlyBoundary, isChatOnlySession, resolveStartupToolSelection } from "./tool-selection-policy";
 import { hasActiveSessionLivenessProvider } from "./session-liveness";
 
 const THINKING_LEVEL_NAMES = new Set<string>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -2819,13 +2820,20 @@ export interface SetRpcSessionToolsResult {
   recreated: boolean;
 }
 
-/** Persist a normal session's tool selection and rebuild when resource policy changes. */
+/**
+ * Persist a normal session's tool selection and rebuild when the resource policy
+ * changes. `requestedToolNames === undefined` retracts the pin so the session
+ * follows settings.json defaultTools again (#700); that is not the same as an
+ * explicit empty selection, which means "every tool off" (chat-only).
+ */
 export async function setRpcSessionTools(
   sessionId: string,
   sessionFile: string | undefined,
   requestedToolNames: unknown,
 ): Promise<SetRpcSessionToolsResult> {
-  const toolNames = validateSessionToolSelection(requestedToolNames);
+  const toolNames = requestedToolNames === undefined
+    ? undefined
+    : validateSessionToolSelection(requestedToolNames);
   const existing = getRpcSession(sessionId);
 
   if (!existing?.isAlive()) {
@@ -2834,7 +2842,8 @@ export async function setRpcSessionTools(
     if (readSubagentSessionResources(manager.getEntries() as unknown as SessionEntry[])) {
       throw new Error("Subagent tool selection is fixed by its profile");
     }
-    appendSessionToolSelection(manager, toolNames);
+    if (toolNames === undefined) appendClearedSessionToolSelection(manager);
+    else appendSessionToolSelection(manager, toolNames);
     invalidateSessionListCache();
     const started = await startRpcSession(sessionId, sessionFile, undefined);
     return { session: started.session, sessionId: started.realSessionId, recreated: false };
@@ -2847,12 +2856,17 @@ export async function setRpcSessionTools(
 
   const hasCurrentResourcePolicy = typeof existing.isChatOnly === "function"
     && typeof existing.setActiveToolSelection === "function";
-  const crossesChatOnlyBoundary = !hasCurrentResourcePolicy
-    || existing.isChatOnly() !== (toolNames.length === 0);
-  appendSessionToolSelection(existing.inner.sessionManager, toolNames);
+  // Retracting the pin (`undefined`) always rebuilds: only a fresh start
+  // re-derives the loadout from settings.json defaultTools and re-evaluates
+  // the resource policy.
+  const crossesBoundary = toolNames === undefined
+    || !hasCurrentResourcePolicy
+    || crossesChatOnlyBoundary({ currentChatOnly: existing.isChatOnly(), nextTools: toolNames });
+  if (toolNames === undefined) appendClearedSessionToolSelection(existing.inner.sessionManager);
+  else appendSessionToolSelection(existing.inner.sessionManager, toolNames);
   invalidateSessionListCache();
 
-  if (!crossesChatOnlyBoundary) {
+  if (toolNames !== undefined && !crossesBoundary) {
     existing.setActiveToolSelection(toolNames);
     return { session: existing, sessionId, recreated: false };
   }
@@ -2871,7 +2885,7 @@ export async function setRpcSessionTools(
   }
 
   const started = await startRpcSession(`__recreate__${randomUUID()}`, "", sessionCwd, {
-    toolNames,
+    ...(toolNames !== undefined ? { toolNames } : {}),
     ...(model ? { initialModel: { provider: model.provider, modelId: model.id } } : {}),
     allowInitialModelFallback: true,
     ...(currentThinkingLevel && THINKING_LEVEL_NAMES.has(currentThinkingLevel)
@@ -3240,9 +3254,22 @@ export async function startRpcSession(
   // Subagent sessions persist a resource snapshot (appendSystemPrompt + tools +
   // loadSkills/loadExtensions) so reopening them restores the exact tool set
   // and prompt context instead of falling back to the host session's defaults.
+  const sessionEntries = sessionManager.getEntries() as unknown as SessionEntry[];
   const subagentResources = sessionFile
-    ? readSubagentSessionResources(sessionManager.getEntries() as unknown as SessionEntry[])
+    ? readSubagentSessionResources(sessionEntries)
     : null;
+  // A session's own persisted pin outranks this call's request; a subagent
+  // profile outranks both. `undefined` must stay `undefined` here: it is what
+  // separates "the user selected nothing" (`[]` → chat-only) from "the user
+  // never chose" (configured defaults). Collapsing the two turns every unpinned
+  // session chat-only, which disables the extension resource loader and
+  // silently drops every installed plugin (#782).
+  const persistedToolNames = subagentResources
+    ? undefined
+    : readSessionToolSelection(sessionEntries);
+  if (!subagentResources && persistedToolNames === undefined && toolNames !== undefined) {
+    appendSessionToolSelection(sessionManager, toolNames);
+  }
   const finishStartingSession = trackStartingSession(sessionCwd);
   const startController = new AbortController();
   const startTimeout = setTimeout(() => startController.abort(), START_SESSION_TIMEOUT_MS);
@@ -3301,8 +3328,20 @@ export async function startRpcSession(
     finishStartingSession();
   };
   const starting = (async () => {
-    const selectedToolNames = subagentResources?.tools ?? toolNames ?? [];
-    const chatOnly = selectedToolNames.length === 0;
+    const selectedToolNames = resolveStartupToolSelection({
+      subagentTools: subagentResources?.tools,
+      persistedTools: persistedToolNames,
+      requestedTools: toolNames,
+    });
+    // Chat only means an explicit empty selection (every tool off); an absent
+    // selection must fall through to pi's configured defaults so extensions,
+    // skills and prompt templates keep loading (#782).
+    const chatOnly = isChatOnlySession({
+      toolSelection: selectedToolNames,
+      subagentLoadsResources: Boolean(
+        subagentResources?.loadExtensions || subagentResources?.loadSkills,
+      ),
+    });
     // Some extensions access the SDK's global theme even outside the terminal UI.
     if (!chatOnly) initTheme();
     const agentDir = getAgentDir();
@@ -3310,7 +3349,7 @@ export async function startRpcSession(
     // Determine which tools to pass based on requested toolNames.
     // Since v0.68.0, session creation expects string[] tool names instead of Tool[] instances.
     let toolsOption: string[] | undefined = subagentResources?.tools;
-    if (!subagentResources && toolNames !== undefined) {
+    if (!subagentResources && selectedToolNames !== undefined) {
       // toolNames === [] -> "all off" (an empty allow-list disables every tool).
       // Otherwise DO NOT pass a builtin-only allow-list: passing CODING_TOOL_NAMES
       // set allowedToolNames to coding builtins only, which filtered every
@@ -3479,8 +3518,8 @@ export async function startRpcSession(
       // If specific tool names were requested (non-empty), set the active tools to the
       // requested builtin coding tools PLUS all extension/package tools, so installed
       // extensions stay usable in pi-web just like in the `pi` CLI.
-      if (!subagentResources && toolNames && toolNames.length > 0) {
-        inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
+      if (!subagentResources && !chatOnly && selectedToolNames !== undefined) {
+        inner.setActiveToolsByName(withExtensionTools(inner, selectedToolNames));
       }
 
       // No async gap between this generation check and persistence/registration.
@@ -3492,7 +3531,7 @@ export async function startRpcSession(
       // When all tools are disabled, clear the system prompt entirely.
       // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
       // keep this forced after extension resource discovery and reloads as well.
-      if (toolNames?.length === 0 || subagentResources?.tools.length === 0) {
+      if (selectedToolNames?.length === 0) {
         wrapper.setForceEmptySystemPrompt(true);
       } else if (subagentResources && subagentResources.appendSystemPrompt.length > 0) {
         // Subagent sessions carry their profile's system prompt snapshot; apply it
@@ -3534,7 +3573,8 @@ export async function startRpcSession(
         if (registry.get(realSessionId) === wrapper) registry.delete(realSessionId);
       });
       registry.set(realSessionId, wrapper);
-      wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });      enforceRegistryCap();
+      wrapper.beginExtensionBinding({ forceEmptySystemPrompt: selectedToolNames?.length === 0 });
+      enforceRegistryCap();
 
       return { session: wrapper, realSessionId, created: true };
     } catch (error) {
