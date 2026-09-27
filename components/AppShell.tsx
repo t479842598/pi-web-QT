@@ -14,6 +14,7 @@ import { TabBar, type Tab } from "./TabBar";
 import { FILE_TABS_KEY, restoreFileTabs, serializeFileTabs } from "@/lib/file-tab-state";
 import { openFileTab } from "./file-tab-state";
 import { SettingsModal, type SettingsTab } from "./SettingsModal";
+import { CommandPalette, buildPaletteCommands } from "./CommandPalette";
 import { TasksViewProvider } from "@/contexts/tasks-view-context";
 import { TasksBoard, TasksBoardTitle } from "./tasks/tasks-board";
 import { OPEN_TASKS_VIEW_EVENT } from "./ChatWindow";
@@ -29,7 +30,7 @@ import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useAudio } from "@/hooks/useAudio";
 import { copyText } from "@/lib/clipboard";
 import { sendAgentCommand } from "@/lib/agent-client";
-import { getFileName } from "@/lib/file-paths";
+import { getFileName, joinFilePath } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import {
   claimExtensionAttentionNotification,
@@ -81,6 +82,14 @@ const AGENT_PANEL_WIDTH = 420;
 
 function parkedNewSessionDraftKey(cwd: string): string {
   return `parked-new:${cwd}`;
+}
+
+/** Client-side session id; minted in event handlers, never during render. */
+function newSessionId(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function AppShell() {
@@ -158,7 +167,7 @@ export function AppShell() {
   const [projectTrustBusy, setProjectTrustBusy] = useState(false);
   const [projectTrustError, setProjectTrustError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => !initialNavigation.sidebarCollapsed);
-  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);  const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [rightPanelExpanded, setRightPanelExpanded] = useState(false);
   const rightPanelFullWidth = rightPanelOpen && rightPanelExpanded && !isMobile;
   useEffect(() => {
@@ -532,9 +541,9 @@ export function AppShell() {
   }, [initialNavigation]);
   // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
   const suppressCwdBumpRef = useRef(false);
-  // Per-project last-open session memory: switching project tabs keeps each
-  // tab's open session and restores it when switching back, instead of
-  // landing on a blank new-session state.
+  // Per-project last-open session memory: switching projects (from the title-bar
+  // picker or the sidebar's project list) keeps each project's open session and
+  // restores it when switching back, instead of landing on a blank state.
   const lastSessionByProjectRef = useRef(new Map<string, string>());
   const [pendingRestore, setPendingRestore] = useState<{ projectRoot: string; sessionId: string } | null>(null);
 
@@ -707,8 +716,7 @@ export function AppShell() {
       return;
     }
     // Remember the session that was open in the project we are leaving, so
-    // switching back to this tab restores it instead of a blank new-session
-    // state (project tabs are expected to keep their open session).
+    // switching back restores it instead of a blank new-session state.
     if (selectedSession) {
       const leavingProject = selectedSession.projectRoot ?? selectedSession.cwd;
       if (leavingProject) lastSessionByProjectRef.current.set(leavingProject, selectedSession.id);
@@ -749,8 +757,8 @@ export function AppShell() {
         return;
       }
     }
-    // Remember the session under its project root so a later project-tab
-    // switch can restore it.
+    // Remember the session under its project root so a later project switch
+    // can restore it.
     const sessionProject = session.projectRoot ?? session.cwd;
     if (sessionProject) lastSessionByProjectRef.current.set(sessionProject, session.id);
     setNewSessionCwd(null);
@@ -785,6 +793,12 @@ export function AppShell() {
   // (it depends on selectedSession) can never interfere.
   const handleSelectSessionRef = useRef<(session: SessionInfo, isRestore?: boolean) => void>(() => {});
   useEffect(() => { handleSelectSessionRef.current = handleSelectSession; }, [handleSelectSession]);
+
+  // The sidebar owns its three forms (list / groups / panel), so the palette's
+  // "cycle sidebar form" command reaches them through a ref, same as session
+  // selection above.
+  const cycleSidebarFormRef = useRef<(() => void) | null>(null);
+  const cycleSidebarForm = useCallback(() => { cycleSidebarFormRef.current?.(); }, []);
 
   // Client-built transient SessionInfo (new session / fork / tab restore) lacks
   // the server-computed projectRoot and/or name. Hydrate it from the session
@@ -1003,6 +1017,8 @@ export function AppShell() {
   useGlobalKeyboardShortcuts({
     onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd),
     activeCwd,
+    onOpenCommandPalette: () => setCommandPaletteOpen((open) => !open),
+    commandPaletteOpen,
   });
 
 
@@ -1247,6 +1263,20 @@ export function AppShell() {
     setSettingsOpen(true);
   }, []);
 
+  // Commands offered by the command palette. Rebuilt when a dependency changes
+  // so each entry closes over current state (theme direction, panel flags).
+  const paletteCommands = useMemo(() => buildPaletteCommands({
+    onNewSession: () => handleNewSession(newSessionId("palette"), activeCwd ?? ""),
+    onCycleSidebarForm: cycleSidebarForm,
+    onToggleSidebar: () => setSidebarOpen((open) => !open),
+    onToggleRightPanel: () => setRightPanelOpen((open) => !open),
+    onToggleTasks: handleToggleTasks,
+    onToggleTheme: toggleTheme,
+    onOpenSettings: () => openSettings("models"),
+    isDark,
+    t: translate,
+  }), [handleNewSession, activeCwd, cycleSidebarForm, toggleTheme, openSettings, isDark, translate, handleToggleTasks]);
+
   const sidebarContent = (
     <>
       <SessionSidebar
@@ -1280,6 +1310,9 @@ export function AppShell() {
         // including before a project is active, so new users can pick a
         // project from the top-left corner instead of a sidebar-only button.
         showWorkspaceControls={true}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        cycleSidebarFormRef={cycleSidebarFormRef}
+        onSessionsLoaded={handleSessionsChange}
       />
     </>
   );
@@ -1843,7 +1876,64 @@ export function AppShell() {
         }
       }
     `}</style>
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "var(--bg)", "--pi-titlebar-sidebar-offset": `${isMobile || !sidebarOpen ? 0 : sidebarPanel.width}px` } as React.CSSProperties}>
+    <div style={{ display: "flex", flexDirection: "row", height: "100dvh", overflow: "hidden", background: "var(--bg-panel)" }}>
+      {/* Sidebar: its own full-height column beside the main region, showing the
+          shell background so the two areas read as separate surfaces (ZCode).
+          macOS draws its native traffic lights at the window's top-left corner
+          (12px in, centred on the 48px bar), which now lands on this column —
+          so the sidebar carries the inset that used to live on the title bar. */}
+      <div
+        ref={sidebarResizer.panelRef}
+        id="session-sidebar"
+        inert={rightPanelFullWidth}
+        className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}${sidebarResizer.isResizing ? " sidebar-resizing" : ""}`}
+        style={{
+          "--sidebar-width": `${sidebarPanel.width}px`,
+          display: "flex",
+          flexDirection: "column",
+          flexShrink: 0,
+          zIndex: 200,
+        } as React.CSSProperties}
+      >
+        {/* macOS keeps its native traffic lights at the window's top-left, which
+            is now this column. ZCode reserves a 48px strip there so the controls
+            never overlap the first row; the strip doubles as a drag handle. The
+            strip is inside the column, so it never squeezes the content box. */}
+        {desktopChrome?.isMacOS && (
+          <div
+            {...desktopChrome.dragRegionProps}
+            {...windowDrag}
+            aria-hidden="true"
+            style={{ height: 48, flexShrink: 0 }}
+          />
+        )}
+        {sidebarContent}
+      </div>
+      {sidebarOpen && (
+        <div
+          {...sidebarResizer.separatorProps}
+          inert={rightPanelFullWidth}
+          aria-controls="session-sidebar"
+          className={`panel-resize-handle sidebar-resize-handle${sidebarResizer.isResizing ? " is-resizing" : ""}`}
+          data-resize-handle="sidebar"
+          title={`${translate("layout.resizeSidebar")}: ${translate("layout.resizeHint")}`}
+        />
+      )}
+
+      {/* Main region: title bar, chat and right panel share ONE rounded container,
+          so the whole right side reads as a single connected surface. */}
+      <div
+        className="app-main-region"
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          minWidth: 0,
+          position: "relative",
+          background: "var(--bg)",
+        }}
+      >
       <AppTitleBar
         topBarRef={topBarRef}
         sidebarOpen={sidebarOpen}
@@ -1929,34 +2019,6 @@ export function AppShell() {
         }}
       />
 
-      <div
-        ref={sidebarResizer.panelRef}
-        id="session-sidebar"
-        inert={rightPanelFullWidth}
-        className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}${sidebarResizer.isResizing ? " sidebar-resizing" : ""}`}
-        style={{
-          "--sidebar-width": `${sidebarPanel.width}px`,
-          background: "var(--bg-panel)",
-          borderRight: "1px solid var(--border)",
-          display: "flex",
-          flexDirection: "column",
-          flexShrink: 0,
-          zIndex: 200,
-        } as React.CSSProperties}
-      >
-        {sidebarContent}
-      </div>
-      {sidebarOpen && (
-        <div
-          {...sidebarResizer.separatorProps}
-          inert={rightPanelFullWidth}
-          aria-controls="session-sidebar"
-          className={`panel-resize-handle sidebar-resize-handle${sidebarResizer.isResizing ? " is-resizing" : ""}`}
-          data-resize-handle="sidebar"
-          title={`${translate("layout.resizeSidebar")}: ${translate("layout.resizeHint")}`}
-        />
-      )}
-
       {/* Center: chat */}
       <div inert={rightPanelFullWidth} style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Upstream's second chat toolbar row is hidden on every viewport (the
@@ -1964,7 +2026,7 @@ export function AppShell() {
             duplicate AppTitleBar (sidebar / file-panel toggles) and the bottom
             SessionInfoBar (history / system prompt / branches / token stats);
             generate-title lives in the sidebar and Agents in the right panel. */}
-        <div ref={topPanelAnchorRef} style={{ flexShrink: 0, background: "var(--bg-panel)" }}>
+        <div ref={topPanelAnchorRef} style={{ flexShrink: 0 }}>
         {!isMobile && renderProjectTrustWarning(false)}
         <div style={{ display: "none", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
           <button
@@ -2417,12 +2479,13 @@ export function AppShell() {
         style={{
           display: "flex",
           flexDirection: "column",
-          borderLeft: "1px solid var(--border)",
+          // Stays on --bg so the selected file tab (which fills with --bg-card)
+          // still reads as selected against this surface.
           background: "var(--bg)",
         }}
       >
         {/* Right panel tab bar */}
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
+        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: 36 }}>
           <div style={{ flex: 1, overflow: "hidden" }}>
             <TabBar
               tabs={fileTabs}
@@ -2543,6 +2606,7 @@ export function AppShell() {
           )}
         </div>
       </div>
+      </div>
     </div>
     {projectTrustDialogOpen && projectTrustCwd && (
       <ProjectTrustDialog
@@ -2555,6 +2619,41 @@ export function AppShell() {
         onConfirmAction={() => void handleTrustProject()}
       />
     )}
+    <CommandPalette
+      open={commandPaletteOpen}
+      onOpenChange={setCommandPaletteOpen}
+      sessions={sessionCatalog}
+      projectKey={activeCwd ?? ""}
+      cwd={activeCwd}
+      commands={paletteCommands}
+      onOpenSession={(session) => {
+        handleSelectSessionRef.current(session);
+      }}
+      onOpenFile={(filePath) => {
+        // The index returns paths relative to the project; every file API wants
+        // an absolute one.
+        const absolute = activeCwd ? joinFilePath(activeCwd, filePath) : filePath;
+        handleOpenFile(absolute, getFileName(absolute));
+      }}
+      onOpenMessage={(session, entryId) => {
+        // Open the session first, then scroll to the matched message. Both
+        // message roles carry data-entry-id, but the list is virtualized, so a
+        // row far from the current window mounts only after the transcript
+        // loads and renders a few frames — poll briefly instead of racing it.
+        handleSelectSessionRef.current(session);
+        if (!entryId) return;
+        let attempts = 0;
+        const seek = () => {
+          const row = document.querySelector(`[data-entry-id="${CSS.escape(entryId)}"]`);
+          if (row) {
+            row.scrollIntoView({ block: "center", behavior: "smooth" });
+            return;
+          }
+          if (attempts++ < 20) setTimeout(seek, 150);
+        };
+        setTimeout(seek, 200);
+      }}
+    />
     {settingsOpen && (
       <SettingsModal
         initialTab={settingsTab}

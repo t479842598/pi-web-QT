@@ -67,6 +67,14 @@ interface Props {
   };
   /** Hide both workspace controls on the empty welcome page. */
   showWorkspaceControls?: boolean;
+  /** Open the command palette (⌘K). The palette itself lives in AppShell,
+   *  which owns the panel/theme state its commands need. */
+  onOpenCommandPalette?: () => void;
+  /** Lets AppShell's palette trigger the sidebar's three-form cycle, which is
+   *  state this component owns. */
+  cycleSidebarFormRef?: React.MutableRefObject<(() => void) | null>;
+  /** Publishes the session catalogue so the command palette can search it. */
+  onSessionsLoaded?: (sessions: SessionInfo[]) => void;
 }
 
 interface WorktreeEntry {
@@ -299,7 +307,7 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 type SessionViewStyle = "list" | "groups";
 const SESSION_VIEW_STYLE_KEY = "pi-web:session-view-style";
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onFileCreated, onFileDeleted, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onFileCreated, onFileDeleted, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true, onOpenCommandPalette, cycleSidebarFormRef, onSessionsLoaded }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   // Tracked in a ref only: the version is compared against the polled value to
@@ -321,152 +329,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setPickedProjects((prev) => (prev.includes(cwd) ? prev : [...prev, cwd]));
   }, []);
 
-  // ── Project tab bar state (desktop top bar) ──────────────────────────────
   const isMobile = useIsMobile();
-  const PROJECT_TABS_KEY = "pi-project-tabs";
-  // Mirrored in lib/project-tab-state.ts (server-side cap) — keep in sync.
-  const MAX_PROJECT_TABS = 4;
-  const [projectTabs, setProjectTabs] = useState<string[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const raw = window.localStorage.getItem(PROJECT_TABS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as unknown;
-        if (Array.isArray(parsed)) return parsed.filter((p): p is string => typeof p === "string" && p.length > 0).slice(0, MAX_PROJECT_TABS);
-      }
-    } catch {}
-    return [];
-  });
-  const persistProjectTabs = useCallback((tabs: string[]) => {
-    setProjectTabs(tabs);
-    try { window.localStorage.setItem(PROJECT_TABS_KEY, JSON.stringify(tabs)); } catch {}
-    // Cross-device sync: the server file is the shared source of truth for
-    // every window/device connected to this pi-web server.
-    void fetch("/api/project-state", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tabs }),
-    }).catch(() => { /* offline — localStorage keeps the local copy */ });
-  }, []);
-
-  // ── Cross-device sync of the project tab bar / dropdown pin ─────────────
-  // Refs mirroring state that stable callbacks / SSE handlers must read
-  // without stale closures (and without re-subscribing EventSource on change).
-  const projectTabsRef = useRef<string[]>(projectTabs);
-  useEffect(() => { projectTabsRef.current = projectTabs; }, [projectTabs]);
-  const selectedCwdRef = useRef<string | null>(selectedCwd);
-  useEffect(() => { selectedCwdRef.current = selectedCwd; }, [selectedCwd]);
-  /** Dropdown pin last seen from the server (remote-change detection). */
-  const serverPinnedRef = useRef<string | null>(null);
-
-  /**
-   * Fetch the server-side project state (tabs + dropdown pin) and apply it.
-   * - tabs: server always wins (it is the shared source of truth).
-   * - pinnedProject: applied to the dropdown pin always; the current project
-   *   is switched only when the pin genuinely changed remotely (`adoptSelection`
-   *   && pin differs from the last seen server pin) — a plain tab-list edit
-   *   on another device must not yank this device's project, and neither may
-   *   the echo of our own dropdown selection (selectProject marks the pin as
-   *   seen at PUT time). `adoptFirst` is the mount-restore case: with a clean
-   *   URL the first pin ever observed may set the current project, since there
-   *   is no user interaction to yank yet.
-   * - `pushLocal`: first sync on a server with no stored tabs migrates this
-   *   device's pre-sync localStorage tabs to the server.
-   */
-  const syncProjectStateFromServer = useCallback(async (opts: { adoptSelection?: boolean; adoptFirst?: boolean; pushLocal?: boolean }) => {
-    try {
-      const res = await fetch("/api/project-state");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json().catch(() => ({})) as { tabs?: string[]; pinnedProject?: string | null };
-      let remoteTabs = Array.isArray(data.tabs)
-        ? data.tabs.filter((p): p is string => typeof p === "string" && p.length > 0).slice(0, MAX_PROJECT_TABS)
-        : null;
-      const pinned = typeof data.pinnedProject === "string" && data.pinnedProject ? data.pinnedProject : null;
-
-      if (opts.pushLocal && remoteTabs !== null && remoteTabs.length === 0 && projectTabsRef.current.length > 0) {
-        // Fresh server: publish this device's pre-sync localStorage tabs, and
-        // adopt the sanitized pushed list from the PUT response — the stale
-        // pre-push read ([]) must not wipe the just-pushed tabs from state.
-        try {
-          const putRes = await fetch("/api/project-state", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tabs: projectTabsRef.current }),
-          });
-          const putData = putRes.ok ? await putRes.json().catch(() => null) as { tabs?: string[] } | null : null;
-          remoteTabs = putData && Array.isArray(putData.tabs)
-            ? putData.tabs.filter((p): p is string => typeof p === "string" && p.length > 0).slice(0, MAX_PROJECT_TABS)
-            : projectTabsRef.current; // PUT failed — keep the local list
-        } catch {
-          remoteTabs = projectTabsRef.current;
-        }
-      }
-
-      if (remoteTabs !== null) {
-        setProjectTabs(remoteTabs);
-        try { window.localStorage.setItem(PROJECT_TABS_KEY, JSON.stringify(remoteTabs)); } catch {}
-      }
-      if (pinned) {
-        const seen = serverPinnedRef.current;
-        const pinChanged = seen !== null && !samePath(seen, pinned);
-        serverPinnedRef.current = pinned;
-        setDropdownPinnedProject(pinned);
-        if (opts.adoptFirst || (opts.adoptSelection && pinChanged)) {
-          if (!samePath(pinned, selectedCwdRef.current ?? "")) setSelectedCwd(pinned);
-        }
-      }
-    } catch {
-      // Server unavailable — keep the local copy; the next event/refetch retries.
-    }
-  }, []);
-
-  // Pull the server state once on mount: adopt the tab list always; adopt the
-  // dropdown pin as the current project only when no explicit ?session= / ?cwd=
-  // URL restore is in flight (so a shared link is never yanked to the pin).
-  useEffect(() => {
-    let adoptSelection = true;
-    try {
-      const params = new URLSearchParams(window.location.search);
-      adoptSelection = !params.has("session") && !params.has("cwd");
-    } catch { /* URL unreadable — adopt */ }
-    void syncProjectStateFromServer({ adoptSelection: false, adoptFirst: adoptSelection, pushLocal: true });
-    // Run once on mount only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  // Drop persisted tabs whose directory no longer exists (e.g. a volume was
-  // unmounted or the project was moved). Clicking such a tab used to surface
-  // a "Directory does not exist" console error from the project-trust check.
-  useEffect(() => {
-    if (projectTabs.length === 0) return;
-    let cancelled = false;
-    const validate = async () => {
-      const results = await Promise.all(projectTabs.map(async (project) => {
-        try {
-          const res = await fetch("/api/cwd/validate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cwd: project }),
-          });
-          if (!res.ok) return false;
-          const data = await res.json().catch(() => ({})) as { cwd?: string };
-          return typeof data.cwd === "string";
-        } catch {
-          return false;
-        }
-      }));
-      if (cancelled) return;
-      const kept = projectTabs.filter((_, i) => results[i]);
-      if (kept.length !== projectTabs.length) {
-        try { window.localStorage.setItem(PROJECT_TABS_KEY, JSON.stringify(kept)); } catch {}
-        setProjectTabs(kept);
-      }
-    };
-    void validate();
-    return () => { cancelled = true; };
-    // Run once on mount against the initial tabs (server-side state is already
-    // pruned by /api/project-state, so this only covers the localStorage copy).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [workspaceProjectDropdownOpen, setWorkspaceProjectDropdownOpen] = useState<"title" | "welcome" | null>(null);
@@ -519,6 +382,25 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     // Entering the panel is itself the discovery action — retire the hint.
     if (mode === "projects") dismissModeHintRef.current?.();
   }, []);
+
+  // Same three-form cycle as the header button, exposed to AppShell so the
+  // command palette can drive it. Kept in a ref: the cycle reads viewStyle,
+  // which this component owns.
+  useEffect(() => {
+    if (!cycleSidebarFormRef) return;
+    cycleSidebarFormRef.current = () => {
+      if (viewStyle === "list") setViewStyleAndPersist("groups");
+      else switchSidebarMode("projects");
+    };
+    return () => { if (cycleSidebarFormRef) cycleSidebarFormRef.current = null; };
+  }, [cycleSidebarFormRef, viewStyle, setViewStyleAndPersist, switchSidebarMode]);
+
+  // Mobile has exactly one sidebar form (the ZCode-style projects panel): the
+  // cycle button is not rendered there, so a stored "dropdown" preference would
+  // otherwise strand the phone in a form it cannot leave. Every read of the
+  // mode goes through this value; the desktop keeps all three forms.
+  const effectiveSidebarMode: SidebarMode = isMobile ? "projects" : sidebarMode;
+
   // One-time onboarding hint for the *dropdown* layout. Fresh installs now
   // default to the projects panel (DEFAULT_SIDEBAR_MODE), so this no longer
   // fires on first run — it only surfaces when a user switches back to the
@@ -592,6 +474,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
 
+  // Latest onSessionsLoaded callback, read inside loadSessions (empty deps).
+  const onSessionsLoadedRef = useRef<Props["onSessionsLoaded"]>(undefined);
+  useEffect(() => { onSessionsLoadedRef.current = onSessionsLoaded; }, [onSessionsLoaded]);
+
   const loadSessions = useCallback(async (showLoading = false, force = false, summary = false) => {
     const loadId = ++sessionLoadIdRef.current;
     try {
@@ -601,6 +487,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
       if (loadId !== sessionLoadIdRef.current) return;
       setAllSessions(data.sessions);
+      // AppShell's command palette needs the same catalogue; publishing it here
+      // keeps one loader instead of a second fetch that could disagree. Reached
+      // through a ref so loadSessions keeps its empty dependency array.
+      onSessionsLoadedRef.current?.(data.sessions);
       // This is only an initial fallback. The dedicated snapshot route owns
       // running state once it has responded, so a slow list reload stays stale.
       if (!runningSnapshotAuthoritativeRef.current) {
@@ -790,10 +680,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           // Alias edits in another window update this window's alias map
           // without reloading the session list.
           void loadProjectAliases();
-        } else if (data && data.type === "project_state_changed") {
-          // Project tab / dropdown-pin edits in another window or device apply
-          // immediately (and switch the current project when the pin changed).
-          void syncProjectStateFromServer({ adoptSelection: true });
         } else if (data && data.type === "project_visibility_changed") {
           // Project hide/restore in another window/device: refresh the hidden
           // list so the projects panel follows immediately.
@@ -807,7 +693,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       source.close();
       if (throttleTimer) clearTimeout(throttleTimer);
     };
-  }, [loadSessions, loadProjectAliases, syncProjectStateFromServer, loadHiddenProjects]);
+  }, [loadSessions, loadProjectAliases, loadHiddenProjects]);
 
   useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;
@@ -1208,9 +1094,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       ? crypto.randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
     setSelectedCwd("");
-    // The welcome project button falls back to the dropdown pin when no cwd
-    // is selected — clear it too so the "选择项目…" placeholder shows.
-    setDropdownPinnedProject(null);
     onNewSession?.(tempId, "");
   }, [onNewSession]);
 
@@ -1223,62 +1106,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;    onNewSession?.(tempId, selectedCwd);
   }, [selectedCwd, onNewSession]);
 
-  const selectedProject = projectRootFor(selectedCwd);
-  // Project tabs are user-managed: every tab is added via the + button and
-  // closed via its ✕. The leading project dropdown shows the current project;
-  // a tab is highlighted only when its project is the current one (sync is
-  // purely visual via the `active` check at render time).
+    const selectedProject = projectRootFor(selectedCwd);
+  // Projects offered by the picker: every project the user has opened a session
+  // in (or picked explicitly), most recent first.
   const recentProjects = getRecentProjects(allSessions, selectedCwd ? projectRootFor(selectedCwd) ?? selectedCwd : null, pickedProjects);
 
-  // ── Project tab bar handlers ─────────────────────────────────────────────
-  const [addTabDropdownOpen, setAddTabDropdownOpen] = useState(false);
-  const addTabDropdownRef = useRef<HTMLDivElement | null>(null);
-  /** Project shown in the leading dropdown. It is pinned here on first load
-   *  and whenever the user switches via the dropdown itself; clicking a tab
-   *  does NOT change it (the tab's project is shown in the session title
-   *  instead). The dropdown button switches to its pinned project on click
-   *  unless that project is already the current one (then it opens the list). */
-  const [dropdownPinnedProject, setDropdownPinnedProject] = useState<string | null>(null);
-  // Pin the leading dropdown to the initial project once, so clicking tabs
-  // later never changes what the dropdown shows.
-  useEffect(() => {
-    if (!dropdownPinnedProject && selectedProject) {
-      setDropdownPinnedProject(selectedProject);
-    }
-  }, [selectedProject, dropdownPinnedProject]);
-  const removeProjectTab = (project: string) => {
-    const next = projectTabs.filter((p) => p !== project);
-    persistProjectTabs(next);
-    // All tabs closed: fall back to the leading dropdown's pinned project.
-    if (next.length === 0 && dropdownPinnedProject && !samePath(dropdownPinnedProject, selectedCwd ?? "")) {
-      selectProject(dropdownPinnedProject, true);
-    }
-  };
-  const addProjectTab = (project: string) => {
-    // Already the dropdown's pinned project or an open tab? Just switch to it
-    // (no duplicate tab, no error).
-    if ((dropdownPinnedProject && samePath(dropdownPinnedProject, project))
-      || projectTabs.some((p) => samePath(p, project))) {
-      selectProject(project);
-      return;
-    }
-    const next = [...projectTabs, project].slice(0, MAX_PROJECT_TABS);
-    persistProjectTabs(next);
-    // Append the tab (it stays where it was added — no reordering) and switch
-    // to the newly added project immediately.
-    selectProject(project);
-  };
-  // Close the + dropdown on outside click.
-  useEffect(() => {
-    if (!addTabDropdownOpen) return;
-    const onPointer = (event: MouseEvent) => {
-      if (!addTabDropdownRef.current?.contains(event.target as Node)) {
-        setAddTabDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onPointer);
-    return () => document.removeEventListener("mousedown", onPointer);
-  }, [addTabDropdownOpen]);
   const visibleProjects = projectFilter.trim()
     ? recentProjects.filter((p) => p.toLowerCase().includes(projectFilter.trim().toLowerCase()))
     : recentProjects;
@@ -1442,24 +1274,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       void loadProjectAliases();
     }
   }, [aliasDraft, loadProjectAliases]);
-  const compactProjectLabel = dropdownPinnedProject
-    ? aliasFor(dropdownPinnedProject) ?? pathBaseName(dropdownPinnedProject)
+  // The title-bar dropdown shows the current project (there is no pinned tab
+  // anymore); before anything is selected it falls back to the placeholder.
+  const compactProjectLabel = selectedProject
+    ? aliasFor(selectedProject) ?? pathBaseName(selectedProject)
     : (initialSessionId && !restoredRef.current ? "" : `${t("desktop.selectProject")}…`);
-  const selectProject = (project: string, fromDropdown = false) => {
+  const selectProject = (project: string) => {
     setSelectedCwd(project);
-    if (fromDropdown) {
-      setDropdownPinnedProject(project);
-      // Mark the pin as seen by the server so the echo of this very PUT can
-      // never look like a remote change and yank the selection back.
-      serverPinnedRef.current = project;
-      // Cross-device sync of the dropdown's pinned project (the top project
-      // picker area), so other windows/devices follow the selection.
-      void fetch("/api/project-state", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pinnedProject: project }),
-      }).catch(() => {});
-    }
     setProjectFilter("");
     setDirectoryPickerOpen(false);
     setCustomPathError(null);
@@ -1533,7 +1354,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)"; }}
         onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
       >
-        <button onClick={() => selectProject(project, true)} title={project} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", background: "transparent", border: "none", color: isSelected ? "var(--accent)" : "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12, fontFamily: "var(--font-mono)", transition: "background 0.1s" }}
+        <button onClick={() => selectProject(project)} title={project} style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", background: "transparent", border: "none", color: isSelected ? "var(--accent)" : "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12, fontFamily: "var(--font-mono)", transition: "background 0.1s" }}
           onMouseDown={(e) => { e.currentTarget.style.background = "var(--bg-selected)"; }}
         >
           {isQuick ? (
@@ -1587,207 +1408,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const compactWorktreeLabel = currentWt
     ? (currentWt.branch ?? pathBaseName(currentWt.path))
     : inactiveWorktreeSelector?.label;
-  const hasWorkspaceControlsHosts = Boolean(workspaceControlsHosts?.title || workspaceControlsHosts?.welcome);
-
-  // ── Project tab bar (desktop top bar) ────────────────────────────────────
-  // Candidate projects for the + dropdown: recent projects not already open
-  // as a tab and not the dropdown's own pinned project.
-  const addTabCandidates = recentProjects.filter((p) =>
-    !projectTabs.includes(p) && !(dropdownPinnedProject && samePath(dropdownPinnedProject, p)),
-  );
-  const projectTabBar = !isMobile ? (
-    <div className="app-no-drag" style={{ display: "flex", alignItems: "center", height: "100%", gap: 2, flexShrink: 1, minWidth: 0 }}>
-      {/* Leading project picker — the original dropdown kept at the far left. */}
-      <div style={{ position: "relative", display: "flex", alignItems: "center", height: "100%", flexShrink: 0 }}>
-        <button
-          className="app-no-drag app-titlebar-context-control workspace-project-control"
-          onClick={() => {
-            // The dropdown is independent of the tabs: clicking it switches to
-            // its pinned project unless that is already the current one — in
-            // that case it just opens/closes the project list.
-            if (dropdownPinnedProject && selectedCwd && !samePath(dropdownPinnedProject, selectedCwd)) {
-              selectProject(dropdownPinnedProject, true);
-              return;
-            }
-            setWorkspaceProjectDropdownOpen((open) => (open === "title" ? null : "title"));
-          }}
-          title={dropdownPinnedProject ?? selectedCwd ?? t("desktop.selectProject")}
-          aria-label={t("desktop.selectProject")}
-          aria-expanded={workspaceProjectDropdownOpen === "title"}
-          style={{
-            height: "100%",
-            maxWidth: 220,
-            minWidth: 0,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "0 8px",
-            background: workspaceProjectDropdownOpen === "title" ? "var(--bg-selected)" : "none",
-            border: "none",
-            color: workspaceProjectDropdownOpen === "title" ? "var(--text)" : selectedCwd ? "var(--text-muted)" : "var(--text-dim)",
-            cursor: "pointer",
-            fontSize: 12,
-            fontWeight: 500,
-            fontFamily: "var(--font-mono)",
-            lineHeight: 1,
-            letterSpacing: 0,
-            textAlign: "left",
-            flexShrink: 0,
-            transition: "background 0.12s, color 0.12s, border-color 0.12s",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "var(--bg-hover)";
-            e.currentTarget.style.color = selectedCwd ? "var(--text)" : "var(--text-muted)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = workspaceProjectDropdownOpen === "title" ? "var(--bg-selected)" : "none";
-            e.currentTarget.style.color = workspaceProjectDropdownOpen === "title" ? "var(--text)" : selectedCwd ? "var(--text-muted)" : "var(--text-dim)";
-          }}
-        >
-          <PathLabel text={compactProjectLabel} style={{ flex: 1, minWidth: 0, color: "inherit", direction: "ltr", fontFamily: "inherit" }} />
-          <CaretDown size={12} weight="regular" style={{ flexShrink: 0, transition: "transform 0.12s", transform: workspaceProjectDropdownOpen === "title" ? "rotate(180deg)" : "none" }} aria-hidden="true" />
-        </button>
-        <AnimatedDropdown open={workspaceProjectDropdownOpen === "title"} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: "min(320px, calc(88vw - 16px))", zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "min(38vh, 300px)" }}>
-          {projectSearch}
-          {projectList}
-          {projectActions}
-        </AnimatedDropdown>
-      </div>
-      {projectTabs.map((project) => {
-        const active = samePath(project, selectedProject ?? selectedCwd ?? "");
-        const label = aliasFor(project) ?? pathBaseName(project);
-        return (
-          <div
-            key={project}
-            className="project-tab"
-            title={project}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 2,
-              height: 28,
-              maxWidth: 220,
-              flexShrink: 0,
-              padding: "0 4px 0 10px",
-              borderRadius: 7,
-              background: active ? "var(--bg-selected)" : "var(--bg-card)",
-              border: `1px solid ${active ? "color-mix(in srgb, var(--accent) 45%, var(--border))" : "var(--border)"}`,
-              color: active ? "var(--text)" : "var(--text-muted)",
-              cursor: "pointer",
-              transition: "background 0.12s, border-color 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = active ? "var(--bg-selected)" : "var(--bg-hover)";
-              e.currentTarget.style.borderColor = active ? "color-mix(in srgb, var(--accent) 60%, var(--border))" : "var(--border-hover)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = active ? "var(--bg-selected)" : "var(--bg-card)";
-              e.currentTarget.style.borderColor = active ? "color-mix(in srgb, var(--accent) 45%, var(--border))" : "var(--border)";
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => selectProject(project)}
-              aria-label={label}
-              style={{
-                display: "flex", alignItems: "center", flex: 1, minWidth: 0,
-                height: "100%", padding: 0,
-                background: "none", border: "none",
-                color: "inherit", cursor: "pointer",
-                fontSize: 12, fontFamily: "var(--font-mono)", lineHeight: 1,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }}
-            >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{label}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => removeProjectTab(project)}
-              title={t("i18n.close")}
-              aria-label={t("i18n.close")}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 18, height: 18, padding: 0,
-                borderRadius: 5,
-                background: "none", border: "none",
-                color: "var(--text-dim)",
-                cursor: "pointer", flexShrink: 0,
-                opacity: active ? 1 : 0.75,
-                transition: "background 0.12s, color 0.12s, opacity 0.12s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--text) 12%, transparent)"; e.currentTarget.style.color = "var(--text)"; e.currentTarget.style.opacity = "1"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.opacity = active ? "1" : "0.75"; }}
-            >
-              <X size={11} weight="bold" aria-hidden="true" />
-            </button>
-          </div>
-        );      })}
-      {/* + button: only after the last tab; hidden at the 5-tab cap. */}
-      {projectTabs.length < MAX_PROJECT_TABS && (
-        <div ref={addTabDropdownRef} style={{ position: "relative", display: "flex", alignItems: "center", height: "100%", flexShrink: 0 }}>
-          <button
-            type="button"
-            onClick={() => setAddTabDropdownOpen((open) => !open)}
-            title={t("desktop.addProjectTab")}
-            aria-label={t("desktop.addProjectTab")}
-            aria-expanded={addTabDropdownOpen}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 30, height: "100%", padding: 0,
-              background: addTabDropdownOpen ? "var(--bg-selected)" : "none",
-              border: "none",
-              borderLeft: "1px solid var(--border)",
-              color: addTabDropdownOpen ? "var(--text)" : "var(--text-muted)",
-              cursor: "pointer",
-              transition: "background 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = addTabDropdownOpen ? "var(--bg-selected)" : "none"; e.currentTarget.style.color = addTabDropdownOpen ? "var(--text)" : "var(--text-muted)"; }}
-          >
-            <Plus size={14} aria-hidden="true" />
-          </button>
-          <AnimatedDropdown open={addTabDropdownOpen} style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: "min(320px, calc(88vw - 16px))", zIndex: 1000, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "min(38vh, 300px)" }}>
-            <div className="scroll-overlay" style={{ maxHeight: "min(32vh, 240px)", flex: 1, minHeight: 0, padding: "4px" }}>
-              {addTabCandidates.length > 0 && (
-                <div style={{ padding: "5px 8px 3px", fontSize: 10, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                  {t("desktop.recentProjects")}
-                </div>
-              )}
-              {addTabCandidates.map((project) => (
-                <button
-                  key={project}
-                  type="button"
-                  onClick={() => { addProjectTab(project); setAddTabDropdownOpen(false); }}
-                  title={project}
-                  style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "6px 8px", background: "transparent", border: "none", borderRadius: 5, color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12, fontFamily: "var(--font-mono)" }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-                >
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{aliasFor(project) ?? pathBaseName(project)}</span>
-                  {aliasFor(project) && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{pathBaseName(project)}</span>}
-                </button>
-              ))}
-              {addTabCandidates.length === 0 && projectTabs.length >= MAX_PROJECT_TABS && (
-                <div style={{ padding: "8px", fontSize: 12, color: "var(--text-dim)" }}>{t("desktop.maxProjectTabs")}</div>
-              )}
-            </div>
-            <div style={{ borderTop: "1px solid var(--border)", padding: "4px", flexShrink: 0 }}>
-              <button
-                type="button"
-                onClick={() => { setAddTabDropdownOpen(false); handleCustomPathClick(); }}
-                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 8px", background: "transparent", border: "none", borderRadius: 5, color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
-              >
-                <FolderOpen size={14} weight="regular" style={{ flexShrink: 0 }} aria-hidden="true" />
-                <span>{t("desktop.selectFolder")}</span>
-              </button>
-            </div>
-          </AnimatedDropdown>
-        </div>
-      )}
-    </div>
-  ) : null;
+  // Only the welcome host renders workspace controls now (the title bar keeps
+  // none — the sidebar owns project switching). The sidebar's own project and
+  // worktree pickers therefore render whenever the welcome host is absent, so
+  // the list form is not left without a way to change projects.
+  // The sidebar's own project/worktree pickers render in the list and accordion
+  // forms, where nothing else offers a project switcher (the title bar
+  // deliberately carries none — ZCode layout). The panel form lists projects
+  // itself, so a second picker there would be redundant.
+  const showSidebarProjectPickers = effectiveSidebarMode === "dropdown";
 
   // Git-branch chip shown to the right of the session title (moved out of the
   // title-bar worktree switcher per the top-bar redesign).
@@ -1800,7 +1429,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         padding: "2px 8px",
         border: "1px solid var(--border)",
         borderRadius: 999,
-        background: "var(--bg-card)",
+        // Tinted from the accent: the chip sits on the main region (--bg), where
+        // --bg-card would match the surface on themes that alias the two.
+        background: "color-mix(in srgb, var(--accent) 10%, var(--bg))",
         color: "var(--text-muted)",
         fontSize: 11,
         fontFamily: "var(--font-mono)",
@@ -1888,20 +1519,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const isLargeWorkspaceControl = location === "welcome";
     const isProjectDropdownOpen = workspaceProjectDropdownOpen === location;
     const isWorktreeDropdownOpen = workspaceWorktreeDropdownOpen === location;
-    // The welcome (new-session) project button must show the CURRENT project
-    // (selectedCwd/selectedProject), not the leading dropdown's pinned one:
-    // switching via a project tab changes selectedCwd but leaves
-    // dropdownPinnedProject untouched, which previously left a stale name on
-    // the new-session page. The title bar keeps the pinned label on purpose.
+    // Both locations show the CURRENT project (selectedCwd/selectedProject).
     const currentProjectLabel = selectedProject
       ? aliasFor(selectedProject) ?? pathBaseName(selectedProject)
       : compactProjectLabel;
-    // The standalone project dropdown button lives at the front of the tab bar
-    // on desktop; hide it here so it is not duplicated (welcome keeps it).
-    const hideProjectButton = location === "title" && !isMobile;
     return showWorkspaceControls ? (
       <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "flex-start", gap: isLargeWorkspaceControl ? 6 : 2, height: isLargeWorkspaceControl ? "auto" : "100%", minWidth: 0, width: isLargeWorkspaceControl ? "100%" : undefined }}>
-        {!hideProjectButton && (
         <div style={{ position: "relative", minWidth: 0, width: isLargeWorkspaceControl ? "fit-content" : undefined, maxWidth: isLargeWorkspaceControl ? "min(100%, 560px)" : undefined }}>
           <button
             className={`app-no-drag app-titlebar-context-control workspace-project-control${isLargeWorkspaceControl ? " workspace-project-control-large" : ""}`}
@@ -1949,7 +1572,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             {projectActions}
           </AnimatedDropdown>
         </div>
-        )}
 
         {/* Worktree switcher — shown only in the welcome (large) layout; in the
             title bar it lives beside the branch chip on the right of the
@@ -2058,70 +1680,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           onSelect={(path) => void commitCustomPath(path)}
         />
       )}
-      {/* Panel mode (desktop only): the title-bar strip where the project
-          tabs/dropdown live in dropdown mode becomes a big search box +
-          新建任务 button. On mobile the panel renders its own compact row,
-          since the title bar is too narrow there. */}
-      {sidebarMode === "projects" && !isMobile && workspaceControlsHosts?.title && createPortal(
-        <div className="app-no-drag" style={{ display: "flex", alignItems: "center", gap: 6, height: "100%", minWidth: 0, width: "100%" }}>
-          <div style={{ flex: "1 1 240px", minWidth: 120, maxWidth: 460, marginLeft: 8, display: "flex", alignItems: "center", gap: 6, background: "var(--bg-hover)", borderRadius: 0, padding: "0 10px", height: 32 }}>
-            <MagnifyingGlass size={13} color="var(--text-dim)" style={{ flexShrink: 0 }} aria-hidden="true" />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t("desktop.searchSessions")}
-              aria-label={t("desktop.searchSessions")}
-              style={{ flex: 1, minWidth: 0, background: "none", border: "none", outline: "none", color: "var(--text)", fontSize: 12.5, fontFamily: "var(--font-mono)" }}
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                aria-label={t("i18n.close")}
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, padding: 0, background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", borderRadius: 4, flexShrink: 0 }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-selected)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
-              >
-                <X size={11} aria-hidden="true" />
-              </button>
-            )}
-          </div>
-          <button
-            onClick={handleNewTaskBlank}
-            title={t("desktop.newTask")}
-            aria-label={t("desktop.newTask")}
-            style={{
-              display: "flex", alignItems: "center", gap: 5, flexShrink: 0,
-              height: 32, padding: "0 12px",
-              background: "var(--bg-selected)", border: "1px solid var(--border)", borderRadius: 5,
-              color: "var(--text)", fontSize: 12, fontWeight: 500, whiteSpace: "nowrap",
-              cursor: "pointer",
-              transition: "color 0.12s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-          >
-            <Plus size={13} weight="regular" aria-hidden="true" />
-            {t("desktop.newTask")}
-          </button>
+      {/* The title bar carries no project picker: the sidebar's project panel is
+          the single place projects are chosen (ZCode layout). The welcome-page
+          picker still renders, since a new session shows the project name above
+          the composer. */}
+      {workspaceControlsHosts?.welcome && createPortal(
+        <div ref={(node) => { workspaceDropdownRefs.current.welcome = node; }} style={{ height: "100%", display: "flex" }}>
+          {workspaceControls("welcome")}
         </div>,
-        workspaceControlsHosts.title,
-        "panel-title",
+        workspaceControlsHosts.welcome,
+        "welcome",
       )}
-      {/* Dropdown mode: the title-bar workspace controls (project tabs +
-          dropdown switcher). Panel mode replaces that strip with the search +
-          新建任务 portal above. The welcome-page project picker renders in
-          BOTH modes — a new session always shows the project name above the
-          composer and supports switching via dropdown. */}
-      {(Object.entries(workspaceControlsHosts ?? {}) as Array<[string, HTMLElement | null | undefined]>)
-        .filter(([location]) => location === "welcome" || (location === "title" && sidebarMode !== "projects"))
-        .map(([location, host]) => host && createPortal(
-        <div ref={(node) => { workspaceDropdownRefs.current[location as "title" | "welcome"] = node; }} style={{ height: "100%", display: "flex" }}>
-          {location === "title" && projectTabBar}
-          {workspaceControls(location as "title" | "welcome")}
-        </div>,
-        host,
-        location,
-      ))}
       {workspaceControlsHosts?.titleRight && !isMobile && createPortal(
         <div ref={(node) => { workspaceDropdownRefs.current.titleRight = node; }} style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           {branchChip}
@@ -2134,7 +1703,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       {/* One-time onboarding hint for the two sidebar layouts. Anchored to the
           sidebar root (not the toggle button) so its full width always stays
           inside the panel instead of overflowing the left edge. */}
-      {modeHintVisible && sidebarMode === "dropdown" && (
+      {modeHintVisible && effectiveSidebarMode === "dropdown" && (
         <div
           role="dialog"
           aria-label={t("desktop.sidebarModeHintTitle")}
@@ -2162,7 +1731,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </div>
         </div>
       )}
-      {sidebarMode === "projects" ? (
+      {effectiveSidebarMode === "projects" ? (
         <ProjectsPanel
           sessions={allSessions}
           loading={loading}
@@ -2184,6 +1753,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           onCycleToList={() => { setViewStyleAndPersist("list"); switchSidebarMode("dropdown"); }}
           onRenamed={() => void loadSessions(false)}
           onNewTask={handleNewTaskBlank}
+          onOpenCommandPalette={onOpenCommandPalette}
           renderFileTree={(cwd) => (
             <FileExplorer
               ref={fileExplorerRef}
@@ -2335,7 +1905,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             project selection always lives in the title/welcome workspace
             control, which is now shown regardless of whether a project is
             selected. */}
-        {!hasWorkspaceControlsHosts && <div ref={dropdownRef} style={{ position: "relative" }}>
+        {showSidebarProjectPickers && <div ref={dropdownRef} style={{ position: "relative" }}>
           <button
             onClick={() => setDropdownOpen((v) => !v)}
             title={selectedProject ?? selectedCwd ?? ""}
@@ -2355,8 +1925,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             }}
           >
             {selectedCwd ? (
+              // The trigger shows the project's NAME (alias, else folder name) —
+              // the full path lives in the row's title tooltip.
               <PathLabel
-                text={aliasFor(selectedProject ?? selectedCwd ?? "") ?? displayCwd(selectedProject ?? selectedCwd, homeDir)}
+                text={aliasFor(selectedProject ?? selectedCwd ?? "") ?? pathBaseName(selectedProject ?? selectedCwd ?? "")}
                 style={{
                   flex: 1,
                   fontFamily: "var(--font-mono)",
@@ -2412,7 +1984,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             switching between worktrees of one project keeps the row mounted
             instead of flickering while data refetches: all worktrees of a
             project share the same list anyway. */}
-        {!hasWorkspaceControlsHosts && showWorktreeSwitcher && (() => {
+        {showSidebarProjectPickers && showWorktreeSwitcher && (() => {
           if (!worktreeState) return null;
           const currentWt = worktreeState.worktrees.find((w) => samePath(w.path, selectedCwd ?? ""))
             ?? worktreeState.worktrees.find((w) => w.isMain);
@@ -2668,7 +2240,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </div>
           );
         })()}
-        {!hasWorkspaceControlsHosts && inactiveWorktreeSelector && (
+        {showSidebarProjectPickers && inactiveWorktreeSelector && (
           <button
             type="button"
             aria-disabled="true"

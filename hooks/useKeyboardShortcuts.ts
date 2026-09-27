@@ -25,6 +25,10 @@ interface UseGlobalKeyboardShortcutsOptions {
   onNewSession?: (cwd: string) => void;
   /** The currently selected project directory (sidebar cwd). */
   activeCwd?: string | null;
+  /** Toggle the command palette (Cmd/Ctrl+K, Cmd/Ctrl+Shift+P). */
+  onOpenCommandPalette?: () => void;
+  /** Whether the palette is currently open — the shortcut closes it when true. */
+  commandPaletteOpen?: boolean;
 }
 
 /**
@@ -42,12 +46,27 @@ interface UseGlobalKeyboardShortcutsOptions {
 export function useGlobalKeyboardShortcuts(
   options: UseGlobalKeyboardShortcutsOptions,
 ): void {
-  const { onNewSession, activeCwd } = options;
+  const { onNewSession, activeCwd, onOpenCommandPalette, commandPaletteOpen } = options;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
+      // ---- Cmd/Ctrl+K and Cmd/Ctrl+Shift+P: command palette ----
+      // Handled before Esc so the palette's own Escape reaches Radix, and
+      // accepted from inside inputs too: the palette is a global entry point.
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K" || (e.shiftKey && (e.key === "p" || e.key === "P")))) {
+        if (!onOpenCommandPalette) return;
+        e.preventDefault();
+        onOpenCommandPalette();
+        return;
+      }
+
       // ---- Esc: stop agent ----
+      // Guarded by `commandPaletteOpen`: Radix closes the palette on Esc, and
+      // without this the same keypress would bubble on and abort the running
+      // agent (the palette's focus can sit on a plain button, so the tagName
+      // check below does not cover it).
       if (e.key === "Escape") {
+        if (commandPaletteOpen) return;
         if (!globalAbortHandler) return;
 
         const tag = (e.target as HTMLElement)?.tagName;
@@ -69,5 +88,5 @@ export function useGlobalKeyboardShortcuts(
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeCwd, onNewSession]);
+  }, [activeCwd, onNewSession, onOpenCommandPalette, commandPaletteOpen]);
 }

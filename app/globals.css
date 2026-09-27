@@ -219,6 +219,7 @@ html.dark,
   --bg-panel: #e9f0ee;
   --bg-hover: #e0eae7;
   --bg-selected: #d7e4df;
+  --bg-card: #ffffff;
   --border: #afc4ba;
   --text: #202e2b;
   --text-muted: #455f56;
@@ -238,6 +239,7 @@ html.dark,
   --bg-panel: #f3edef;
   --bg-hover: #eee3e7;
   --bg-selected: #e8dce1;
+  --bg-card: #ffffff;
   --border: #cdb5bf;
   --text: #34282e;
   --text-muted: #65505a;
@@ -258,6 +260,7 @@ html[data-theme="pine"],
   --bg-panel: #212b28;
   --bg-hover: #2b3632;
   --bg-selected: #35433c;
+  --bg-card: #212b28;
   --border: #4a5f52;
   --text: #e6ede8;
   --text-muted: #c3d0c6;
@@ -2705,14 +2708,84 @@ span.token.table {
     display: none !important;
   }
 
+  /* Main region: title bar + chat + right panel form ONE rounded, inset surface
+     over the shell background (ZCode layout). The sidebar is a separate column
+     outside it, so the two areas read as distinct surfaces. */
+  .app-main-region {
+    margin: 5px 5px 5px 0;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  /* Some themes give the shell and the main surface the same fill (jetbrains
+     light: both #ffffff), so the seam needs its own hairline rather than
+     relying on the colour difference alone. */
+  .sidebar-container.sidebar-open {
+    border-right: 1px solid var(--border);
+  }
+
+/* The search input drops its own outline, so the search row shows focus. */
+.palette-search:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Notice shown in the panel form when a query typed in the list form still
+   filters it — the query is shared, so this is the only place to clear it. */
+.panel-filter-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-hover);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.panel-filter-notice-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-filter-notice-text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.panel-filter-notice-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.panel-filter-notice-clear:hover {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+
   .sidebar-container {
     position: relative;
     overflow: hidden;
     transition: width 0.2s ease, min-width 0.2s ease;
   }
   .sidebar-container.sidebar-open {
-    width: var(--sidebar-width, 260px);
-    min-width: var(--sidebar-width, 260px);
+    width: var(--sidebar-width, 264px);
+    min-width: var(--sidebar-width, 264px);
   }
   .sidebar-container.sidebar-closed {
     width: 0;
@@ -2720,8 +2793,8 @@ span.token.table {
     border-right: none !important;
   }
   .sidebar-container > * {
-    width: var(--sidebar-width, 260px);
-    min-width: var(--sidebar-width, 260px);
+    width: var(--sidebar-width, 264px);
+    min-width: var(--sidebar-width, 264px);
   }
 
   .right-panel-container {
@@ -2729,18 +2802,27 @@ span.token.table {
     transition: width 0.2s ease, min-width 0.2s ease;
     flex-shrink: 0;
   }
+  /* The right panel is a card inside the main region: rounded, bordered and
+     inset, so it reads as a separate surface rather than a flush column. */
   .right-panel-container.right-panel-open {
     width: var(--right-panel-width, clamp(360px, 42vw, 640px));
     min-width: var(--right-panel-width, clamp(360px, 42vw, 640px));
+    margin: 5px 5px 5px 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
   }
   .right-panel-container.right-panel-closed {
     width: 0;
     min-width: 0;
-    border-left: none !important;
+    margin: 0;
+    border: none !important;
   }
+  /* Children fill the card's content box: the card is border-box, so its own
+     1px borders already come out of the declared width. Forcing the full
+     --right-panel-width here would overflow by 2px and clip the viewer. */
   .right-panel-container > * {
-    width: var(--right-panel-width, clamp(360px, 42vw, 640px));
-    min-width: var(--right-panel-width, clamp(360px, 42vw, 640px));
+    width: 100%;
+    min-width: 0;
   }
 
   .workspace-panel-splitter {
@@ -2826,7 +2908,11 @@ span.token.table {
     width: auto;
     min-width: 0;
     height: var(--app-viewport-height, 100dvh);
-    border-left: none !important;
+    /* Full width means the whole viewport: drop the card inset and its border
+       (the open-state rule above adds margin/border/radius for the docked card). */
+    margin: 0;
+    border: none !important;
+    border-radius: 0;
     box-shadow: none;
     transform: none;
     transition: none;
@@ -2897,6 +2983,10 @@ span.token.table {
     top: 48px;
     left: 0;
     bottom: 0;
+    /* The drawer floats over the chat, so it needs its own opaque surface —
+       on desktop the sidebar sits beside the main region and shows the shell
+       background instead. */
+    background: var(--bg-panel);
     /* Keep the px floor for very narrow phones, then let the drawer grow to a
        comfortable reading width on a landscape phone / small tablet. */
     width: min(88vw, 28rem);
@@ -3200,8 +3290,12 @@ span.token.table {
   outline-offset: -2px;
 }
 
+/* Selected tab fill is derived from the accent rather than --bg-card: in every
+   theme --bg-card equals --bg-panel, which is also the tab strip's own fill, so
+   a --bg-card selected state was invisible on some themes (jetbrains light:
+   both #ffffff) and near-invisible on several others. */
 .file-tab[aria-selected="true"] {
-  background: var(--bg-card);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel));
   border-color: var(--border);
   color: var(--text);
   font-weight: 500;
@@ -3450,5 +3544,312 @@ span.token.table {
   .web-login-submit {
     height: 50px;
     font-size: 16px;
+  }
+}
+
+/* ─── Command palette (ZCode-style command center) ─────────────────────────
+   cmdk + Radix Dialog provide focus management, keyboard navigation and the
+   portal; every colour below comes from the theme variables so the palette
+   follows all 51 themes without per-theme rules. */
+
+/* Radix keeps an element mounted until its exit animation finishes; without
+   these keyframes the overlay would linger with pointer-events intact and
+   swallow clicks on whatever it covers. */
+@keyframes palette-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes palette-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes palette-content-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+
+@keyframes palette-content-out {
+  from { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  to { opacity: 0; transform: translateX(-50%) translateY(-8px) scale(0.98); }
+}
+
+.palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+}
+
+.palette-overlay[data-state="open"] {
+  animation: palette-overlay-in 120ms ease-out;
+}
+
+.palette-overlay[data-state="closed"] {
+  animation: palette-overlay-out 100ms ease-in;
+}
+
+.palette-content[data-state="open"] {
+  animation: palette-content-in 140ms ease-out;
+}
+
+.palette-content[data-state="closed"] {
+  animation: palette-content-out 100ms ease-in;
+}
+
+.palette-content {
+  position: fixed;
+  z-index: 1201;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(512px, calc(100vw - 32px));
+  max-height: calc(100dvh - 4.5rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+}
+
+@media (min-width: 641px) {
+  .palette-content {
+    top: 80px;
+    max-height: calc(100dvh - 6rem);
+  }
+}
+
+.palette-sr-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.palette-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 44px;
+  margin: 10px 10px 0;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+}
+
+.palette-search:focus-within {
+  border-color: var(--accent);
+}
+
+.palette-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font-size: 13.5px;
+  font-family: inherit;
+}
+
+.palette-input::placeholder {
+  color: var(--text-dim);
+}
+
+.palette-kbd {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.palette-scopes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 9px 10px 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.palette-scopes::-webkit-scrollbar {
+  display: none;
+}
+
+.palette-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.palette-scope:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.palette-scope.is-active {
+  border-color: var(--border);
+  background: var(--bg-selected);
+  color: var(--text);
+}
+
+.palette-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(440px, calc(100dvh - 15rem));
+  overflow-y: auto;
+  padding: 0 6px 8px;
+}
+
+.palette-group [cmdk-group-heading] {
+  padding: 8px 8px 3px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.palette-item[data-selected="true"] {
+  background: var(--bg-selected);
+}
+
+.palette-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.palette-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-item-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.palette-item-meta {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+}
+
+.palette-item-more {
+  color: var(--text-muted);
+}
+
+.palette-mark {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.palette-empty {
+  padding: 26px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.palette-empty-hint {
+  margin-top: 5px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.palette-status {
+  padding: 10px 12px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+/* Sidebar entry row, styled to match the 新建任务 row directly above it:
+   same 32px height, 10px padding, 8px gap and 13px/500 label. */
+.palette-open-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.palette-open-button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.palette-open-button .palette-kbd {
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .palette-content {
+    top: 8px;
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 2rem);
+  }
+  .palette-list {
+    max-height: calc(100dvh - 13rem);
+  }
+  .palette-item {
+    min-height: 40px;
   }
 }

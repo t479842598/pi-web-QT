@@ -174,11 +174,9 @@ export function AppTitleBar({
           // 48px 对齐 u1s1：给右侧无边框窗口控制钮足够的呼吸空间
           // （36px 时三个控制钮视觉上过于局促，用户实测反馈两次）
           height: 48,
-          background: "var(--bg-panel)",
+          background: "transparent",
           position: "relative",
           zIndex: 600,
-          // macOS 保留原生红绿灯（title_bar_style Overlay），左侧内缩让出它们
-          paddingLeft: desktopChrome?.isMacOS ? 76 : 0,
         }}
       >
         {/* Left zone: sidebar toggle + workspace controls (project picker +
@@ -220,30 +218,25 @@ export function AppTitleBar({
           />
         </div>
 
-        {/* Center zone: active session title + branch chip + worktree switcher.
-            Desktop: absolutely positioned over the area right of the sidebar
-            (the sidebar width is excluded via --pi-titlebar-sidebar-offset), so
-            the title centers in the chat region itself. Mobile: an in-flow flex
-            child between the toggle and the right-zone icons — left aligned,
-            never overlapped, and free of the desktop-only 320px right reserve
-            that squeezed it down to "(no …". */}
+        {/* Center zone: the active session title + branch chip + worktree
+            switcher, left-aligned like ZCode's header. Desktop: in flow right
+            after the sidebar toggle, taking all remaining width; the branch
+            controls sit immediately after the title. Mobile: the same in-flow
+            row, but the title collapses to a button that opens the full-text
+            modal instead of the 320px right reserve that squeezed it down to
+            "(no …". */}
         <div
           className="app-title-drag"
           style={{
-            ...(isMobile
-              ? { position: "relative" as const, flex: "1 1 auto", minWidth: 0 }
-              : {
-                  position: "absolute" as const,
-                  left: "var(--pi-titlebar-sidebar-offset, 0px)",
-                  right: 0,
-                  top: 0,
-                  bottom: 0,
-                }),
+            position: "relative",
+            flex: "1 1 auto",
+            minWidth: 0,
+            height: "100%",
             display: "flex",
             alignItems: "center",
-            justifyContent: isMobile ? "flex-start" : "center",
-            padding: isMobile ? "0 8px 0 4px" : "0 12px",
-            overflow: "hidden",
+            justifyContent: "flex-start",
+            padding: isMobile ? "0 8px 0 4px" : "0 4px 0 12px",
+            overflow: "visible",
             userSelect: "none",
           }}
         >
@@ -256,7 +249,7 @@ export function AppTitleBar({
                 display: "block",
                 flex: "0 1 auto",
                 minWidth: 0,
-                maxWidth: isMobile ? "100%" : "calc(100% - 320px)",
+                maxWidth: isMobile ? "100%" : "min(46vw, 560px)",
                 fontSize: 12,
                 fontWeight: 500,
                 color: "var(--text-muted)",
@@ -275,11 +268,13 @@ export function AppTitleBar({
               {sessionTitle}
             </button>
           )}
-          {/* Branch chip slot — SessionSidebar portals the current git branch here. */}
+          {/* Branch chip + worktree switcher — portalled here by SessionSidebar.
+              The slot must not clip: the worktree switcher opens a dropdown that
+              hangs below the bar. */}
           <div
             className="app-no-drag"
             ref={onTitleRightHostChange}
-            style={{ flexShrink: 0, display: "flex", alignItems: "center", marginLeft: 4 }}
+            style={{ flexShrink: 0, display: "flex", alignItems: "center", marginLeft: 4, position: "relative", zIndex: 2 }}
           />
         </div>
 

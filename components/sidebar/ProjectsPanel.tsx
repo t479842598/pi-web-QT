@@ -6,10 +6,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import {
   Archive, ArchiveRestore, ArrowLeft, Check, ChevronRight, CirclePlus, Clock, Ellipsis,
   Folder, FolderClosed, FolderOpen, FolderPlus, Hash, LayoutList, ListFilter, ListTree, Maximize2,
-  Minimize2, Plus, Search, Sparkles, Trash2, X,
+  MessageCirclePlus, Minimize2, Search, Sparkles, Trash2, X,
 } from "lucide-react";
 import type { SessionInfo } from "@/lib/types";
 import { sessionDisplayTitle } from "@/lib/session-display-title";
+import { commandPaletteShortcutLabel } from "@/lib/command-palette-match";
 import { useI18n } from "@/hooks/useI18n";
 import {
   buildArchived, buildProjectGroups, buildSessionGroups, buildTimeline, filterVisibleSessions,
@@ -55,6 +56,8 @@ interface Props {
   /** 新建任务 — on mobile the panel renders its own search row + button,
    *  because the title-bar strip (desktop) is too narrow there. */
   onNewTask: () => void;
+  /** Open the command palette (the panel's search entry). */
+  onOpenCommandPalette?: () => void;
   /** SessionSidebar-owned FileExplorer render for a project root. */
   renderFileTree: (cwd: string) => ReactNode;
   isMobile: boolean;
@@ -73,13 +76,18 @@ const iconButtonStyle = (active: boolean): CSSProperties => ({
   transition: "color 0.12s, background 0.12s",
 });
 
+/** True on Apple platforms, where the palette shortcut label uses ⌘. */
+function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+}
+
 export function ProjectsPanel({
   sessions, loading, runningIds, unreadIds, aliases,
   selectedSessionId, selectedProjectRoot,
   searchQuery, onSearchQueryChange,
   onSelectSession, onNewSessionInProject, onArchive, onDeleteForever,
   onRemoveProject, hiddenProjects, onUnhideProject,
-  onPickFolder, onCycleToList, onRenamed, onNewTask, renderFileTree, isMobile,
+  onPickFolder, onCycleToList, onRenamed, onNewTask, onOpenCommandPalette, renderFileTree, isMobile,
 }: Props) {
   const { t } = useI18n();
 
@@ -240,9 +248,9 @@ export function ProjectsPanel({
             onClick={() => toggleCollapsed(group.projectKey)}
             style={{
               display: "flex", alignItems: "center", gap: 6,
-              height: 34, paddingLeft: 8, paddingRight: 66,
+              height: 32, paddingLeft: 8, paddingRight: 66,
               cursor: "pointer", color: "var(--text)",
-              borderRadius: 6,
+              borderRadius: 8,
             }}
             onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
@@ -414,9 +422,6 @@ export function ProjectsPanel({
     if (prefs.organizeBy === "project") {
       return (
         <div style={{ padding: "0 4px" }}>
-          <div style={{ padding: "6px 8px 2px", fontSize: 11, fontWeight: 600, color: "var(--text-dim)", letterSpacing: "0.04em" }}>
-            {t("desktop.projectSectionHeader")}
-          </div>
           {groups.length === 0 && !loading && (
             <div style={{ padding: "16px 10px", color: "var(--text-muted)", fontSize: 12 }}>
               {t(searchQuery.trim() ? "desktop.noSearchResults" : "desktop.noProjects")}
@@ -462,43 +467,103 @@ export function ProjectsPanel({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: "1 1 0", minHeight: 0, overflow: "hidden" }}>
-      {/* Panel top bar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "6px 6px", flexShrink: 0 }}>
-        {/* Panel's own view bubbles (分组/项目); the sidebar-form cycle button
-            lives in the dropdown-mode header. */}
-        <div style={{ display: "flex", alignItems: "center", gap: 1, background: "var(--bg-hover)", borderRadius: 12, padding: 2 }}>
-          <button style={bubbleStyle(prefs.organizeBy === "grouped")} onClick={() => setBubble("grouped")} aria-pressed={prefs.organizeBy === "grouped"}>
-            <Hash size={11} style={{ opacity: 0.7 }} aria-hidden="true" />
-            {t("desktop.panelGroupBubble")}
-          </button>
-          <button style={bubbleStyle(prefs.organizeBy !== "grouped")} onClick={() => setBubble("project")} aria-pressed={prefs.organizeBy !== "grouped"}>
-            <Folder size={11} aria-hidden="true" />
-            {t("desktop.panelProjectBubble")}
-          </button>
-        </div>
+      {/* Top block, in ZCode's order: 新建任务 → 搜索 → view tools. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "6px 6px 4px", flexShrink: 0 }}>
         <button
-          onClick={handleExpandAll}
-          title={collapsedKeys.size > 0 ? t("desktop.expandAllFolders") : t("desktop.collapseAllFolders")}
-          aria-label={collapsedKeys.size > 0 ? t("desktop.expandAllFolders") : t("desktop.collapseAllFolders")}
-          style={{ ...iconButtonStyle(false), marginLeft: 2 }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+          onClick={onNewTask}
+          title={t("desktop.newTask")}
+          aria-label={t("desktop.newTask")}
+          style={{
+            display: "flex", alignItems: "center", gap: 8, width: "100%",
+            height: 32, padding: "0 10px",
+            background: "transparent", border: "none", borderRadius: 8,
+            color: "var(--text)", fontSize: 13, fontWeight: 500,
+            textAlign: "left", cursor: "pointer",
+            transition: "background 0.12s",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
         >
-          {collapsedKeys.size > 0
-            ? <Maximize2 size={13} aria-hidden="true" />
-            : <Minimize2 size={13} aria-hidden="true" />}
+          <MessageCirclePlus size={16} style={{ flexShrink: 0, color: "var(--text-muted)" }} aria-hidden="true" />
+          {t("desktop.newTask")}
         </button>
-        {/* Cycle button (icon-only, fixed slot right of expand-all): panel → 列表 form. */}
+
+        {/* ZCode-style search entry: a plain button that opens the command
+            palette (⌘K), rather than a field permanently occupying the panel.
+            Styled to match the 新建任务 row above it (same height, padding,
+            gap, font size/weight and icon size). */}
         <button
-          onClick={onCycleToList}
-          title={`${t("desktop.sidebarModeCycle")}：${t("desktop.sessionViewList")}`}
-          aria-label={t("desktop.sidebarModeCycle")}
-          style={{ ...iconButtonStyle(false), marginLeft: 2 }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+          onClick={() => onOpenCommandPalette?.()}
+          title={t("palette.placeholder")}
+          aria-label={t("palette.open")}
+          className="palette-open-button"
         >
-          <LayoutList size={13} aria-hidden="true" />
+          <Search size={16} style={{ flexShrink: 0, color: "var(--text-muted)" }} aria-hidden="true" />
+          {t("palette.open")}
+          <span className="palette-kbd">{commandPaletteShortcutLabel(isMacPlatform())}</span>
         </button>
+
+        {/* A filter typed in the list form keeps applying here (one query is
+            shared by both forms), so the panel needs its own way to clear it —
+            otherwise the list looks empty with no visible cause. */}
+        {searchQuery.trim() && (
+          <div className="panel-filter-notice">
+            <span className="panel-filter-notice-text">
+              {t("desktop.filteringBy")} <strong>{searchQuery}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => onSearchQueryChange("")}
+              aria-label={t("desktop.clearFilter")}
+              title={t("desktop.clearFilter")}
+              className="panel-filter-notice-clear"
+            >
+              <X size={11} aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
+        {/* View tools: 分组/项目 bubbles, expand-all, form cycle, filter. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 2, paddingTop: 2 }}>
+          {/* Panel's own view bubbles (分组/项目); the sidebar-form cycle button
+              lives in the dropdown-mode header. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 1, background: "var(--bg-hover)", borderRadius: 12, padding: 2 }}>
+            <button style={bubbleStyle(prefs.organizeBy === "grouped")} onClick={() => setBubble("grouped")} aria-pressed={prefs.organizeBy === "grouped"}>
+              <Hash size={11} style={{ opacity: 0.7 }} aria-hidden="true" />
+              {t("desktop.panelGroupBubble")}
+            </button>
+            <button style={bubbleStyle(prefs.organizeBy !== "grouped")} onClick={() => setBubble("project")} aria-pressed={prefs.organizeBy !== "grouped"}>
+              <Folder size={11} aria-hidden="true" />
+              {t("desktop.panelProjectBubble")}
+            </button>
+          </div>
+          <button
+            onClick={handleExpandAll}
+            title={collapsedKeys.size > 0 ? t("desktop.expandAllFolders") : t("desktop.collapseAllFolders")}
+            aria-label={collapsedKeys.size > 0 ? t("desktop.expandAllFolders") : t("desktop.collapseAllFolders")}
+            style={{ ...iconButtonStyle(false), marginLeft: 2 }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+          >
+            {collapsedKeys.size > 0
+              ? <Maximize2 size={13} aria-hidden="true" />
+              : <Minimize2 size={13} aria-hidden="true" />}
+          </button>
+          {/* Cycle button (icon-only, fixed slot right of expand-all): panel → 列表 form.
+              Desktop only — mobile has exactly one sidebar form, so leaving this
+              here would offer a switch to a form the phone cannot return from. */}
+          {!isMobile && (
+            <button
+              onClick={onCycleToList}
+              title={`${t("desktop.sidebarModeCycle")}：${t("desktop.sessionViewList")}`}
+              aria-label={t("desktop.sidebarModeCycle")}
+              style={{ ...iconButtonStyle(false), marginLeft: 2 }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+            >
+              <LayoutList size={13} aria-hidden="true" />
+            </button>
+          )}
         <div style={{ flex: 1 }} />
         <div ref={filterRef} style={{ position: "relative" }}>
           <button
@@ -592,47 +657,8 @@ export function ProjectsPanel({
         >
           <FolderPlus size={13} aria-hidden="true" />
         </button>
-      </div>
-
-      {/* Mobile: the title-bar search/new-task strip is desktop-only, so the
-          panel carries its own compact row here. */}
-      {isMobile && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 8px 6px", flexShrink: 0 }}>
-          <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6, background: "var(--bg-hover)", borderRadius: 8, padding: "0 9px", height: 30 }}>
-            <Search size={13} color="var(--text-dim)" style={{ flexShrink: 0 }} aria-hidden="true" />
-            <input
-              value={searchQuery}
-              onChange={(e) => onSearchQueryChange(e.target.value)}
-              placeholder={archivedOpen ? t("desktop.searchArchived") : t("desktop.searchSessions")}
-              aria-label={archivedOpen ? t("desktop.searchArchived") : t("desktop.searchSessions")}
-              style={{ flex: 1, minWidth: 0, background: "none", border: "none", outline: "none", color: "var(--text)", fontSize: 12, fontFamily: "var(--font-mono)" }}
-            />
-            {searchQuery && (
-              <button
-                onClick={() => onSearchQueryChange("")}
-                aria-label={t("i18n.close")}
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, padding: 0, background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", borderRadius: 4, flexShrink: 0 }}
-              >
-                <X size={11} aria-hidden="true" />
-              </button>
-            )}
-          </div>
-          <button
-            onClick={onNewTask}
-            title={t("desktop.newTask")}
-            aria-label={t("desktop.newTask")}
-            style={{
-              display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
-              height: 30, padding: "0 10px",
-              background: "var(--bg-selected)", border: "1px solid var(--border)", borderRadius: 5,
-              color: "var(--text)", fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", cursor: "pointer",
-            }}
-          >
-            <Plus size={13} aria-hidden="true" />
-            {t("desktop.newTask")}
-          </button>
         </div>
-      )}
+      </div>
 
       {loading && sessions.length === 0 && (
         <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>{t("desktop.loading")}</div>
@@ -764,7 +790,7 @@ function PanelSessionRow({
         padding: `${rowStyle === "detailed" ? 5 : 0}px 6px ${rowStyle === "detailed" ? 5 : 0}px ${indent ? 42 : 18}px`,
         height: rowStyle === "detailed" ? 46 : 30,
         display: "flex", flexDirection: "column", justifyContent: "center",
-        cursor: "pointer", borderRadius: 6,
+        cursor: "pointer", borderRadius: 8,
         background: isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
         borderLeft: isSelected ? "2px solid var(--accent)" : "2px solid transparent",
       }}

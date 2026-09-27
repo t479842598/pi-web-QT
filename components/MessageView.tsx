@@ -259,6 +259,8 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
+      data-message-role="user"
+      data-entry-id={entryId}
       className="chat-user-message chat-msg-in"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
