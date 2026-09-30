@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pi Web — Pi Coding Agent 工作台</title>
+  <meta name="description" content="Pi Web 是 Pi coding agent 的网页、桌面与移动工作台。开源 MIT，提供 macOS / Windows / Android / iOS 下载。">
+  <link rel="icon" href="public/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+  <div class="grid" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="#top">
+      <img src="public/icon.svg" width="28" height="28" alt="">
+      <span>Pi Web</span>
+    </a>
+    <nav>
+      <a href="#product">客户端</a>
+      <a href="#download">下载</a>
+      <a href="#oss">开源</a>
+      <a href="#start">开始</a>
+    </nav>
+    <a class="nav-gh" href="https://github.com/t479842598/pi-web-QT" target="_blank" rel="noreferrer">GitHub</a>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="kicker"><span class="live"></span> v0.18.11 · MIT · 桌面 / 移动 / Web</p>
+        <h1>本机上的<br><em>Pi Agent</em> 工作台</h1>
+        <p class="lede">会话、文件、模型、技能和 Git Worktree 收在同一个客户端里。流式看见工具调用和思考过程，点开下面的界面就能看布局。</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#download">下载客户端</a>
+          <a class="btn ghost" href="https://github.com/t479842598/pi-web-QT" target="_blank" rel="noreferrer">查看源码</a>
+        </div>
+        <dl class="stats">
+          <div><dt>协议</dt><dd>MIT</dd></div>
+          <div><dt>运行</dt><dd>Node 22+</dd></div>
+          <div><dt>包名</dt><dd>@qt4798/pi-web</dd></div>
+        </dl>
+      </div>
+
+      <button class="stage" type="button" data-shot="desktop" aria-label="打开放大桌面客户端">
+        <div class="stage-glow"></div>
+        <div class="bezel">
+          <div class="chrome">
+            <span class="dots"><i></i><i></i><i></i></span>
+            <span class="chrome-title">Pi Web · main</span>
+            <span class="chrome-meta">SSE · live</span>
+          </div>
+          <div class="ui" id="desk">
+            <aside>
+              <div class="side-h">会话</div>
+              <div class="row on"><b>对齐上游模型目录</b><small>4 分钟前 · 12 条</small></div>
+              <div class="row"><b>Worktree 切换</b><small>今天 · 6 条</small></div>
+              <div class="row"><b>技能面板草稿</b><small>昨天 · 21 条</small></div>
+              <div class="side-h">文件</div>
+              <div class="file">app/</div>
+              <div class="file on">lib/rpc-manager.ts</div>
+              <div class="file">components/</div>
+              <div class="file">README.md</div>
+            </aside>
+            <section class="chat">
+              <div class="bubble me">把模型列表收成可切换的侧边栏，保持流式输出。</div>
+              <div class="tools"><span>read</span><span>edit</span><span>bash</span><em>思考 6</em></div>
+              <div class="bubble ai">已按项目分组会话，工具调用留在消息流里。点这张图可以放大看完整布局。</div>
+              <div class="composer">
+                <span>输入消息…</span>
+                <span class="send">发送</span>
+              </div>
+            </section>
+          </div>
+        </div>
+        <span class="hint">点击放大</span>
+      </button>
+    </section>
+
+    <section class="shots" id="product">
+      <div class="sec-h">
+        <h2>客户端</h2>
+        <p>三端同一套会话。点任意一张放大。</p>
+      </div>
+      <div class="shot-row">
+        <button type="button" class="shot" data-shot="desktop">
+          <div class="mini bezel">
+            <div class="chrome sm"><span class="dots"><i></i><i></i><i></i></span><span>桌面</span></div>
+            <div class="mini-desk"></div>
+          </div>
+          <strong>桌面</strong>
+          <span>macOS · Windows · 多窗口</span>
+        </button>
+        <button type="button" class="shot" data-shot="web">
+          <div class="mini bezel">
+            <div class="chrome sm"><span class="url">127.0.0.1:30141</span></div>
+            <div class="mini-web"></div>
+          </div>
+          <strong>网页</strong>
+          <span>浏览器直连本机 Agent</span>
+        </button>
+        <button type="button" class="shot" data-shot="phone">
+          <div class="phone">
+            <div class="notch"></div>
+            <div class="phone-ui">
+              <div class="p-top">↑ 会话 · live</div>
+              <div class="p-card">思考</div>
+              <div class="p-card alt">bash · 4s</div>
+              <div class="p-input"></div>
+              <div class="p-tabs"><i></i><i></i><i></i></div>
+            </div>
+          </div>
+          <strong>移动</strong>
+          <span>Android · iOS</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="features">
+      <article><h3>流式会话</h3><p>SSE 推送正文、工具调用、思考和错误，断线后还能接上正在跑的回合。</p></article>
+      <article><h3>项目与文件</h3><p>按目录加载项目，浏览 Diff、图片、PDF、DOCX，会话可以分叉和导出。</p></article>
+      <article><h3>模型与技能</h3><p>在客户端里管模型、OAuth、连通性、Skills 和插件，不用改配置文件。</p></article>
+      <article><h3>Worktree</h3><p>同一仓库开多条工作树，任务看板把每条任务放进独立分支里跑。</p></article>
+    </section>
+
+    <section id="download" class="panel">
+      <div class="sec-h">
+        <h2>下载</h2>
+        <p>当前正式版 <b>v0.18.11</b>。安装包在 GitHub Release，网页端也可以直接用 npm。</p>
+      </div>
+      <div class="dl-grid" id="dl"></div>
+      <p class="note">历史版本不在这里列出。需要旧包时去 <a href="https://github.com/t479842598/pi-web-QT/releases" target="_blank" rel="noreferrer">Releases</a>。</p>
+    </section>
+
+    <section id="oss" class="panel oss">
+      <div class="sec-h">
+        <h2>开源</h2>
+        <p>仓库公开，协议 MIT。上游是 agegr/pi-web，本仓库是可独立运行的定制版。</p>
+      </div>
+      <div class="oss-grid">
+        <a href="https://github.com/t479842598/pi-web-QT" target="_blank" rel="noreferrer"><small>源码</small><b>t479842598/pi-web-QT</b></a>
+        <a href="https://github.com/t479842598/pi-web-QT/blob/main/LICENSE" target="_blank" rel="noreferrer"><small>协议</small><b>MIT License</b></a>
+        <a href="https://www.npmjs.com/package/@qt4798/pi-web" target="_blank" rel="noreferrer"><small>npm</small><b>@qt4798/pi-web</b></a>
+        <a href="https://github.com/t479842598/pi-web-QT/blob/main/CHANGELOG.md" target="_blank" rel="noreferrer"><small>变更</small><b>CHANGELOG</b></a>
+      </div>
+    </section>
+
+    <section id="start" class="panel">
+      <div class="sec-h">
+        <h2>开始</h2>
+        <p>不装客户端也可以先跑网页服务。默认只听 127.0.0.1。</p>
+      </div>
+      <div class="tabs">
+        <button type="button" class="on" data-tab="npx">npx</button>
+        <button type="button" data-tab="npm">全局安装</button>
+        <button type="button" data-tab="src">源码</button>
+      </div>
+      <div class="code on" data-pane="npx"><button type="button" class="copy">复制</button><pre>npx @qt4798/pi-web@latest</pre></div>
+      <div class="code" data-pane="npm"><button type="button" class="copy">复制</button><pre>npm install -g @qt4798/pi-web
+pi-web</pre></div>
+      <div class="code" data-pane="src"><button type="button" class="copy">复制</button><pre>git clone https://github.com/t479842598/pi-web-QT.git
+cd pi-web-QT
+npm ci
+npm run dev</pre></div>
+      <p class="note">安装版打开 <code>http://127.0.0.1:30141</code>。源码开发服使用随机端口，看启动日志。</p>
+    </section>
+  </main>
+
+  <footer>
+    <span>© 2026 Pi Web · MIT</span>
+    <span>v0.18.11</span>
+  </footer>
+
+  <dialog id="lightbox">
+    <form method="dialog"><button class="x" aria-label="关闭">关闭</button></form>
+    <div class="lb-frame" id="lb"></div>
+    <p id="lb-cap"></p>
+  </dialog>
+
+  <script src="script.js"></script>
+</body>
+</html>
