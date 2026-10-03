@@ -1,6 +1,6 @@
 {
   "name": "@qt4798/pi-web",
-  "version": "0.18.11",
+  "version": "0.18.13",
   "description": "Web workspace for the pi coding agent",
   "homepage": "https://github.com/t479842598/pi-web-QT#readme",
   "repository": {
@@ -30,14 +30,14 @@
     "package.json"
   ],
   "scripts": {
-    "dev": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next dev -H 127.0.0.1 -p 0 --turbopack",
+    "dev": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js nextDev",
     "dev:lan": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next dev -H 0.0.0.0 -p 0 --turbopack",
     "postinstall": "node bin/prepare-terminal.js",
     "theme:css": "node scripts/generate-theme-css.mjs",
     "prebuild": "node scripts/generate-theme-css.mjs",
     "build": "env -u TURBOPACK -u __NEXT_PRIVATE_STANDALONE_CONFIG next build --webpack",
     "bundle:backend": "node scripts/bundle-backend.mjs",
-    "start": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next start -H 127.0.0.1 -p 0",
+    "start": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js nextStart",
     "start:lan": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next start -H 0.0.0.0 -p 0",
     "lint": "eslint .",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",

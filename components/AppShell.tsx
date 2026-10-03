@@ -427,9 +427,12 @@ export function AppShell() {
     let cancelled = false;
     const load = () => {
       fetch("/api/sessions", { cache: "no-store" })
-        .then((r) => r.json() as Promise<{ sessions?: SessionInfo[]; runningSessionIds?: string[] }>)
+        // A failed poll (expired cookie after password rotation, server restart)
+        // must keep the last snapshot: overwriting it with an empty list made
+        // the panel silently go blank with no way to tell error from truth.
+        .then((r) => r.ok ? r.json() as Promise<{ sessions?: SessionInfo[]; runningSessionIds?: string[] }> : null)
         .then((data) => {
-          if (cancelled) return;
+          if (cancelled || !data) return;
           setAgentsPanelSessions(data.sessions ?? []);
           setAgentsPanelRunningIds(new Set(data.runningSessionIds ?? []));
         })
@@ -1290,6 +1293,7 @@ export function AppShell() {
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
         onOpenFile={handleOpenFile}
+        selectedFilePath={activeFileTab?.filePath || null}
         selectedSessionStats={sessionStats}
         onOpenSettings={(tab) => {
           // The sidebar derives its shortcuts from the settings tab registry,

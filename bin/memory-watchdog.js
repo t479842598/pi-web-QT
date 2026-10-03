@@ -36,7 +36,6 @@ function resolveConfig(env) {
   if (!Number.isFinite(port) || port <= 0) return null;
   return {
     port,
-    hostname: env.PI_WEB_HOSTNAME || "127.0.0.1",
     restartMb: parsePositiveInt(rawRestart, DEFAULT_RESTART_MB, 1),
     checkMinutes: parsePositiveInt(env.PI_WEB_RSS_CHECK_MINUTES, DEFAULT_CHECK_MINUTES, 1),
   };
@@ -52,7 +51,17 @@ function basicAuthHeaders(env) {
 }
 
 async function isServerIdle(config, env) {
-  const res = await fetch(`http://${config.hostname}:${config.port}/api/agent/running`, {
+  // Literal loopback origin: the watchdog self-checks THIS process, which
+  // always answers on 127.0.0.1 regardless of the LAN bind address (-H), so
+  // the probe target is never derived from the environment. Only the port is
+  // injected, as a validated numeric URL component.
+  const probeUrl = new URL("/api/agent/running", "http://127.0.0.1");
+  const port = Number.isFinite(config.port) && config.port >= 1024 && config.port <= 65535
+    ? config.port
+    : 0;
+  if (!port) return null;
+  probeUrl.port = String(port);
+  const res = await fetch(probeUrl, {
     headers: basicAuthHeaders(env),
     signal: AbortSignal.timeout(RUNNING_CHECK_TIMEOUT_MS),
   });

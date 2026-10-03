@@ -58,9 +58,35 @@ export async function GET(request: NextRequest) {
 
   const password = process.env.PI_WEB_PASSWORD;
   const enabled = isWebPasswordEnabled(password);
-  const authenticated = !enabled
-    || isValidBasicAuthorization(request.headers.get("authorization"), password)
-    || isValidWebSessionToken(request.cookies.get(PI_WEB_SESSION_COOKIE)?.value, password);
+  const cookieAuthenticated = enabled
+    && isValidWebSessionToken(request.cookies.get(PI_WEB_SESSION_COOKIE)?.value, password);
+
+  // proxy.ts waves /api/web-auth through so the login page can render itself,
+  // which means the Basic guesses the proxy would have throttled land here
+  // unchecked — a full-speed password oracle that answers {authenticated:true}
+  // on the right guess. Feed Basic attempts the same ledger as POST: blocked
+  // while throttled, counted on failure, never reset on success (Basic clients
+  // authenticate on every request; a reset would hand an interleaved guesser a
+  // fresh window). A valid session cookie is checked first, mirroring the
+  // proxy's ordering, so an authenticated client never feeds the ledger.
+  if (enabled && !cookieAuthenticated) {
+    const authorization = request.headers.get("authorization");
+    if (authorization && /^Basic\s/i.test(authorization)) {
+      const retryAfterMs = getAuthRetryAfterMs();
+      if (retryAfterMs > 0) return tooManyAttempts(retryAfterMs);
+      if (!isValidBasicAuthorization(authorization, password)) {
+        const delayMs = recordAuthFailure();
+        console.warn(`[web-auth] Basic credential check failed; further attempts blocked for ${delayMs}ms`);
+        return NextResponse.json(
+          { enabled, authenticated: false, retryAfterMs: delayMs },
+          { status: 401, headers: { "Retry-After": String(retryAfterSeconds(delayMs)) } },
+        );
+      }
+    }
+  }
+
+  const authenticated = !enabled || cookieAuthenticated
+    || isValidBasicAuthorization(request.headers.get("authorization"), password);
   return NextResponse.json(
     { enabled, authenticated },
     { headers: { "Cache-Control": "no-store" } },

@@ -256,7 +256,7 @@ pi keeps steer/follow-up queues in memory only — a server restart would lose t
 ### Web password throttling
 - `lib/auth-throttle.ts` is deliberately global, not per-IP: Next 16 route handlers have no socket address and `x-forwarded-for` is spoofable, while the server binds `127.0.0.1` for a single operator. Failures double the delay (1s → 60s cap) for everyone; a success or 5 idle minutes resets it. The reset window must stay longer than the max delay or waiting out one block restarts the burst.
 - State lives on `globalThis` under `Symbol.for("pi-web:auth-throttle")` so it survives hot reload and is shared by every module instance. Tests reset it with `recordAuthSuccess()`.
-- Only `POST /api/web-auth` is throttled. The Basic auth branch in `proxy.ts` is not, because sharing state between the proxy bundle and route handlers has not been verified.
+- `POST /api/web-auth` is throttled, and since 0.18.12 `GET /api/web-auth` also throttles invalid `Authorization: Basic` attempts against the same ledger (cookie-authenticated requests bypass it; the 401/429 answers carry no `WWW-Authenticate`, so browsers never pop a native prompt). The proxy's Basic branch and the route handlers share the ledger via `globalThis` under `Symbol.for("pi-web:auth-throttle")`.
 
 ### Auth and model config
 - `ModelsConfig` combines models from `~/.pi/agent/models.json` with provider auth status from pi's `AuthStorage`/`ModelRegistry`.

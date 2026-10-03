@@ -22,7 +22,11 @@ export async function POST(
   { params }: { params: Promise<{ provider: string }> }
 ) {
   const { provider } = await params;
-  const { token, code } = (await req.json()) as { token?: string; code?: string };
+  const body = await req.json().catch(() => null) as { token?: string; code?: string } | null;
+  if (!body) {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  const { token, code } = body;
 
   if (!token || !code) {
     return Response.json({ error: "token and code required" }, { status: 400 });

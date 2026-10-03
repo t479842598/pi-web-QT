@@ -1,4 +1,4 @@
-import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
+import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, ModelRuntime, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
@@ -340,6 +340,9 @@ export class AgentSessionWrapper {
   private forceEmptySystemPrompt = false;
   /** Exact system prompt for subagent sessions restored from their snapshot. */
   private exactSystemPrompt: string | null = null;
+  /** 60s cache for the disk-fresh runtime that set_model's last-resort
+   *  resolution builds, so retrying an unresolvable id cannot churn catalogs. */
+  private freshRuntimeProbe: { runtime: ModelRuntime; at: number } | null = null;
   private pendingPromptCount = 0;
   private activeMutatingCommands = 0;
   private agentRunNeedsCompletion = false;
@@ -1682,6 +1685,25 @@ export class AgentSessionWrapper {
             model = undefined;
           }
         }
+        if (!model) {
+          // Last resort: a runtime built from current disk state. The wrapper's
+          // runtime is a creation-time snapshot whose in-memory store can lag
+          // models.json / models-store.json, while the picker is served by a
+          // runtime built fresh per request — so the dropdown can list models
+          // the snapshot cannot resolve. create() restores catalogs from disk
+          // and never touches the network unless asked. Reused for 60s so a
+          // client retrying an unresolvable id cannot churn disk catalogs.
+          try {
+            const now = Date.now();
+            if (!this.freshRuntimeProbe || now - this.freshRuntimeProbe.at > 60_000) {
+              this.freshRuntimeProbe = { runtime: await ModelRuntime.create(), at: now };
+            }
+            model = this.freshRuntimeProbe.runtime.getModel(provider, modelId);
+          } catch {
+            this.freshRuntimeProbe = null;
+            model = undefined;
+          }
+        }
         if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
         await this.inner.setModel(model);
         invalidateModelsCache();
@@ -2713,7 +2735,24 @@ function getLocks(): Map<string, Promise<{ session: AgentSessionWrapper; realSes
 /** Evict idle AND unwatched wrappers (oldest activity first) when the registry
  *  exceeds MAX_REGISTERED_SESSIONS. Streaming sessions (a listener attached)
  *  and actively-running ones are never evicted. */
+/** Prune lifecycle bookkeeping for sessions that are neither registered,
+ * deleted (tombstone), nor mid-mutation: the map otherwise grows once per
+ * session id ever touched and is never read again for finished sessions.
+ * Synchronous, so the decision cannot race a begin/finish mutation window
+ * (those hold barriers > 0) or an in-flight start (those hold a lease). */
+function pruneSessionLifecycles(): void {
+  const lifecycles = globalThis.__piSessionLifecycles;
+  if (!lifecycles || lifecycles.size === 0) return;
+  const registry = getRegistry();
+  for (const [id, lifecycle] of lifecycles) {
+    if (lifecycle.deleted || lifecycle.barriers > 0 || lifecycle.starts.size > 0) continue;
+    if (registry.has(id)) continue;
+    lifecycles.delete(id);
+  }
+}
+
 function enforceRegistryCap(): void {
+  pruneSessionLifecycles();
   const registry = getRegistry();
   if (registry.size <= MAX_REGISTERED_SESSIONS) return;
   const evictable = Array.from(registry.entries())

@@ -14,7 +14,10 @@ import type {
 import { normalizeToolCalls } from "@/lib/normalize";
 import { extractSubject } from "@/lib/permission";
 import { cnyCost, matchesDeepSeekCNY } from "@/lib/deepseek-pricing";
-import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
+import { AgentCommandTimeoutError, isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
+import { translateMessage } from "@/lib/i18n/format";
+import { getLocalePlugin, isSupportedLocale } from "@/lib/i18n/registry";
+import type { TranslationParams } from "@/lib/i18n/types";
 import { getToolNamesForPreset, PRESET_PLAN, CONFIGURED_TOOL_PRESET, getPresetFromToolNames, type ToolPreset, type ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { SessionFileStats } from "@/lib/session-stats";
@@ -70,6 +73,27 @@ function localizeExtensionNotice(message: string): string {
     return `无法发送计划模式消息：${trimmed.replace(/^Unable to send Plan-mode message:\s*/, "")}`;
   }
   return message;
+}
+
+/**
+ * Translate a catalog key for notices raised inside this hook. Reaches into the
+ * pure i18n registry instead of useI18n(): the hook must stay a .ts file (a
+ * .tsx import breaks the bare node loader some unit tests use), and callbacks
+ * here run outside any component render anyway. Locale rides
+ * documentElement.lang, which I18nProvider keeps in sync.
+ */
+function hookT(key: string, params?: TranslationParams): string {
+  const raw = typeof document !== "undefined" ? document.documentElement.lang : null;
+  const locale = isSupportedLocale(raw) ? raw : "en";
+  const en = getLocalePlugin("en");
+  const active = getLocalePlugin(locale);
+  if (!en && !active) return key;
+  return translateMessage(
+    locale,
+    key,
+    { en: en?.messages, ...(active ? { [locale]: active.messages } : {}) },
+    params,
+  );
 }
 
 export interface SessionInitialData {
@@ -339,6 +363,10 @@ const EVENT_STREAM_IDLE_GRACE_MS = 120_000;
 // global /api/events bus takes over, so OTHER clients' changes still reach an
 // idle tab in seconds without a manual refresh.
 const AGENT_STATE_RECONCILE_MS = 15_000;
+// set_model cold-starts a reaped wrapper (full model listing, ~20s+) before it
+// can answer; the default 30s command timeout abandons switches that are still
+// succeeding server-side and the picker would snap back to the old model.
+const MODEL_SWITCH_TIMEOUT_MS = 120_000;
 // Selected-session lease renewal. The server-side lease (90s TTL) keeps the
 // session alive while the browser is on it; renewing every 30s leaves two
 // missed intervals of slack before the lease lapses.
@@ -842,8 +870,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [forkingEntryId, setForkingEntryId] = useState<string | null>(null);
   const [currentModelOverride, setCurrentModelOverride] = useState<{ provider: string; modelId: string } | null>(null);
   const [liveModel, setLiveModel] = useState<{ provider: string; modelId: string } | null>(null);
-  // Upstream v0.9.2: sync the live model from reconcile/agent_end snapshots without
-  // disturbing an explicit pending selection.
+  // What the persisted session file last reported as its model. A failed
+  // set_model response reads it to tell "the switch actually landed" (timeout
+  // after a server-side write) apart from a genuine failure.
+  const lastLoadedModelRef = useRef<{ provider: string; modelId: string } | null>(null);
+  // Upstream v0.9.2: sync the live model from reconcile/agent_end snapshots
+  // without disturbing an explicit pending selection. The live layer feeds the
+  // bottom-bar display (override > live > persisted file model) and is
+  // converged to the file on every full load, so a stale snapshot cannot
+  // outvote the session file after a branch switch or another client's change.
   const syncLiveModel = useCallback((state: { model?: { provider?: string; modelId?: string } | null; thinkingLevel?: string } | null | undefined) => {
     const m = state?.model;
     if (m && typeof m.provider === "string" && typeof m.modelId === "string") {
@@ -855,6 +890,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setLiveThinkingLevel(asConcreteThinkingLevel(state.thinkingLevel));
     }
   }, []);
+
+  // A model picked in one conversation must not bleed into another one's bar:
+  // both layers reset whenever the viewed session id changes, together with the
+  // failure-reconcile snapshot and any in-flight switch (a 120s timed-out
+  // set_model must not fire its notice on another conversation's screen).
+  // New-session composers keep their selection in newSessionModel/pendingModel.
+  useEffect(() => {
+    setCurrentModelOverride(null);
+    setLiveModel(null);
+    lastLoadedModelRef.current = null;
+    modelSwitchIdRef.current += 1;
+  }, [session?.id]);
 
   const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [isCompacting, setIsCompacting] = useState(false);
@@ -1014,7 +1061,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const contextModel = data?.context.model;
   const effectiveContextModel =
     contextModel && contextModel.provider && contextModel.modelId ? contextModel : null;
-  const currentModel = currentModelOverride ?? effectiveContextModel ?? pendingModel ?? null;
+  const currentModel = currentModelOverride ?? liveModel ?? effectiveContextModel ?? pendingModel ?? null;
   const displayModel = isNew
     ? (newSessionModel ?? newSessionDefaultModel)
     : currentModel ?? (data?.context.messages.length === 0 ? newSessionDefaultModel : null);
@@ -1210,6 +1257,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           && override.modelId === d.context.model.modelId
           ? null
           : override;
+      });
+      const persistedModel = d.context.model
+        && d.context.model.provider
+        && d.context.model.modelId
+        ? { provider: d.context.model.provider, modelId: d.context.model.modelId }
+        : null;
+      lastLoadedModelRef.current = persistedModel;
+      // Converge the live layer to the file: an alive wrapper persists every
+      // model change synchronously, so a disagreement means the live snapshot
+      // is stale (branch navigation, another client switched the model).
+      setLiveModel((live) => {
+        if (!persistedModel) return live;
+        return live && live.provider === persistedModel.provider && live.modelId === persistedModel.modelId
+          ? live
+          : persistedModel;
       });
       // Tool-preset state follows the persisted selection (#700): a session the
       // user never overrode keeps saying "configured" instead of borrowing
@@ -1672,6 +1734,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         } : d.context;
         return { ...prev, context };
       });
+      // Leaf navigation swaps the branch the file reports its model from; the
+      // live layer must follow or it would shadow the new branch's model.
+      // Scroll-up `before` pages are NOT navigation: the context route computes
+      // their model from the branch sliced at the older entry, so consuming it
+      // here would drag the bottom bar back to a historical model.
+      if (!before && d.context.model && d.context.model.provider && d.context.model.modelId) {
+        const branchModel = { provider: d.context.model.provider, modelId: d.context.model.modelId };
+        lastLoadedModelRef.current = branchModel;
+        setLiveModel((live) => live && live.provider === branchModel.provider && live.modelId === branchModel.modelId
+          ? live
+          : branchModel);
+      }
       if (before) {
         // Older page: prepend so scroll position stays anchored.
         setMessages((prev) => [...d.context.messages, ...prev]);
@@ -2982,6 +3056,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [loadContext]);
 
+  const modelSwitchFailureNotice = useCallback((error: unknown) => {
+    if (error instanceof AgentCommandTimeoutError) {
+      addNotice({ type: "error", message: hookT("desktop.modelSwitchTimeout") });
+      return;
+    }
+    addNotice({ type: "error", message: hookT("desktop.modelSwitchFailed", { reason: error instanceof Error ? error.message : String(error) }) });
+  }, [addNotice]);
+
   const handleModelChange = useCallback(async (provider: string, modelId: string) => {
     if (isNew) {
       const selectedModel = { provider, modelId };
@@ -2997,41 +3079,60 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
       if (!sid) return;
       try {
-        await sendAgentCommand(sid, { type: "set_model", provider, modelId });
+        await sendAgentCommand(sid, { type: "set_model", provider, modelId }, { timeoutMs: MODEL_SWITCH_TIMEOUT_MS });
       } catch (e) {
         console.error("Failed to set model:", e);
+        modelSwitchFailureNotice(e);
       }
       return;
     }
     const sid = sessionIdRef.current;
     if (!sid) return;
     const switchId = ++modelSwitchIdRef.current;
-    const previousModel = currentModelOverride ?? data?.context.model ?? null;
     const selectedModel = { provider, modelId };
     // Update the picker immediately; a slow cold-start or persisted model_change
     // entry must not make a successful click look ignored.
     setCurrentModelOverride(selectedModel);
     try {
-      const selected = await sendAgentCommand<{ provider: string; id: string }>(sid, { type: "set_model", provider, modelId });
+      // A reaped wrapper turns set_model into a full cold start (~20s+ model
+      // listing); the 30s default command timeout would abandon a switch that
+      // is still succeeding server-side, so give it real headroom.
+      const selected = await sendAgentCommand<{ provider: string; id: string }>(
+        sid,
+        { type: "set_model", provider, modelId },
+        { timeoutMs: MODEL_SWITCH_TIMEOUT_MS },
+      );
       setLiveModel({ provider: selected.provider, modelId: selected.id });
       // Pi persists model_change synchronously. Reload the canonical session so
       // the model, thinking level, and active leaf all advance together.
       await loadSession(sid);
+      if (modelSwitchIdRef.current === switchId) {
+        const displayName = modelList.find((m) => m.provider === selected.provider && m.id === selected.id)?.name ?? selected.id;
+        addNotice({ type: "success", message: hookT("desktop.modelSwitched", { model: displayName }) });
+      }
     } catch (e) {
       console.error("Failed to set model:", e);
+      // Never pin the previous model back: the request can still complete
+      // server-side after a timeout or dropped response, and a pinned override
+      // outranks the persisted file model forever (the bar would stick on the
+      // old model even though the next run uses the new one). Clear both layers
+      // and let the reloaded session file settle what the bar shows.
       if (modelSwitchIdRef.current === switchId) {
-        setCurrentModelOverride(
-          previousModel && (previousModel.provider !== provider || previousModel.modelId !== modelId)
-            ? previousModel
-            : null,
-        );
-        addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
+        setCurrentModelOverride(null);
+        setLiveModel(null);
       }
-      // A failed response can still follow a server-side write (for example, a
-      // dropped connection), so let the session file settle the displayed model.
       await loadSession(sid, false, true);
+      if (modelSwitchIdRef.current === switchId) {
+        const settled = lastLoadedModelRef.current;
+        if (settled && settled.provider === provider && settled.modelId === modelId) {
+          const displayName = modelList.find((m) => m.provider === provider && m.id === modelId)?.name ?? modelId;
+          addNotice({ type: "success", message: hookT("desktop.modelSwitched", { model: displayName }) });
+        } else {
+          modelSwitchFailureNotice(e);
+        }
+      }
     }
-  }, [addNotice, currentModelOverride, data?.context.model, isNew, setNewSessionModel]);
+  }, [addNotice, isNew, modelList, modelSwitchFailureNotice, setNewSessionModel]);
 
   const handleCompact = useCallback(async () => {
     const sid = sessionIdRef.current;

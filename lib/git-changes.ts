@@ -45,6 +45,21 @@ function toGitPath(filePath: string): string {
   return filePath.split(path.sep).join("/");
 }
 
+/** Git resolves symlinks: on a symlinked cwd (some worktree setups) every path
+ *  comes back under the real directory, while the file tree, tab ids and the
+ *  selected-row highlight all use the logical path the user opened. Rewrite
+ *  the real prefix back to the logical one so a file opened from the git
+ *  panel shares its tab with (and highlights) the same tree row. Diff route
+ *  already re-anchors logical paths via path.relative, so this is safe. */
+function toLogicalCwdPath(filePath: string, logicalCwd: string, realCwd: string): string {
+  if (realCwd === logicalCwd) return filePath;
+  if (filePath === realCwd) return logicalCwd;
+  const realPrefix = realCwd.endsWith(path.sep) ? realCwd : realCwd + path.sep;
+  return filePath.startsWith(realPrefix)
+    ? logicalCwd + filePath.slice(realCwd.length)
+    : filePath;
+}
+
 async function readStatusEntries(repositoryRoot: string): Promise<GitPorcelainEntry[]> {
   const output = await git(repositoryRoot, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   return parseGitPorcelainV1(output);
@@ -177,7 +192,7 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
     readTrackedLineStats(repositoryRoot, resolvedCwd),
     readIgnoredPaths(repositoryRoot),
   ]);
-  const files = entries.flatMap((entry): GitFileStatus[] => {
+  const realFiles = entries.flatMap((entry): GitFileStatus[] => {
     const filePath = path.resolve(repositoryRoot, entry.path);
     if (!isWithinPath(resolvedCwd, filePath)) return [];
     return [{
@@ -187,19 +202,32 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
       worktreeStatus: entry.worktreeStatus,
     }];
   });
-  const untrackedAdditions = files.reduce(
+  // Untracked line counting reads from disk: keep it on the real paths (the
+  // logical cwd opens the same files, but real is guaranteed to).
+  const untrackedAdditions = realFiles.reduce(
     (total, file) => total + (file.status === "untracked" ? countUntrackedTextLines(file.filePath) : 0),
     0,
   );
+  const files = realFiles.map((file) => ({ ...file, filePath: toLogicalCwdPath(file.filePath, cwd, resolvedCwd) }));
+  // Rewrite the repo root too when it lives under the resolved cwd (the
+  // worktree case, where toplevel === cwd): consumers like the tasks
+  // changed-files route strip `repositoryRoot + "/"` from filePath, which
+  // only matches when both sides share the same (logical) prefix. A repo root
+  // ABOVE a symlinked subdirectory cwd cannot be rewritten this way; its
+  // changed-files entries fall back to absolute paths (diffs still resolve).
+  const logicalRepositoryRoot = toLogicalCwdPath(repositoryRoot, cwd, resolvedCwd);
+  const logicalIgnoredPaths = ignoredPaths
+    .filter((ignoredPath) => isWithinPath(resolvedCwd, ignoredPath))
+    .map((ignoredPath) => toLogicalCwdPath(ignoredPath, cwd, resolvedCwd));
 
 
   return {
     isGitRepository: true,
-    repositoryRoot,
+    repositoryRoot: logicalRepositoryRoot,
     files,
     additions: trackedLineStats.additions + untrackedAdditions,
     deletions: trackedLineStats.deletions,
-    ignoredPaths: ignoredPaths.filter((ignoredPath) => isWithinPath(resolvedCwd, ignoredPath)),
+    ignoredPaths: logicalIgnoredPaths,
   };
 }
 

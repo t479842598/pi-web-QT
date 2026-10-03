@@ -73,8 +73,10 @@ function applyUndiciFix(rootDir = path.join(__dirname, ".."), opts = {}) {
   if (!fs.existsSync(topUndici)) return;
 
   try {
-    const nestedVersion = require(path.join(nestedUndici, "package.json")).version;
-    const topVersion = require(path.join(topUndici, "package.json")).version;
+    // Read the manifests as data (never require() a path built from config —
+    // requiring would execute module code from an externally-resolved location).
+    const nestedVersion = JSON.parse(fs.readFileSync(path.join(nestedUndici, "package.json"), "utf8")).version;
+    const topVersion = JSON.parse(fs.readFileSync(path.join(topUndici, "package.json"), "utf8")).version;
     // Already a real dir with the correct version → nothing to do.
     if (!nestedIsSymlink && nestedVersion === topVersion) return;
 

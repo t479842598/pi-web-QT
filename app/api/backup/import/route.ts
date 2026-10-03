@@ -14,11 +14,14 @@ import {
 } from "@/lib/backup";
 import { isApiRequestAllowed } from "@/lib/request-security";
 import { getProjectTrustStatus } from "@/lib/project-trust";
+import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 
 export const dynamic = "force-dynamic";
 
-/** Max upload: backups may include sessions history. */
-const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+/** Max upload: backups may include sessions history. Real-world backup zips
+ * stay far below this; the cap exists so one request cannot pin a huge Buffer
+ * (external memory, invisible to the heap watchdog) for 30 minutes. */
+const MAX_UPLOAD_BYTES = 128 * 1024 * 1024;
 
 /** Preview tokens expire after this long; the client must re-upload afterwards. */
 const BACKUP_TOKEN_TTL_MS = 30 * 60 * 1000;
@@ -34,9 +37,24 @@ interface BackupBufferEntry {
 /**
  * In-flight backup buffers between preview (phase=parse) and confirm
  * (phase=restore). Survives hot reload like other globalThis registries.
- * Entries expire 30 minutes after parsing; expired entries are dropped lazily.
+ * Entries expire 30 minutes after parsing; expired entries are dropped lazily
+ * and by the timed sweep below.
  */
 const backupBuffers = (globalThis as { __piBackupBuffers?: Map<string, BackupBufferEntry> }).__piBackupBuffers ??= new Map<string, BackupBufferEntry>();
+
+function sweepExpiredBackupBuffers(): void {
+  const now = Date.now();
+  for (const [key, entry] of backupBuffers) {
+    if (entry.expiresAt <= now) backupBuffers.delete(key);
+  }
+}
+
+// Buffers used to be reclaimed only on the NEXT upload, so an abandoned
+// preview pinned its Buffer until then. A single unref'd globalThis timer
+// (survives hot reload like the map itself) reclaims them on a cadence instead.
+const backupBufferSweep = (globalThis as { __piBackupBufferSweep?: NodeJS.Timeout }).__piBackupBufferSweep
+  ??= setInterval(sweepExpiredBackupBuffers, 5 * 60 * 1000);
+backupBufferSweep.unref?.();
 
 function getBackupBuffer(token: string): Buffer | null {
   const entry = backupBuffers.get(token);
@@ -87,11 +105,19 @@ export async function POST(req: Request) {
 
   let formData: FormData;
   try {
-    formData = await req.formData();
-  } catch {
+    // Bounded parse: without it the whole wire body is buffered before the
+    // 128MB check runs — exactly the pinning this cap exists to prevent.
+    formData = await parseFormDataWithinLimit(req, MAX_UPLOAD_BYTES);
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return NextResponse.json(
+        { error: `File too large. Maximum is ${MAX_UPLOAD_BYTES / 1024 / 1024}MB.` },
+        { status: 413 },
+      );
+    }
     return NextResponse.json(
-      { error: "Failed to parse form data — the upload may be too large or malformed" },
-      { status: 413 },
+      { error: "Failed to parse form data — the upload may be malformed" },
+      { status: 400 },
     );
   }
 

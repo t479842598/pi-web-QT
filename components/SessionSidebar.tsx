@@ -56,6 +56,9 @@ interface Props {
   onAtMentions?: (relativePaths: string[]) => void;
   onFileCreated?: (filePath: string) => void;
   onFileDeleted?: (filePath: string, isDir: boolean) => void;
+  /** Absolute path of the file open in the active viewer tab; highlights its
+   *  row in the file tree. */
+  selectedFilePath?: string | null;
   /** Open the settings modal (used by the title-generation failure banner). */
   onOpenSettings?: (tab?: SettingsTab) => void;
   selectedSessionStats?: SessionStatsInfo | null;
@@ -307,7 +310,7 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 type SessionViewStyle = "list" | "groups";
 const SESSION_VIEW_STYLE_KEY = "pi-web:session-view-style";
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onFileCreated, onFileDeleted, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true, onOpenCommandPalette, cycleSidebarFormRef, onSessionsLoaded }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onFileCreated, onFileDeleted, selectedFilePath, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true, onOpenCommandPalette, cycleSidebarFormRef, onSessionsLoaded }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   // Tracked in a ref only: the version is compared against the polled value to
@@ -1767,6 +1770,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               onFileSearchOpenChange={setExplorerFileSearchOpen}
               onFileCreated={onFileCreated}
               onFileDeleted={onFileDeleted}
+              selectedFilePath={selectedFilePath}
             />
           )}
           isMobile={isMobile}
@@ -2497,6 +2501,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 onFileSearchOpenChange={setExplorerFileSearchOpen}
                 onFileCreated={onFileCreated}
                 onFileDeleted={onFileDeleted}
+                selectedFilePath={selectedFilePath}
               />
             </div>
           )}

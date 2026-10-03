@@ -37,6 +37,11 @@ import { isFileEditingEnabled } from "@/lib/file-editing";
 // 编辑保存的软上限：处理器能接收大 body，但仍需限制，避免失控客户端耗尽内存。
 const MAX_EDIT_CONTENT_BYTES = 16 * 1024 * 1024;
 
+// Multipart boundaries + per-part headers add ~200-300 bytes per file; 2MB
+// covers hundreds of files so the wire cap never rejects a body whose file
+// bytes are within MAX_UPLOAD_TOTAL_BYTES.
+const MULTIPART_WIRE_HEADROOM_BYTES = 2 * 1024 * 1024;
+
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -284,7 +289,12 @@ export async function POST(
       }
       const target = path.join(directory, name);
       // directory 已是 realpath 加固的父目录，validateUploadFileNames 已拒绝
-      // "/"、"\\"、".."，target 保证留在允许根内。
+      // "/"、"\\"、".."；显式 containment 复核让这一保证在目标文件系统语义
+      // （符号链接目录、大小写折叠）下也成立。
+      const resolvedTarget = path.resolve(target);
+      if (!resolvedTarget.startsWith(directory + path.sep)) {
+        return NextResponse.json({ error: "Invalid target path" }, { status: 400 });
+      }
       try {
         if (kind === "file") {
           // flag: "wx" 已存在即失败（EEXIST），符合"新建空文件"意图，不覆盖。
@@ -332,9 +342,17 @@ export async function POST(
 
     let formData: FormData;
     try {
-      formData = await request.formData();
-    } catch {
-      return NextResponse.json({ error: "Uploads must total 100MB or less" }, { status: 413 });
+      // Bounded parse: the advertised 100MB total must gate how much of the
+      // wire body is read into memory, not be checked only after the whole
+      // multipart payload has already been buffered. The wire limit carries
+      // headroom for multipart boundaries/headers so the file-sum check below
+      // stays the real contract (an exactly-100MB upload must still pass).
+      formData = await parseFormDataWithinLimit(request, MAX_UPLOAD_TOTAL_BYTES + MULTIPART_WIRE_HEADROOM_BYTES);
+    } catch (error) {
+      if (error instanceof RequestBodyTooLargeError) {
+        return NextResponse.json({ error: "Uploads must total 100MB or less" }, { status: 413 });
+      }
+      return NextResponse.json({ error: "Invalid multipart upload" }, { status: 400 });
     }
     const files = formData.getAll("files").filter((entry): entry is File => typeof entry !== "string");
     if (files.some((file) => file.size > MAX_UPLOAD_FILE_BYTES)) {

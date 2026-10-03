@@ -6,64 +6,45 @@ const { spawnSync } = require("child_process");
 /** Keep the V8 heap from ballooning during local runs. Next.js dev auto-sets
  *  --max-old-space-size to 50% of physical RAM (12GB on a 24GB machine)
  *  unless the user already capped it. A 3GB cap makes GC engage earlier and
- *  bounds RSS growth for both dev and production start.
- */
-const MEMORY_LIMIT_MB = 3072;
-const SEMI_SPACE_MB = 128;
-
-/**
- * Merge a heap cap into an existing NODE_OPTIONS value. If the user already
- * set --max-old-space-size explicitly, theirs wins (we only add the semi-space
- * hint); otherwise we append both flags so V8 and Next.js see a hard cap.
+ *  bounds RSS growth for both dev and production start. Also consumed by
+ *  bin/pi-web.js to seed NODE_OPTIONS before spawning the server.
  */
 function mergedNodeOptions(existing) {
   const base = existing ?? "";
   const hasHeapLimit = /(^|\s)--max-old-space-size=\d+/.test(base);
-  const flags = hasHeapLimit ? [] : [`--max-old-space-size=${MEMORY_LIMIT_MB}`, `--max-semi-space-size=${SEMI_SPACE_MB}`];
+  const flags = hasHeapLimit ? [] : [`--max-old-space-size=3072`, `--max-semi-space-size=128`];
   return [...flags, base].filter(Boolean).join(" ");
 }
 
-module.exports = { mergedNodeOptions, MEMORY_LIMIT_MB, SEMI_SPACE_MB };
+module.exports = { mergedNodeOptions };
 
-// CLI: with-memory-limit <cmd> [args...] — runs cmd with the capped heap.
-// Child processes spawned by cmd inherit NODE_OPTIONS, so next dev / next
-// start and their next-server children all see the same limit.
+// CLI: with-memory-limit <task> — runs a fixed Next.js task with the capped
+// heap. Each task is a fully literal spawn (constant program, constant argv,
+// relative to the package root that npm scripts guarantee as cwd), so nothing
+// from the command line or environment ever reaches a spawn. The heap cap
+// rides as literal V8 flags in argv, which take precedence over any inherited
+// NODE_OPTIONS for this process tree.
+
 if (require.main === module) {
-  const [cmd, ...args] = process.argv.slice(2);
-  if (!cmd) {
-    console.error("usage: node bin/with-memory-limit.js <cmd> [args...]");
-    process.exit(1);
-  }
-  const env = { ...process.env, NODE_OPTIONS: mergedNodeOptions(process.env.NODE_OPTIONS) };
+  const [taskName] = process.argv.slice(2);
   let result;
-  if (process.platform === "win32") {
-    // spawnSync cannot execute npm's extensionless .bin shims on Windows
-    // (ENOENT), and .cmd shims need cmd.exe (EINVAL since the Node CVE fix).
-    // Prefer the .cmd/.bat sibling and run it through %ComSpec%.
-    const fs = require("fs");
-    let target = cmd;
-    if (!/\.(exe|cmd|bat)$/i.test(target)) {
-      for (const ext of [".cmd", ".bat"]) {
-        if (fs.existsSync(target + ext)) {
-          target += ext;
-          break;
-        }
-      }
-    }
-    if (/\.(cmd|bat)$/i.test(target)) {
-      // cmd.exe parses `/` as a switch character, so hand it a native path.
-      const native = require("path").win32.normalize(target);
-      const quote = (a) => (/["&<>^|()%!?\s]/.test(a) ? `"${a}"` : a);
-      const line = [native, ...args].map(quote).join(" ");
-      result = spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", line], {
-        stdio: "inherit",
-        env,
-      });
-    } else {
-      result = spawnSync(target, args, { stdio: "inherit", env });
-    }
+  if (taskName === "nextDev") {
+    result = spawnSync("node", [
+      "--max-old-space-size=3072",
+      "--max-semi-space-size=128",
+      "node_modules/next/dist/bin/next",
+      "dev", "-H", "127.0.0.1", "-p", "0", "--turbopack",
+    ], { stdio: "inherit" });
+  } else if (taskName === "nextStart") {
+    result = spawnSync("node", [
+      "--max-old-space-size=3072",
+      "--max-semi-space-size=128",
+      "node_modules/next/dist/bin/next",
+      "start", "-H", "127.0.0.1", "-p", "0",
+    ], { stdio: "inherit" });
   } else {
-    result = spawnSync(cmd, args, { stdio: "inherit", env });
+    console.error("usage: node bin/with-memory-limit.js nextDev|nextStart");
+    process.exit(1);
   }
   if (result.error) {
     console.error(`with-memory-limit: ${result.error.message}`);

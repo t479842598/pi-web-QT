@@ -70,13 +70,27 @@ export async function GET(
     }
   }
 
+  // abort fires on most disconnects, but some tunnel/proxy paths cancel the
+  // stream without the request's abort signal ever firing; cancel() then
+  // releases the listener, lease and timers immediately instead of at the 2h
+  // idle cap.
+  let onStreamCancel: (() => void) | null = null;
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
+      let idleTimeout: ReturnType<typeof setTimeout> | undefined;
+      // Idle close, sliding: the cap guards against half-open connections
+      // that never fire abort, while every frame (data or heartbeat) re-arms
+      // it so a healthy long-lived stream is not decapitated at 2h.
+      const bumpIdle = () => {
+        clearTimeout(idleTimeout);
+        idleTimeout = setTimeout(cleanup, 2 * 60 * 60 * 1000);
+      };
       // Holding a lease for the lifetime of this stream keeps the selected
       // session alive while the browser keeps renewing it (POST .../lease).
       const releaseLease = acquireSessionLivenessLease(id).release;
       const encode = (data: unknown) => {
+        bumpIdle();
         const text = `data: ${JSON.stringify(data)}\n\n`;
         controller.enqueue(encoder.encode(text));
       };
@@ -138,6 +152,7 @@ export async function GET(
       // from a half-open connection whose transport still reports OPEN.
       const heartbeat = setInterval(() => {
         try {
+          bumpIdle();
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "heartbeat" })}\n\n`));
         } catch {
           // controller already closed
@@ -151,14 +166,17 @@ export async function GET(
         clearTimeout(coalesceTimer);
         clearTimeout(idleTimeout);
         unsubscribe();
+        onStreamCancel = null;
         try { controller.close(); } catch { /* already closed */ }
       }
-      // Idle close: guard against half-open connections that never fire abort.
-      // Mirrors the 2h cap already used by the tasks events route.
-      const idleTimeout = setTimeout(cleanup, 2 * 60 * 60 * 1000);
+      onStreamCancel = cleanup;
+      bumpIdle();
 
       // Detect client disconnect via abort signal
       req.signal?.addEventListener("abort", cleanup, { once: true });
+    },
+    cancel() {
+      onStreamCancel?.();
     },
   });
 

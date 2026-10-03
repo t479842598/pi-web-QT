@@ -4,6 +4,7 @@ import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useR
 import { At, CaretRight, Check, DownloadSimple, FilePlus, FolderPlus, Info, MinusCircle, Spinner, Trash, UploadSimple, Warning, X } from "@phosphor-icons/react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
 import { encodeFilePathForApi, getRelativeFilePath, joinFilePath } from "@/lib/file-paths";
+import { samePath } from "@/lib/paths";
 import { useI18n } from "@/hooks/useI18n";
 import { isFileEditingEnabled } from "@/lib/file-editing";
 import type { GitFileStatusKind, GitStatusResponse } from "@/lib/git-types";
@@ -39,6 +40,10 @@ interface Props {
   onFileSearchOpenChange?: (open: boolean) => void;
   onFileCreated?: (filePath: string) => void;
   onFileDeleted?: (filePath: string, isDir: boolean) => void;
+  /** Absolute path of the file open in the active viewer tab, so the tree can
+   *  keep its row highlighted after the mouse leaves (hover alone gave touch
+   *  users and re-opening flows no selected state at all). */
+  selectedFilePath?: string | null;
 }
 
 export interface FileExplorerHandle {
@@ -292,6 +297,7 @@ function TreeNode({
   onCreateFile,
   onCreateFolder,
   onDelete,
+  selectedPath,
 }: {
   node: FileNode;
   depth: number;
@@ -308,10 +314,15 @@ function TreeNode({
   onCreateFile: (parentDir: string) => void;
   onCreateFolder: (parentDir: string) => void;
   onDelete: (filePath: string, name: string, isDir: boolean) => void;
+  selectedPath?: string | null;
 }) {
   const { t } = useI18n();
   const open = expandedPaths.has(node.fullPath);
   const highlighted = highlightedPaths.has(node.fullPath);
+  // samePath, not string equality: tabs can be opened from the git panel or
+  // @-mentions whose path form differs (Windows case/separator variants) from
+  // the tree's joinFilePath output — the same rule the worktree code lives by.
+  const selected = selectedPath ? samePath(selectedPath, node.fullPath) : false;
   const pathKey = gitPathKey(node.fullPath);
   const ignored = isIgnoredPath(pathKey, ignoredPaths);
   const gitStatus = getNodeGitStatus(pathKey, node.isDir, changedFiles);
@@ -356,8 +367,22 @@ function TreeNode({
     <div>
       <div
         onClick={handleClick}
+        onKeyDown={(event) => {
+          // Nested controls (mention/download/delete) live inside the row: when
+          // one of THEM has focus, its Enter/Space must not be re-routed here.
+          if (event.target !== event.currentTarget) return;
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          handleClick();
+        }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
+        role="treeitem"
+        tabIndex={-1}
+        data-tree-row=""
+        aria-selected={selected || undefined}
+        aria-expanded={node.isDir ? open : undefined}
+        aria-current={selected ? "true" : undefined}
         style={{
           position: "relative",
           display: "flex",
@@ -367,7 +392,7 @@ function TreeNode({
           paddingRight: 8,
           height: 24,
           cursor: "pointer",
-          background: hovered ? "var(--bg-hover)" : "transparent",
+          background: selected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
           borderRadius: 4,
           userSelect: "none",
           opacity: ignored ? (hovered ? 0.72 : 0.5) : 1,
@@ -528,6 +553,7 @@ function TreeNode({
               onCreateFile={onCreateFile}
               onCreateFolder={onCreateFolder}
               onDelete={onDelete}
+              selectedPath={selectedPath}
             />
           ))}
           {children.length === 0 && loaded && (
@@ -552,6 +578,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   onFileSearchOpenChange,
   onFileCreated,
   onFileDeleted,
+  selectedFilePath,
 }, ref) {
   const { t } = useI18n();
   const [roots, setRoots] = useState<FileNode[]>([]);
@@ -561,6 +588,13 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [treeRefreshKey, setTreeRefreshKey] = useState(0);
   const [highlightedPaths, setHighlightedPaths] = useState<Set<string>>(new Set());
+  // The "newly uploaded/created" dot is a pointer, not a state: expire it so a
+  // stale dot cannot outlive its purpose until the next upload or cwd switch.
+  useEffect(() => {
+    if (highlightedPaths.size === 0) return;
+    const timer = setTimeout(() => setHighlightedPaths(new Set()), 15_000);
+    return () => clearTimeout(timer);
+  }, [highlightedPaths]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchPaths, setSearchPaths] = useState<string[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -667,6 +701,22 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       if (open) next.add(fullPath); else next.delete(fullPath);
       return next;
     });
+  }, []);
+
+  // Keyboard support for the tree: the container is the single Tab stop no
+  // matter how many files it holds (rows are tabIndex={-1}), ArrowUp/ArrowDown
+  // move focus between rows in DOM order, and Enter/Space on a row activates
+  // it (handled by the row itself).
+  const handleTreeKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const rows = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("[data-tree-row]"));
+    if (rows.length === 0) return;
+    const currentIndex = rows.indexOf(document.activeElement as HTMLElement);
+    event.preventDefault();
+    const nextIndex = currentIndex === -1
+      ? (event.key === "ArrowDown" ? 0 : rows.length - 1)
+      : Math.max(0, Math.min(rows.length - 1, currentIndex + (event.key === "ArrowDown" ? 1 : -1)));
+    rows[nextIndex]?.focus();
   }, []);
 
   const applyUploadResult = useCallback((data: UploadResponse) => {
@@ -1008,7 +1058,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             {!searchLoading && searchError && <div role="alert" style={{ padding: "6px 2px", fontSize: 10, color: "var(--status-error)" }}>{t("i18n.networkError")}</div>}
             {!searchLoading && !searchError && searchPaths.length === 0 && <div style={{ padding: "6px 2px", fontSize: 10, color: "var(--text-dim)" }}>{t("sidebar.noMatchingFiles")}</div>}
             {!searchLoading && !searchError && searchPaths.length > 0 && (
-              <div>
+              <div role="tree" tabIndex={0} onKeyDown={handleTreeKeyDown} aria-label={t("sidebar.searchFiles")}>
                 {searchRoots.map((node) => (
                   // 搜索结果目录不响应树刷新（refreshToken 固定），避免
                   // TreeNode 重新拉真实目录列表污染搜索视图。
@@ -1035,6 +1085,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                     onCreateFile={handleCreateFile}
                     onCreateFolder={handleCreateFolder}
                     onDelete={handleDelete}
+                    selectedPath={selectedFilePath}
                   />
                 ))}
               </div>
@@ -1052,26 +1103,29 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         ) : hasSearchQuery ? (
           <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }} />
         ) : (
-          roots.map((node) => (
-            <TreeNode
-              key={node.fullPath}
-              node={node}
-              depth={0}
-              cwd={cwd}
-              onOpenFile={onOpenFile}
-              onAtMention={onAtMention}
-              expandedPaths={expandedPaths}
-              onToggleExpanded={handleToggleExpanded}
-              refreshToken={refreshToken}
-              highlightedPaths={highlightedPaths}
-              ignoredPaths={ignoredPaths}
-              changedFiles={changedFiles}
-              editingEnabled={mutationsEnabled}
-              onCreateFile={handleCreateFile}
-              onCreateFolder={handleCreateFolder}
-              onDelete={handleDelete}
-            />
-          ))
+          <div role="tree" tabIndex={0} onKeyDown={handleTreeKeyDown} aria-label={t("desktop.files")}>
+            {roots.map((node) => (
+              <TreeNode
+                key={node.fullPath}
+                node={node}
+                depth={0}
+                cwd={cwd}
+                onOpenFile={onOpenFile}
+                onAtMention={onAtMention}
+                expandedPaths={expandedPaths}
+                onToggleExpanded={handleToggleExpanded}
+                refreshToken={refreshToken}
+                highlightedPaths={highlightedPaths}
+                ignoredPaths={ignoredPaths}
+                changedFiles={changedFiles}
+                editingEnabled={mutationsEnabled}
+                onCreateFile={handleCreateFile}
+                onCreateFolder={handleCreateFolder}
+                onDelete={handleDelete}
+                selectedPath={selectedFilePath}
+              />
+            ))}
+          </div>
         )}
         {!loading && !error && roots.length === 0 && (
           <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>

@@ -44,6 +44,26 @@ function isStaticAsset(pathname: string): boolean {
     || STATIC_ASSET_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
+// Passwordless mode is a deliberate local-only posture. A request arriving
+// under any other hostname (LAN IP, tunnel domain) means the deployment serves
+// sessions, files and the file browser unauthenticated to that origin; warn
+// loudly once per host instead of hard-blocking, which would break legitimate
+// LAN usage. globalThis Set survives hot reload like the auth-throttle state.
+const passwordlessWarnedHosts = (globalThis as { __piPasswordlessWarnedHosts?: Set<string> }).__piPasswordlessWarnedHosts ??= new Set<string>();
+
+function warnPasswordlessExposure(hostname: string): void {
+  const host = hostname.toLowerCase();
+  const isLoopback = host === "localhost" || host === "127.0.0.1" || host === "::1"
+    || host === "[::1]" || host.endsWith(".localhost");
+  if (isLoopback || passwordlessWarnedHosts.has(host) || passwordlessWarnedHosts.size >= 16) return;
+  passwordlessWarnedHosts.add(host);
+  console.warn(
+    `[pi-web] SECURITY WARNING: no PI_WEB_PASSWORD is configured, but requests are arriving for `
+    + `non-loopback host "${host}". Sessions, files and the file browser are readable from this `
+    + `origin without authentication. Set PI_WEB_PASSWORD, or restrict access to localhost.`,
+  );
+}
+
 export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
@@ -74,6 +94,7 @@ export function proxy(request: NextRequest) {
 
   // No password configured: the login route has nothing to do — send it home.
   if (!passwordEnabled) {
+    warnPasswordlessExposure(request.nextUrl.hostname);
     if (pathname === "/login") {
       return NextResponse.redirect(new URL("/", request.url), 302);
     }
