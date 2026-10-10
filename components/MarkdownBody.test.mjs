@@ -90,6 +90,22 @@ test("sizes an ordered list's padding from its largest marker digit count", () =
   assert.match(hundreds, /<ol[^>]*style="[^"]*--ol-marker-digits: ?3/);
 });
 
+test("renders CJK sentence emphasis without spaces after closing punctuation", () => {
+  const sentence = "今天天气很好。";
+  const html = renderMarkdown(`**${sentence}**我们去公园散步吧。`);
+  assert.ok(html.includes(`<strong>${sentence}</strong>我们`));
+  assert.doesNotMatch(html, /\*\*/);
+});
+
+test("keeps CJK emphasis markers literal in code and escaped text", () => {
+  const literal = "**需要。**即使";
+  for (const markdown of [`\`${literal}\``, `\`\`\`\n${literal}\n\`\`\``, "\\*\\*需要。\\*\\*即使"]) {
+    const html = renderMarkdown(markdown);
+    assert.doesNotMatch(html, /<strong>/);
+    assert.ok(html.includes(literal));
+  }
+});
+
 test("defers Prism highlighting while a code block is streaming", async () => {
   const source = (await readFile(new URL("./MarkdownBody.tsx", import.meta.url), "utf8")).replace(/\r/g, "");
   const codeBlockSource = source.slice(source.indexOf("export function CodeBlock"));

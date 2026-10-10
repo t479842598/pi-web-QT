@@ -10,7 +10,7 @@ import { copyText } from "@/lib/clipboard";
 import { parsePdfPageFragment, resolveLocalFileHref } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { splitStableParts } from "@/lib/markdown-incremental";
-import { headingId, markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
+import { headingId, markdownAppUrlTransform, markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { prismTheme } from "@/lib/prism-theme";
 import { QuoteReplyPopover } from "./QuoteReplyPopover";
 import { parseParagraph, type ParsedSegment } from "@/lib/quote-reply";
@@ -267,7 +267,7 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
           <ReactMarkdown
             remarkPlugins={markdownRemarkPlugins}
             rehypePlugins={markdownRehypePlugins}
-            urlTransform={onOpenFile ? markdownUrlTransform : undefined}
+            urlTransform={onOpenFile ? markdownUrlTransform : markdownAppUrlTransform}
             components={components}
           >
             {normalizedMarkdown}

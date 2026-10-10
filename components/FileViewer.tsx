@@ -15,7 +15,7 @@ import {
 import { encodeFilePathForApi, getFileDirectory, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { isFileEditingEnabled } from "@/lib/file-editing";
 import { parsePdfPageFragment, resolveLocalFileHref } from "@/lib/file-links";
-import { headingId, markdownRehypePlugins, markdownRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
+import { headingId, markdownAppUrlTransform, markdownRehypePlugins, markdownRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
 import { prismTheme } from "@/lib/prism-theme";
 import { CodeBlock, MermaidBlock } from "@/components/MarkdownBody";
 import type {
@@ -1528,6 +1528,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
             <ReactMarkdown
               remarkPlugins={markdownRemarkPlugins}
               rehypePlugins={markdownRehypePlugins}
+              urlTransform={markdownAppUrlTransform}
               components={{
                 h1({ children }: React.ComponentProps<'h1'>) {
                   return <h1 id={headingId(children)}>{children}</h1>
