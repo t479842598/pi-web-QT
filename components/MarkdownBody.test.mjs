@@ -76,6 +76,20 @@ test("renders quoteable table rows without inline elements under tr", async () =
   assert.doesNotMatch(tableRowBranch.slice(0, tableRowBranch.indexOf("return (\n    <Tag")), /<span/);
 });
 
+test("sizes an ordered list's padding from its largest marker digit count", () => {
+  // A single-digit list keeps the two-digit default padding.
+  const shortList = renderMarkdown("1. one\n2. two\n3. three");
+  assert.match(shortList, /<ol[^>]*style="[^"]*--ol-marker-digits: ?2/);
+
+  // Twelve items reach "12.", so the digit count (and padding) grows to two — still 2 here.
+  const twelve = renderMarkdown(Array.from({ length: 12 }, (_, i) => `${i + 1}. item`).join("\n"));
+  assert.match(twelve, /<ol[^>]*style="[^"]*--ol-marker-digits: ?2/);
+
+  // Starting at 98 with three items reaches "100." — three digits, more padding.
+  const hundreds = renderMarkdown("98. a\n99. b\n100. c");
+  assert.match(hundreds, /<ol[^>]*style="[^"]*--ol-marker-digits: ?3/);
+});
+
 test("defers Prism highlighting while a code block is streaming", async () => {
   const source = (await readFile(new URL("./MarkdownBody.tsx", import.meta.url), "utf8")).replace(/\r/g, "");
   const codeBlockSource = source.slice(source.indexOf("export function CodeBlock"));

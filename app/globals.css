@@ -1256,6 +1256,10 @@ pre, code {
 .markdown-body li { margin: 4px 0; padding-left: 3px; }
 .markdown-body ul > li { list-style-type: disc; }
 .markdown-body ol > li { list-style-type: decimal; }
+/* Room for the widest bold "N. " marker; MarkdownBody sets the digit count.
+   Without this an outside marker wider than the list padding is clipped by
+   .markdown-body's overflow-x on lists that reach 10 or more. */
+.markdown-body ol { padding-left: calc(0.8em + var(--ol-marker-digits, 2) * 0.62em); }
 .markdown-body li > p { margin: 0; }
 .markdown-body li::marker {
   color: color-mix(in srgb, var(--accent) 72%, var(--text-muted));
@@ -1349,6 +1353,7 @@ pre, code {
   font-size: 13px;
 }
 .markdown-body th, .markdown-body td {
+  max-width: 240px;
   border: 0;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);

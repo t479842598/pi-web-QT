@@ -172,11 +172,18 @@ function buildMarkdownComponents({ isStreaming, cwd, onOpenFile, onQuoteReply, q
     img(props) {
       return <MarkdownImage cwd={cwd} {...props} />;
     },
+    ol({ node, start, style, ...props }) {
+      // An outside marker wider than the list's left padding is clipped by
+      // .markdown-body's overflow-x, so the padding follows the largest number.
+      const items = node?.children.filter((child) => child.type === "element" && child.tagName === "li").length ?? 0;
+      const digits = String(Math.abs((start ?? 1) + Math.max(items, 1) - 1)).length;
+      return <ol start={start} style={{ ...style, ["--ol-marker-digits" as string]: Math.max(digits, 2) }} {...props} />;
+    },
     table({ children }: React.ComponentProps<'table'> & ExtraProps) {
       return (
         <div className="my-3 rounded-lg overflow-hidden border border-(--border)">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse [&_tr:last-child>td]:border-b-0">
+            <table className="min-w-full w-max text-sm border-collapse [&_tr:last-child>td]:border-b-0">
               {children}
             </table>
           </div>
