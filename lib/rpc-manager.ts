@@ -218,6 +218,30 @@ export function resolveSessionIdleTimeoutMs(raw = process.env.PI_WEB_IDLE_TIMEOU
 
 const SESSION_IDLE_TIMEOUT_MS = resolveSessionIdleTimeoutMs();
 
+const DEFAULT_SESSION_SHUTDOWN_DEADLINE_MS = 5_000;
+
+/**
+ * Resolves the PI_WEB_SHUTDOWN_DEADLINE_MS environment variable into the time
+ * extensions get to handle `session_shutdown` before the wrapper disposes the
+ * SDK session anyway. An unset/blank value returns the 5-second default, and
+ * positive values up to Node's timer limit (2147483647 ms) are used as-is.
+ * `0`, invalid and out-of-range values fall back to the default with a console
+ * warning: shutdown always has a deadline.
+ * @param rawValue Value to parse; defaults to the environment variable.
+ */
+export function resolveSessionShutdownDeadlineMs(
+  rawValue: string | undefined = process.env.PI_WEB_SHUTDOWN_DEADLINE_MS,
+): number {
+  if (rawValue !== undefined && rawValue.trim() !== "") {
+    const parsed = Number(rawValue);
+    if (Number.isFinite(parsed) && parsed > 0 && parsed <= 2_147_483_647) return parsed;
+    console.warn(`[pi-web] invalid PI_WEB_SHUTDOWN_DEADLINE_MS "${rawValue}", falling back to 5 seconds`);
+  }
+  return DEFAULT_SESSION_SHUTDOWN_DEADLINE_MS;
+}
+
+const SESSION_SHUTDOWN_DEADLINE_MS = resolveSessionShutdownDeadlineMs();
+
 const SESSION_REPLACEMENT_COMMAND_TYPES = new Set(["fork", "clone"]);
 const COMMANDS_ALLOWED_DURING_SESSION_REPLACEMENT = new Set(["get_state", "abort", "steer", "follow_up_draft"]);
 
@@ -368,7 +392,12 @@ export class AgentSessionWrapper {
   private onDestroyCallback: (() => void) | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private sessionShutdownEmitted = false;
+  // The armed idle timer is the forced cleanup Stop scheduled.
+  private forcedIdleTimerArmed = false;
   private _alive = true;
+  // Set when shutdown() starts. The SDK session stays usable until destroy(),
+  // but lookups must treat the wrapper as gone from this point on.
+  private closing = false;
   private approvalPolicy: Policy = policyFromStrings(readModeSettings().permissionRules);
   private approvalMode: "ask" | "auto" | "yolo" = readModeSettings().toolApprovalMode;
   private pendingApprovals = new Map<string, PendingApproval>();
@@ -437,8 +466,13 @@ export class AgentSessionWrapper {
     return this.inner.sessionFile ?? "";
   }
 
+  /**
+   * False from the moment shutdown() or destroy() begins, not only once the SDK
+   * session is disposed: extensions may take up to the shutdown deadline to
+   * handle session_shutdown, and a prompt routed here meanwhile would be lost.
+   */
   isAlive(): boolean {
-    return this._alive;
+    return this._alive && !this.closing;
   }
 
   /**
@@ -1265,11 +1299,23 @@ export class AgentSessionWrapper {
   }
 
   private resetIdleTimer(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    if (!this._alive) return;
-    // A resolved timeout of 0 disables idle shutdown entirely.
-    if (SESSION_IDLE_TIMEOUT_MS === 0) return;
+    if (!this._alive) {
+      if (this.idleTimer) clearTimeout(this.idleTimer);
+      return;
+    }
     if (!this.isRunning()) this.forceShutdownOnIdle = false;
+    // A stuck user reloads, reopens the session or presses Stop again, and
+    // each of those commands lands here. Moving the forced deadline for them
+    // would keep a run that Stop cannot unwind alive indefinitely.
+    if (this.forceShutdownOnIdle && this.forcedIdleTimerArmed) return;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    // A resolved timeout of 0 disables idle shutdown, but a run that Stop could
+    // not unwind is still reaped after the default delay; otherwise it stays
+    // running until the server restarts (#656).
+    const timeoutMs = SESSION_IDLE_TIMEOUT_MS
+      || (this.forceShutdownOnIdle ? DEFAULT_SESSION_IDLE_TIMEOUT_MS : 0);
+    this.forcedIdleTimerArmed = timeoutMs !== 0 && this.forceShutdownOnIdle;
+    if (timeoutMs === 0) return;
     this.idleTimer = setTimeout(() => {
       if (!this.forceShutdownOnIdle && (this.isRunning() || hasActiveSessionLivenessProvider({
         sessionId: this.sessionId,
@@ -1281,7 +1327,7 @@ export class AgentSessionWrapper {
       void this.shutdown().catch((error) => {
         console.error("[pi-web] failed to shut down idle session:", error instanceof Error ? error.message : error);
       });
-    }, SESSION_IDLE_TIMEOUT_MS);
+    }, timeoutMs);
   }
 
   /** Any activity (send, new listener) cancels a pending idle disposal. */
@@ -1582,6 +1628,9 @@ export class AgentSessionWrapper {
         // Stop must unwind extension commands that have not started the agent yet.
         // 控制器保持 aborted（下一次 prompt 才重建），Stop 后新的 UI 请求一律拒绝。
         this.forceShutdownOnIdle = true;
+        // Arm the forced cleanup now: the reset above ran before this flag,
+        // and the final reset only runs once the SDK run has unwound.
+        this.resetIdleTimer();
         this.extensionUiAbortController.abort(new DOMException("Extension UI cancelled by Stop", "AbortError"));
         try {
           await this.inner.abort();
@@ -2162,6 +2211,7 @@ export class AgentSessionWrapper {
 
       case "abort_bash": {
         this.forceShutdownOnIdle = true;
+        this.resetIdleTimer();
         this.inner.abortBash();
         notifyRunningChange();
         return null;
@@ -2257,6 +2307,9 @@ export class AgentSessionWrapper {
   async shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     if (!this._alive) return;
+    // Closing starts before the first await, so a request that arrives while
+    // extensions shut down starts a fresh wrapper instead of prompting this one.
+    this.closing = true;
     this.cancelQueuedRun();
     this.cancelGoalContinuation();
 
@@ -2272,13 +2325,47 @@ export class AgentSessionWrapper {
         }
         if (!this.sessionShutdownEmitted) {
           this.sessionShutdownEmitted = true;
-          await this.inner.extensionRunner.emit?.({ type: "session_shutdown", reason: "quit" });
+          const emit = this.inner.extensionRunner?.emit;
+          if (typeof emit === "function") await this.emitSessionShutdown(emit);
         }
       } finally {
         this.destroy();
       }
     })();
     return this.shutdownPromise;
+  }
+
+  /**
+   * Gives extensions at most SESSION_SHUTDOWN_DEADLINE_MS to handle
+   * session_shutdown, then returns so the SDK session is disposed and
+   * unregistered anyway. Closing an MCP connection has no upper bound: it waits
+   * for a token refresh in flight and for a stdio child whose daemonized
+   * grandchild may never close stdout.
+   */
+  private async emitSessionShutdown(
+    emit: NonNullable<AgentSessionLike["extensionRunner"]["emit"]>,
+  ): Promise<void> {
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<"timeout">((resolve) => {
+      deadlineTimer = setTimeout(() => resolve("timeout"), SESSION_SHUTDOWN_DEADLINE_MS);
+      // A quitting process must not wait for an extension's cleanup.
+      deadlineTimer.unref?.();
+    });
+    // A synchronous throw becomes a rejection, and a rejection that arrives
+    // after the deadline is still handled by the race below.
+    const handled = (async () => {
+      await emit.call(this.inner.extensionRunner, { type: "session_shutdown", reason: "quit" });
+      return "handled" as const;
+    })();
+    try {
+      if (await Promise.race([handled, deadline]) === "timeout") {
+        console.warn(
+          `[pi-web] extensions did not finish session_shutdown for session ${this.sessionId} until after ${SESSION_SHUTDOWN_DEADLINE_MS} ms; disposing it anyway`,
+        );
+      }
+    } finally {
+      clearTimeout(deadlineTimer);
+    }
   }
 
   private resolveExtensionUiResponse(response: ExtensionUiResponse): void {
@@ -3044,7 +3131,12 @@ function registerSubagentWrapper(
   wrapper.start();
   const sessionId = inner.sessionId as string;
   const registry = getRegistry();
-  wrapper.onDestroy(() => registry.delete(sessionId));
+  // A closing wrapper reports itself dead while extensions shut down, so the
+  // next request registers a replacement under the same id. Finishing later,
+  // the closing wrapper must not unregister that replacement.
+  wrapper.onDestroy(() => {
+    if (registry.get(sessionId) === wrapper) registry.delete(sessionId);
+  });
   registry.set(sessionId, wrapper);
   return wrapper;
 }
