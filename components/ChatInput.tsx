@@ -7,6 +7,7 @@ import type { TextContent, UserMessage } from "@/lib/types";
 import type { SnippetItem } from "@/lib/snippet-store";
 import { clearDraft, getDraft, isDraftImageWithinLimits, mergeRestoredSubmissionDraft, setDraft, type ChatDraftImage, type ChatDraftPastedBlock } from "@/lib/draft-store";
 import { extractPathsFromClipboardData, formatPathsForInput } from "@/lib/clipboard-paths";
+import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { truncateModelLabel } from "@/lib/model-label";
 import {
   isBase64ImageWithinLimits,
@@ -592,6 +593,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   topCenterControl,
 }: Props, ref) {
   const isMobile = useIsMobile();
+  // Keeps the app height on the visual viewport while a mobile keyboard is open,
+  // so the composer stays above it; also sets html[data-keyboard-open] for the
+  // CSS that collapses secondary composer chrome.
+  useViewportHeight();
   const { t } = useI18n();
   // Image capability of the currently selected model, read straight from the
   // model list so it is available to the attachment handlers declared below.
