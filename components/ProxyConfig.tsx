@@ -168,6 +168,7 @@ export function ProxyConfig() {
 
   return (
     <div
+      className="settings-content-panel settings-content-stack"
       style={{
         flex: 1,
         display: "flex",
@@ -177,7 +178,7 @@ export function ProxyConfig() {
         gap: 16,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+      <div className="settings-content-card settings-content-row" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4, border: "var(--settings-content-card-border, none)", background: "var(--settings-content-card-bg, transparent)" }}>
         <label
           style={{
             display: "flex",
@@ -219,7 +220,10 @@ export function ProxyConfig() {
       </div>
 
       <div
+        className="settings-content-card settings-content-fields"
         style={{
+          border: "var(--settings-content-card-border, none)",
+          background: "var(--settings-content-card-bg, transparent)",
           display: "grid",
           gridTemplateColumns: "1fr 1fr",
           gap: "12px 16px",

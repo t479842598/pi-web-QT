@@ -226,21 +226,21 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
     platform === "win32" ? "Windows" : platform === "darwin" ? "macOS" : "Linux";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
-      <header style={{ padding: "18px 22px 14px", borderBottom: "1px solid var(--border)" }}>
-        <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.backup")}</h1>
+    <div className="settings-content-panel" style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
+      <header className="settings-content-header" style={{ padding: "var(--settings-content-header-padding, 18px 22px 14px)", borderBottom: "var(--settings-content-header-border, 1px solid var(--border))" }}>
+        <h1 className="settings-content-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.backup")}</h1>
       </header>
 
       {/* ── Export ── */}
-      <section style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)" }}>
-        <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+      <section className="settings-content-card settings-content-section" style={{ padding: "var(--settings-content-section-padding, 18px 22px)", borderBottom: "var(--settings-content-section-divider, 1px solid var(--border))" }}>
+        <h2 className="settings-content-section-title" style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
           {t("desktop.backupExportTitle")}
         </h2>
         <p style={{ margin: "6px 0 12px", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
           {t("desktop.backupExportDescription")}
         </p>
 
-        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 8 }}>
+        <label className="settings-content-row" style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 8 }}>
           <input
             type="checkbox"
             checked={includeSecrets}
@@ -253,7 +253,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
           </span>
         </label>
 
-        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 14 }}>
+        <label className="settings-content-row" style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer", marginBottom: 14 }}>
           <input
             type="checkbox"
             checked={includeSessions}
@@ -281,8 +281,8 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
       </section>
 
       {/* ── Import ── */}
-      <section style={{ padding: "18px 22px" }}>
-        <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+      <section className="settings-content-card settings-content-section" style={{ padding: "var(--settings-content-section-padding, 18px 22px)" }}>
+        <h2 className="settings-content-section-title" style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
           {t("desktop.backupImportTitle")}
         </h2>
         <p style={{ margin: "6px 0 12px", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>

@@ -85,8 +85,8 @@ export function LogsConfig() {
   };
 
   return (
-    <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <div className="settings-content-panel settings-content-stack" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="settings-content-card settings-content-toolbar" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "var(--settings-content-card-bg, transparent)", border: "var(--settings-content-card-border, none)" }}>
         <select value={level} onChange={(event) => setLevel(event.target.value)} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }}>
           <option value="">{t("desktop.logsAllLevels")}</option>
           {["error", "warning", "info"].map((item) => <option key={item} value={item}>{item}</option>)}
@@ -106,9 +106,9 @@ export function LogsConfig() {
       {loading && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>{t("desktop.loading")}</div>}
       {error && <div style={{ color: "var(--status-error)", fontSize: 12 }}>{error}</div>}
       {!loading && !error && entries.length === 0 && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>{t("desktop.logsEmpty")}</div>}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="settings-content-stack" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {entries.map((entry) => (
-          <details key={entry.id} style={{ border: "1px solid var(--border)", borderRadius: 7, background: "var(--bg-panel)", padding: "8px 10px" }}>
+          <details key={entry.id} className="settings-content-card settings-content-log-entry" style={{ border: "var(--settings-content-card-border, 1px solid var(--border))", borderRadius: 7, background: "var(--settings-content-card-bg, var(--bg-panel))", padding: "8px 10px" }}>
             <summary style={{ cursor: "pointer", color: entry.level === "error" ? "var(--status-error)" : entry.level === "warning" ? "var(--status-warning)" : "var(--text)", fontSize: 12 }}>
               <span style={{ fontFamily: "var(--font-mono)", marginRight: 8 }}>{entry.statusCode ?? "—"}</span>
               <span style={{ marginRight: 8 }}>{new Date(entry.timestamp).toLocaleString()}</span>

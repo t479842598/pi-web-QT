@@ -31,12 +31,12 @@ export function ServerSwitchConfig() {
   if (!desktopShell) return null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
-      <header style={{ padding: "18px 22px 14px", borderBottom: "1px solid var(--border)" }}>
-        <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.server")}</h1>
+    <div className="settings-content-panel" style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
+      <header className="settings-content-header" style={{ padding: "var(--settings-content-header-padding, 18px 22px 14px)", borderBottom: "var(--settings-content-header-border, 1px solid var(--border))" }}>
+        <h1 className="settings-content-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.server")}</h1>
       </header>
-      <div style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 10, background: "var(--bg-hover)", border: "1px solid var(--border)" }}>
+      <div className="settings-content-stack" style={{ padding: "var(--settings-content-panel-padding, 18px 22px)", display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="settings-content-card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 10, background: "var(--settings-content-card-bg, var(--bg-hover))", border: "var(--settings-content-card-border, 1px solid var(--border))" }}>
           <PlugsConnected size={18} color="var(--accent)" />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.serverCurrent")}</div>

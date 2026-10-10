@@ -307,8 +307,8 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
 
   if (progress.done && importedIds.length > 0) {
     return (
-      <div style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="settings-content-panel settings-content-card settings-content-stack" style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14, background: "var(--settings-content-card-bg, transparent)", border: "var(--settings-content-card-border, none)" }}>
+        <div className="settings-content-section-header" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <CheckCircle size={20} weight="fill" style={{ color: "var(--status-success)" }} />
           <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>
             {t("desktop.importDone") ?? "导入完成"}
@@ -371,7 +371,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
   // ========================================================================
 
   const content = (
-    <div style={{ padding: isMobile ? "12px 18px" : "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
+    <div className="settings-content-panel settings-content-stack" style={{ padding: isMobile ? "12px 18px" : "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
       {/* 错误 */}
       {error && (
         <div style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: "var(--status-error)", lineHeight: 1.5 }}>
@@ -387,15 +387,16 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
             {t("desktop.importSessionsDesc") ?? "从其他 AI 编码工具导入历史对话记录到 pi-web。目前支持 Reasonix，更多工具陆续支持中。"}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className="settings-content-stack" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {sources.map(src => (
               <label
+                className="settings-content-card settings-content-row"
                 key={src.key}
                 style={{
                   display: "flex", alignItems: "center", gap: 10,
-                  padding: "10px 14px", border: "1px solid var(--border)",
+                  padding: "10px 14px", border: "var(--settings-content-card-border, 1px solid var(--border))",
                   borderRadius: 8, cursor: src.status === "available" ? "pointer" : "default",
-                  background: selectedSource === src.key ? "var(--bg-selected)" : "var(--bg-panel)",
+                  background: selectedSource === src.key ? "var(--settings-content-card-selected-bg, var(--bg-selected))" : "var(--settings-content-card-bg, var(--bg-panel))",
                   opacity: src.status === "unavailable" ? 0.5 : src.status === "coming-soon" ? 0.7 : 1,
                   transition: "background 0.12s",
                 }}
@@ -442,15 +443,16 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
                 </button>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div className="settings-content-stack" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {reasonixData.map(proj => (
                   <label
                     key={proj.name}
+                    className="settings-content-card settings-content-row"
                     style={{
                       display: "flex", alignItems: "center", gap: 10,
-                      padding: "8px 12px", border: "1px solid var(--border)",
+                      padding: "8px 12px", border: "var(--settings-content-card-border, 1px solid var(--border))",
                       borderRadius: 6, cursor: "pointer",
-                      background: selectedProjects.has(proj.name) ? "var(--bg-selected)" : "transparent",
+                      background: selectedProjects.has(proj.name) ? "var(--settings-content-card-selected-bg, var(--bg-selected))" : "var(--settings-content-card-bg, transparent)",
                       transition: "background 0.12s",
                     }}
                   >
@@ -562,7 +564,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
         </button>
 
         <BottomSheet open={mobileSheetOpen} onClose={() => setMobileSheetOpen(false)}>
-          <div style={{ padding: "4px 18px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div className="settings-content-header" style={{ padding: "4px 18px 14px", borderBottom: "var(--settings-content-header-border, 1px solid var(--border))", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
               {t("desktop.importSessions") ?? "导入会话"}
             </span>

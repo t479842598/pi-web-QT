@@ -77,15 +77,15 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
   );
 
   return (
-    <div style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
-      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{t("desktop.usage")}</h3>
+    <div className="settings-content-panel settings-content-stack" style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <h3 className="settings-content-title" style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{t("desktop.usage")}</h3>
 
       {/* Current session — always visible, no tab switching. */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>{t("desktop.usageSession")}</div>
+      <div className="settings-content-section" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div className="settings-content-section-title" style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>{t("desktop.usageSession")}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {sessionId ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, borderRadius: 12, border: "1px solid var(--border)", padding: 16 }}>
+            <div className="settings-content-card" style={{ display: "flex", flexDirection: "column", gap: 12, borderRadius: 12, border: "var(--settings-content-card-border, 1px solid var(--border))", padding: 16 }}>
               {sessionUsage ? (
                 <>
                   <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -139,15 +139,15 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
       </div>
 
       {/* Global — always visible below the session card. */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>{t("desktop.usageGlobal")}</div>
+      <div className="settings-content-section" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div className="settings-content-section-title" style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>{t("desktop.usageGlobal")}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
             {[
               { label: t("desktop.usageTotal"), value: formatToken(report?.totalTokens), sub: report ? `${report.totalSessions} ${t("desktop.usageSessions")}` : "…" },
               { label: t("desktop.usageMessages"), value: report ? String(report.messageCount) : "…", sub: t("desktop.usageMessagesHint") },
             ].map((card) => (
-              <div key={card.label} style={{ borderRadius: 12, border: "1px solid var(--border)", padding: "12px 14px", background: "var(--bg-panel)" }}>
+              <div key={card.label} className="settings-content-card" style={{ borderRadius: 12, border: "var(--settings-content-card-border, 1px solid var(--border))", padding: "12px 14px", background: "var(--settings-content-card-bg, var(--bg-panel))" }}>
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>{card.label}</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{card.value}</div>
                 <div style={{ fontSize: 10.5, color: "var(--text-dim)", marginTop: 2 }}>{card.sub}</div>
@@ -156,7 +156,7 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
           </div>
 
           {/* Daily bars */}
-          <div style={{ borderRadius: 12, border: "1px solid var(--border)", padding: "14px 16px" }}>
+          <div className="settings-content-card" style={{ borderRadius: 12, border: "var(--settings-content-card-border, 1px solid var(--border))", padding: "14px 16px" }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 10 }}>
               {t("desktop.usageDaily")}
             </div>
@@ -179,8 +179,8 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
           </div>
 
           {/* Session list */}
-          <div style={{ borderRadius: 12, border: "1px solid var(--border)", overflow: "hidden" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+          <div className="settings-content-card" style={{ borderRadius: 12, border: "var(--settings-content-card-border, 1px solid var(--border))", overflow: "hidden" }}>
+            <div className="settings-content-section-title" style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
               {t("desktop.usageTopSessions")}
             </div>
             {report && report.sessions.length === 0 ? (

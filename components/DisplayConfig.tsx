@@ -42,7 +42,7 @@ function tagStyle(active: boolean, hovered: boolean, disabled?: boolean): React.
 
 function SectionLabel({ icon, label, actions }: { icon: React.ReactNode; label: string; actions?: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, width: "100%" }}>
+    <div className="settings-content-section-label" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, width: "100%" }}>
       <span style={{ color: "var(--text-dim)", display: "inline-flex", flexShrink: 0 }}>{icon}</span>
       <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
         {label}
@@ -77,9 +77,9 @@ const underlineOnHover = {
 
 function ConfigSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return (
-    <section style={{ padding: "20px 22px", borderBottom: "1px solid var(--border)" }}>
-      <h2 style={{ margin: 0, fontSize: 14, fontWeight: 650, color: "var(--text)" }}>{title}</h2>
-      <p style={{ margin: "5px 0 16px", fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)" }}>{description}</p>
+    <section className="settings-content-card settings-content-section" style={{ padding: "var(--settings-content-section-padding, 20px 22px)", borderBottom: "var(--settings-content-section-divider, 1px solid var(--border))" }}>
+      <h2 className="settings-content-section-title" style={{ margin: 0, fontSize: 14, fontWeight: 650, color: "var(--text)" }}>{title}</h2>
+      <p className="settings-content-section-description" style={{ margin: "5px 0 16px", fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)" }}>{description}</p>
       {children}
     </section>
   );
@@ -329,9 +329,9 @@ export function DisplayConfig() {
   }, []);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
-      <header style={{ padding: "18px 22px 14px", borderBottom: "1px solid var(--border)" }}>
-        <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.display")}</h1>
+    <div className="settings-content-panel" style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
+      <header className="settings-content-header" style={{ padding: "var(--settings-content-header-padding, 18px 22px 14px)", borderBottom: "var(--settings-content-header-border, 1px solid var(--border))" }}>
+        <h1 className="settings-content-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.display")}</h1>
       </header>
 
       {/* ── Theme ── */}

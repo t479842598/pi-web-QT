@@ -140,7 +140,7 @@ function useModelTranslation() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <div className="settings-content-field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <label style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>{label}</label>
       {children}
     </div>
@@ -256,7 +256,7 @@ function Check({ label, checked, onChange }: { label: string; checked: boolean; 
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{children}</div>;
+  return <div className="settings-content-section-title" style={{ fontSize: 11, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{children}</div>;
 }
 
 // ── Provider detail ───────────────────────────────────────────────────────────
@@ -358,7 +358,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className="settings-content-detail-stack" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <SectionTitle>{t("desktop.modelsProvider")}</SectionTitle>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -871,7 +871,7 @@ function ModelDetail({
       : "var(--text-dim)";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className="settings-content-detail-stack" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <SectionTitle>{t("desktop.modelsModelSection")}</SectionTitle>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1552,7 +1552,7 @@ function AddProviderPicker({
 
 
   return (
-    <div
+    <div data-settings-child-dialog="true"
       style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}
     >
       <div style={{ width: 820, maxWidth: "calc(100vw - 32px)", maxHeight: "min(72vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
@@ -1705,7 +1705,7 @@ function CustomProviderDialog({
   };
 
   return (
-    <div
+    <div data-settings-child-dialog="true"
       style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}
     >
       <div style={{ width: 480, maxWidth: "calc(100vw - 32px)", maxHeight: "min(82vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
@@ -2260,16 +2260,17 @@ export function ModelsConfig({
   return (
     <>
     <div
+      className="settings-content-panel"
       style={embedded
         ? { display: "flex", flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }
         : { position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
     >
-      <div className={embedded ? undefined : "models-config-panel"} style={embedded
+      <div className={embedded ? "settings-content-surface" : "models-config-panel settings-content-surface"} style={embedded
         ? { flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }
         : { width: isMobile ? "calc(100vw - 16px)" : 860, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "78vh", maxHeight: "calc(100dvh - 16px)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
 
         {!embedded && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+          <div className="settings-content-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
               <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{t("desktop.models")}</span>
               <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>~/.pi/agent/models.json</code>
@@ -2284,15 +2285,15 @@ export function ModelsConfig({
         <EnabledModelsBanner controller={enabledModels} />
 
         {/* Body */}
-        <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
+        <div className="settings-content-split" style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
 
           {/* Left: tree */}
-          <div style={{
+          <div className="settings-content-sidebar" style={{
             width: isMobile ? "100%" : 210,
             maxHeight: isMobile ? "40vh" : undefined,
             borderRight: isMobile ? "none" : "1px solid var(--border)",
             borderBottom: isMobile ? "1px solid var(--border)" : "none",
-            display: "flex", flexDirection: "column", flexShrink: 0, background: "var(--bg-panel)",
+            display: "flex", flexDirection: "column", flexShrink: 0, background: "var(--settings-content-sidebar-bg, var(--bg-panel))",
           }}>
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 6px" }}>
               {/* Active OAuth subscriptions */}
@@ -2409,7 +2410,7 @@ export function ModelsConfig({
           </div>
 
           {/* Right: detail */}
-          <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+          <div className="settings-content-detail" style={{ flex: 1, overflowY: "auto", padding: "var(--settings-content-detail-padding, 20px)" }}>
             {loading ? null : detailContent ?? (
               <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 13 }}>
                 {t("desktop.modelsSelectProviderOrModel")}
@@ -2419,7 +2420,7 @@ export function ModelsConfig({
         </div>
 
         {/* Footer */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
+        <div className="settings-content-footer" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
           {saveError && <span style={{ fontSize: 12, color: "var(--status-error)", flex: 1 }}>{saveError}</span>}
           {!embedded && (
             <button onClick={() => { void requestClose(); }} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>

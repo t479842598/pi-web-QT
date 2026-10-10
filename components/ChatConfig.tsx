@@ -38,9 +38,9 @@ export function ChatConfig() {
   }, []);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
-      <header style={{ padding: "18px 22px 14px", borderBottom: "1px solid var(--border)" }}>
-        <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.chat")}</h1>
+    <div className="settings-content-panel" style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
+      <header className="settings-content-header" style={{ padding: "var(--settings-content-header-padding, 18px 22px 14px)", borderBottom: "var(--settings-content-header-border, 1px solid var(--border))" }}>
+        <h1 className="settings-content-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.chat")}</h1>
       </header>
       <SettingSection title={t("desktop.inputShortcut")} description={t("desktop.inputShortcutDescription")}>
         <SettingToggle

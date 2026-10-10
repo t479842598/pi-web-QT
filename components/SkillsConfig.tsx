@@ -141,9 +141,9 @@ function SkillDetail({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div className="settings-content-detail-stack" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Path + tag + toggle */}
-      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+      <div className="settings-content-detail-header" style={{ display: "flex", alignItems: "center", gap: 7 }}>
         <span
           style={{
             fontSize: 10,
@@ -895,18 +895,20 @@ export function SkillsConfig({
 
   return (
     <div
+      className="settings-content-panel"
       style={embedded
         ? { display: "flex", flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }
         : { position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
     >
       <div
+        className="settings-content-surface"
         style={embedded
           ? { display: "flex", flex: 1, minWidth: 0, minHeight: 0, flexDirection: "column", overflow: "hidden" }
           : { width: isMobile ? "calc(100vw - 16px)" : 860, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "78vh", maxHeight: "calc(100dvh - 16px)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }
         }
       >
         {!embedded && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+          <div className="settings-content-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
               <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{t("desktop.skills")}</span>
               <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortenPath(cwd)}</code>
@@ -931,9 +933,10 @@ export function SkillsConfig({
         )}
 
         {/* Body */}
-        <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
+        <div className="settings-content-split" style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
           {/* Left: skill list */}
           <div
+            className="settings-content-sidebar"
             style={{
               width: isMobile ? "100%" : 210,
               maxHeight: isMobile ? "40vh" : undefined,
@@ -942,7 +945,7 @@ export function SkillsConfig({
               display: "flex",
               flexDirection: "column",
               flexShrink: 0,
-              background: "var(--bg-panel)",
+              background: "var(--settings-content-sidebar-bg, var(--bg-panel))",
             }}
           >
             <div style={{ padding: "8px 8px 0", display: "flex", justifyContent: "flex-end" }}>
@@ -1171,7 +1174,7 @@ export function SkillsConfig({
           </div>
 
           {/* Right: detail or add panel */}
-          <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+          <div className="settings-content-detail" style={{ flex: 1, overflowY: "auto", padding: "var(--settings-content-detail-padding, 20px)" }}>
             {addMode ? (
               <AddSkillPanel
                 cwd={cwd}
@@ -1234,6 +1237,7 @@ export function SkillsConfig({
 
         {/* Footer */}
         <div
+          className="settings-content-footer"
           style={{
             display: "flex",
             alignItems: "center",

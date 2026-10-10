@@ -5,7 +5,6 @@ import {
   ArrowClockwise,
   Check,
   Copy,
-  Gear,
   List,
   Moon,
   PlugsConnected,
@@ -47,7 +46,6 @@ interface AppTitleBarProps {
   onToggleFilePanel: () => void;
   /** Force-reload the current session (re-fetch + reconnect SSE). */
   onRefreshSession?: () => void;
-  onOpenSettings: () => void;
   sessionTitle: string | null;
   onWorkspaceControlsHostChange?: (node: HTMLDivElement | null) => void;
   /** Host slot for the git-branch chip displayed to the right of the session title. */
@@ -128,7 +126,6 @@ export function AppTitleBar({
   rightPanelOpen,
   onToggleFilePanel,
   onRefreshSession,
-  onOpenSettings,
   sessionTitle,
   onWorkspaceControlsHostChange,
   onTitleRightHostChange,
@@ -279,12 +276,9 @@ export function AppTitleBar({
         </div>
 
 
-        {/* Right zone: task board / file panel / theme / settings buttons.
-            窗口控制已由悬浮灵动岛（DynamicIsland）承担，不再占用本行宽度；
-            桌面窄窗口时本区收缩、overflow:hidden 从左侧裁掉功能钮，功能区最末
-            的「设置」始终保留。移动端本区 flexShrink:0 不可收缩，让中间的标题
-            （已改为流内子元素）自行截断。marginLeft:auto 把它钉在右缘，
-            position/zIndex 保证按钮浮在中区拖拽层之上可点击。 */}
+        {/* Right zone: task board / file panel / theme / server / refresh.
+            Window controls live in DynamicIsland; settings now lives in the
+            sidebar footer rather than duplicating a button here. */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, minWidth: 0, height: "100%", flexShrink: isMobile ? 0 : 1, overflow: "hidden", marginLeft: "auto", position: "relative", zIndex: 1 }}>
 
         {/* Task board toggle — desktop only, hidden when the feature is off */}
@@ -375,23 +369,6 @@ export function AppTitleBar({
         </button>
         )}
 
-        <button
-          className="app-no-drag"
-          type="button"
-          onClick={onOpenSettings}
-          title={translate("desktop.settings")}
-          aria-label={translate("desktop.settings")}
-          style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: 36, height: 36, padding: 0,
-            background: "none", border: "none",
-            color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "background 0.12s, color 0.12s",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
-        >
-          <Gear size={16} aria-hidden="true" />
-        </button>
 
         </div>
 

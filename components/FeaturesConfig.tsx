@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { SquaresFour } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
-import { SettingCard, SettingRow, SettingRowLast, SettingNote } from "./SettingCard";
+import { SettingRow, SettingRowLast, SettingNote } from "./SettingCard";
+import { SettingsContentCard } from "./SettingsUi";
 import { SettingToggle } from "./SettingToggle";
 import type { CollaborationMode, TokenMode, ToolApprovalMode, ModeSettings } from "@/lib/modes";
 import { normalizeCollaborationMode, normalizeTokenMode, normalizeToolApprovalMode } from "@/lib/modes";
@@ -182,15 +183,15 @@ export function FeaturesConfig() {
   }, []);
 
   return (
-    <div style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className="settings-content-panel settings-content-stack" style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="settings-content-card-host" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {!loaded ? (
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
             {t("desktop.featuresLoading")}
           </div>
         ) : (
           <>
-            <SettingCard>
+            <SettingsContentCard>
               <SettingRowLast>
                 <SettingToggle
                   checked={features.tasksBoard}
@@ -207,12 +208,12 @@ export function FeaturesConfig() {
                   description={t("desktop.featuresTasksBoardDesc")}
                 />
               </SettingRowLast>
-            </SettingCard>
+            </SettingsContentCard>
 
             {modes && (
-              <SettingCard>
+              <SettingsContentCard>
                 <SettingRow>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 0" }}>
+                  <div className="settings-content-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 0" }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.featuresCollabDefault")}</div>
                       <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t("desktop.featuresCollabDefaultDesc")}</div>
@@ -226,7 +227,7 @@ export function FeaturesConfig() {
                   </div>
                 </SettingRow>
                 <SettingRow>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 0" }}>
+                  <div className="settings-content-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 0" }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.featuresTokenDefault")}</div>
                       <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t("desktop.featuresTokenDefaultDesc")}</div>
@@ -240,7 +241,7 @@ export function FeaturesConfig() {
                   </div>
                 </SettingRow>
                 <SettingRowLast>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 0" }}>
+                  <div className="settings-content-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 0" }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.featuresApprovalDefault")}</div>
                       <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t("desktop.featuresApprovalDefaultDesc")}</div>
@@ -254,7 +255,7 @@ export function FeaturesConfig() {
                     />
                   </div>
                 </SettingRowLast>
-              </SettingCard>
+              </SettingsContentCard>
             )}
           </>
         )}

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
-import { ChatCenteredText, ChartBar, Cpu, Database, DownloadSimple, Lightning, List, ListBullets, Monitor, Network, Plug, PlugsConnected, Robot, Stack, TerminalWindow, X } from "@phosphor-icons/react";
+import { ArrowLeft, ChatCenteredText, ChartBar, Cpu, Database, DownloadSimple, Lightning, List, ListBullets, MagnifyingGlass, Monitor, Network, Plug, PlugsConnected, Robot, Stack, TerminalWindow, X } from "@phosphor-icons/react";
+import { groupSettingsDirectory } from "@/lib/settings-directory";
 import { BackupConfig } from "./BackupConfig";
 import { ChatConfig } from "./ChatConfig";
 import { DisplayConfig } from "./DisplayConfig";
@@ -80,6 +81,26 @@ export function SettingsModal({
     setDesktopShell(new URLSearchParams(window.location.search).has("piweb_connected"));
   }, []);
   const visibleTabs = desktopShell ? SETTINGS_TABS : SETTINGS_TABS.filter(({ id }) => id !== "server");
+  const navigableTabs = visibleTabs.filter(({ id }) => !(isMobile && id === "import"));
+  const [query, setQuery] = useState("");
+  const groups = groupSettingsDirectory(navigableTabs, query, t);
+  const dialogRef = useRef<HTMLElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    searchRef.current?.focus();
+    return () => previous?.focus();
+  }, []);
+  const keepFocusInSettings = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab" || dialogRef.current?.querySelector("[data-settings-child-dialog]")) return;
+    const items = [...(dialogRef.current?.querySelectorAll<HTMLElement>('button, input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? [])]
+      .filter((item) => !item.hasAttribute("disabled") && item.getClientRects().length > 0);
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  };
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
   // Multiple embedded configs can register a close-time flush (e.g. the
@@ -111,147 +132,90 @@ export function SettingsModal({
     }
   }, [closing, onCloseAction]);
 
-  useEscapeKey(!closing, () => { void requestClose(); });
+  useEscapeKey(!closing, () => {
+    if (!dialogRef.current?.querySelector("[data-settings-child-dialog]")) void requestClose();
+  });
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1000,
-        background: "rgba(0,0,0,0.35)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
+    <div className="settings-page-overlay">
       <section
+        ref={dialogRef}
+        onKeyDown={keepFocusInSettings}
         role="dialog"
         aria-modal="true"
         aria-label={t("desktop.settings")}
         className="settings-modal"
-        style={{
-          width: isMobile ? "calc(100vw - 16px)" : 1000,
-          maxWidth: "calc(100vw - 16px)",
-          height: isMobile ? "calc(100dvh - 16px)" : "80vh",
-          maxHeight: "calc(100dvh - 16px)",
-          background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-          overflow: "hidden",
-        }}
       >
-        <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 18px",
-            borderBottom: "1px solid var(--border)",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{t("desktop.settings")}</span>
-            {activeTab === "models" ? (
-              <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                ~/.pi/agent/models.json
-              </code>
-            ) : cwd && (
-              <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {cwd}
-              </code>
-            )}
+        <aside className="settings-modal-rail">
+          <div className="settings-modal-rail-top">
+            <div className="settings-modal-search-wrap">
+              <MagnifyingGlass size={15} aria-hidden="true" />
+              <input
+                ref={searchRef}
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t("desktop.settingsSearch")}
+                aria-label={t("desktop.settingsSearch")}
+              />
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => { void requestClose(); }}
-            disabled={closing}
-            title={t("desktop.closeSettings")}
-            aria-label={t("desktop.closeSettings")}
-            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: 4, display: "flex" }}
-          >
-            <X size={18} aria-hidden="true" />
-          </button>
-        </header>
-
-        <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", minHeight: 0, overflow: "hidden", pointerEvents: closing ? "none" : undefined }}>
-          <nav
-            aria-label={t("desktop.settingsSections")}
-            style={{
-              display: "flex",
-              flexDirection: isMobile ? "row" : "column",
-              gap: 4,
-              width: isMobile ? "100%" : 150,
-              padding: 8,
-              flexShrink: 0,
-              minWidth: 0,
-              background: "var(--bg-panel)",
-              borderRight: isMobile ? "none" : "1px solid var(--border)",
-              borderBottom: isMobile ? "1px solid var(--border)" : "none",
-              // On mobile all tabs cannot fit one row; allow horizontal
-              // scrolling so every tab stays reachable (previously the
-              // overflow was clipped with no scrollbar and the last tabs
-              // were unreachable).
-              overflowX: isMobile ? "auto" : undefined,
-              overflowY: isMobile ? "hidden" : undefined,
-              WebkitOverflowScrolling: isMobile ? "touch" : undefined,
-            }}
-          >
-            {visibleTabs.filter(({ id }) => !(isMobile && id === "import")).map(({ id, labelKey, Icon }) => {
-              const disabled = (id === "skills" || id === "plugins") && !cwd;
-              const active = activeTab === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => setActiveTab(id)}
-                  aria-current={active ? "page" : undefined}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    flex: isMobile ? "0 0 auto" : undefined,
-                    whiteSpace: "nowrap",
-                    width: isMobile ? undefined : "100%",
-                    padding: "8px 10px",
-                    border: "none",
-                    borderRadius: 6,
-                    background: active ? "var(--bg-selected)" : "none",
-                    color: active ? "var(--text)" : "var(--text-muted)",
-                    cursor: disabled ? "not-allowed" : "pointer",
-                    opacity: disabled ? 0.4 : 1,
-                    fontSize: 12,
-                    fontWeight: active ? 600 : 400,
-                    textAlign: "left",
-                    transition: "background 0.12s, color 0.12s",
-                  }}
-                  title={t(labelKey)}
-                  aria-label={t(labelKey)}
-                  onMouseEnter={(event) => {
-                    if (!active && !disabled) {
-                      event.currentTarget.style.background = "var(--bg-hover)";
-                      event.currentTarget.style.color = "var(--text)";
-                    }
-                  }}
-                  onMouseLeave={(event) => {
-                    if (!active) {
-                      event.currentTarget.style.background = "none";
-                      event.currentTarget.style.color = "var(--text-muted)";
-                    }
-                  }}
-                >
-                  <Icon size={16} aria-hidden="true" />
-                  {!isMobile && <span>{t(labelKey)}</span>}
-                </button>
-              );
-            })}
+          <nav className="settings-modal-nav" aria-label={t("desktop.settingsSections")}>
+            {groups.length === 0 ? (
+              <p className="settings-modal-empty">{t("desktop.settingsNoResults")}</p>
+            ) : groups.map((group) => (
+              <div className="settings-modal-nav-group" key={group.id}>
+                <div className="settings-modal-group-label">{t(group.labelKey)}</div>
+                {group.tabs.map(({ id, labelKey, Icon }) => {
+                  const disabled = (id === "skills" || id === "plugins") && !cwd;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className="settings-modal-nav-item"
+                      disabled={disabled}
+                      onClick={() => setActiveTab(id)}
+                      aria-current={activeTab === id ? "page" : undefined}
+                      title={t(labelKey)}
+                    >
+                      <Icon size={16} aria-hidden="true" />
+                      <span>{t(labelKey)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </nav>
+          <div className="settings-modal-rail-footer">
+            <button type="button" onClick={() => { void requestClose(); }} disabled={closing}>
+              <ArrowLeft size={16} aria-hidden="true" />
+              <span>{t("desktop.settingsBack")}</span>
+            </button>
+          </div>
+        </aside>
 
+        <main className="settings-modal-main">
+          <header className="settings-modal-heading">
+            <div className="settings-modal-heading-copy">
+              <h1>{t(SETTINGS_TABS.find(({ id }) => id === activeTab)?.labelKey ?? "desktop.settings")}</h1>
+              {activeTab === "models" ? (
+                <code>~/.pi/agent/models.json</code>
+              ) : cwd && (
+                <code title={cwd}>{cwd}</code>
+              )}
+            </div>
+            <button
+              type="button"
+              className="settings-modal-close"
+              onClick={() => { void requestClose(); }}
+              disabled={closing}
+              title={t("desktop.closeSettings")}
+              aria-label={t("desktop.closeSettings")}
+            >
+              <X size={19} aria-hidden="true" />
+            </button>
+          </header>
+          <div className="settings-modal-page" style={{ pointerEvents: closing ? "none" : undefined }}>
           <div style={{ display: activeTab === "server" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <ServerSwitchConfig />
           </div>
@@ -293,7 +257,7 @@ export function SettingsModal({
             <McpConfig sessionId={sessionId} />
           </div>
           <div style={{ display: activeTab === "subagents" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <AgentsConfig cwd={cwd ?? ""} sessionId={sessionId} onClose={onCloseAction} />
+            <AgentsConfig embedded cwd={cwd ?? ""} sessionId={sessionId} onClose={onCloseAction} />
           </div>
           <div style={{ display: activeTab === "tools" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0 }}>
             <ToolsConfig sessionId={sessionId} onSessionReloaded={onSessionReloadedAction} />
@@ -304,12 +268,11 @@ export function SettingsModal({
           <div style={{ display: activeTab === "import" ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
             <ImportSessionsConfig onSessionsChanged={onSessionsChanged} />
           </div>
-        </div>
-        {closeError && (
-          <div style={{ padding: "6px 18px", borderTop: "1px solid var(--border)", color: "var(--status-error)", fontSize: 11 }}>
-            {closeError}
           </div>
-        )}
+          {closeError && (
+            <div className="settings-modal-close-error" role="alert">{closeError}</div>
+          )}
+        </main>
       </section>
     </div>
   );

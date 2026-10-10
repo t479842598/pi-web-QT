@@ -41,11 +41,11 @@ export function ConfigPanelShell({
       role={embedded ? undefined : "dialog"}
       aria-modal={embedded ? undefined : "true"}
       aria-label={title}
-      className={`config-panel-root ${embedded ? "is-embedded" : "is-modal"}`}
+      className={`config-panel-root settings-content-panel ${embedded ? "is-embedded" : "is-modal"}`}
     >
-      <div className="config-panel-surface" style={panelStyle}>
+      <div className="config-panel-surface settings-content-surface" style={panelStyle}>
         {!embedded && (
-          <div className="config-panel-header">
+          <div className="config-panel-header settings-content-header">
             <strong className="config-panel-title">{title}</strong>
             {subtitle && (
               <code className="config-panel-subtitle" title={subtitle}>
@@ -69,12 +69,29 @@ export function ConfigPanelShell({
   );
 }
 
+/** Settings card with the same defaults as SettingCard, but CSS-customizable surfaces. */
+export function SettingsContentCard({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="settings-content-card"
+      style={{
+        borderRadius: "var(--settings-content-card-radius, 12px)",
+        border: "var(--settings-content-card-border, 1px solid var(--border))",
+        background: "var(--settings-content-card-bg, color-mix(in srgb, var(--bg-panel) 55%, transparent))",
+        overflow: "hidden",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function ConfigSplitView({ children }: { children: ReactNode }) {
-  return <div className="config-split-view">{children}</div>;
+  return <div className="config-split-view settings-content-split">{children}</div>;
 }
 
 export function ConfigSidebar({ children }: { children: ReactNode }) {
-  return <aside className="config-sidebar">{children}</aside>;
+  return <aside className="config-sidebar settings-content-sidebar">{children}</aside>;
 }
 
 export function ConfigSidebarList({ children }: { children: ReactNode }) {
@@ -96,7 +113,7 @@ export function ConfigSidebarItem({
       type="button"
       {...props}
       aria-current={active ? "page" : undefined}
-      className={["config-sidebar-item", className].filter(Boolean).join(" ")}
+      className={["config-sidebar-item", "settings-content-sidebar-item", className].filter(Boolean).join(" ")}
     >
       {children}
     </button>
@@ -116,7 +133,7 @@ export function ConfigDetailStack({ className, ...props }: HTMLAttributes<HTMLDi
   return (
     <div
       {...props}
-      className={["config-detail-stack", className].filter(Boolean).join(" ")}
+      className={["config-detail-stack", "settings-content-detail-stack", className].filter(Boolean).join(" ")}
     />
   );
 }
@@ -125,7 +142,7 @@ export function ConfigDetailHeader({ className, ...props }: HTMLAttributes<HTMLD
   return (
     <div
       {...props}
-      className={["config-detail-header", className].filter(Boolean).join(" ")}
+      className={["config-detail-header", "settings-content-detail-header", className].filter(Boolean).join(" ")}
     />
   );
 }
@@ -149,16 +166,16 @@ export function ConfigDetailActions({ className, ...props }: HTMLAttributes<HTML
 }
 
 export function ConfigDetailTitle({ children }: { children: ReactNode }) {
-  return <div className="config-detail-title">{children}</div>;
+  return <div className="config-detail-title settings-content-section-title">{children}</div>;
 }
 
 export function ConfigSectionTitle({ children }: { children: ReactNode }) {
-  return <div className="config-section-title">{children}</div>;
+  return <div className="config-section-title settings-content-section-title">{children}</div>;
 }
 
 export function ConfigField({ label, children, style }: { label: ReactNode; children: ReactNode; style?: CSSProperties }) {
   return (
-    <div className="config-field" style={style}>
+    <div className="config-field settings-content-field" style={style}>
       <span className="config-field-label">{label}</span>
       {children}
     </div>
@@ -171,7 +188,7 @@ export function ConfigEmptyState({ children }: { children: ReactNode }) {
 
 export function ConfigDetail({ children, style }: { children: ReactNode; style?: CSSProperties }) {
   return (
-    <div className="config-detail" style={style}>
+    <div className="config-detail settings-content-detail" style={style}>
       {children}
     </div>
   );
@@ -179,7 +196,7 @@ export function ConfigDetail({ children, style }: { children: ReactNode; style?:
 
 export function ConfigFooter({ status, children }: { status?: ReactNode; children?: ReactNode }) {
   return (
-    <footer className="config-footer">
+    <footer className="config-footer settings-content-footer">
       <div className="config-footer-status">{status}</div>
       <div className="config-footer-actions">{children}</div>
     </footer>

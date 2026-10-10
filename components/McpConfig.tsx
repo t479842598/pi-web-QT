@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { PencilSimple, PlusIcon, Trash } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
-import { SettingCard, SettingNote, SettingRow, SettingRowLast } from "./SettingCard";
+import { SettingNote, SettingRow, SettingRowLast } from "./SettingCard";
+import { SettingsContentCard } from "./SettingsUi";
 import type { McpConfigResponse, McpServerConfig, McpTransport } from "@/lib/api-types";
 import { normalizeMcpTransport } from "@/lib/api-types";
 import { validateMcpServer } from "@/lib/mcp-config";
@@ -273,17 +274,17 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
   const entries = Object.entries(servers).filter(([name]) => name !== VISION_SERVER_NAME);
 
   return (
-    <div style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className="settings-content-panel settings-content-stack" style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="settings-content-card-host" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {!loaded ? (
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.loading")}</div>
         ) : loadError ? (
           <div style={{ fontSize: 12, color: "var(--status-error)" }}>{loadError}</div>
         ) : (
           <>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div className="settings-content-section-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>{t("desktop.mcpServers")}</div>
+                <div className="settings-content-section-title" style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>{t("desktop.mcpServers")}</div>
                 <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {filePath}
                 </div>
@@ -318,18 +319,18 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
             <VisionMcpConfig sessionId={sessionId} />
 
             {entries.length === 0 && !editing ? (
-              <SettingCard>
+              <SettingsContentCard>
                 <SettingRowLast>
                   <div style={{ padding: "14px 0", fontSize: 12, color: "var(--text-dim)" }}>
                     {servers[VISION_SERVER_NAME] ? t("desktop.mcpEmptyOther") : t("desktop.mcpEmpty")}
                   </div>
                 </SettingRowLast>
-              </SettingCard>
+              </SettingsContentCard>
             ) : (
               entries.map(([name, server]) => (
-                <SettingCard key={name}>
+                <SettingsContentCard key={name}>
                   <SettingRowLast>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 0", minWidth: 0 }}>
+                    <div className="settings-content-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 0", minWidth: 0 }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", fontFamily: "var(--font-mono)" }}>
@@ -396,14 +397,14 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                       </div>
                     </div>
                   </SettingRowLast>
-                </SettingCard>
+                </SettingsContentCard>
               ))
             )}
 
             {editing && (
-              <SettingCard>
+              <SettingsContentCard>
                 <SettingRow>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", padding: "12px 0 4px" }}>
+                  <div className="settings-content-section-title" style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", padding: "12px 0 4px" }}>
                     {editing.isNew ? t("desktop.mcpNewServer") : t("desktop.mcpEditServer", { name: editing.name })}
                   </div>
                 </SettingRow>
@@ -526,7 +527,7 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                     {saveError && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{saveError}</span>}
                   </div>
                 </SettingRowLast>
-              </SettingCard>
+              </SettingsContentCard>
             )}
 
             {saved && !editing && (

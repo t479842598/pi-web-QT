@@ -5,7 +5,8 @@ import { useI18n } from "@/hooks/useI18n";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ShellToolSettingsResponse } from "@/lib/api-types";
 import type { ToolEntry } from "@/lib/tool-presets";
-import { SettingCard, SettingRow, SettingRowLast, SettingNote } from "./SettingCard";
+import { SettingRow, SettingRowLast } from "./SettingCard";
+import { SettingsContentCard } from "./SettingsUi";
 import { SettingToggle } from "./SettingToggle";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 
@@ -134,8 +135,8 @@ export function ToolsConfig({ sessionId, onSessionReloaded }: Props) {
   }, [onSessionReloaded, sessionId]);
 
   return (
-    <div style={{ padding: 16, overflowY: "auto", minHeight: 0, flex: 1 }}>
-      <SettingCard>
+    <div className="settings-content-panel settings-content-card-host settings-content-stack" style={{ padding: 16, overflowY: "auto", minHeight: 0, flex: 1 }}>
+      <SettingsContentCard>
         <SettingRow>
           <SettingToggle
             label={t("desktop.usePowerShell")}
@@ -151,14 +152,14 @@ export function ToolsConfig({ sessionId, onSessionReloaded }: Props) {
               : (shellError ?? t("desktop.shellToolMacOnly"))}
           </div>
         </SettingRowLast>
-      </SettingCard>
+      </SettingsContentCard>
 
       {/* Per-extension-tool switches. These tools are injected regardless of
           the composer's tool preset, so this is the only way to keep a
           write-capable one out of a read-only session. */}
-      <SettingCard>
+      <SettingsContentCard>
         <SettingRow>
-          <div style={{ padding: "12px 0 4px", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+          <div className="settings-content-section-title" style={{ padding: "12px 0 4px", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
             {t("desktop.extensionToolsTitle")}
           </div>
           <div style={{ paddingBottom: 8, fontSize: 11, lineHeight: 1.5, color: "var(--text-dim)" }}>
@@ -184,21 +185,21 @@ export function ToolsConfig({ sessionId, onSessionReloaded }: Props) {
             {disabledError ?? (savingDisabled ? t("desktop.saving") : t("desktop.extensionToolsApplyNote"))}
           </div>
         </SettingRowLast>
-      </SettingCard>
+      </SettingsContentCard>
 
       {/* Read-only inventory of the tools the live session exposes. */}
-      <SettingCard>
+      <SettingsContentCard>
         <SettingRowLast>
-          <div style={{ padding: "12px 0 4px", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+          <div className="settings-content-section-title" style={{ padding: "12px 0 4px", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
             {t("tools.title")}
           </div>
           <div style={{ paddingBottom: 10, fontSize: 11, lineHeight: 1.5, color: "var(--text-dim)" }}>
             {sessionId ? t("desktop.toolsListHint") : t("desktop.toolsListNoSession")}
           </div>
         </SettingRowLast>
-      </SettingCard>
+      </SettingsContentCard>
       {sessionId && (
-        <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="settings-content-card" style={{ border: "var(--settings-content-card-border, 1px solid var(--border))", borderRadius: 8, overflow: "hidden" }}>
           <ToolDefinitionsPanel loading={toolsLoading} tools={tools} translate={t} />
         </div>
       )}

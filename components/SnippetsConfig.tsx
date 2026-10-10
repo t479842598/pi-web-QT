@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ListBullets, Plus, Trash, PencilSimple, X } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
-import { SettingCard, SettingRow, SettingRowLast, SettingNote } from "./SettingCard";
+import { SettingRow, SettingRowLast, SettingNote } from "./SettingCard";
+import { SettingsContentCard } from "./SettingsUi";
 
 /** Broadcast when snippets change so ChatInput refreshes its autocomplete. */
 export const SNIPPETS_CHANGED_EVENT = "pi:snippets-changed";
@@ -110,12 +111,13 @@ export function SnippetsConfig() {
   }, [editing, load, notifyChanged]);
 
   return (
-    <SettingCard>
-      <SettingRow>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "12px 0" }}>
+    <div className="settings-content-panel settings-content-card-host settings-content-stack" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", padding: "var(--settings-content-panel-padding, 20px 22px)" }}>
+      <SettingsContentCard>
+        <SettingRow>
+          <div className="settings-content-section-header" style={{ display: "flex", alignItems: "center", gap: 7, padding: "12px 0" }}>
           <ListBullets size={15} aria-hidden="true" />
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.snippets")}</div>
+            <div className="settings-content-section-title" style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.snippets")}</div>
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t("desktop.snippetsDesc")}</div>
           </div>
         </div>
@@ -161,11 +163,12 @@ export function SnippetsConfig() {
               {snippets.map((snippet) => (
                 <div
                   key={snippet.id}
+                  className="settings-content-card settings-content-row"
                   style={{
                     display: "flex", alignItems: "center", gap: 8,
                     padding: "6px 10px",
-                    background: "var(--bg-panel)",
-                    border: "1px solid var(--border)",
+                    background: "var(--settings-content-card-bg, var(--bg-panel))",
+                    border: "var(--settings-content-card-border, 1px solid var(--border))",
                     borderRadius: 6,
                   }}
                 >
@@ -199,6 +202,7 @@ export function SnippetsConfig() {
       <SettingRowLast>
         <SettingNote>{t("desktop.snippetHint")}</SettingNote>
       </SettingRowLast>
-    </SettingCard>
+      </SettingsContentCard>
+    </div>
   );
 }

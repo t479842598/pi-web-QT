@@ -462,7 +462,7 @@ export function AgentsConfig({
     <ConfigPanelShell embedded={embedded} title={t("common.agents")} subtitle={shortenPath(cwd)} closeLabel={t("agents.close")} onClose={onClose}>
       <div className="agents-feature-setting">
         <div className="agents-feature-copy">
-          <strong>{t("agents.builtInTitle")}</strong>
+          <strong className="settings-content-section-title">{t("agents.builtInTitle")}</strong>
           <span>{t("agents.builtInDescription")}</span>
           {reloadNeeded && <span role="status" className="agents-feature-reload-notice">{t("agents.reloadRequired")}</span>}
         </div>

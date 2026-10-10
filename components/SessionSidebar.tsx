@@ -3,8 +3,9 @@ import { cancelSessionTitleRequest, generateSessionTitleRequest } from "@/lib/se
 
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, memo, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowClockwise, Archive, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, GitBranch, GitFork, Lightning, List, MagnifyingGlass, PencilSimple, Plug, Plus, PushPin, Sparkle, Stack, StackSimple, Trash, UploadSimple, X } from "@phosphor-icons/react";
-import { SETTINGS_TABS, type SettingsTab } from "./SettingsModal";
+import { ArrowClockwise, Archive, CaretDown, CaretRight, Check, Cpu, DownloadSimple, FolderOpen, Gear, GitBranch, GitFork, Lightning, List, MagnifyingGlass, PencilSimple, Plug, Plus, PushPin, Sparkle, SquaresFour, Stack, StackSimple, Trash, UploadSimple, X } from "@phosphor-icons/react";
+import type { SettingsTab } from "./SettingsModal";
+import packageInfo from "@/package.json";
 import type { SessionInfo } from "@/lib/types";
 import { sameIdSet } from "@/lib/id-set";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -29,10 +30,6 @@ import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { samePath } from "@/lib/paths";
 import { sessionDisplayTitle } from "@/lib/session-display-title";
 import { showBrowserNotification } from "@/lib/browser-notifications";
-
-/** Settings sections surfaced as sidebar-footer shortcuts. Kept small on
- *  purpose — the footer is a quick-jump strip, not a full settings index. */
-const SIDEBAR_SETTINGS_TABS = new Set<SettingsTab>(["models", "skills", "plugins", "mcp", "subagents", "display"]);
 
 function sessionListUrl(summary: boolean, force: boolean): string {
   if (summary) return "/api/sessions?summary=1";
@@ -61,6 +58,10 @@ interface Props {
   selectedFilePath?: string | null;
   /** Open the settings modal (used by the title-generation failure banner). */
   onOpenSettings?: (tab?: SettingsTab) => void;
+  /** Existing desktop task-board view, shared with the title bar. */
+  onToggleTasks?: () => void;
+  showTasks?: boolean;
+  tasksBoardEnabled?: boolean;
   selectedSessionStats?: SessionStatsInfo | null;
   workspaceControlsHosts?: {
     title?: HTMLElement | null;
@@ -310,7 +311,7 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
 type SessionViewStyle = "list" | "groups";
 const SESSION_VIEW_STYLE_KEY = "pi-web:session-view-style";
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onFileCreated, onFileDeleted, selectedFilePath, onOpenSettings, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true, onOpenCommandPalette, cycleSidebarFormRef, onSessionsLoaded }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, onAtMentions, onFileCreated, onFileDeleted, selectedFilePath, onOpenSettings, onToggleTasks, showTasks = false, tasksBoardEnabled = true, selectedSessionStats, workspaceControlsHosts, showWorkspaceControls = true, onOpenCommandPalette, cycleSidebarFormRef, onSessionsLoaded }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   // Tracked in a ref only: the version is compared against the polled value to
@@ -2518,30 +2519,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         />
       )}
       {onOpenSettings && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 5, padding: "7px 8px", borderTop: "1px solid var(--border)", flexShrink: 0, marginTop: "auto" }}>
-          {/* Shortcuts to the settings sections a sidebar user reaches for most.
-              Derived from the modal's own tab registry so the two cannot drift
-              (the previous hardcoded trio silently omitted MCP). */}
-          {SETTINGS_TABS
-            .filter(({ id }) => SIDEBAR_SETTINGS_TABS.has(id))
-            .map(({ id: tab, labelKey, Icon }) => {
-              const label = t(labelKey as Parameters<typeof t>[0]);
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => onOpenSettings(tab)}
-                  title={label}
-                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, minWidth: 0, padding: "6px 4px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text-muted)", cursor: "pointer", fontSize: 10.5 }}
-                  onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; }}
-                  onMouseLeave={(event) => { event.currentTarget.style.background = "var(--bg-panel)"; event.currentTarget.style.color = "var(--text-muted)"; }}
-                >
-                  <Icon size={13} aria-hidden="true" />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-                </button>
-              );
-            })}
-        </div>
+        <footer className="sidebar-utility-bar" aria-label={t("desktop.settings")}>
+          <div className="sidebar-utility-actions">
+            <button type="button" className="sidebar-utility-button" onClick={() => onOpenSettings()} title={t("desktop.settings")} aria-label={t("desktop.settings")}>
+              <Gear size={16} aria-hidden="true" />
+            </button>
+            <button type="button" className="sidebar-utility-button" onClick={() => onOpenSettings("plugins")} disabled={!selectedCwd && !selectedCwdProp} title={t("desktop.plugins")} aria-label={t("desktop.plugins")}>
+              <Plug size={16} aria-hidden="true" />
+            </button>
+            {!isMobile && tasksBoardEnabled && onToggleTasks && (
+              <button type="button" className="sidebar-utility-button" onClick={onToggleTasks} title={showTasks ? t("desktop.hideTaskBoard") : t("desktop.showTaskBoard")} aria-label={showTasks ? t("desktop.hideTaskBoard") : t("desktop.showTaskBoard")} aria-pressed={showTasks}>
+                <SquaresFour size={16} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          <span className="sidebar-utility-version">v{packageInfo.version}</span>
+        </footer>
       )}
     </div>
     </>

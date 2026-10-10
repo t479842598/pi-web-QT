@@ -1300,6 +1300,9 @@ export function AppShell() {
           // so any id it passes is valid by construction.
           openSettings(tab ?? "models");
         }}
+        onToggleTasks={handleToggleTasks}
+        showTasks={showTasks}
+        tasksBoardEnabled={tasksBoardEnabled}
         explorerRefreshKey={explorerRefreshKey}
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
@@ -1959,7 +1962,6 @@ export function AppShell() {
         rightPanelOpen={rightPanelOpen}
         onToggleFilePanel={() => setRightPanelOpen((v) => !v)}
         onRefreshSession={() => setSessionKey((k) => k + 1)}
-        onOpenSettings={() => openSettings("models")}
         sessionTitle={sessionTitle}
         onWorkspaceControlsHostChange={setTitleWorkspaceControlsHost}
         onTitleRightHostChange={setTitleRightWorkspaceControlsHost}
