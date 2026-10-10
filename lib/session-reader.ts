@@ -18,7 +18,7 @@ import { resolveProject, type ProjectInfo } from "./worktree";
 import { readSettingsJsonUnlocked } from "./settings-lock";
 import { readSessionArchive } from "./session-archive";
 import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
-import { listSessionsIncremental, type ScannedSessionInfo } from "./session-list-scanner";
+import { checkSessionMembership, listSessionsIncremental, type ScannedSessionInfo } from "./session-list-scanner";
 
 /** Listing implementation (overridable via globalThis.__piListSessionsOverride for tests). */
 export const listSessions: typeof listSessionsIncremental = listSessionsIncremental;
@@ -385,6 +385,9 @@ export function invalidateSessionListCache(): void {
 }
 
 export function getSessionListVersion(): number {
+  // Session files another process (the pi CLI) creates or deletes bump no
+  // version. Every poll of the version may start a filename check instead.
+  void checkSessionMembership(defaultSessionsDir(), invalidateSessionListCache);
   return globalThis.__piSessionListGeneration ?? 0;
 }
 
