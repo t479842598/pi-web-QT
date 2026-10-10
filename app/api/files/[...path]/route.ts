@@ -24,6 +24,7 @@ import {
   MAX_UPLOAD_REQUEST_BYTES,
   MAX_UPLOAD_TOTAL_BYTES,
   parseUploadConflictStrategy,
+  replaceUploadFile,
   validateUploadFileNames,
 } from "@/lib/file-upload";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
@@ -407,17 +408,12 @@ export async function POST(
         continue;
       }
 
-      if (conflictSet.has(file.name)) {
-        try {
-          fs.unlinkSync(destination);
-        } catch (error) {
-          errors.push({ name: file.name, error: error instanceof Error ? error.message : String(error) });
-          continue;
-        }
-      }
-
       try {
-        fs.writeFileSync(destination, bytes, { flag: "wx" });
+        if (conflictSet.has(file.name)) {
+          replaceUploadFile(destination, bytes);
+        } else {
+          fs.writeFileSync(destination, bytes, { flag: "wx" });
+        }
         uploaded.push(file.name);
       } catch (error) {
         errors.push({ name: file.name, error: error instanceof Error ? error.message : String(error) });
