@@ -29,6 +29,13 @@
     "next.config.ts",
     "package.json"
   ],
+  "browserslist": [
+    "chrome 111",
+    "edge 111",
+    "firefox 111",
+    "safari 16.2",
+    "ios_saf 16.2"
+  ],
   "scripts": {
     "dev": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js nextDev",
     "dev:lan": "node bin/fix-pi-agent-undici.js && node bin/with-memory-limit.js node_modules/.bin/next dev -H 0.0.0.0 -p 0 --turbopack",
