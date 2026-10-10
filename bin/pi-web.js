@@ -13,6 +13,8 @@ const os = require("os");
 const { parseLaunchOptions, assessLanExposure } = require("./pi-web-options");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { wireChildProcessLifecycle } = require("./process-lifecycle");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { rotatePreviewSecrets, getRotationWarning } = require("./rotate-preview-secrets");
 
 // Apply the undici CVE fix (formerly a postinstall hook). Running it here —
 // before the pi agent's undici can be loaded — keeps installs quiet under
@@ -132,6 +134,14 @@ const watchdogPreload = path.join(__dirname, "watchdog-preload.js");
 if (!fs.existsSync(nextDir)) {
   console.error("Build artifacts not found. Please report this issue.");
   process.exit(1);
+}
+
+// Replace the published preview-mode secrets with fresh random values so the
+// previewModeId baked into the npm tarball cannot be used to skip the proxy
+// (via the x-prerender-revalidate header). Must happen before `next start`.
+const rotation = rotatePreviewSecrets(nextDir);
+if (!rotation.ok) {
+  console.warn(getRotationWarning(rotation.reason));
 }
 
 const lanExposure = assessLanExposure(hostname);
