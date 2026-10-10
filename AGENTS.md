@@ -231,6 +231,7 @@ pi keeps steer/follow-up queues in memory only — a server restart would lose t
 
 ### File access allow-list
 - `/api/files` is intentionally not a general filesystem browser. Allowed roots come from session cwds, their resolved project roots, `~/pi-cwd-*`, and roots explicitly added with `allowFileRoot()`.
+- `/api/files/...?sessionId=` also reads (never lists) a file outside the roots when that exact path appears in the session, so a chat link to it opens (`lib/session-file-references-core.ts`). Four things never count: transcript system messages (they carry every tool schema), the codemode script store, `context_edit` replacements (the UI never shows them, and they often restate a tool result), and the result of any tool other than pi's coding tools and the subagent tools — MCP, codemode, third-party extensions relay text a remote party controls, and any string in it would become readable. Such a result still authorizes its `details.fullOutputPath` and the arguments of the coding-tool calls it made through `ctx.executeTool()` (`nestedCalls`); arguments of its nested MCP calls do not count, because a script hands one MCP result to the next call without the model reading it. User and assistant messages, the model's own tool call arguments (MCP calls included) and the other entries count as before. Tools are matched by name, so keep the list in step with `CODING_TOOL_NAMES`.
 - `/api/cwd/validate`, `/api/default-cwd`, and `/api/worktrees` call `allowFileRoot()` when they make a new location browsable.
 - Allowed roots are stored slash-normalized, but that is a Set-key convention, not a correctness requirement: `isPathWithinRoots()` (`lib/path-security.ts`, the single implementation behind `isFilePathAllowed()`) re-resolves and case-folds both sides, so either path form authorizes correctly. Keep that one implementation — it is the security boundary.
 - A UNC cwd (`\\host\share\dir`) must survive the `/api/files/[...path]` round-trip. `encodeFilePathForApi()` folds the `//` root into the first segment (`%2F%2Fhost`) because a literal `//` URL prefix is 308-normalized away before routing; `filePathFromApiSegments()` decodes it back. Never split UNC paths into segments and rejoin them — that silently turns `\\host\share` into the relative-looking `host/share` and every allow-check fails with 403.
@@ -341,3 +342,13 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
   3. `npm run build` 后 `npm publish --access public` 发 NPM。
   4. git commit + 打 annotated tag `v<新版本>` + push main 与 tag。
   5. `gh release create` 建 GitHub Release（正文引用 CHANGELOG 对应条目）。
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
