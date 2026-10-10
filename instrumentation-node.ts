@@ -1,4 +1,4 @@
-import { configureHttpDispatcher } from "@/lib/http-dispatcher";
+import { configureHttpDispatcher, readHttpIdleTimeoutMs } from "@/lib/http-dispatcher";
 import { closeAllAgentEventStreams } from "@/lib/agent-event-stream";
 
 export async function registerNodeInstrumentation(): Promise<void> {
@@ -12,7 +12,11 @@ export async function registerNodeInstrumentation(): Promise<void> {
   const { readProxyConfig, applyProxyEnv } = await import("@/lib/proxy-config");
   applyProxyEnv(readProxyConfig());
 
-  configureHttpDispatcher();
+  // The pi CLI applies settings' `httpIdleTimeoutMs` to the same undici
+  // body/header timeouts, so a Web UI session gets the timeout the user
+  // configured. Without it the built-in five minutes aborts a provider stream
+  // that stays quiet for longer, which a CLI session tolerates.
+  configureHttpDispatcher(readHttpIdleTimeoutMs());
 
   // Start the work-task engine (single-process lock; the first server to
   // register owns it). Import is async so the engine's heavier deps (pi SDK)
@@ -31,4 +35,11 @@ export async function registerNodeInstrumentation(): Promise<void> {
   const shutdownStreams = () => closeAllAgentEventStreams();
   process.on("SIGINT", shutdownStreams);
   process.on("SIGTERM", shutdownStreams);
+
+  // Next evaluates a route's code on its first request, so the first
+  // /api/sessions used to pay for importing the whole pi SDK, seconds on
+  // Windows (#964). Start that import now, unawaited so register() stays fast:
+  // it overlaps the browser opening, and the routes reuse Node's cached module.
+  // A failure is left for the routes' own import to report.
+  import("@earendil-works/pi-coding-agent").catch(() => {});
 }
