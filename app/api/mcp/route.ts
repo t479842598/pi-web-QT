@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { existsSync, readFileSync } from "fs";
+import { readFileSync } from "fs";
 import path from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "@/lib/atomic-file";
@@ -17,15 +17,14 @@ function mcpFilePath(): string {
   return path.join(getAgentDir(), "mcp.json");
 }
 
-function readMcpServers(): Record<string, McpServerConfig> {
-  const filePath = mcpFilePath();
-  if (!existsSync(filePath)) return {};
-  try {
-    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as { mcpServers?: unknown };
-    return normalizeMcpServers(isRecord(parsed) ? parsed.mcpServers : undefined);
-  } catch {
-    return {};
+class McpConfigReadError extends Error {
+  constructor() {
+    super("Cannot read mcp.json: configuration is unreadable or invalid. Repair it before saving.");
   }
+}
+
+function readMcpServers(): Record<string, McpServerConfig> {
+  return normalizeMcpServers(readMcpDocument().mcpServers);
 }
 
 export async function GET(req: Request) {
@@ -40,7 +39,7 @@ export async function GET(req: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
-      { status: 500 },
+      { status: error instanceof McpConfigReadError ? 422 : 500 },
     );
   }
 }
@@ -48,13 +47,22 @@ export async function GET(req: Request) {
 /** Read the whole mcp.json document so a write preserves sibling keys the
  *  editor does not manage (notably the extension's `settings` block). */
 function readMcpDocument(): Record<string, unknown> {
-  const filePath = mcpFilePath();
-  if (!existsSync(filePath)) return {};
+  let content: string;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(filePath, "utf8"));
-    return isRecord(parsed) ? parsed : {};
+    content = readFileSync(mcpFilePath(), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new McpConfigReadError();
+  }
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (!isRecord(parsed)) throw new McpConfigReadError();
+    if (parsed.mcpServers !== undefined && (!isRecord(parsed.mcpServers)
+      || !Object.values(parsed.mcpServers).every(isRecord))) throw new McpConfigReadError();
+    return parsed;
   } catch {
-    return {};
+    // Parsing errors can quote credentials; never return their source excerpts.
+    throw new McpConfigReadError();
   }
 }
 
@@ -68,7 +76,7 @@ export async function PUT(req: Request) {
   }
 
   try {
-    const body = (await req.json()) as { mcpServers?: unknown };
+    const body: unknown = await req.json().catch(() => null);
     if (!isRecord(body) || !isRecord(body.mcpServers)) {
       return NextResponse.json({ error: "mcpServers must be an object" }, { status: 400 });
     }
@@ -85,7 +93,7 @@ export async function PUT(req: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
-      { status: 500 },
+      { status: error instanceof McpConfigReadError ? 409 : 500 },
     );
   }
 }

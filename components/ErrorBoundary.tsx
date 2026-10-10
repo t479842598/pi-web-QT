@@ -42,7 +42,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <div
           style={{
-            height: "100dvh",
+            height: "var(--app-viewport-height)",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",

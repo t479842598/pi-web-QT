@@ -2,6 +2,13 @@
 
 本文说明 pi-web 的计划模式（plan）与目标模式（goal）如何工作、此前为什么坏掉，以及 v0.17.7 的修法与实证过程。
 
+## 2026-10-08：Shell 审批规则更新
+
+“变更前确认”（`ask`）模式不再通过 Shell 命令前缀判断是否免审批。所有 `bash` / `powershell` 命令，包括 `ls`、`cat`、`git status`，都需要确认，除非命中明确的允许规则；专用读取、搜索工具保持可用。规则统一为 `deny > ask > allow`，在 `auto` / `yolo` 中显式拒绝或询问规则也优先。
+
+例如 `Bash=command:git status` 只允许该命令；PowerShell 采用同样的 `command:` subject。原有 nested bash 的精确授权检查及 `auto` / `yolo` 回退保持；取消前缀豁免不等于隔离 Shell，广泛的允许规则仍会授予广泛权限。下面 v0.17.7 的内容为历史实现记录，不代表本次完成真实 SDK 或三端端到端验收。
+
+
 ---
 
 ## 一、先搞清楚「扩展工具始终可用」是哪些工具

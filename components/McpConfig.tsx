@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { PencilSimple, PlusIcon, Trash } from "@phosphor-icons/react";
+import { MagnifyingGlassIcon, PencilSimple, PlusIcon, Trash } from "@phosphor-icons/react";
 import { useI18n } from "@/hooks/useI18n";
 import { SettingNote, SettingRow, SettingRowLast } from "./SettingCard";
 import { SettingsContentCard } from "./SettingsUi";
@@ -46,14 +46,15 @@ const emptyForm: FormState = {
 
 const inputStyle: React.CSSProperties = {
   padding: "7px 9px",
-  background: "var(--bg-panel)",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
+  background: "var(--ds-tile-hover)",
+  border: "none",
+  borderRadius: "var(--radius-2xs)",
   color: "var(--text)",
   fontSize: 12,
   fontFamily: "var(--font-mono)",
   width: "100%",
   boxSizing: "border-box",
+  outline: "none",
 };
 
 function labelStyle(): React.CSSProperties {
@@ -161,6 +162,7 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [query, setQuery] = useState("");
 
   const loadConfig = useCallback(async () => {
     setLoadError(null);
@@ -271,7 +273,14 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
 
   // The built-in deepseek-vision server is managed from its own dedicated
   // card (VisionMcpConfig) — keep it out of the generic server list.
-  const entries = Object.entries(servers).filter(([name]) => name !== VISION_SERVER_NAME);
+  const allEntries = Object.entries(servers).filter(([name]) => name !== VISION_SERVER_NAME);
+  const normalizedQuery = query.trim().toLowerCase();
+  const entries = normalizedQuery
+    ? allEntries.filter(([name, server]) =>
+        name.toLowerCase().includes(normalizedQuery)
+        || (server.command ?? "").toLowerCase().includes(normalizedQuery)
+        || (typeof server.url === "string" ? server.url.toLowerCase() : "").includes(normalizedQuery))
+    : allEntries;
 
   return (
     <div className="settings-content-panel settings-content-stack" style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
@@ -313,6 +322,18 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                 </button>
               </div>
             </div>
+
+            {allEntries.length > 0 && (
+              <label className="settings-search-pill" style={{ display: "flex" }}>
+                <MagnifyingGlassIcon size={14} style={{ color: "var(--text-dim)", flexShrink: 0 }} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t("desktop.mcpSearchPlaceholder")}
+                  aria-label={t("desktop.mcpSearchPlaceholder")}
+                />
+              </label>
+            )}
 
             <SettingNote>{t("desktop.mcpRestartNote")}</SettingNote>
 

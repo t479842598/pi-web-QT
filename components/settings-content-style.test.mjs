@@ -33,13 +33,18 @@ const hasClass = (found, tag, name) => found.some((el) =>
 
 test("shared toggle and section expose independent, stylable row and heading hooks", async () => {
   const { source, found } = await elements("SettingToggle");
+  // Settings moved to border-free "tile" primitives: each row is a
+  // .settings-row tile and the label/description use the shared copy hooks.
+  for (const name of [
+    "settings-row", "settings-row-copy", "settings-row-title", "settings-row-description",
+    "settings-toggle", "settings-toggle-knob",
+  ]) assert.ok(hasClass(found, "*", name), name);
+  // The section wrapper still uses the card/section hooks.
   for (const [tag, name] of [
-    ["label", "settings-content-row"], ["span", "settings-content-row-label"],
-    ["span", "settings-content-row-description"], ["section", "settings-content-card"],
-    ["h2", "settings-content-section-title"], ["p", "settings-content-section-description"],
+    ["section", "settings-content-card"], ["h2", "settings-content-section-title"],
+    ["p", "settings-content-section-description"],
   ]) assert.ok(hasClass(found, tag, name), `${tag}.${name}`);
-  assert.match(source, /--settings-content-row-padding/);
-  assert.match(source, /--settings-content-section-divider/);
+  assert.match(source, /--settings-content-section-padding/);
   assert.doesNotMatch(source, /onMouse(?:Enter|Leave)/, "hover must not overwrite CSS backgrounds");
   assert.ok(found.some((el) => el.tag === "button" && el.attributes.role === '"switch"'));
 });
@@ -74,10 +79,19 @@ test("cards, headers and split editors have stable styling hooks", async () => {
     assert.ok(hasClass(found, "*", "settings-content-card") ||
       (panel === "ChatConfig" && found.some((el) => el.tag === "SettingSection")), `${panel} card`);
   }
-  for (const panel of ["ModelsConfig", "SkillsConfig", "PluginsConfig"]) {
+  // Models and Plugins moved from a two-pane split to a single-column list
+  // (PI-Desktop shape); Skills still uses the split. Assert the hooks each
+  // panel actually relies on rather than a fixed split shape.
+  for (const panel of ["ModelsConfig", "PluginsConfig"]) {
     const { found } = await elements(panel);
-    for (const name of ["settings-content-surface", "settings-content-split", "settings-content-sidebar", "settings-content-detail", "settings-content-footer"]) {
+    for (const name of ["settings-content-surface", "settings-content-detail", "settings-content-footer"]) {
       assert.ok(hasClass(found, "*", name), `${panel} ${name}`);
+    }
+  }
+  {
+    const { found } = await elements("SkillsConfig");
+    for (const name of ["settings-content-surface", "settings-content-split", "settings-content-sidebar", "settings-content-detail", "settings-content-footer"]) {
+      assert.ok(hasClass(found, "*", name), `SkillsConfig ${name}`);
     }
   }
   for (const panel of ["ProxyConfig", "FeaturesConfig", "LogsConfig", "SnippetsConfig", "UsageConfig", "McpConfig", "ToolsConfig", "ImportSessionsConfig"]) {

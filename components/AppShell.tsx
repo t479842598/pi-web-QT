@@ -24,6 +24,7 @@ import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { useTheme } from "@/hooks/useTheme";
+import { useFontScaleInitialise } from "@/hooks/useFontScale";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -105,6 +106,9 @@ export function AppShell() {
   }, [searchParams]);
   const initialNavigationMemo = useMemo(() => initialNavigation, [initialNavigation]);
   const { isDark, toggleTheme } = useTheme();
+  // Applies the persisted global font scale to :root on load. Kept here so the
+  // whole app (not just the settings page) scales.
+  useFontScaleInitialise();
   const { locale, t } = useI18n();
   const translate = t;
   const isMobile = useIsMobile();
@@ -1883,7 +1887,7 @@ export function AppShell() {
         }
       }
     `}</style>
-    <div style={{ display: "flex", flexDirection: "row", height: "100dvh", overflow: "hidden", background: "var(--bg-panel)" }}>
+    <div style={{ display: "flex", flexDirection: "row", height: "var(--app-viewport-height)", overflow: "hidden", background: "var(--bg-panel)" }}>
       {/* Sidebar: its own full-height column beside the main region, showing the
           shell background so the two areas read as separate surfaces (ZCode).
           macOS draws its native traffic lights at the window's top-left corner

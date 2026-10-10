@@ -15,6 +15,8 @@ import { createRequire } from "module";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { normalizeFilePathSlashes } from "./file-paths";
 import { writePrivateFileAtomicSync } from "./atomic-file";
+import { readModelsConfig } from "./models-config-store";
+import { restoreSessionFiles } from "./backup-sessions";
 
 /**
  * Global backup & cross-platform restore for ~/.pi/agent/.
@@ -226,7 +228,7 @@ function redactApiKeys(modelsJson: Record<string, unknown>): Record<string, unkn
   const next: Record<string, Record<string, unknown>> = {};
   for (const [name, provider] of Object.entries(providers)) {
     next[name] = { ...provider };
-    if (typeof next[name].apiKey === "string") next[name].apiKey = "";
+    if (Object.hasOwn(next[name], "apiKey")) next[name].apiKey = "";
   }
   return { ...modelsJson, providers: next };
 }
@@ -269,13 +271,24 @@ export function createBackupZip(options: BackupOptions): Buffer {
     if (!existsSync(path)) continue;
     if (name === "auth.json" && !options.includeSecrets) continue;
 
-    let content: unknown = readFileSync(path, "utf8");
-    if (name === "models.json" && !options.includeSecrets) {
-      const parsed = readJsonFile(path);
-      if (parsed) content = JSON.stringify(redactApiKeys(parsed), null, 2);
-    } else if (name === "settings.json" || name === "mcp.json" || name === "models.json") {
-      const parsed = readJsonFile(path);
-      if (parsed) content = JSON.stringify(normalizeBackupPaths(parsed), null, 2);
+    let content: unknown;
+    if (name === "models.json") {
+      let parsed: Record<string, unknown>;
+      try {
+        // Use the same BOM/comment/trailing-comma support as the model panel.
+        // Never fall back to raw bytes: that bypasses credential redaction.
+        parsed = readModelsConfig(path);
+      } catch {
+        // JSON parser errors may quote credentials from the source document.
+        throw new Error("Cannot export models.json: configuration is unreadable or invalid");
+      }
+      content = JSON.stringify(normalizeBackupPaths(options.includeSecrets ? parsed : redactApiKeys(parsed)), null, 2);
+    } else {
+      content = readFileSync(path, "utf8");
+      if (name === "settings.json" || name === "mcp.json") {
+        const parsed = readJsonFile(path);
+        if (parsed) content = JSON.stringify(normalizeBackupPaths(parsed), null, 2);
+      }
     }
     addFileToZip(zip, name, String(content));
     manifest.files.push(`${BACKUP_ROOT}/${name}`);
@@ -751,6 +764,13 @@ export function restoreBackup(
     writePrivateFileAtomicSync(join(agentDir, "mcp.json"), JSON.stringify({ ...currentMcp, mcpServers: nextServers }, null, 2));
     report.restored.push("mcp.json");
     report.needsRestart.push("mcp.json");
+  }
+
+  // 5. Session history is restored without overwriting or starting any work.
+  if (selected.has("sessions")) {
+    const sessions = restoreSessionFiles(join(parsed.tempDir, BACKUP_ROOT, "sessions"), agentDir);
+    report.restored.push(...sessions.restored);
+    report.warnings.push(...sessions.warnings);
   }
 
   return { report, npmPackages: npmSpecsFromSettings(parsed) };

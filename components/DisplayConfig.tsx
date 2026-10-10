@@ -5,6 +5,7 @@ import { Moon, PaintBrush, Sun, Monitor, ArrowSquareOut, Link, CheckCircle } fro
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme, type ThemeMode } from "@/hooks/useTheme";
 import type { ThemeSetInfo, ThemePreviewColors } from "@/lib/theme";
+import { FontSizeRow } from "@/components/FontSizeRow";
 
 // ── Tag / chip helpers ───────────────────────────────────────────────────────
 
@@ -481,6 +482,11 @@ export function DisplayConfig() {
             {t("desktop.noCustomThemesHint2")}
           </p>
         )}
+      </ConfigSection>
+
+      {/* ── Appearance: global font scale ── */}
+      <ConfigSection title={t("desktop.appearance")} description={t("desktop.appearanceDescription")}>
+        <FontSizeRow />
       </ConfigSection>
 
       {/* ── Language ── */}

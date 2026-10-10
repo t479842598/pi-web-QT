@@ -750,7 +750,7 @@
   gap: 6px;
   border-width: 1px;
   border-style: solid;
-  border-radius: 5px;
+  border-radius: 9px;
   cursor: pointer;
   font-family: inherit;
   letter-spacing: 0;
@@ -843,26 +843,24 @@
   position: relative;
   flex-shrink: 0;
   width: 32px;
-  height: 18px;
+  height: 20px;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--bg-selected);
+  border: none;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--border) 70%, var(--bg));
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s;
 }
 
 .config-switch[aria-checked="true"] {
-  border-color: var(--accent);
   background: var(--accent);
 }
 
 .config-switch:not(:disabled):hover {
-  border-color: var(--text-muted);
+  background: color-mix(in srgb, var(--border) 90%, var(--bg));
 }
 
 .config-switch[aria-checked="true"]:not(:disabled):hover {
-  border-color: var(--accent-hover);
   background: var(--accent-hover);
 }
 
@@ -879,22 +877,23 @@
 
 .config-switch.is-loading:disabled {
   cursor: wait;
+  animation: settings-toggle-breathe 1.1s ease-in-out infinite;
 }
 
 .config-switch-knob {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: var(--text-muted);
+  background: var(--text-dim);
   transition: transform 0.15s, background 0.15s;
 }
 
 .config-switch[aria-checked="true"] .config-switch-knob {
-  transform: translateX(14px);
-  background: var(--bg);
+  transform: translateX(12px);
+  background: var(--accent-fg);
 }
 
 .config-switch:focus-visible {
@@ -1439,7 +1438,7 @@
 .settings-modal {
   display: flex;
   width: 100%;
-  height: 100dvh;
+  height: var(--app-viewport-height);
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
@@ -1628,14 +1627,14 @@
 /* Existing settings editors keep their data and nested panes. Their new
    presentation hooks provide a common tile rhythm under this page only. */
 .settings-modal {
-  --settings-content-card-bg: color-mix(in srgb, var(--bg-panel) 78%, var(--bg));
-  --settings-content-card-selected-bg: var(--bg-selected);
-  --settings-content-card-border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
-  --settings-content-card-radius: 12px;
+  --settings-content-card-bg: var(--ds-tile);
+  --settings-content-card-selected-bg: var(--ds-raised);
+  --settings-content-card-border: none;
+  --settings-content-card-radius: var(--radius-lg-plus);
   --settings-content-section-padding: 16px 18px;
   --settings-content-section-divider: none;
   --settings-content-row-padding: 14px 16px;
-  --settings-content-row-radius: 9px;
+  --settings-content-row-radius: var(--radius-md-plus);
   --settings-content-row-margin: 0;
   --settings-content-header-padding: 0;
   --settings-content-header-border: none;
@@ -1665,4 +1664,155 @@
 
 @media (max-width: 767px) {
   .settings-modal { --settings-content-panel-padding: 14px 16px 32px; --settings-content-detail-padding: 14px 16px 32px; }
+}
+
+/* ── Tile primitives ─────────────────────────────────────────────────────────
+   Border-free soft surfaces shared by every settings page. A .settings-panel
+   is a stack of .settings-row tiles separated by gap instead of a hairline;
+   a panel that only wraps rows goes transparent so the rows' own tiles read
+   as the rhythm. Mirrors PI-Desktop's settings.css/.ui-kit language. */
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: var(--radius-lg-plus);
+  background: var(--ds-tile);
+  border: none;
+  padding: 0;
+}
+.settings-panel.is-bare { background: transparent; }
+.settings-panel.is-padded { padding: 6px; }
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: var(--radius-md-plus);
+  background: var(--ds-tile);
+  border: none;
+  transition: background 0.12s ease;
+}
+.settings-row.is-stacked { align-items: flex-start; }
+.settings-row.is-hoverable { cursor: pointer; }
+.settings-row.is-hoverable:hover { background: var(--ds-tile-hover); }
+.settings-row.is-selected { background: var(--ds-raised); }
+.settings-row-copy { min-width: 0; flex: 1; }
+.settings-row-title {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--text);
+  line-height: 1.4;
+}
+.settings-row-description {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.settings-panel.is-bare > .settings-row { background: var(--ds-tile); }
+
+/* Borderless field: soft fill, accent ring only on focus. */
+.field-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  border: none;
+  border-radius: var(--radius-2xs);
+  background: var(--ds-tile-hover);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.field-input::placeholder { color: var(--text-dim); }
+.field-input:focus {
+  background: var(--ds-raised);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Settings toggle: 32×20 track, the accent when on, a neutral track when off. */
+.settings-toggle {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  outline: none;
+  background: color-mix(in srgb, var(--border) 70%, var(--bg));
+  transition: background 0.18s ease;
+}
+.settings-toggle[aria-checked="true"] { background: var(--accent); }
+.settings-toggle:disabled { cursor: not-allowed; opacity: 0.55; }
+.settings-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: left 0.18s ease, background 0.18s ease;
+}
+.settings-toggle[aria-checked="false"] .settings-toggle-knob { background: var(--text-dim); }
+.settings-toggle[aria-checked="true"] .settings-toggle-knob { left: 14px; }
+.settings-toggle.is-loading { animation: settings-toggle-breathe 1.1s ease-in-out infinite; }
+@keyframes settings-toggle-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* Pill segmented control used by toolbar filters (plugins, MCP, fontSize). */
+.settings-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9999px;
+  background: var(--ds-tile-deep);
+  border: none;
+}
+.settings-segmented button {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.settings-segmented button:hover { color: var(--text); }
+.settings-segmented button[aria-pressed="true"] {
+  background: var(--ds-raised);
+  color: var(--text);
+  box-shadow: var(--ds-raised-shadow);
+}
+
+/* Capsule search field used in settings toolbars. */
+.settings-search-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 9999px;
+  background: var(--ds-tile-hover);
+  border: none;
+  flex: 1;
+  min-width: 0;
+}
+.settings-search-pill input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 12.5px;
 }

@@ -118,28 +118,18 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Upstream v0.9.3: every Basic header on /api/* is a password guess, so it
-  // shares the login form's throttle (otherwise any API path, or GET
-  // /api/web-auth, answers guesses at full speed). While blocked even the
-  // right password gets 429, or the answer would leak. A Basic success does
-  // not reset the counter: Basic clients authenticate on every request, and
-  // each reset would hand an interleaved guesser a fresh short block. The
-  // throttle state lives on globalThis under a Symbol.for key, shared between
-  // the proxy bundle and route handlers in both next dev and next start.
-  // Basic itself stays valid on EVERY route, not just /api/*: the Tauri
-  // desktop shell injects it into page navigations through its local proxy
-  // (desktop/src/proxy.rs), and the Flutter client + memory watchdog send it
-  // to APIs — restricting it to /api/* would break those clients' page loads.
-  // Only API requests feed the throttle; page Basic auth is exempt.
+  // Every Basic verifier shares the throttle, including page navigations:
+  // redirect differences otherwise turn pages into an unlimited password oracle.
+  // Basic success never resets the counter, since clients send it on every request.
+  // Keep Basic valid on pages for the desktop proxy; valid cookies already bypass
+  // this branch, and static assets/headerless login stay accessible above/below.
   const authorization = request.headers.get("authorization");
   let authenticated: boolean;
   if (authorization && /^Basic\s/i.test(authorization)) {
-    if (isApiRequest) {
-      const retryAfterMs = getAuthRetryAfterMs();
-      if (retryAfterMs > 0) return tooManyAttempts(retryAfterMs);
-    }
+    const retryAfterMs = getAuthRetryAfterMs();
+    if (retryAfterMs > 0) return tooManyAttempts(retryAfterMs);
     authenticated = isValidBasicAuthorization(authorization, password);
-    if (!authenticated && isApiRequest) recordAuthFailure();
+    if (!authenticated) recordAuthFailure();
   } else {
     authenticated = false;
   }

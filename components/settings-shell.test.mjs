@@ -61,5 +61,7 @@ test("settings rail and narrow-screen styles preserve reachable navigation and t
 
 test("nested provider dialogs take Escape before the settings page", async () => {
   const models = await readFile(new URL("ModelsConfig.tsx", import.meta.url), "utf8");
-  assert.equal(models.match(/data-settings-child-dialog="true"/g)?.length, 2);
+  // AddProviderPicker, CustomProviderDialog, and the row-opened detail editor
+  // each render a child dialog that must capture Escape before the page.
+  assert.equal(models.match(/data-settings-child-dialog="true"/g)?.length, 3);
 });

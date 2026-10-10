@@ -2,40 +2,26 @@
 
 import type { ReactNode } from "react";
 
-/** Bordered surface that groups related settings rows. Rows stacked inside one
- *  card get a hairline between them, which is what makes options that belong
- *  together read as one decision instead of two unrelated lines. */
+/** Border-free tile surface that groups related settings rows. Each row inside
+ *  is its own soft tile separated by a gap, so options that belong together
+ *  read as one decision without a hairline between them. */
 export function SettingCard({ children }: { children: ReactNode }) {
   return (
-    <div
-      style={{
-        borderRadius: 12,
-        border: "1px solid var(--border)",
-        background: "color-mix(in srgb, var(--bg-panel) 55%, transparent)",
-        overflow: "hidden",
-      }}
-    >
+    <div className="settings-panel is-bare">
       {children}
     </div>
   );
 }
 
-/** Hairline-separated row inside a SettingCard. */
+/** Tile row inside a SettingCard. */
 export function SettingRow({ children }: { children: ReactNode }) {
-  return (
-    <div style={{ padding: "0 14px" }}>
-      <div style={{ borderBottom: "1px solid var(--border)" }}>
-        {children}
-      </div>
-    </div>
-  );
+  return <div className="settings-row">{children}</div>;
 }
 
-/** Final row inside a SettingCard — no trailing hairline. */
+/** Final row inside a SettingCard — kept in the API for callers; the tile
+ *  layout has no trailing hairline to suppress, so it renders like SettingRow. */
 export function SettingRowLast({ children }: { children: ReactNode }) {
-  return (
-    <div style={{ padding: "0 14px" }}>{children}</div>
-  );
+  return <div className="settings-row">{children}</div>;
 }
 
 /** An explanatory block on the same surface as the cards around it — for the
@@ -43,12 +29,9 @@ export function SettingRowLast({ children }: { children: ReactNode }) {
 export function SettingNote({ children }: { children: ReactNode }) {
   return (
     <div
+      className="settings-row is-stacked"
       style={{
-        display: "flex",
         gap: 8,
-        borderRadius: 10,
-        border: "1px solid var(--border)",
-        background: "color-mix(in srgb, var(--bg-panel) 55%, transparent)",
         padding: "10px 12px",
         fontSize: 12,
         lineHeight: 1.5,

@@ -728,7 +728,6 @@ export function PluginsConfig({
   const standaloneExtensions = useMemo(() => data?.standaloneExtensions ?? [], [data?.standaloneExtensions]);
   const selectedPackage = packages.find((pkg) => packageKey(pkg) === selected) ?? null;
   const selectedExtension = standaloneExtensions.find((extension) => extensionKey(extension) === selected) ?? null;
-  const projectResourcesLoaded = data?.projectResourcesLoaded ?? true;
 
   const groupedPackages = useMemo(() => {
     return (["project", "global"] as PluginScope[])
@@ -744,17 +743,16 @@ export function PluginsConfig({
       const next = (await res.json()) as PluginsResponse & { error?: string };
       if (!res.ok || next.error) throw new Error(next.error ?? `HTTP ${res.status}`);
       setData(next);
-      setAddMode((current) => (next.packages.length === 0 && next.standaloneExtensions.length === 0) || current);
+      // The list is the page; the detail editor is a modal opened by clicking
+      // a row. Never auto-select (that would pop the modal on load), only drop
+      // a selection that no longer exists.
       setSelected((current) => {
-        if (current && (
+        if (!current) return null;
+        if (
           next.packages.some((pkg) => packageKey(pkg) === current)
           || next.standaloneExtensions.some((extension) => extensionKey(extension) === current)
-        )) return current;
-        return next.packages[0]
-          ? packageKey(next.packages[0])
-          : next.standaloneExtensions[0]
-            ? extensionKey(next.standaloneExtensions[0])
-            : null;
+        ) return current;
+        return null;
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -930,21 +928,26 @@ export function PluginsConfig({
           </div>
         )}
 
-        <div className="settings-content-split" style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
-          <div
-            className="settings-content-sidebar"
-            style={{
-              width: isMobile ? "100%" : 245,
-              maxHeight: isMobile ? "40vh" : undefined,
-              borderRight: isMobile ? "none" : "1px solid var(--border)",
-              borderBottom: isMobile ? "1px solid var(--border)" : "none",
-              display: "flex",
-              flexDirection: "column",
-              flexShrink: 0,
-              background: "var(--settings-content-sidebar-bg, var(--bg-panel))",
-            }}
-          >
-            <div style={{ flex: 1, overflowY: "auto", padding: "8px 6px" }}>
+        {/* Single-column plugin list (PI-Desktop shape): flat rows grouped by
+            scope; the detail/add editor opens as a modal over the list. */}
+        <div className="settings-content-detail" style={{ flex: 1, overflowY: "auto", padding: "var(--settings-content-detail-padding, 20px)", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+              <span style={{ fontSize: 14, fontWeight: 650, color: "var(--text)" }}>{t("desktop.plugins")}</span>
+              {packages.length + standaloneExtensions.length > 0 && (
+                <span className="models-sidebar-badge">{packages.length + standaloneExtensions.length}</span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="config-button config-button-primary config-button-small"
+              onClick={() => { setAddMode(true); setActionError(null); setActionMessage(null); }}
+            >
+              {t("desktop.addPlugin")}
+            </button>
+          </div>
+          <div className="settings-panel">
+            <div style={{ padding: "8px 6px" }}>
               {loading ? (
                 <div style={{ padding: "10px 8px", fontSize: 12, color: "var(--text-muted)" }}>
                   {t("desktop.loading")}
@@ -1166,53 +1169,63 @@ export function PluginsConfig({
               </button>
             </div>
           </div>
-
-          <div className="settings-content-detail" style={{ flex: 1, overflowY: "auto", padding: "var(--settings-content-detail-padding, 20px)" }}>
-            {addMode ? (
-              <AddPluginPanel
-                cwd={cwd}
-                source={installSource}
-                scope={installScope}
-                busy={addBusy}
-                actionError={actionError}
-                onSourceChange={setInstallSource}
-                onScopeChange={setInstallScope}
-                onInstall={installPlugin}
-              />
-            ) : loading ? null : selectedExtension ? (
-              <StandaloneExtensionDetail extension={selectedExtension} />
-            ) : selectedPackage ? (
-              <PackageDetail
-                key={packageKey(selectedPackage)}
-                pkg={selectedPackage}
-                cwd={cwd}
-                busyKey={busyKey}
-                actionError={actionError}
-                actionMessage={actionMessage}
-                sessionId={sessionId}
-                updateStatus={updateStatuses[packageKey(selectedPackage)]}
-                checkingUpdate={checkingUpdates.has(packageKey(selectedPackage))}
-                updateError={updateError}
-                onAction={runAction}
-                onCheckUpdate={() => void checkForUpdates(selectedPackage)}
-                onReloadSession={reloadSession}
-              />
-            ) : (
-              <div
-                style={{
-                  height: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "var(--text-dim)",
-                  fontSize: 13,
-                }}
-              >
-                {t("desktop.selectPackage")}
-              </div>
-            )}
-          </div>
         </div>
+
+        {(addMode || selectedExtension || selectedPackage) && !loading && (
+          <div
+            data-settings-child-dialog="true"
+            style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}
+            onClick={() => { setAddMode(false); setSelected(null); }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 680, maxWidth: "calc(100vw - 32px)", maxHeight: "min(84vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 12px 40px rgba(0,0,0,0.28)", overflow: "hidden" }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "8px 12px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => { setAddMode(false); setSelected(null); }}
+                  aria-label={t("desktop.close")}
+                  style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 8px" }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ overflowY: "auto", padding: "18px 20px" }}>
+                {addMode ? (
+                  <AddPluginPanel
+                    cwd={cwd}
+                    source={installSource}
+                    scope={installScope}
+                    busy={addBusy}
+                    actionError={actionError}
+                    onSourceChange={setInstallSource}
+                    onScopeChange={setInstallScope}
+                    onInstall={installPlugin}
+                  />
+                ) : selectedExtension ? (
+                  <StandaloneExtensionDetail extension={selectedExtension} />
+                ) : selectedPackage ? (
+                  <PackageDetail
+                    key={packageKey(selectedPackage)}
+                    pkg={selectedPackage}
+                    cwd={cwd}
+                    busyKey={busyKey}
+                    actionError={actionError}
+                    actionMessage={actionMessage}
+                    sessionId={sessionId}
+                    updateStatus={updateStatuses[packageKey(selectedPackage)]}
+                    checkingUpdate={checkingUpdates.has(packageKey(selectedPackage))}
+                    updateError={updateError}
+                    onAction={runAction}
+                    onCheckUpdate={() => void checkForUpdates(selectedPackage)}
+                    onReloadSession={reloadSession}
+                  />
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div
           className="settings-content-footer"

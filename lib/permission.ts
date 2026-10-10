@@ -122,7 +122,7 @@ function matchAny(rules: Rule[], toolName: string, subject: string): boolean {
  * command prefixed with "command:".
  */
 export function extractSubject(toolName: string, args: unknown): string {
-  if (toolName.toLowerCase() === "bash") {
+  if (toolName.toLowerCase() === "bash" || toolName.toLowerCase() === "powershell") {
     const cmd = (args as Record<string, unknown> | null | undefined)?.command;
     return typeof cmd === "string" && cmd.trim() ? `command:${cmd.trim()}` : "";
   }
@@ -159,26 +159,6 @@ export function bashRequiresHuman(command: string): boolean {
   return false;
 }
 
-const READONLY_BASH_PREFIXES = [
-  "ls", "cat", "head", "tail", "grep", "rg", "find", "wc", "echo", "pwd",
-  "cd", "git status", "git diff", "git log", "git branch", "git remote",
-  "git stash list", "git show", "git ls-files", "which", "type", "env",
-  "file", "stat", "du", "df", "history", "man", "less", "more", "tree",
-  "git diff --", "git log --", "curl -I", "curl --head",
-];
-
-/** A plain, single, read-only bash command (no chaining) is safe to allow. */
-export function bashIsPlainReadonly(command: string): boolean {
-  const cmd = command.trim();
-  if (!cmd || bashRequiresHuman(cmd)) return false;
-  if (/[;&|>]/.test(cmd)) return false; // chaining, redirects, pipes
-  const lower = cmd.toLowerCase();
-  for (const p of READONLY_BASH_PREFIXES) {
-    if (lower === p || lower.startsWith(p + " ")) return true;
-  }
-  return false;
-}
-
 // ---------------------------------------------------------------------------
 // Decision
 // ---------------------------------------------------------------------------
@@ -205,10 +185,12 @@ export function decide(policy: Policy, toolName: string, opts: DecideOptions = {
   const args = opts.args;
   const subject = extractSubject(toolName, args);
   const isBash = toolName.toLowerCase() === "bash";
+  const isShell = isBash || toolName.toLowerCase() === "powershell";
   const command = isBash && subject.startsWith("command:") ? subject.slice("command:".length) : "";
 
-  // deny wins in every mode (including yolo).
+  // Explicit deny and ask rules win in every mode, including over allow rules.
   if (matchAny(policy.deny, toolName, subject)) return "deny";
+  if (matchAny(policy.ask, toolName, subject)) return "ask";
 
   // Bash command classification drives the fallback below.
   if (isBash && command) {
@@ -217,7 +199,6 @@ export function decide(policy: Policy, toolName: string, opts: DecideOptions = {
     // matchAnyAllow refusing glob-allow for nested bash).
     const requiresHuman = bashRequiresHuman(command);
     if (matchAny(policy.allow, toolName, subject) && !requiresHuman) return "allow";
-    if (matchAny(policy.ask, toolName, subject)) return "ask";
     if (requiresHuman) {
       // Nested execution: allow only if there is an exact (literal) allow rule.
       const exactAllow = policy.allow.some(
@@ -226,15 +207,14 @@ export function decide(policy: Policy, toolName: string, opts: DecideOptions = {
       if (exactAllow) return "allow";
       return mode === "yolo" ? "allow" : "ask";
     }
-    if (bashIsPlainReadonly(command)) return "allow";
-    // Ordinary write-ish command: mode decides (auto allows, ask asks).
+    // Shell text is not proof of read-only behavior. Without an explicit allow
+    // rule, ask mode requires confirmation even for read-looking commands.
     return mode === "ask" ? "ask" : "allow";
   }
 
-  // Non-bash tools.
+  // Shell tools never inherit read-only hints, including when command is absent.
   if (matchAny(policy.allow, toolName, subject)) return "allow";
-  if (matchAny(policy.ask, toolName, subject)) return "ask";
-  if (readOnly) return "allow";
+  if (!isShell && readOnly) return "allow";
   // Writer with no explicit rule: mode decides.
   return mode === "ask" ? "ask" : "allow";
 }
