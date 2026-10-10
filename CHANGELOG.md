@@ -2,6 +2,30 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.18.16 — 2026-10-11（同步上游 v0.9.3→v0.11.1：安全加固 + 生产健壮性 + 移动端）
+
+从上游 `agegr/pi-web` v0.9.3 之后 206 个提交中，挑选生产相关且不依赖 pi SDK 升级的项移植（上游部分提交依赖 pi 1.x，本版未取）。
+
+**安全**
+- 启动时轮换 preview 密钥：npm 包内置的 `.next/prerender-manifest.json` 中 `previewModeId` 为构建期常量，携带 `x-prerender-revalidate` 即可跳过 `proxy.ts`（密码门 + Host/Origin 校验）；现在启动前用随机值重写三个密钥。
+- `/api/files?sessionId=` 路径授权收紧：不再从 transcript system 消息（含全部 tool schema）、codemode 脚本存储、`context_edit` 替换内容，以及 MCP/codemode/第三方扩展工具结果正文中提取可读路径（均为远端可控文本）；仅认 pi 编码工具与子代理工具的结果。
+- 上传改为非破坏替换（暂存文件 → rename），失败不再丢失原文件；`git diff` 拒绝目录 junction 与 `..` 符号链接穿越。
+
+**生产健壮性**
+- Web UI 遵循 settings 的 `httpIdleTimeoutMs`（此前恒用内置 5 分钟，静默更久的上游流会被中断）；启动时预热 pi SDK 导入，首次 `/api/sessions` 不再等导入。
+- 每客户端 SSE 积压上限 16MB（`PI_WEB_SSE_BACKLOG_LIMIT_BYTES`）：超限断开重连并重新快照，不再被不读取的客户端撑爆内存；高水位只丢可重建的 delta。
+- 外部进程（pi CLI）新建/删除的会话文件免手动刷新即可发现。
+- 会话生命周期收口：`PI_WEB_IDLE_TIMEOUT_MS=0` 下 Stop 无法展开的运行仍按默认兜底回收；`shutdown()` 起始即标记关闭、扩展 `session_shutdown` 有界（`PI_WEB_SHUTDOWN_DEADLINE_MS`，默认 5s）。
+- Safari / iOS 16.2 兼容：`browserslist` 降级 class `static {}`、mermaid 纳入转译、remark-gfm 邮箱 lookbehind 运行时回退。
+
+**Markdown / UI**
+- CJK 标点：强调不再留在字面量、自动链接不再吞掉后续中文（首个 CJK 标点处切分）；宽表单元格 240px 换行、两位数有序列表不再被裁；桌面 App 链接（`obsidian://`/`vscode://` 等）白名单放行。
+- 移动端软键盘不再遮挡作曲器（视觉视口对齐 + 键盘态折叠次要用件）。
+- 移动端底栏直接显示模型名（超 10 字符截断加省略号）与思考档位文字。
+
+**设置页**
+- 整合并行完成的设置样式与配置改动：无边框磁贴语言（`--ds-tile` / `--radius-*-plus`）、全局字号缩放（`--font-scale`，`/api/settings/appearance`）、模型配置导入、备份会话恢复；并修复 `app/api/settings/appearance/route.ts` 的非法 re-export（阻断 `next build`）。
+
 ## v0.18.15 — 2026-10-10（设置页与侧栏底栏对齐 PI-Desktop）
 
 - 设置改为全窗口双栏：左侧 275px 搜索与分组导航，右侧卡片/设置行；沿用当前主题变量，适配窄屏与亮暗模式。原有 16 个分类、字段、条件显示与保存逻辑不变。
