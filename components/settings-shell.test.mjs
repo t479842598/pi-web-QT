@@ -46,7 +46,9 @@ test("main sidebar has one icon-only footer and no repeated settings gear in tit
 });
 
 test("settings rail and narrow-screen styles preserve reachable navigation and theme tokens", () => {
-  assert.match(css, /\.settings-modal-rail \{[^}]*flex: 0 0 275px;/);
+  // The rail width now comes from the PI-Desktop token, whose 275px value is
+  // declared once in globals.css instead of being repeated as a literal here.
+  assert.match(css, /\.settings-modal-rail \{[^}]*flex: 0 0 var\(--ds-settings-nav-width\);/);
   assert.match(css, /\.settings-modal-nav \{[^}]*overflow: auto;/);
   assert.match(css, /\.settings-content-panel:not\(:has\(> \.settings-content-surface\)\)/);
   assert.match(css, /\.settings-modal-nav-item:focus-visible/);

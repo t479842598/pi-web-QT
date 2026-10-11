@@ -165,6 +165,55 @@
   --radius-2xs: 4px;
   --radius-md-plus: 14px;
   --radius-lg-plus: 18px;
+  --radius-full: 9999px;
+
+  /* ── Settings design system (PI-Desktop 0.18 visual language) ────────────
+     Ported token by token, but each one derives from this fork's theme
+     variables instead of PI-Desktop's fixed gray ramp, so all 24 themes keep
+     working and the tone-on-tone structure (page → tile → raised) stays the
+     same. Names match upstream so a future sync is a diff, not a rewrite. */
+  --ds-bg-primary: var(--bg);
+  --ds-bg-secondary: var(--bg-panel);
+  --ds-bg-tertiary: var(--bg-hover);
+  --ds-bg-inset: var(--bg-subtle, var(--bg-panel));
+  --ds-bg-hover: var(--bg-hover);
+  --ds-bg-active: var(--bg-selected);
+  --ds-bg-elevated: var(--bg-panel);
+  --ds-bg-elevated-opaque: var(--bg-panel);
+  --ds-bg-chip: var(--bg-hover);
+  /* One ink ramp: primary, then three descending steps of it. */
+  --ds-text-primary: var(--text);
+  --ds-text-secondary: var(--text-muted);
+  --ds-text-muted: var(--text-muted);
+  --ds-text-faint: var(--text-dim);
+  --ds-border-default: var(--border);
+  --ds-border-subtle: color-mix(in srgb, var(--border) 55%, transparent);
+  --ds-border-strong: color-mix(in srgb, var(--border) 160%, var(--text-dim));
+  --ds-accent: var(--accent);
+  --ds-accent-hover: var(--accent-hover);
+  --ds-accent-soft: color-mix(in srgb, var(--accent) 45%, var(--text-muted));
+  --ds-focus: var(--accent);
+  /* Settings fields and inset searches keep their own tone. */
+  --ds-settings-field-bg: var(--bg-panel);
+  --ds-settings-nav-active: color-mix(in srgb, var(--bg-selected) 85%, var(--accent) 15%);
+  --ds-field-inset-bg: color-mix(in srgb, var(--text) 5%, transparent);
+  --ds-field-inset-focus-bg: color-mix(in srgb, var(--text) 7%, transparent);
+  --ds-field-height: 38px;
+  /* Switch track/knob: off keeps a dim fill so the empty slot still reads as a
+     control; on fills with the accent and flips the knob's polarity. */
+  --ds-switch-track-off: color-mix(in srgb, var(--text) 10%, transparent);
+  --ds-switch-track-off-hover: color-mix(in srgb, var(--text) 18%, transparent);
+  --ds-switch-ring-off: color-mix(in srgb, var(--text) 22%, transparent);
+  --ds-switch-knob-off: var(--text-muted);
+  --ds-switch-knob-on: var(--accent-fg, var(--bg));
+  --ds-error: var(--status-error, #e5484d);
+  --ds-success: var(--status-success, #30a46c);
+  --ds-warning: var(--status-warning, #f5a623);
+  /* Settings rail width: PI-Desktop's 275px at 1200-wide. */
+  --ds-settings-nav-width: 275px;
+  --ds-toolbar-height: 38px;
+  --motion-duration-fast: 0.12s;
+  --motion-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
 
   /* Full-height containers use this instead of a bare `100dvh`: under the
      global `zoom` (see useFontScale) a raw `100dvh` is multiplied by the zoom

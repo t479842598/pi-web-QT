@@ -211,7 +211,8 @@ test("a missing custom provider is not blamed on a sign-in", () => {
 test("the section carries the usage heading font and no rule above it", () => {
   assert.match(source, /<span className="enabled-models-title">/);
   const title = cssSource.slice(cssSource.indexOf(".enabled-models-title {"));
-  assert.match(title.slice(0, title.indexOf("}")), /font-size: 13px;[\s\S]*font-weight: 600;/);
+  // The heading now takes the shared type ramp and the settings heading weight.
+  assert.match(title.slice(0, title.indexOf("}")), /font-size: var\(--text-ui-base\);[\s\S]*font-weight: 500;/);
   const section = cssSource.slice(cssSource.indexOf(".enabled-models-section {"));
   assert.doesNotMatch(section.slice(0, section.indexOf("}")), /border-top/);
 });
