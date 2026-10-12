@@ -26,7 +26,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--ds-bg-primary);
 }
 
 .config-panel-root.is-embedded > .config-panel-surface {
@@ -56,14 +56,14 @@
 }
 
 .config-panel-title {
-  color: var(--text);
+  color: var(--ds-text-primary);
   font-size: var(--text-ui-lg);
 }
 
 .config-panel-subtitle {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-ui-xs);
   text-overflow: ellipsis;
@@ -80,7 +80,7 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   cursor: pointer;
   font-size: 20px;
   line-height: 1;
@@ -88,8 +88,8 @@
 
 .config-close-button:hover,
 .config-close-button:focus-visible {
-  background: var(--bg-hover);
-  color: var(--text);
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-primary);
   outline: none;
 }
 
@@ -184,7 +184,7 @@
 }
 
 .models-sidebar-add-item {
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
 }
 
 .models-sidebar-add-item:not(:disabled):hover,
@@ -194,7 +194,7 @@
 
 .models-sidebar-badge {
   flex-shrink: 0;
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-ui-xs);
 }
@@ -393,12 +393,12 @@
 }
 
 .config-sidebar-text.is-muted {
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
 }
 
 .agents-overridden-label {
   flex: 0 0 auto;
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
   font-size: var(--text-ui-xs);
   line-height: 1;
   white-space: nowrap;
@@ -413,7 +413,7 @@
   min-height: 68px;
   padding: 10px 18px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-panel);
+  background: var(--ds-bg-secondary);
 }
 
 .agents-feature-copy {
@@ -421,12 +421,12 @@
   flex-direction: column;
   gap: 3px;
   min-width: 0;
-  color: var(--text);
+  color: var(--ds-text-primary);
   font-size: var(--text-ui-sm);
 }
 
 .agents-feature-copy > span {
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   line-height: 1.4;
 }
 
@@ -438,7 +438,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   font-size: var(--text-ui-xs);
   white-space: nowrap;
 }
@@ -449,8 +449,8 @@
   padding: 0 6px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--ds-bg-primary);
+  color: var(--ds-text-primary);
   font: inherit;
   text-align: center;
 }
@@ -466,7 +466,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   font-size: var(--text-ui-xs);
   white-space: nowrap;
 }
@@ -477,15 +477,15 @@
   padding: 0 6px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--ds-bg-primary);
+  color: var(--ds-text-primary);
   font: inherit;
   text-align: center;
 }
 
 .config-sidebar-message {
   padding: 10px 8px;
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   font-size: var(--text-ui-sm);
 }
 
@@ -494,7 +494,7 @@
 }
 
 .config-sidebar-message.is-empty {
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
 }
 
 .config-detail {
@@ -558,7 +558,7 @@
 }
 
 .config-detail-title {
-  color: var(--text);
+  color: var(--ds-text-primary);
   font-size: var(--text-ui-base);
   font-weight: 600;
   line-height: 1.35;
@@ -604,7 +604,7 @@
 }
 
 .config-field-label {
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   font-size: var(--text-ui-xs);
   font-weight: 500;
   line-height: 1.35;
@@ -615,7 +615,8 @@
   flex: 1;
   place-items: center;
   min-height: 160px;
-  color: var(--text-dim);
+  padding: 16px 14px;
+  color: var(--ds-text-muted);
   font-size: var(--text-ui-sm);
   line-height: 1.5;
   text-align: center;
@@ -625,7 +626,7 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-ui-xs);
   text-overflow: ellipsis;
@@ -637,7 +638,7 @@
   padding: 1px 5px;
   border-radius: 3px;
   background: rgba(120, 120, 120, 0.12);
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
   font-size: var(--text-ui-xs);
 }
 
@@ -649,8 +650,8 @@
 .config-trust-notice {
   padding: 8px 18px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-panel);
-  color: var(--text-muted);
+  background: var(--ds-bg-secondary);
+  color: var(--ds-text-secondary);
   font-size: var(--text-ui-sm);
 }
 
@@ -697,7 +698,7 @@
 
 .skill-version-value,
 .skill-name-value {
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-ui-sm);
 }
@@ -708,11 +709,11 @@
 }
 
 .skill-name-value {
-  color: var(--text);
+  color: var(--ds-text-primary);
 }
 
 .skill-update-status {
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
   font-size: var(--text-ui-sm);
 }
 
@@ -729,7 +730,7 @@
 }
 
 .skill-description {
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   font-size: var(--text-ui-sm);
   line-height: 1.5;
 }
@@ -754,7 +755,7 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
   font-size: var(--text-ui-xs);
 }
 
@@ -808,7 +809,7 @@
 .config-button-secondary {
   border-color: var(--border);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
 }
 
 .config-button-danger {
@@ -820,7 +821,7 @@
 .config-button-ghost {
   border-color: transparent;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
 }
 
 .config-button-primary:not(:disabled):hover {
@@ -831,8 +832,8 @@
 .config-button-secondary:not(:disabled):hover,
 .config-button-ghost:not(:disabled):hover {
   border-color: var(--border);
-  background: var(--bg-hover);
-  color: var(--text);
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-primary);
 }
 
 .config-button-danger:not(:disabled):hover {
@@ -955,20 +956,20 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
   cursor: pointer;
   font-size: var(--text-ui-sm);
 }
 
 .config-list-action-button:not(:disabled):hover,
 .config-list-action-button:not(:disabled):focus-visible {
-  background: var(--bg-hover);
-  color: var(--text-muted);
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-secondary);
   outline: none;
 }
 
 .config-list-action-button[aria-current="page"] {
-  background: var(--bg-selected);
+  background: var(--ds-bg-active);
   color: var(--accent);
 }
 
@@ -982,7 +983,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--text-dim);
+  background: var(--ds-text-muted);
 }
 
 .config-status-dot.is-active {
@@ -1013,7 +1014,7 @@
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg);
+  background: var(--ds-bg-primary);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
 }
 
@@ -1029,7 +1030,7 @@
 
 .settings-dialog-title {
   flex-shrink: 0;
-  color: var(--text);
+  color: var(--ds-text-primary);
   font-size: var(--text-ui-lg);
   white-space: nowrap;
 }
@@ -1058,7 +1059,7 @@
   border: 0;
   outline: none;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   cursor: pointer;
   font-size: var(--text-ui-sm);
   font-weight: 400;
@@ -1081,7 +1082,7 @@
 }
 
 .settings-section-tab[aria-current="page"] {
-  color: var(--text);
+  color: var(--ds-text-primary);
   font-weight: 600;
 }
 
@@ -1091,7 +1092,7 @@
 }
 
 .settings-section-tab:not(:disabled):hover {
-  color: var(--text);
+  color: var(--ds-text-primary);
 }
 
 .settings-section-tab:disabled {
@@ -1101,8 +1102,8 @@
 
 .settings-section-tab:focus-visible:not([aria-current="page"]) {
   border-radius: 4px;
-  background: var(--bg-hover);
-  color: var(--text);
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-primary);
 }
 
 .settings-section-tab:focus-visible[aria-current="page"] {
@@ -1153,7 +1154,7 @@
 
 .settings-general-title {
   margin: 0;
-  color: var(--text);
+  color: var(--ds-text-primary);
   font-size: var(--text-ui-xl);
   font-weight: 700;
 }
@@ -1168,14 +1169,14 @@
 
 .settings-general-heading {
   margin: 0 0 5px;
-  color: var(--text);
+  color: var(--ds-text-primary);
   font-size: var(--text-ui-base);
   font-weight: 650;
 }
 
 .settings-general-description {
   margin: 0 0 12px;
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
   font-size: var(--text-ui-xs);
   line-height: 1.5;
 }
@@ -1201,20 +1202,20 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   cursor: pointer;
   font-size: var(--text-ui-sm);
   font-weight: 400;
 }
 
 .settings-theme-option:has(input:checked) {
-  background: var(--bg-selected);
+  background: var(--ds-bg-active);
   color: var(--accent);
   font-weight: 600;
 }
 
 .settings-theme-option:not(:has(input:checked)):hover {
-  background: var(--bg-hover);
+  background: var(--ds-bg-hover);
 }
 
 .settings-theme-option:has(input:focus-visible) {
@@ -1237,7 +1238,7 @@
 
 .settings-chat-option {
   width: 100%;
-  color: var(--text);
+  color: var(--ds-text-primary);
   font-size: var(--text-ui-sm);
 }
 
@@ -1261,7 +1262,7 @@
 }
 
 .settings-chat-range-header output {
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-ui-xs);
 }
@@ -1296,19 +1297,19 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--text);
+  color: var(--ds-text-primary);
   cursor: pointer;
   font-size: var(--text-ui-sm);
   text-align: left;
 }
 
 .settings-language-option[aria-checked="true"] {
-  background: var(--bg-selected);
+  background: var(--ds-bg-active);
 }
 
 .settings-language-option:not([aria-checked="true"]):hover,
 .settings-language-option:focus-visible {
-  background: var(--bg-hover);
+  background: var(--ds-bg-hover);
   outline: none;
 }
 
@@ -1338,7 +1339,7 @@
 }
 
 .settings-language-code {
-  color: var(--text-dim);
+  color: var(--ds-text-muted);
   font-family: var(--font-mono);
   font-size: var(--text-ui-xs);
 }
@@ -1353,8 +1354,8 @@
   min-height: 44px;
   padding: 0 10px;
   border-radius: 5px;
-  background: var(--bg-panel);
-  color: var(--text);
+  background: var(--ds-bg-secondary);
+  color: var(--ds-text-primary);
   font-size: var(--text-ui-sm);
 }
 
@@ -1415,8 +1416,8 @@
     padding: 0 9px;
     border: 1px solid var(--border);
     border-radius: 5px;
-    background: var(--bg-panel);
-    color: var(--text);
+    background: var(--ds-bg-secondary);
+    color: var(--ds-text-primary);
     font-size: var(--text-ui-lg);
   }
 }
@@ -1468,7 +1469,7 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: var(--bg);
+  background: var(--ds-bg-primary);
 }
 
 .settings-modal {
@@ -1476,8 +1477,8 @@
   width: 100%;
   height: var(--app-viewport-height);
   overflow: hidden;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--ds-bg-primary);
+  color: var(--ds-text-primary);
 }
 
 /* The rail is its own surface with no rule between it and the content: its
@@ -1559,7 +1560,7 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-.settings-modal-empty { margin: 0; padding: 12px 10px; color: var(--text-muted); font-size: var(--text-ui-sm); }
+.settings-modal-empty { margin: 0; padding: 12px 10px; color: var(--ds-text-secondary); font-size: var(--text-ui-sm); }
 .settings-modal-rail-footer { flex: 0 0 auto; padding: 7px 12px 8px; }
 .settings-modal-rail-footer button {
   display: inline-flex;
@@ -1641,13 +1642,13 @@
   border: 0;
   border-radius: 7px;
   background: none;
-  color: var(--text-muted);
+  color: var(--ds-text-secondary);
   cursor: pointer;
   transition: background 0.14s, color 0.14s;
 }
-.sidebar-utility-button:hover, .sidebar-utility-button[aria-pressed="true"] { background: var(--bg-hover); color: var(--text); }
-.sidebar-utility-version { margin-left: auto; padding: 5px 8px; color: var(--text-muted); font-size: var(--text-ui-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sidebar-utility-button:disabled { opacity: 0.45; cursor: not-allowed; background: none; color: var(--text-muted); }
+.sidebar-utility-button:hover, .sidebar-utility-button[aria-pressed="true"] { background: var(--ds-bg-hover); color: var(--ds-text-primary); }
+.sidebar-utility-version { margin-left: auto; padding: 5px 8px; color: var(--ds-text-secondary); font-size: var(--text-ui-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sidebar-utility-button:disabled { opacity: 0.45; cursor: not-allowed; background: none; color: var(--ds-text-secondary); }
 
 @media (max-width: 767px) {
   .settings-modal { flex-direction: column; }
@@ -1710,13 +1711,13 @@
   background: var(--settings-content-card-bg);
 }
 .settings-modal .settings-content-section { flex: 0 0 auto; }
-.settings-modal .settings-content-section-title { color: var(--text); font-size: var(--text-ui-base); font-weight: 650; }
-.settings-modal .settings-content-section-description { color: var(--text-muted); line-height: 1.5; }
+.settings-modal .settings-content-section-title { color: var(--ds-text-primary); font-size: var(--text-ui-base); font-weight: 650; }
+.settings-modal .settings-content-section-description { color: var(--ds-text-secondary); line-height: 1.5; }
 .settings-modal .settings-content-card-host { gap: 12px; }
 .settings-modal .settings-content-row { min-width: 0; }
 .settings-modal .settings-content-row:focus-within { outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -1px; }
 .settings-modal .settings-content-toolbar { padding: 12px; }
-.settings-modal .settings-content-sidebar { background: var(--settings-content-sidebar-bg, var(--bg-panel)); }
+.settings-modal .settings-content-sidebar { background: var(--settings-content-sidebar-bg, var(--ds-bg-secondary)); }
 .settings-modal .settings-content-detail { min-width: 0; }
 .settings-modal .settings-content-detail-header { border-color: var(--border); }
 .settings-modal .settings-content-footer { border-color: var(--border); }
@@ -1890,6 +1891,6 @@
   background: none;
   border: none;
   outline: none;
-  color: var(--text);
+  color: var(--ds-text-primary);
   font-size: 12.5px;
 }

@@ -53,7 +53,7 @@ test("settings rail and narrow-screen styles preserve reachable navigation and t
   assert.match(css, /\.settings-content-panel:not\(:has\(> \.settings-content-surface\)\)/);
   assert.match(css, /\.settings-modal-nav-item:focus-visible/);
   assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.settings-modal-nav \{[^}]*overflow-x: auto;/);
-  assert.match(css, /\.settings-modal \{[^}]*background: var\(--bg\);/);
+  assert.match(css, /\.settings-modal \{[^}]*background: var\(--ds-bg-primary\);/);
   assert.match(css, /@media \(max-width: 767px\) and \(max-height: 500px\)/);
   assert.match(css, /settings-content-split > \.settings-content-sidebar \{ max-height: min\(30%, 160px\)/);
   assert.match(css, /\.settings-page-overlay \{ box-sizing: border-box; padding: max\(59px, env\(safe-area-inset-top\)\)/);

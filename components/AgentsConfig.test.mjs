@@ -16,7 +16,7 @@ test("keeps same-name profiles selectable by scope and groups writable sources f
 test("uses the shared enabled status treatment", () => {
   assert.match(source, /<ConfigStatusDot active=\{profile\.enabled\}/);
   assert.match(source, /className=\{`is-grow\$\{profile\.enabled \? "" : " is-muted"\}`\}/);
-  assert.match(cssSource, /\.config-sidebar-text\.is-muted \{[\s\S]*?color: var\(--text-dim\)/);
+  assert.match(cssSource, /\.config-sidebar-text\.is-muted \{[\s\S]*?color: var\(--ds-text-muted\)/);
 });
 
 test("offers a persisted built-in sub-agent switch with explicit session reload", () => {
