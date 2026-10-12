@@ -381,12 +381,12 @@ export function BuiltinModelsDetail({
   }
 
   return (
-    <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ marginTop: 14, paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-primary)" }}>
         {t("desktop.builtinModelsTitle")}
       </div>
       {/* 获取新模型：拉取上游最新模型列表，新增模型可勾选添加 */}
-      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <button
             type="button"

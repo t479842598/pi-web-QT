@@ -397,7 +397,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
         <Select value={provider.api ?? "openai-completions"} onChange={(v) => set("api", v)} options={API_OPTIONS} required />
       </Field>
 
-      <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {discoveryState.phase !== "success" && (
             <button
@@ -941,7 +941,7 @@ function ModelDetail({
         <Field label={t("desktop.modelsName")}><TextInput value={model.name ?? ""} onChange={(v) => set("name", v || undefined)} placeholder={t("desktop.modelsDisplayName")} /></Field>
       </div>
 
-      <div style={{ padding: "10px 0", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
+      <div style={{ padding: "10px 0" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <button
             onClick={() => void handleCatalogFill()}
@@ -1758,7 +1758,7 @@ function CustomProviderDialog({
           </div>
 
           {/* URL — click + to input a full URL */}
-          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ paddingTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
             <SectionTitle>{t("desktop.modelsFullUrl")}</SectionTitle>
             {!urlOpen ? (
               <button onClick={() => setUrlOpen(true)}
@@ -1788,7 +1788,7 @@ function CustomProviderDialog({
           </div>
 
           {/* Custom request — model ID + context length + output length */}
-          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
             <SectionTitle>{t("desktop.modelsCustomRequest")}</SectionTitle>
             <Field label={t("desktop.modelsRequestModelId")}>
               <TextInput value={modelId} onChange={setModelId} placeholder="model-id" mono />
