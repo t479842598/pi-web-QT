@@ -375,14 +375,14 @@ export function BuiltinModelsDetail({
   if (loading) {
     return (
       <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 12 }}>
-        <p style={{ margin: 0, fontSize: 12, color: "var(--text-dim)" }}>{t("desktop.modelsLoading")}</p>
+        <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-muted)" }}>{t("desktop.modelsLoading")}</p>
       </div>
     );
   }
 
   return (
     <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
+      <div style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-primary)" }}>
         {t("desktop.builtinModelsTitle")}
       </div>
       {/* 获取新模型：拉取上游最新模型列表，新增模型可勾选添加 */}
@@ -394,12 +394,12 @@ export function BuiltinModelsDetail({
             disabled={discovery.phase === "loading"}
             style={{
               padding: "5px 12px",
-              background: discovery.phase === "loading" ? "var(--bg-panel)" : "var(--bg-panel)",
+              background: discovery.phase === "loading" ? "var(--ds-bg-secondary)" : "var(--ds-bg-secondary)",
               border: "1px solid var(--border)",
-              borderRadius: 5,
-              color: discovery.phase === "loading" ? "var(--text-dim)" : "var(--text-muted)",
+              borderRadius: 'var(--radius-sm)',
+              color: discovery.phase === "loading" ? "var(--ds-text-muted)" : "var(--ds-text-secondary)",
               cursor: discovery.phase === "loading" ? "not-allowed" : "pointer",
-              fontSize: 12,
+              fontSize: 'var(--text-ui-sm)',
             }}
           >
             {discovery.phase === "loading" ? t("desktop.modelsDiscoveryFetching") : t("desktop.builtinModelsFetchNew")}
@@ -411,12 +411,12 @@ export function BuiltinModelsDetail({
               disabled={saving || selectedNewIds.length === 0}
               style={{
                 padding: "5px 12px",
-                background: selectedNewIds.length > 0 && !saving ? "var(--accent)" : "var(--bg-panel)",
+                background: selectedNewIds.length > 0 && !saving ? "var(--ds-accent)" : "var(--ds-bg-secondary)",
                 border: "none",
-                borderRadius: 5,
-                color: selectedNewIds.length > 0 && !saving ? "#fff" : "var(--text-dim)",
+                borderRadius: 'var(--radius-sm)',
+                color: selectedNewIds.length > 0 && !saving ? "#fff" : "var(--ds-text-muted)",
                 cursor: selectedNewIds.length > 0 && !saving ? "pointer" : "not-allowed",
-                fontSize: 12,
+                fontSize: 'var(--text-ui-sm)',
                 fontWeight: 600,
               }}
             >
@@ -431,12 +431,12 @@ export function BuiltinModelsDetail({
             }}
             style={{
               padding: "5px 12px",
-              background: "var(--bg-panel)",
+              background: "var(--ds-bg-secondary)",
               border: "1px solid var(--border)",
-              borderRadius: 5,
-              color: "var(--text-muted)",
+              borderRadius: 'var(--radius-sm)',
+              color: "var(--ds-text-secondary)",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: 'var(--text-ui-sm)',
             }}
           >
             {manualOpen ? t("desktop.cancel") : t("desktop.builtinModelsManualAdd")}
@@ -445,32 +445,32 @@ export function BuiltinModelsDetail({
 
         {/* 手动添加模型：写一个新的请求模型 ID（与「改名」不同） */}
         {manualOpen && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 10px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)" }}>
-            <p style={{ margin: 0, fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 10px", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)" }}>
+            <p style={{ margin: 0, fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", lineHeight: 1.5 }}>
               {t("desktop.builtinModelsManualHint")}
             </p>
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-muted)" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)" }}>
                 {t("desktop.modelsIdRequired")}
                 <input
                   type="text"
                   value={manual.id}
                   placeholder="model-id"
                   onChange={(e) => setManual((prev) => ({ ...prev, id: e.target.value }))}
-                  style={{ padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                  style={{ padding: "4px 7px", fontSize: 'var(--text-ui-xs)', background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-xs)', color: "var(--ds-text-primary)", fontFamily: "var(--font-mono)" }}
                 />
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-muted)" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)" }}>
                 {t("desktop.modelsName")}
                 <input
                   type="text"
                   value={manual.name}
                   placeholder={t("desktop.modelsDisplayName")}
                   onChange={(e) => setManual((prev) => ({ ...prev, name: e.target.value }))}
-                  style={{ padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)" }}
+                  style={{ padding: "4px 7px", fontSize: 'var(--text-ui-xs)', background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-xs)', color: "var(--ds-text-primary)" }}
                 />
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-muted)" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)" }}>
                 {t("desktop.modelsContextWindow")}
                 <input
                   type="number"
@@ -478,10 +478,10 @@ export function BuiltinModelsDetail({
                   value={manual.contextWindow}
                   placeholder="128000"
                   onChange={(e) => setManual((prev) => ({ ...prev, contextWindow: e.target.value }))}
-                  style={{ padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                  style={{ padding: "4px 7px", fontSize: 'var(--text-ui-xs)', background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-xs)', color: "var(--ds-text-primary)", fontFamily: "var(--font-mono)" }}
                 />
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-muted)" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)" }}>
                 {t("desktop.modelsMaxOutputTokens")}
                 <input
                   type="number"
@@ -489,12 +489,12 @@ export function BuiltinModelsDetail({
                   value={manual.maxTokens}
                   placeholder="16384"
                   onChange={(e) => setManual((prev) => ({ ...prev, maxTokens: e.target.value }))}
-                  style={{ padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                  style={{ padding: "4px 7px", fontSize: 'var(--text-ui-xs)', background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-xs)', color: "var(--ds-text-primary)", fontFamily: "var(--font-mono)" }}
                 />
               </label>
             </div>
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", cursor: "pointer" }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)", cursor: "pointer" }}>
                 <input
                   type="checkbox"
                   checked={manual.reasoning}
@@ -502,7 +502,7 @@ export function BuiltinModelsDetail({
                 />
                 {t("desktop.builtinModelsReasoning")}
               </label>
-              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", cursor: "pointer" }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)", cursor: "pointer" }}>
                 <input
                   type="checkbox"
                   checked={manual.vision}
@@ -518,12 +518,12 @@ export function BuiltinModelsDetail({
                 disabled={saving || !manual.id.trim()}
                 style={{
                   padding: "5px 14px",
-                  background: saving || !manual.id.trim() ? "var(--bg-panel)" : "var(--accent)",
+                  background: saving || !manual.id.trim() ? "var(--ds-bg-secondary)" : "var(--ds-accent)",
                   border: "none",
-                  borderRadius: 5,
-                  color: saving || !manual.id.trim() ? "var(--text-dim)" : "#fff",
+                  borderRadius: 'var(--radius-sm)',
+                  color: saving || !manual.id.trim() ? "var(--ds-text-muted)" : "#fff",
                   cursor: saving || !manual.id.trim() ? "not-allowed" : "pointer",
-                  fontSize: 12,
+                  fontSize: 'var(--text-ui-sm)',
                   fontWeight: 600,
                 }}
               >
@@ -534,11 +534,11 @@ export function BuiltinModelsDetail({
         )}
 
         {discovery.phase === "error" && (
-          <p style={{ margin: 0, fontSize: 11, color: "var(--status-error)" }}>{discovery.message}</p>
+          <p style={{ margin: 0, fontSize: 'var(--text-ui-xs)', color: "var(--status-error)" }}>{discovery.message}</p>
         )}
 
         {discovery.phase === "success" && discovery.models && (
-          <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)" }}>
+          <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)" }}>
             {discovery.models.map((model) => {
               const isNew = discovery.newIds?.has(model.id) ?? false;
               const checked = selectedNewIds.includes(model.id);
@@ -562,12 +562,12 @@ export function BuiltinModelsDetail({
                         ? [...prev, model.id]
                         : prev.filter((id) => id !== model.id));
                     }}
-                    style={{ width: 13, height: 13, accentColor: "var(--accent)", flexShrink: 0 }}
+                    style={{ width: 13, height: 13, accentColor: "var(--ds-accent)", flexShrink: 0 }}
                   />
-                  <span style={{ fontSize: 12, color: "var(--text)", fontWeight: isNew ? 600 : 400 }}>{model.name || model.id}</span>
-                  <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
+                  <span style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)", fontWeight: isNew ? 600 : 400 }}>{model.name || model.id}</span>
+                  <code style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
                   {isNew && (
-                    <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--accent)", color: "var(--accent-fg)", marginLeft: "auto" }}>
+                    <span style={{ fontSize: 'var(--text-ui-xs)', padding: "1px 6px", borderRadius: 'var(--radius-md)', background: "var(--ds-accent)", color: "var(--accent-fg)", marginLeft: "auto" }}>
                       新
                     </span>
                   )}
@@ -578,9 +578,9 @@ export function BuiltinModelsDetail({
         )}
       </div>
 
-      {error && <p style={{ margin: 0, fontSize: 11, color: "var(--status-error)" }}>{error}</p>}
+      {error && <p style={{ margin: 0, fontSize: 'var(--text-ui-xs)', color: "var(--status-error)" }}>{error}</p>}
       {models.length === 0 && !error && (
-        <p style={{ margin: 0, fontSize: 11, color: "var(--text-dim)" }}>{t("desktop.builtinModelsEmpty")}</p>
+        <p style={{ margin: 0, fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)" }}>{t("desktop.builtinModelsEmpty")}</p>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -590,28 +590,28 @@ export function BuiltinModelsDetail({
           const isDirty = dirty.has(model.id);
           const isCustomModel = model.custom === true;
           return (
-            <div key={model.id} style={{ border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", padding: "8px 10px" }}>
+            <div key={model.id} style={{ border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)", padding: "8px 10px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button
                   type="button"
                   onClick={() => setExpanded(isOpen ? null : model.id)}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text)", fontSize: 12, fontWeight: 600, padding: 0, textAlign: "left" }}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-sm)', fontWeight: 600, padding: 0, textAlign: "left" }}
                 >
                   {draft.name || model.name || model.id}
-                  {isDirty && <span style={{ color: "var(--accent)", marginLeft: 6 }}>•</span>}
+                  {isDirty && <span style={{ color: "var(--ds-accent)", marginLeft: 6 }}>•</span>}
                 </button>
-                <code style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
+                <code style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", fontFamily: "var(--font-mono)" }}>{model.id}</code>
                 {isCustomModel && (
-                  <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--bg-selected)", color: "var(--accent)" }}>
+                  <span style={{ fontSize: 'var(--text-ui-xs)', padding: "1px 6px", borderRadius: 'var(--radius-md)', background: "var(--ds-bg-active)", color: "var(--ds-accent)" }}>
                     {t("desktop.builtinModelsManualBadge")}
                   </span>
                 )}
                 {(draft.reasoning ?? model.reasoning) && (
-                  <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "var(--bg-selected)", color: "var(--text-muted)" }}>
+                  <span style={{ fontSize: 'var(--text-ui-xs)', padding: "1px 6px", borderRadius: 'var(--radius-md)', background: "var(--ds-bg-active)", color: "var(--ds-text-secondary)" }}>
                     reasoning
                   </span>
                 )}
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)" }}>
                   {t("desktop.builtinModelsContext")}: <b>{draft.contextWindow ? Number(draft.contextWindow).toLocaleString() : "—"}</b>
                   {" · "}
                   {t("desktop.builtinModelsMaxTokens")}: <b>{draft.maxTokens ? Number(draft.maxTokens).toLocaleString() : "—"}</b>
@@ -620,16 +620,16 @@ export function BuiltinModelsDetail({
 
               {isOpen && (
                 <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
-                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", width: "100%" }}>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)", width: "100%" }}>
                     {t("desktop.modelsName")}
                     <input
                       type="text"
                       value={draft.name ?? ""}
                       placeholder={model.name || model.id}
                       onChange={(e) => patch(model.id, { name: e.target.value.trim() || undefined })}
-                      style={{ flex: 1, minWidth: 0, padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                      style={{ flex: 1, minWidth: 0, padding: "4px 7px", fontSize: 'var(--text-ui-xs)', background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-xs)', color: "var(--ds-text-primary)", fontFamily: "var(--font-mono)" }}
                     />
-                    <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 11, color: draft.hidden ? "var(--status-error)" : "var(--text-muted)", cursor: "pointer", whiteSpace: "nowrap", marginLeft: 8 }}>
+                    <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 'var(--text-ui-xs)', color: draft.hidden ? "var(--status-error)" : "var(--ds-text-secondary)", cursor: "pointer", whiteSpace: "nowrap", marginLeft: 8 }}>
                       <input
                         type="checkbox"
                         checked={draft.hidden === true}
@@ -639,7 +639,7 @@ export function BuiltinModelsDetail({
                     </label>
                   </label>
                   <div style={{ display: "flex", gap: 16, flexWrap: "wrap", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "flex-start" : "center" }}>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", cursor: "pointer" }}>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)", cursor: "pointer" }}>
                       <input
                         type="checkbox"
                         checked={draft.reasoning === true}
@@ -647,7 +647,7 @@ export function BuiltinModelsDetail({
                       />
                       {t("desktop.builtinModelsReasoning")}
                     </label>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", cursor: "pointer" }}>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)", cursor: "pointer" }}>
                       <input
                         type="checkbox"
                         checked={draft.input?.includes("image") ?? false}
@@ -655,7 +655,7 @@ export function BuiltinModelsDetail({
                       />
                       {t("desktop.modelsImageInput")}
                     </label>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", flex: isMobile ? 1 : undefined, width: isMobile ? "100%" : undefined }}>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)", flex: isMobile ? 1 : undefined, width: isMobile ? "100%" : undefined }}>
                       {t("desktop.modelsContextWindow")}
                       <input
                         type="number"
@@ -663,10 +663,10 @@ export function BuiltinModelsDetail({
                         value={draft.contextWindow ?? ""}
                         placeholder={model.contextWindow != null ? String(model.contextWindow) : ""}
                         onChange={(e) => patch(model.id, { contextWindow: e.target.value })}
-                        style={{ flex: 1, minWidth: 0, padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                        style={{ flex: 1, minWidth: 0, padding: "4px 7px", fontSize: 'var(--text-ui-xs)', background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-xs)', color: "var(--ds-text-primary)", fontFamily: "var(--font-mono)" }}
                       />
                     </label>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--text)", flex: isMobile ? 1 : undefined, width: isMobile ? "100%" : undefined }}>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)", flex: isMobile ? 1 : undefined, width: isMobile ? "100%" : undefined }}>
                       {t("desktop.modelsMaxOutputTokens")}
                       <input
                         type="number"
@@ -674,12 +674,12 @@ export function BuiltinModelsDetail({
                         value={draft.maxTokens ?? ""}
                         placeholder={model.maxTokens != null ? String(model.maxTokens) : ""}
                         onChange={(e) => patch(model.id, { maxTokens: e.target.value })}
-                        style={{ flex: 1, minWidth: 0, padding: "4px 7px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontFamily: "var(--font-mono)" }}
+                        style={{ flex: 1, minWidth: 0, padding: "4px 7px", fontSize: 'var(--text-ui-xs)', background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-xs)', color: "var(--ds-text-primary)", fontFamily: "var(--font-mono)" }}
                       />
                     </label>
                   </div>
 
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-dim)" }}>
+                  <div style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--ds-text-muted)" }}>
                     {t("desktop.builtinModelsThinking")}
                   </div>
                   <ThinkingLevelMapEditor
@@ -701,19 +701,19 @@ export function BuiltinModelsDetail({
           style={{
             alignSelf: "flex-start",
             padding: "5px 14px",
-            background: dirty.size > 0 && !saving ? "var(--accent)" : "var(--bg-panel)",
+            background: dirty.size > 0 && !saving ? "var(--ds-accent)" : "var(--ds-bg-secondary)",
             border: "none",
-            borderRadius: 5,
-            color: dirty.size > 0 && !saving ? "#fff" : "var(--text-dim)",
+            borderRadius: 'var(--radius-sm)',
+            color: dirty.size > 0 && !saving ? "#fff" : "var(--ds-text-muted)",
             cursor: dirty.size > 0 && !saving ? "pointer" : "not-allowed",
-            fontSize: 12,
+            fontSize: 'var(--text-ui-sm)',
             fontWeight: 600,
           }}
         >
           {saving ? t("desktop.modelsSaving") : savedOk ? t("desktop.modelsSaved") : t("desktop.modelsSave")}
         </button>
         {dirty.size > 0 && (
-          <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)" }}>
             {t("desktop.builtinModelsDirty", { count: dirty.size })}
           </span>
         )}

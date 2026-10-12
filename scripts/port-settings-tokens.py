@@ -40,6 +40,9 @@ TARGETS = [
     "components/McpConfig.tsx",
     "components/VisionMcpConfig.tsx",
     "components/ModelsConfig.tsx",
+    # The built-in provider detail and its "fetch new models" tray: part of the
+    # model settings page, so it follows the settings surface, not chat's scale.
+    "components/BuiltinModelsDetail.tsx",
     "components/ModelConfigImportPanel.tsx",
     "components/ModelSelector.tsx",
     "components/SettingsUi.tsx",
