@@ -258,7 +258,6 @@ function SkillDetail({
                 disabled={checkingUpdate || updating}
                 style={{
                   padding: "4px 9px",
-                  border: "1px solid var(--border)",
                   borderRadius: 'var(--radius-sm)',
                   background: "none",
                   color: "var(--ds-text-secondary)",
@@ -486,7 +485,6 @@ function AddSkillPanel({
               padding: "7px 10px",
               fontSize: 'var(--text-ui-base)',
               background: "var(--ds-bg-secondary)",
-              border: "1px solid var(--border)",
               borderRadius: 'var(--radius-sm)',
               color: "var(--ds-text-primary)",
               outline: "none",

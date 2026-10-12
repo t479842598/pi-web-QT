@@ -12,7 +12,6 @@ export const VISION_SERVER_NAME = "deepseek-vision";
 const inputStyle: React.CSSProperties = {
   padding: "7px 9px",
   background: "var(--ds-bg-secondary)",
-  border: "1px solid var(--border)",
   borderRadius: 'var(--radius-sm)',
   color: "var(--ds-text-primary)",
   fontSize: 'var(--text-ui-sm)',

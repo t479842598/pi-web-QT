@@ -432,7 +432,6 @@ export function BuiltinModelsDetail({
             style={{
               padding: "5px 12px",
               background: "var(--ds-bg-secondary)",
-              border: "1px solid var(--border)",
               borderRadius: 'var(--radius-sm)',
               color: "var(--ds-text-secondary)",
               cursor: "pointer",

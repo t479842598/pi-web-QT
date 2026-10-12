@@ -86,6 +86,31 @@ RADIUS_PAIRS = [
     ("borderRadius: 3", "borderRadius: 'var(--radius-xs)'"),
 ]
 
+# Third class (PI-Desktop D297): in-flow structure is carried by tone, not
+# strokes. Inside the settings surface the remaining `1px solid var(--border)`
+# literals are ghost buttons (a small padding plus a transparent background) and
+# inset fields (a panel fill), which the ported language renders without a
+# stroke — a hover fill for buttons, an inset fill plus focus ring for fields.
+#
+# Both rewrites only delete the `border:` line and keep everything around it, so
+# they are idempotent and never touch a border that already reads "none". A
+# floating layer (dialog, popover) is not matched here because its border is not
+# preceded by one of those two markers.
+GHOST_BUTTON_RE = re.compile(
+    r'(padding: "[0-9]+px [0-9]+px",\s*\n)(\s*)border: "1px solid var\(--border\)",\n',
+)
+INSET_FIELD_RE = re.compile(
+    r'(background: "var\(--ds-bg-secondary\)",\s*\n)(\s*)border: "1px solid var\(--border\)",\n',
+)
+
+
+def drop_inline_border(text: str) -> tuple[str, int]:
+    total = 0
+    for pattern in (GHOST_BUTTON_RE, INSET_FIELD_RE):
+        text, hits = pattern.subn(lambda m: m.group(1), text)
+        total += hits
+    return text, total
+
 
 def apply(text, pairs):
     total = 0
@@ -119,6 +144,9 @@ def main():
         ):
             text, n = apply(text, pairs)
             counts.append("%s=%d" % (label, n))
+        # The removal runs last: it looks for the already-ported fills.
+        text, strokes = drop_inline_border(text)
+        counts.append("stroke=%d" % strokes)
         changed = sum(int(c.split("=")[1]) for c in counts)
         grand += changed
         if changed:

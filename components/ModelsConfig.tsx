@@ -151,7 +151,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const inputStyle = {
   padding: "6px 9px",
   background: "var(--ds-bg-secondary)",
-  border: "1px solid var(--border)",
   borderRadius: 'var(--radius-sm)',
   color: "var(--ds-text-primary)",
   fontSize: 'var(--text-ui-sm)',
@@ -1540,7 +1539,6 @@ function AddProviderPicker({
     display: "flex", flexDirection: "row", alignItems: "center", gap: 8,
     padding: "10px 12px",
     background: "var(--ds-bg-secondary)",
-    border: "1px solid var(--border)",
     borderRadius: 'var(--radius-md)',
     boxSizing: "border-box",
     cursor: "pointer",

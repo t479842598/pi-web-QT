@@ -402,7 +402,6 @@ function AddPluginPanel({
                 minHeight: 30,
                 textAlign: "left",
                 padding: "6px 9px",
-                border: "1px solid var(--border)",
                 borderRadius: 'var(--radius-sm)',
                 background: "var(--ds-bg-secondary)",
                 color: "var(--ds-text-muted)",
