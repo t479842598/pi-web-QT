@@ -33,14 +33,14 @@ export function ServerSwitchConfig() {
   return (
     <div className="settings-content-panel" style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
       <header className="settings-content-header" style={{ padding: "var(--settings-content-header-padding, 18px 22px 14px)", borderBottom: "var(--settings-content-header-border, 1px solid var(--border))" }}>
-        <h1 className="settings-content-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.server")}</h1>
+        <h1 className="settings-content-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--ds-text-primary)" }}>{t("desktop.server")}</h1>
       </header>
       <div className="settings-content-stack" style={{ padding: "var(--settings-content-panel-padding, 18px 22px)", display: "flex", flexDirection: "column", gap: 14 }}>
-        <div className="settings-content-card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 10, background: "var(--settings-content-card-bg, var(--bg-hover))", border: "var(--settings-content-card-border, 1px solid var(--border))" }}>
-          <PlugsConnected size={18} color="var(--accent)" />
+        <div className="settings-content-card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 'var(--radius-md-plus)', background: "var(--settings-content-card-bg, var(--bg-hover))", border: "var(--settings-content-card-border, 1px solid var(--border))" }}>
+          <PlugsConnected size={18} color="var(--ds-accent)" />
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.serverCurrent")}</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>{host}</div>
+            <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{t("desktop.serverCurrent")}</div>
+            <div style={{ fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>{host}</div>
           </div>
         </div>
         <button
@@ -48,15 +48,15 @@ export function ServerSwitchConfig() {
           onClick={switchServer}
           style={{
             display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            padding: "10px 16px", borderRadius: 10,
+            padding: "10px 16px", borderRadius: 'var(--radius-md-plus)',
             background: "linear-gradient(135deg, var(--accent), var(--accent-hover, var(--accent)))",
-            color: "var(--accent-fg)", fontSize: 14, fontWeight: 600, cursor: "pointer", border: "none",
+            color: "var(--accent-fg)", fontSize: 'var(--text-ui-base)', fontWeight: 600, cursor: "pointer", border: "none",
           }}
         >
           <ArrowCounterClockwise size={16} />
           {t("desktop.serverSwitch")}
         </button>
-        <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.7, color: "var(--text-muted)" }}>
+        <p style={{ margin: 0, fontSize: 'var(--text-ui-base)', lineHeight: 1.7, color: "var(--ds-text-secondary)" }}>
           {t("desktop.serverSwitchHint")}
         </p>
       </div>

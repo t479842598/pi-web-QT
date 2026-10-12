@@ -142,7 +142,7 @@ function useModelTranslation() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="settings-content-field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <label style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>{label}</label>
+      <label style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", fontWeight: 500 }}>{label}</label>
       {children}
     </div>
   );
@@ -150,11 +150,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const inputStyle = {
   padding: "6px 9px",
-  background: "var(--bg-panel)",
+  background: "var(--ds-bg-secondary)",
   border: "1px solid var(--border)",
-  borderRadius: 5,
-  color: "var(--text)",
-  fontSize: 12,
+  borderRadius: 'var(--radius-sm)',
+  color: "var(--ds-text-primary)",
+  fontSize: 'var(--text-ui-sm)',
   outline: "none",
   width: "100%",
   boxSizing: "border-box" as const,
@@ -218,7 +218,7 @@ function SecretTextInput({
           padding: 0,
           border: "none",
           background: "transparent",
-          color: "var(--text-dim)",
+          color: "var(--ds-text-muted)",
           cursor: "pointer",
           display: "flex",
           alignItems: "center",
@@ -239,7 +239,7 @@ function Select({ value, onChange, options, required }: { value: string; onChang
   const t = useModelTranslation();
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}
-      style={{ ...inputStyle, color: value ? "var(--text)" : "var(--text-dim)" }}>
+      style={{ ...inputStyle, color: value ? "var(--ds-text-primary)" : "var(--ds-text-muted)" }}>
       {!required && <option value="">{t("desktop.modelsInheritNone")}</option>}
       {options.map((o) => <option key={o} value={o}>{o}</option>)}
     </select>
@@ -248,16 +248,16 @@ function Select({ value, onChange, options, required }: { value: string; onChang
 
 function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "var(--text-muted)" }}>
+    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)}
-        style={{ width: 13, height: 13, accentColor: "var(--accent)", cursor: "pointer" }} />
+        style={{ width: 13, height: 13, accentColor: "var(--ds-accent)", cursor: "pointer" }} />
       {label}
     </label>
   );
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div className="settings-content-section-title" style={{ fontSize: 11, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{children}</div>;
+  return <div className="settings-content-section-title" style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--ds-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{children}</div>;
 }
 
 // ── Provider detail ───────────────────────────────────────────────────────────
@@ -365,7 +365,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <EnabledModelsProviderSwitch providerId={name} controller={enabledModels} />
           <button onClick={onDelete}
-            style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "var(--status-error)", cursor: "pointer", fontSize: 11 }}>
+            style={{ padding: "3px 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 'var(--radius-xs)', color: "var(--status-error)", cursor: "pointer", fontSize: 'var(--text-ui-xs)' }}>
             {t("desktop.delete")}
           </button>
         </div>
@@ -375,7 +375,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
         <TextInput value={editingName} onChange={setEditingName} placeholder="provider-name" mono />
         {editingName !== name && editingName.trim() && (
           <button onClick={() => onRename(editingName.trim())}
-            style={{ marginTop: 4, padding: "3px 10px", background: "var(--accent)", border: "none", borderRadius: 4, color: "var(--accent-fg)", cursor: "pointer", fontSize: 11, alignSelf: "flex-start" }}>
+            style={{ marginTop: 4, padding: "3px 10px", background: "var(--ds-accent)", border: "none", borderRadius: 'var(--radius-xs)', color: "var(--accent-fg)", cursor: "pointer", fontSize: 'var(--text-ui-xs)', alignSelf: "flex-start" }}>
             {t("desktop.rename")}
           </button>
         )}
@@ -389,7 +389,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
       <Field label={t("desktop.modelsApiKey")}>
         <SecretTextInput value={provider.apiKey ?? ""} onChange={(v) => set("apiKey", v || undefined)}
           placeholder={t("desktop.modelsApiKeyPlaceholder")} mono />
-        <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
+        <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", marginTop: 2 }}>
           {t("desktop.modelsApiKeyHelp")}
         </span>
       </Field>
@@ -405,9 +405,9 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
               onClick={handleDiscoverModels}
               disabled={discoveryState.phase === "loading"}
               style={{
-                height: 30, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 5,
-                background: "var(--bg-panel)", color: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "var(--text-dim)" : "var(--text-muted)",
-                cursor: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "not-allowed" : "pointer", fontSize: 11,
+                height: 30, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)',
+                background: "var(--ds-bg-secondary)", color: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "var(--ds-text-muted)" : "var(--ds-text-secondary)",
+                cursor: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "not-allowed" : "pointer", fontSize: 'var(--text-ui-xs)',
               }}
             >
               {discoveryState.phase === "loading" ? t("desktop.modelsDiscoveryFetching") : t("desktop.modelsDiscoveryFetch")}
@@ -416,14 +416,14 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
           <button
             onClick={onAddModel}
             title={t("desktop.modelsAddModelManual")}
-            style={{ height: 30, padding: "0 12px", border: "none", borderRadius: 5, background: "var(--accent)", color: "var(--accent-fg)", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
+            style={{ height: 30, padding: "0 12px", border: "none", borderRadius: 'var(--radius-sm)', background: "var(--ds-accent)", color: "var(--accent-fg)", cursor: "pointer", fontSize: 'var(--text-ui-xs)', fontWeight: 600 }}
           >
             {t("desktop.modelsAddModelManual")}
           </button>
         </div>
 
         {discoveryState.phase === "error" && (
-          <div style={{ padding: "7px 9px", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 5, color: "var(--status-error)", fontSize: 11, lineHeight: 1.4 }}>
+          <div style={{ padding: "7px 9px", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 'var(--radius-sm)', color: "var(--status-error)", fontSize: 'var(--text-ui-xs)', lineHeight: 1.4 }}>
             {discoveryState.message}
           </div>
         )}
@@ -438,13 +438,13 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
               style={{ ...inputStyle, width: "100%", minWidth: 0 }}
             />
 
-            <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)" }}>
+            <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)" }}>
               <label
                 style={{
                   minHeight: 32, padding: "5px 9px", display: "flex", alignItems: "center", gap: 8,
                   position: "sticky", top: 0, zIndex: 1, borderBottom: "1px solid var(--border)",
                   background: "var(--bg)", cursor: selectableShownIds.length ? "pointer" : "default",
-                  color: "var(--text-muted)", fontSize: 10, fontWeight: 600,
+                  color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-xs)', fontWeight: 600,
                 }}
               >
                 <input
@@ -453,12 +453,12 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
                   checked={allShownSelected}
                   disabled={selectableShownIds.length === 0}
                   onChange={toggleShownModels}
-                  style={{ width: 13, height: 13, accentColor: "var(--accent)", flexShrink: 0 }}
+                  style={{ width: 13, height: 13, accentColor: "var(--ds-accent)", flexShrink: 0 }}
                 />
                 {t("desktop.modelsDiscoverySelectShown")}
               </label>
               {shownDiscoveredModels.length === 0 ? (
-                <div style={{ padding: 12, color: "var(--text-dim)", fontSize: 11 }}>{t("desktop.modelsDiscoveryNoMatches")}</div>
+                <div style={{ padding: 12, color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)' }}>{t("desktop.modelsDiscoveryNoMatches")}</div>
               ) : shownDiscoveredModels.map((model, index) => {
                 const alreadyAdded = existingModelIds.has(model.id);
                 const checked = selectedModelIds.includes(model.id);
@@ -476,20 +476,20 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
                       checked={checked || alreadyAdded}
                       disabled={alreadyAdded}
                       onChange={() => toggleDiscoveredModel(model.id)}
-                      style={{ width: 13, height: 13, accentColor: "var(--accent)", flexShrink: 0 }}
+                      style={{ width: 13, height: 13, accentColor: "var(--ds-accent)", flexShrink: 0 }}
                     />
                     <span style={{ minWidth: 0, flex: 1 }}>
-                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", fontSize: 11 }}>{model.name ?? model.id}</span>
-                      {model.name && <code style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)", fontSize: 10, fontFamily: "var(--font-mono)" }}>{model.id}</code>}
+                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-xs)' }}>{model.name ?? model.id}</span>
+                      {model.name && <code style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)', fontFamily: "var(--font-mono)" }}>{model.id}</code>}
                     </span>
-                    {alreadyAdded && <span style={{ color: "var(--text-dim)", fontSize: 10 }}>{t("desktop.modelsDiscoveryAdded")}</span>}
+                    {alreadyAdded && <span style={{ color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)' }}>{t("desktop.modelsDiscoveryAdded")}</span>}
                   </label>
                 );
               })}
             </div>
 
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <span title={discoveryState.endpoint} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)", fontSize: 10 }}>
+              <span title={discoveryState.endpoint} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)' }}>
                 {filteredDiscoveredModels.length > shownDiscoveredModels.length
                   ? t("desktop.modelsDiscoveryShowing", { shown: shownDiscoveredModels.length, total: filteredDiscoveredModels.length })
                   : t("desktop.modelsDiscoveryFetched", { count: discoveryState.models.length })}
@@ -497,7 +497,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
               <button
                 onClick={addSelectedModels}
                 disabled={selectedCount === 0}
-                style={{ height: 28, padding: "0 11px", border: "none", borderRadius: 5, background: selectedCount ? "var(--accent)" : "var(--bg-panel)", color: selectedCount ? "var(--accent-contrast)" : "var(--text-dim)", cursor: selectedCount ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
+                style={{ height: 28, padding: "0 11px", border: "none", borderRadius: 'var(--radius-sm)', background: selectedCount ? "var(--ds-accent)" : "var(--ds-bg-secondary)", color: selectedCount ? "var(--accent-contrast)" : "var(--ds-text-muted)", cursor: selectedCount ? "pointer" : "not-allowed", fontSize: 'var(--text-ui-xs)', fontWeight: 600, whiteSpace: "nowrap" }}
               >
                 {selectedCount
                   ? t("desktop.modelsDiscoveryAddSelectedCount", { count: selectedCount })
@@ -518,8 +518,8 @@ export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhig
 type ThinkingLevel = typeof THINKING_LEVELS[number];
 
 const LEVEL_COLORS: Record<ThinkingLevel, string> = {
-  off:     "var(--text-dim)",
-  minimal: "var(--text-muted)",
+  off:     "var(--ds-text-muted)",
+  minimal: "var(--ds-text-secondary)",
   low:     "#60a5fa",
   medium:  "#a78bfa",
   high:    "#f472b6",
@@ -558,17 +558,17 @@ export function ThinkingLevelMapEditor({
 
         const btnBase: React.CSSProperties = {
           padding: "4px 10px",
-          fontSize: 10,
+          fontSize: 'var(--text-ui-xs)',
           border: "none",
           cursor: "pointer",
           fontWeight: 400,
           transition: "background 0.1s, color 0.1s",
           whiteSpace: "nowrap",
-          background: "var(--bg-panel)",
-          color: "var(--text-dim)",
+          background: "var(--ds-bg-secondary)",
+          color: "var(--ds-text-muted)",
         };
         const btnActive: React.CSSProperties = {
-          background: "var(--accent)",
+          background: "var(--ds-accent)",
           color: "var(--accent-fg)",
           fontWeight: 600,
         };
@@ -586,7 +586,7 @@ export function ThinkingLevelMapEditor({
               alignItems: "center",
               gap: 8,
               padding: "5px 4px",
-              borderRadius: 6,
+              borderRadius: 'var(--radius-sm)',
               background: "transparent",
               border: "1px solid transparent",
             }}
@@ -595,9 +595,9 @@ export function ThinkingLevelMapEditor({
             <div style={{ display: "flex", alignItems: "center", gap: 5, width: 68, flexShrink: 0 }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0, opacity: state === "null" ? 0.3 : 1 }} />
               <span style={{
-                fontSize: 11,
+                fontSize: 'var(--text-ui-xs)',
                 fontFamily: "var(--font-mono)",
-                color: state === "null" ? "var(--text-dim)" : "var(--text-muted)",
+                color: state === "null" ? "var(--ds-text-muted)" : "var(--ds-text-secondary)",
                 textDecoration: state === "null" ? "line-through" : "none",
               }}>
                 {level}
@@ -605,7 +605,7 @@ export function ThinkingLevelMapEditor({
             </div>
 
             {/* Default + Disabled buttons */}
-            <div style={{ display: "flex", borderRadius: 5, border: "1px solid var(--border)", overflow: "hidden", flexShrink: 0 }}>
+            <div style={{ display: "flex", borderRadius: 'var(--radius-sm)', border: "1px solid var(--border)", overflow: "hidden", flexShrink: 0 }}>
               <button
                 onClick={() => setLevel(level, "omit")}
                 style={{ ...btnBase, ...(state === "omit" ? btnActive : {}) }}
@@ -621,7 +621,7 @@ export function ThinkingLevelMapEditor({
             </div>
 
             {/* Custom button + input fused */}
-            <div style={{ display: "flex", borderRadius: 5, border: `1px solid ${state === "string" ? "var(--accent)" : "var(--border)"}`, overflow: "hidden", transition: "border-color 0.1s" }}>
+            <div style={{ display: "flex", borderRadius: 'var(--radius-sm)', border: `1px solid ${state === "string" ? "var(--ds-accent)" : "var(--ds-border-default)"}`, overflow: "hidden", transition: "border-color 0.1s" }}>
               <button
                 onClick={() => setLevel(level, strVal || level)}
                 style={{ ...btnBase, ...(state === "string" ? btnActive : {}), borderRight: "1px solid var(--border)", flexShrink: 0 }}
@@ -636,12 +636,12 @@ export function ThinkingLevelMapEditor({
                 maxLength={10}
                 style={{
                   width: "12ch",
-                  background: state === "string" ? "var(--bg)" : "var(--bg-panel)",
+                  background: state === "string" ? "var(--bg)" : "var(--ds-bg-secondary)",
                   border: "none",
                   outline: "none",
-                  color: state === "string" ? "var(--text)" : "var(--text-dim)",
+                  color: state === "string" ? "var(--ds-text-primary)" : "var(--ds-text-muted)",
                   fontFamily: "var(--font-mono)",
-                  fontSize: 11,
+                  fontSize: 'var(--text-ui-xs)',
                   padding: "4px 7px",
                   transition: "background 0.1s, color 0.1s",
                 }}
@@ -869,7 +869,7 @@ function ModelDetail({
     ? "var(--status-error)"
     : catalogState.phase === "success" && catalogState.recommendation.price.status === "unreliable"
       ? "var(--status-warning)"
-      : "var(--text-dim)";
+      : "var(--ds-text-muted)";
 
   return (
     <div className="settings-content-detail-stack" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -886,16 +886,16 @@ function ModelDetail({
                 border: `1px solid ${
                   testState.phase === "error" ? "var(--status-error-border)"
                   : testState.phase === "success" ? "var(--status-success-border)"
-                  : "var(--border)"
+                  : "var(--ds-border-default)"
                 }`,
-                borderRadius: 4,
+                borderRadius: 'var(--radius-xs)',
                 background: testState.phase === "error" ? "var(--status-error-bg)"
                   : testState.phase === "success" ? "var(--status-success-bg)"
-                  : "var(--bg-hover)",
+                  : "var(--ds-bg-hover)",
                 color: testState.phase === "error" ? "var(--status-error)"
                   : testState.phase === "success" ? "var(--status-success)"
-                  : "var(--text)",
-                fontSize: 11,
+                  : "var(--ds-text-primary)",
+                fontSize: 'var(--text-ui-xs)',
                 display: "inline-flex",
                 alignItems: "center",
                 whiteSpace: "nowrap",
@@ -915,11 +915,11 @@ function ModelDetail({
               height: 24,
               padding: "0 8px",
               background: testState.phase === "success" ? "var(--status-success)" : "none",
-              border: `1px solid ${testState.phase === "success" ? "var(--status-success)" : "var(--border)"}`,
-              borderRadius: 4,
-              color: testState.phase === "success" ? "#fff" : (!model.id.trim() || testState.phase === "testing") ? "var(--text-dim)" : "var(--text-muted)",
+              border: `1px solid ${testState.phase === "success" ? "var(--status-success)" : "var(--ds-border-default)"}`,
+              borderRadius: 'var(--radius-xs)',
+              color: testState.phase === "success" ? "#fff" : (!model.id.trim() || testState.phase === "testing") ? "var(--ds-text-muted)" : "var(--ds-text-secondary)",
               cursor: (!model.id.trim() || testState.phase === "testing") ? "not-allowed" : "pointer",
-              fontSize: 11,
+              fontSize: 'var(--text-ui-xs)',
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
@@ -931,7 +931,7 @@ function ModelDetail({
             {testState.phase === "testing" ? t("desktop.modelsTesting") : testState.phase === "success" ? t("desktop.modelsOk") : t("desktop.modelsTest")}
           </button>
           <button onClick={onDelete}
-            style={{ height: 24, padding: "0 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, color: "var(--status-error)", cursor: "pointer", fontSize: 11, boxSizing: "border-box" }}>
+            style={{ height: 24, padding: "0 8px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 'var(--radius-xs)', color: "var(--status-error)", cursor: "pointer", fontSize: 'var(--text-ui-xs)', boxSizing: "border-box" }}>
             {t("desktop.modelsRemove")}
           </button>
         </div>
@@ -948,11 +948,11 @@ function ModelDetail({
             onClick={() => void handleCatalogFill()}
             disabled={!model.id.trim() || catalogState.phase === "loading"}
             style={{
-              height: 28, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 5,
-              background: "var(--bg-panel)",
-              color: !model.id.trim() || catalogState.phase === "loading" ? "var(--text-dim)" : "var(--text-muted)",
+              height: 28, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)',
+              background: "var(--ds-bg-secondary)",
+              color: !model.id.trim() || catalogState.phase === "loading" ? "var(--ds-text-muted)" : "var(--ds-text-secondary)",
               cursor: !model.id.trim() || catalogState.phase === "loading" ? "not-allowed" : "pointer",
-              fontSize: 11,
+              fontSize: 'var(--text-ui-xs)',
             }}
           >
             {catalogState.phase === "loading" ? t("desktop.modelsCatalogFilling") : t("desktop.modelsCatalogFill")}
@@ -961,7 +961,7 @@ function ModelDetail({
             href="https://github.com/anomalyco/models.dev"
             target="_blank"
             rel="noreferrer"
-            style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10, textDecoration: "none" }}
+            style={{ marginLeft: "auto", color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)', textDecoration: "none" }}
           >
             {t("desktop.modelsCatalogSource")}
           </a>
@@ -971,7 +971,7 @@ function ModelDetail({
           aria-live="polite"
           style={{
             marginTop: 6, height: 20, display: "flex", alignItems: "center",
-            justifyContent: "space-between", gap: 8, color: catalogStatusColor, fontSize: 10,
+            justifyContent: "space-between", gap: 8, color: catalogStatusColor, fontSize: 'var(--text-ui-xs)',
           }}
         >
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -980,7 +980,7 @@ function ModelDetail({
           {catalogState.phase === "success" && catalogUndoRef.current && (
             <button
               onClick={undoCatalogFill}
-              style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 10, flexShrink: 0 }}
+              style={{ background: "none", border: "none", color: "var(--ds-accent)", cursor: "pointer", fontSize: 'var(--text-ui-xs)', flexShrink: 0 }}
             >
               {t("desktop.modelsCatalogUndo")}
             </button>
@@ -1011,7 +1011,7 @@ function ModelDetail({
               {model.thinkingLevelMap && (
                 <button
                   onClick={() => set("thinkingLevelMap", undefined)}
-                  style={{ fontSize: 10, padding: "2px 7px", background: "none", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-dim)", cursor: "pointer" }}
+                  style={{ fontSize: 'var(--text-ui-xs)', padding: "2px 7px", background: "none", border: "1px solid var(--border)", borderRadius: 'var(--radius-xs)', color: "var(--ds-text-muted)", cursor: "pointer" }}
                 >
                   {t("desktop.modelsClearAll")}
                 </button>
@@ -1208,8 +1208,8 @@ function OAuthDetail({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <SectionTitle>{t("desktop.modelsSubscription")}</SectionTitle>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: provider.loggedIn ? "var(--status-success)" : "var(--border)", display: "inline-block" }} />
-          <span style={{ fontSize: 11, color: provider.loggedIn ? "var(--status-success)" : "var(--text-dim)" }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: provider.loggedIn ? "var(--status-success)" : "var(--ds-border-default)", display: "inline-block" }} />
+          <span style={{ fontSize: 'var(--text-ui-xs)', color: provider.loggedIn ? "var(--status-success)" : "var(--ds-text-muted)" }}>
             {provider.loggedIn ? t("desktop.modelsConnected") : t("desktop.modelsNotConnected")}
           </span>
         </div>
@@ -1218,16 +1218,16 @@ function OAuthDetail({
       {/* Status */}
       <div style={{ minHeight: provider.loggedIn && loginState.phase === "idle" ? 0 : 48 }}>
         {loginState.phase === "idle" && (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+          <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", lineHeight: 1.5 }}>
             {provider.loggedIn ? t("desktop.modelsAlreadyConnected") : t("desktop.modelsConnectAccount", { provider: provider.name })}
           </p>
         )}
         {loginState.phase === "connecting" && (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.modelsOpeningBrowser")}</p>
+          <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{t("desktop.modelsOpeningBrowser")}</p>
         )}
         {loginState.phase === "select" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+            <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", lineHeight: 1.5 }}>
               {loginState.message}
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1235,7 +1235,7 @@ function OAuthDetail({
                 <button
                   key={option.id}
                   onClick={() => submitSelection(loginState.token, option.id)}
-                  style={{ padding: "6px 9px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text)", cursor: "pointer", fontSize: 12, textAlign: "left" }}
+                  style={{ padding: "6px 9px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-primary)", cursor: "pointer", fontSize: 'var(--text-ui-sm)', textAlign: "left" }}
                 >
                   {option.label}
                 </button>
@@ -1245,15 +1245,15 @@ function OAuthDetail({
         )}
         {(loginState.phase === "auth" || loginState.phase === "prompt") && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+            <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", lineHeight: 1.5 }}>
               {loginState.phase === "auth"
                 ? t("desktop.modelsCompleteSignIn")
                 : loginState.message}
             </p>
             {loginState.phase === "auth" && (
-              <p style={{ margin: 0, fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+              <p style={{ margin: 0, fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", lineHeight: 1.5 }}>
                 {t("desktop.modelsBrowserDidNotOpen")}{" "}
-                <a href={loginState.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", wordBreak: "break-all" }}>
+                <a href={loginState.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--ds-accent)", wordBreak: "break-all" }}>
                   {t("desktop.modelsOpenLoginPage")}
                 </a>
                 .
@@ -1266,12 +1266,12 @@ function OAuthDetail({
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") submitCode(loginState.token, inputValue); }}
                 placeholder={loginState.phase === "auth" ? "http://localhost:1455/auth/callback?code=…" : (loginState.placeholder ?? t("desktop.modelsEnterValue"))}
-                style={{ flex: 1, padding: "6px 9px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text)", fontSize: 12, outline: "none", fontFamily: "var(--font-mono)", boxSizing: "border-box" }}
+                style={{ flex: 1, padding: "6px 9px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-sm)', outline: "none", fontFamily: "var(--font-mono)", boxSizing: "border-box" }}
               />
               <button
                 onClick={() => submitCode(loginState.token, inputValue)}
                 disabled={!inputValue.trim()}
-                style={{ padding: "6px 12px", background: inputValue.trim() ? "var(--accent)" : "var(--bg-panel)", border: "none", borderRadius: 5, color: inputValue.trim() ? "var(--accent-contrast)" : "var(--text-dim)", cursor: inputValue.trim() ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 600, flexShrink: 0 }}
+                style={{ padding: "6px 12px", background: inputValue.trim() ? "var(--ds-accent)" : "var(--ds-bg-secondary)", border: "none", borderRadius: 'var(--radius-sm)', color: inputValue.trim() ? "var(--accent-contrast)" : "var(--ds-text-muted)", cursor: inputValue.trim() ? "pointer" : "not-allowed", fontSize: 'var(--text-ui-sm)', fontWeight: 600, flexShrink: 0 }}
               >
                 {t("desktop.submit")}
               </button>
@@ -1280,14 +1280,14 @@ function OAuthDetail({
         )}
         {loginState.phase === "device_code" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+            <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", lineHeight: 1.5 }}>
               {t("desktop.modelsOpenVerificationPage")}
             </p>
-            <div style={{ padding: "8px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text)", fontSize: 16, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: 0 }}>
+            <div style={{ padding: "8px 10px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-primary)", fontSize: 16, fontWeight: 700, fontFamily: "var(--font-mono)", letterSpacing: 0 }}>
               {loginState.userCode}
             </div>
-            <p style={{ margin: 0, fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
-              <a href={loginState.verificationUri} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", wordBreak: "break-all" }}>
+            <p style={{ margin: 0, fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", lineHeight: 1.5 }}>
+              <a href={loginState.verificationUri} target="_blank" rel="noopener noreferrer" style={{ color: "var(--ds-accent)", wordBreak: "break-all" }}>
                 {loginState.verificationUri}
               </a>
               {loginState.expiresInSeconds ? ` ${t("desktop.modelsExpiresInMinutes", { count: Math.ceil(loginState.expiresInSeconds / 60) })}` : ""}
@@ -1295,13 +1295,13 @@ function OAuthDetail({
           </div>
         )}
         {loginState.phase === "progress" && (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>{loginState.message}</p>
+          <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{loginState.message}</p>
         )}
         {loginState.phase === "success" && (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--status-success)" }}>{t("desktop.modelsConnectedSuccessfully")}</p>
+          <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--status-success)" }}>{t("desktop.modelsConnectedSuccessfully")}</p>
         )}
         {loginState.phase === "error" && (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--status-error)" }}>{loginState.message}</p>
+          <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--status-error)" }}>{loginState.message}</p>
         )}
       </div>
 
@@ -1310,7 +1310,7 @@ function OAuthDetail({
         {isWorking ? (
           <button
             onClick={() => { eventSourceRef.current?.close(); setLoginState({ phase: "idle" }); }}
-            style={{ padding: "5px 12px", background: "none", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}
+            style={{ padding: "5px 12px", background: "none", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 'var(--text-ui-sm)' }}
           >
             {t("desktop.cancel")}
           </button>
@@ -1318,14 +1318,14 @@ function OAuthDetail({
           <>
             <button
               onClick={handleLogin}
-              style={{ padding: "5px 14px", background: "var(--accent)", border: "none", borderRadius: 5, color: "var(--accent-fg)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+              style={{ padding: "5px 14px", background: "var(--ds-accent)", border: "none", borderRadius: 'var(--radius-sm)', color: "var(--accent-fg)", cursor: "pointer", fontSize: 'var(--text-ui-sm)', fontWeight: 600 }}
             >
               {provider.loggedIn ? t("desktop.modelsReLogin") : t("desktop.modelsLogin")}
             </button>
             {provider.loggedIn && (
               <button
                 onClick={handleLogout}
-                style={{ padding: "5px 12px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 5, color: "var(--status-error)", cursor: "pointer", fontSize: 12 }}
+                style={{ padding: "5px 12px", background: "none", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 'var(--radius-sm)', color: "var(--status-error)", cursor: "pointer", fontSize: 'var(--text-ui-sm)' }}
               >
                 {t("desktop.modelsDisconnect")}
               </button>
@@ -1427,14 +1427,14 @@ function ApiKeyDetail({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <SectionTitle>{t("desktop.modelsApiKey")}</SectionTitle>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: provider.configured ? "var(--status-success)" : "var(--border)", display: "inline-block" }} />
-          <span style={{ fontSize: 11, color: provider.configured ? "var(--status-success)" : "var(--text-dim)" }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: provider.configured ? "var(--status-success)" : "var(--ds-border-default)", display: "inline-block" }} />
+          <span style={{ fontSize: 'var(--text-ui-xs)', color: provider.configured ? "var(--status-success)" : "var(--ds-text-muted)" }}>
             {provider.configured ? t("desktop.modelsConfigured") : t("desktop.modelsNotConfigured")}
           </span>
         </div>
       </div>
 
-      <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+      <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", lineHeight: 1.5 }}>
         {provider.configured
           ? t("desktop.modelsApiKeyStored")
           : t("desktop.modelsEnableModels", {
@@ -1461,11 +1461,11 @@ function ApiKeyDetail({
             disabled={saving || !apiKey.trim() || savedOk}
             style={{
               padding: "6px 12px",
-              background: savedOk ? "var(--status-success)" : apiKey.trim() ? "var(--accent)" : "var(--bg-panel)",
-              border: "none", borderRadius: 5,
-              color: (apiKey.trim() || savedOk) ? "#fff" : "var(--text-dim)",
+              background: savedOk ? "var(--status-success)" : apiKey.trim() ? "var(--ds-accent)" : "var(--ds-bg-secondary)",
+              border: "none", borderRadius: 'var(--radius-sm)',
+              color: (apiKey.trim() || savedOk) ? "#fff" : "var(--ds-text-muted)",
               cursor: (saving || !apiKey.trim() || savedOk) ? "not-allowed" : "pointer",
-              fontSize: 12, fontWeight: 600, flexShrink: 0,
+              fontSize: 'var(--text-ui-sm)', fontWeight: 600, flexShrink: 0,
               display: "flex", alignItems: "center", gap: 5,
             }}
           >
@@ -1475,7 +1475,7 @@ function ApiKeyDetail({
         </div>
       </Field>
 
-      {error && <p style={{ margin: 0, fontSize: 12, color: "var(--status-error)" }}>{error}</p>}
+      {error && <p style={{ margin: 0, fontSize: 'var(--text-ui-sm)', color: "var(--status-error)" }}>{error}</p>}
 
       {provider.configured && (
         <button
@@ -1484,8 +1484,8 @@ function ApiKeyDetail({
           style={{
             alignSelf: "flex-start", padding: "5px 12px",
             background: "none", border: "1px solid rgba(239,68,68,0.3)",
-            borderRadius: 5, color: "var(--status-error)",
-            cursor: removing ? "not-allowed" : "pointer", fontSize: 12,
+            borderRadius: 'var(--radius-sm)', color: "var(--status-error)",
+            cursor: removing ? "not-allowed" : "pointer", fontSize: 'var(--text-ui-sm)',
           }}
         >
           {removing ? t("desktop.modelsRemoving") : t("desktop.modelsDisconnect")}
@@ -1539,9 +1539,9 @@ function AddProviderPicker({
   const cardStyle: React.CSSProperties = {
     display: "flex", flexDirection: "row", alignItems: "center", gap: 8,
     padding: "10px 12px",
-    background: "var(--bg-panel)",
+    background: "var(--ds-bg-secondary)",
     border: "1px solid var(--border)",
-    borderRadius: 7,
+    borderRadius: 'var(--radius-md)',
     boxSizing: "border-box",
     cursor: "pointer",
     minWidth: 0,
@@ -1556,75 +1556,75 @@ function AddProviderPicker({
     <div data-settings-child-dialog="true"
       style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}
     >
-      <div style={{ width: 820, maxWidth: "calc(100vw - 32px)", maxHeight: "min(72vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
+      <div style={{ width: 820, maxWidth: "calc(100vw - 32px)", maxHeight: "min(72vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-md-plus)', display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
         {/* Search */}
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
-          <MagnifyingGlassIcon size={13} style={{ color: "var(--text-dim)", flexShrink: 0 }} />
+          <MagnifyingGlassIcon size={13} style={{ color: "var(--ds-text-muted)", flexShrink: 0 }} />
           <input
             ref={inputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
             placeholder={t("desktop.modelsSearchProviders")}
-            style={{ flex: 1, background: "none", border: "none", outline: "none", color: "var(--text)", fontSize: 13, boxSizing: "border-box" }}
+            style={{ flex: 1, background: "none", border: "none", outline: "none", color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-base)', boxSizing: "border-box" }}
           />
         </div>
 
         {/* Card grid */}
         <div style={{ flex: 1, overflowY: "auto", padding: 14 }}>
           {totalCount === 0 ? (
-            <div style={{ padding: "20px 0", fontSize: 12, color: "var(--text-dim)", textAlign: "center" }}>{t("desktop.modelsNoProvidersMatch")}</div>
+            <div style={{ padding: "20px 0", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-muted)", textAlign: "center" }}>{t("desktop.modelsNoProvidersMatch")}</div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(240px, 100%), 1fr))", gap: 8 }}>
               {showCustom && (
-                <div style={{ gridColumn: "1 / -1", fontSize: 10, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("desktop.modelsCustom")}</div>
+                <div style={{ gridColumn: "1 / -1", fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--ds-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("desktop.modelsCustom")}</div>
               )}
               {showCustom && (
                 <button
                   onClick={() => { onAddCustom(); onClose(); }}
                   style={cardStyle}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--bg-panel)"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--ds-accent)"; e.currentTarget.style.background = "var(--ds-bg-hover)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ds-border-default)"; e.currentTarget.style.background = "var(--ds-bg-secondary)"; }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t("desktop.modelsCompatibleProvider")}</div>
-                    <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>{t("desktop.modelsCustomEndpointFormat")}</div>
+                    <div style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-primary)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t("desktop.modelsCompatibleProvider")}</div>
+                    <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", marginTop: 2 }}>{t("desktop.modelsCustomEndpointFormat")}</div>
                   </div>
-                  <span style={{ width: 26, height: 26, borderRadius: 5, background: "var(--bg-hover)", border: "1px dashed var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <PlusIcon size={13} style={{ color: "var(--text-dim)" }} />
+                  <span style={{ width: 26, height: 26, borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-hover)", border: "1px dashed var(--border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <PlusIcon size={13} style={{ color: "var(--ds-text-muted)" }} />
                   </span>
                 </button>
               )}
 
               {availableOAuth.length > 0 && (
-                <div style={{ gridColumn: "1 / -1", paddingTop: showCustom ? 6 : 0, fontSize: 10, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("desktop.modelsSubscriptions")}</div>
+                <div style={{ gridColumn: "1 / -1", paddingTop: showCustom ? 6 : 0, fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--ds-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("desktop.modelsSubscriptions")}</div>
               )}
               {availableOAuth.map((p) => (
                 <button key={p.id} onClick={() => { onSelectOAuth(p.id); onClose(); }}
                   style={cardStyle}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--bg-panel)"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--ds-accent)"; e.currentTarget.style.background = "var(--ds-bg-hover)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ds-border-default)"; e.currentTarget.style.background = "var(--ds-bg-secondary)"; }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                    <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>OAuth</div>
+                    <div style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-primary)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                    <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", marginTop: 2 }}>OAuth</div>
                   </div>
                   <ProviderIcon id={p.id} size={28} />
                 </button>
               ))}
 
               {availableApiKey.length > 0 && (
-                <div style={{ gridColumn: "1 / -1", paddingTop: availableOAuth.length > 0 ? 6 : 0, fontSize: 10, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("desktop.modelsApiKey")}</div>
+                <div style={{ gridColumn: "1 / -1", paddingTop: availableOAuth.length > 0 ? 6 : 0, fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--ds-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>{t("desktop.modelsApiKey")}</div>
               )}
               {availableApiKey.map((p) => (
                 <button key={p.id} onClick={() => { onSelectApiKey(p.id); onClose(); }}
                   style={cardStyle}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--bg-panel)"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--ds-accent)"; e.currentTarget.style.background = "var(--ds-bg-hover)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ds-border-default)"; e.currentTarget.style.background = "var(--ds-bg-secondary)"; }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.displayName}</div>
-                    <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>{t("desktop.modelsCount", { count: p.modelCount })}</div>
+                    <div style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-primary)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.displayName}</div>
+                    <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", marginTop: 2 }}>{t("desktop.modelsCount", { count: p.modelCount })}</div>
                   </div>
                   <ProviderIcon id={p.id} size={28} />
                 </button>
@@ -1709,11 +1709,11 @@ function CustomProviderDialog({
     <div data-settings-child-dialog="true"
       style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}
     >
-      <div style={{ width: 480, maxWidth: "calc(100vw - 32px)", maxHeight: "min(82vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
+      <div style={{ width: 480, maxWidth: "calc(100vw - 32px)", maxHeight: "min(82vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-md-plus)', display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>{t("desktop.modelsAddCustomTitle")}</span>
-          <button onClick={onCancel} aria-label={t("desktop.modelsClose")} title={t("desktop.modelsClose")} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
+          <span style={{ fontSize: 'var(--text-ui-base)', fontWeight: 700, color: "var(--ds-text-primary)" }}>{t("desktop.modelsAddCustomTitle")}</span>
+          <button onClick={onCancel} aria-label={t("desktop.modelsClose")} title={t("desktop.modelsClose")} style={{ background: "none", border: "none", color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
         </div>
 
         {/* Body */}
@@ -1738,9 +1738,9 @@ function CustomProviderDialog({
               {API_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
               <option value={CUSTOM_CALL_FORMAT}>{t("desktop.modelsCustomCallFormat")}</option>
             </select>
-            <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{t("desktop.modelsCallFormatHelp")}</span>
+            <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)" }}>{t("desktop.modelsCallFormatHelp")}</span>
             {apiSel === CUSTOM_CALL_FORMAT && (
-              <span style={{ fontSize: 10, color: "var(--status-warning)", lineHeight: 1.4 }}>{t("desktop.modelsCustomCallFormatHelp")}</span>
+              <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--status-warning)", lineHeight: 1.4 }}>{t("desktop.modelsCustomCallFormatHelp")}</span>
             )}
           </div>
 
@@ -1748,14 +1748,14 @@ function CustomProviderDialog({
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <SectionTitle>{t("desktop.modelsImportProvider")}</SectionTitle>
             <select value={importValue} onChange={(e) => handleImport(e.target.value)}
-              style={{ ...inputStyle, color: importValue ? "var(--text)" : "var(--text-dim)" }}>
+              style={{ ...inputStyle, color: importValue ? "var(--ds-text-primary)" : "var(--ds-text-muted)" }}>
               <option value="">{t("desktop.modelsImportProviderPlaceholder")}</option>
               {existingProviders.map((p) => (
                 <option key={p.name} value={p.name}>{p.name}{p.provider.api ? ` · ${p.provider.api}` : ""}</option>
               ))}
             </select>
             {importValue && (
-              <span style={{ fontSize: 10, color: "var(--status-success)" }}>{t("desktop.modelsImported")}: {importValue}</span>
+              <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--status-success)" }}>{t("desktop.modelsImported")}: {importValue}</span>
             )}
           </div>
 
@@ -1764,9 +1764,9 @@ function CustomProviderDialog({
             <SectionTitle>{t("desktop.modelsFullUrl")}</SectionTitle>
             {!urlOpen ? (
               <button onClick={() => setUrlOpen(true)}
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 0", background: "none", border: "1px dashed var(--border)", borderRadius: 5, color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.color = "var(--accent)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--text-muted)"; }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 0", background: "none", border: "1px dashed var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 'var(--text-ui-sm)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--ds-accent)"; e.currentTarget.style.color = "var(--ds-accent)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--ds-border-default)"; e.currentTarget.style.color = "var(--ds-text-secondary)"; }}
               >
                 <PlusIcon size={12} />
                 {t("desktop.modelsAddUrl")}
@@ -1776,14 +1776,14 @@ function CustomProviderDialog({
                 <TextInput value={baseUrl} onChange={setBaseUrl} placeholder={t("desktop.modelsUrlPlaceholder")} mono />
                 <button onClick={() => { setUrlOpen(false); setBaseUrl(""); }}
                   title={t("desktop.modelsRemove")}
-                  style={{ flexShrink: 0, width: 28, height: 28, background: "none", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-dim)", cursor: "pointer", fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+                  style={{ flexShrink: 0, width: 28, height: 28, background: "none", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-muted)", cursor: "pointer", fontSize: 'var(--text-ui-base)', lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
               </div>
             )}
-            {baseUrl.trim() && !urlValid && <span style={{ fontSize: 10, color: "var(--status-error)" }}>{t("desktop.modelsUrlInvalid")}</span>}
+            {baseUrl.trim() && !urlValid && <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--status-error)" }}>{t("desktop.modelsUrlInvalid")}</span>}
 
             <Field label={t("desktop.modelsApiKey")}>
               <SecretTextInput value={apiKey} onChange={setApiKey} placeholder={t("desktop.modelsApiKeyPlaceholder")} mono />
-              <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
+              <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", marginTop: 2 }}>
                 {t("desktop.modelsApiKeyHelp")}
               </span>
             </Field>
@@ -1794,7 +1794,7 @@ function CustomProviderDialog({
             <SectionTitle>{t("desktop.modelsCustomRequest")}</SectionTitle>
             <Field label={t("desktop.modelsRequestModelId")}>
               <TextInput value={modelId} onChange={setModelId} placeholder="model-id" mono />
-              <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>{t("desktop.modelsRequestModelIdHelp")}</span>
+              <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", marginTop: 2 }}>{t("desktop.modelsRequestModelIdHelp")}</span>
             </Field>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <Field label={t("desktop.modelsRequestContextLength")}>
@@ -1809,11 +1809,11 @@ function CustomProviderDialog({
 
         {/* Footer */}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 16px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
-          <button onClick={onCancel} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>
+          <button onClick={onCancel} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 'var(--text-ui-base)' }}>
             {t("desktop.cancel")}
           </button>
           <button onClick={handleSubmit} disabled={!urlValid}
-            style={{ padding: "6px 16px", background: urlValid ? "var(--accent)" : "var(--bg-panel)", border: "none", borderRadius: 6, color: urlValid ? "#fff" : "var(--text-dim)", cursor: urlValid ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600 }}>
+            style={{ padding: "6px 16px", background: urlValid ? "var(--ds-accent)" : "var(--ds-bg-secondary)", border: "none", borderRadius: 'var(--radius-sm)', color: urlValid ? "#fff" : "var(--ds-text-muted)", cursor: urlValid ? "pointer" : "not-allowed", fontSize: 'var(--text-ui-base)', fontWeight: 600 }}>
             {t("desktop.modelsAdd")}
           </button>
         </div>
@@ -2279,15 +2279,15 @@ export function ModelsConfig({
     >
       <div className={embedded ? "settings-content-surface" : "models-config-panel settings-content-surface"} style={embedded
         ? { flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }
-        : { width: isMobile ? "calc(100vw - 16px)" : 860, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "78vh", maxHeight: "calc(100dvh - 16px)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+        : { width: isMobile ? "calc(100vw - 16px)" : 860, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "78vh", maxHeight: "calc(100dvh - 16px)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-md-plus)', display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
 
         {!embedded && (
           <div className="settings-content-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-              <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{t("desktop.models")}</span>
-              <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>~/.pi/agent/models.json</code>
+              <span style={{ fontSize: 15, fontWeight: 700, color: "var(--ds-text-primary)" }}>{t("desktop.models")}</span>
+              <code style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", fontFamily: "var(--font-mono)" }}>~/.pi/agent/models.json</code>
             </div>
-            <button onClick={() => { void requestClose(); }} aria-label={t("desktop.modelsClose")} title={t("desktop.modelsClose")} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
+            <button onClick={() => { void requestClose(); }} aria-label={t("desktop.modelsClose")} title={t("desktop.modelsClose")} style={{ background: "none", border: "none", color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
           </div>
         )}
 
@@ -2305,7 +2305,7 @@ export function ModelsConfig({
           <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 650, color: "var(--text)" }}>{t("desktop.modelsProvidersSection")}</span>
+                <span style={{ fontSize: 'var(--text-ui-base)', fontWeight: 650, color: "var(--ds-text-primary)" }}>{t("desktop.modelsProvidersSection")}</span>
                 {providerCount > 0 && <span className="models-sidebar-badge">{providerCount}</span>}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
@@ -2335,10 +2335,10 @@ export function ModelsConfig({
 
             <div className="settings-panel">
               {loading ? (
-                <div className="settings-row" style={{ color: "var(--text-muted)", fontSize: 12 }}>{t("desktop.modelsLoading")}</div>
+                <div className="settings-row" style={{ color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-sm)' }}>{t("desktop.modelsLoading")}</div>
               ) : providerCount === 0 ? (
                 <div className="settings-row is-stacked" style={{ flexDirection: "column", alignItems: "center", textAlign: "center", gap: 10, padding: "32px 20px" }}>
-                  <CpuIcon size={22} style={{ color: "var(--text-dim)" }} />
+                  <CpuIcon size={22} style={{ color: "var(--ds-text-muted)" }} />
                   <div>
                     <div className="settings-row-title">{t("desktop.modelsNoProviders")}</div>
                     <div className="settings-row-description">{t("desktop.modelsNoProvidersDesc")}</div>
@@ -2365,7 +2365,7 @@ export function ModelsConfig({
                         </span>
                       </span>
                       {scopeBadge(p.id)}
-                      <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>{t("desktop.modelsManage")} ›</span>
+                      <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", flexShrink: 0 }}>{t("desktop.modelsManage")} ›</span>
                     </button>
                   ))}
 
@@ -2385,7 +2385,7 @@ export function ModelsConfig({
                         </span>
                       </span>
                       {scopeBadge(p.id)}
-                      <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>{t("desktop.modelsManage")} ›</span>
+                      <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", flexShrink: 0 }}>{t("desktop.modelsManage")} ›</span>
                     </button>
                   ))}
 
@@ -2400,14 +2400,14 @@ export function ModelsConfig({
                           onClick={() => { void selectSelection({ type: "provider", name: pName }); }}
                         >
                           <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
-                            <CpuIcon size={18} style={{ color: "var(--text-dim)", flexShrink: 0 }} />
+                            <CpuIcon size={18} style={{ color: "var(--ds-text-muted)", flexShrink: 0 }} />
                             <span className="settings-row-copy">
                               <span className="settings-row-title" style={{ fontFamily: "var(--font-mono)" }}>{pName}</span>
                               <span className="settings-row-description">{pData.api ?? "openai-completions"} · {models.length} {t("desktop.modelsPlural")}</span>
                             </span>
                           </span>
                           {scopeBadge(pName)}
-                          <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>{t("desktop.modelsManage")} ›</span>
+                          <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", flexShrink: 0 }}>{t("desktop.modelsManage")} ›</span>
                         </button>
 
                         {models.map((m, i) => (
@@ -2419,12 +2419,12 @@ export function ModelsConfig({
                             onClick={() => { void selectSelection({ type: "model", providerName: pName, index: i }); }}
                           >
                             <span className="settings-row-copy">
-                              <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: m.id ? "var(--text-muted)" : "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <span style={{ fontSize: 'var(--text-ui-sm)', fontFamily: "var(--font-mono)", color: m.id ? "var(--ds-text-secondary)" : "var(--ds-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {m.id || t("desktop.modelsNewModel")}
                               </span>
                             </span>
                             {m.reasoning && (
-                              <span style={{ fontSize: 9, padding: "1px 4px", background: "rgba(99,102,241,0.12)", color: "rgba(99,102,241,0.8)", borderRadius: 3, flexShrink: 0 }}>T</span>
+                              <span style={{ fontSize: 'var(--text-ui-xs)', padding: "1px 4px", background: "rgba(99,102,241,0.12)", color: "rgba(99,102,241,0.8)", borderRadius: 'var(--radius-xs)', flexShrink: 0 }}>T</span>
                             )}
                           </button>
                         ))}
@@ -2432,7 +2432,7 @@ export function ModelsConfig({
                         <button
                           type="button"
                           className="settings-row is-hoverable"
-                          style={{ textAlign: "left", cursor: "pointer", font: "inherit", marginLeft: 18, padding: "6px 14px", background: "transparent", color: "var(--text-dim)", fontSize: 11 }}
+                          style={{ textAlign: "left", cursor: "pointer", font: "inherit", marginLeft: 18, padding: "6px 14px", background: "transparent", color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)' }}
                           onClick={() => { void addModel(pName); }}
                         >
                           {t("desktop.modelsAddModel")}
@@ -2447,7 +2447,7 @@ export function ModelsConfig({
 
           {/* ── Catalog status ── */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-            <code style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <code style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               ~/.pi/agent/models.json
             </code>
             <button
@@ -2464,9 +2464,9 @@ export function ModelsConfig({
 
         {/* Footer */}
         <div className="settings-content-footer" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
-          {saveError && <span style={{ fontSize: 12, color: "var(--status-error)", flex: 1 }}>{saveError}</span>}
+          {saveError && <span style={{ fontSize: 'var(--text-ui-sm)', color: "var(--status-error)", flex: 1 }}>{saveError}</span>}
           {!embedded && (
-            <button onClick={() => { void requestClose(); }} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>
+            <button onClick={() => { void requestClose(); }} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 'var(--text-ui-base)' }}>
               {t("desktop.cancel")}
             </button>
           )}
@@ -2475,10 +2475,10 @@ export function ModelsConfig({
             position: "relative",
             padding: "6px 16px",
             minWidth: 92,
-            background: savedOk ? "var(--status-success)" : saving ? "var(--bg-panel)" : "var(--accent)",
-            border: "none", borderRadius: 6,
-            color: savedOk ? "#fff" : saving ? "var(--text-muted)" : "#fff",
-            cursor: (saving || savedOk) ? "default" : "pointer", fontSize: 13, fontWeight: 600,
+            background: savedOk ? "var(--status-success)" : saving ? "var(--ds-bg-secondary)" : "var(--ds-accent)",
+            border: "none", borderRadius: 'var(--radius-sm)',
+            color: savedOk ? "#fff" : saving ? "var(--ds-text-secondary)" : "#fff",
+            cursor: (saving || savedOk) ? "default" : "pointer", fontSize: 'var(--text-ui-base)', fontWeight: 600,
             display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
             transition: "background-color 0.2s ease, color 0.2s ease",
             animation: savedOk ? "saved-pop 0.45s ease" : undefined,
@@ -2504,14 +2504,14 @@ export function ModelsConfig({
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          style={{ width: 620, maxWidth: "calc(100vw - 32px)", maxHeight: "min(84vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 12px 40px rgba(0,0,0,0.28)", overflow: "hidden" }}
+          style={{ width: 620, maxWidth: "calc(100vw - 32px)", maxHeight: "min(84vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-lg-plus)', display: "flex", flexDirection: "column", boxShadow: "0 12px 40px rgba(0,0,0,0.28)", overflow: "hidden" }}
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "8px 12px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
             <button
               type="button"
               onClick={() => setSelection(null)}
               aria-label={t("desktop.modelsClose")}
-              style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 8px" }}
+              style={{ background: "none", border: "none", color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 8px" }}
             >
               ×
             </button>

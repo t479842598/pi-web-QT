@@ -62,18 +62,18 @@ export function ApplyNowButton({
           padding: "7px 12px",
           background: "none",
           border: "1px solid var(--border)",
-          borderRadius: 6,
-          color: "var(--text-muted)",
+          borderRadius: 'var(--radius-sm)',
+          color: "var(--ds-text-secondary)",
           cursor: disabled ? "not-allowed" : "pointer",
-          fontSize: 12,
+          fontSize: 'var(--text-ui-sm)',
           opacity: disabled ? 0.5 : 1,
           whiteSpace: "nowrap",
         }}
       >
         {busy ? t("desktop.applyNowApplying") : t("desktop.applyNow")}
       </button>
-      {done && <span style={{ color: "var(--status-success)", fontSize: 12 }}>{t("desktop.applyNowDone")}</span>}
-      {error && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{error}</span>}
+      {done && <span style={{ color: "var(--status-success)", fontSize: 'var(--text-ui-sm)' }}>{t("desktop.applyNowDone")}</span>}
+      {error && <span style={{ color: "var(--status-error)", fontSize: 'var(--text-ui-sm)' }}>{error}</span>}
     </span>
   );
 }

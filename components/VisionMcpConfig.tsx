@@ -11,28 +11,28 @@ export const VISION_SERVER_NAME = "deepseek-vision";
 
 const inputStyle: React.CSSProperties = {
   padding: "7px 9px",
-  background: "var(--bg-panel)",
+  background: "var(--ds-bg-secondary)",
   border: "1px solid var(--border)",
-  borderRadius: 6,
-  color: "var(--text)",
-  fontSize: 12,
+  borderRadius: 'var(--radius-sm)',
+  color: "var(--ds-text-primary)",
+  fontSize: 'var(--text-ui-sm)',
   fontFamily: "var(--font-mono)",
   width: "100%",
   boxSizing: "border-box",
 };
 
 function labelStyle(): React.CSSProperties {
-  return { fontSize: 12, color: "var(--text-muted)" };
+  return { fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" };
 }
 
 const primaryButtonStyle: React.CSSProperties = {
   padding: "7px 12px",
   border: "none",
-  borderRadius: 6,
-  background: "var(--accent)",
+  borderRadius: 'var(--radius-sm)',
+  background: "var(--ds-accent)",
   color: "var(--accent-fg)",
   cursor: "pointer",
-  fontSize: 12,
+  fontSize: 'var(--text-ui-sm)',
 };
 
 /**
@@ -236,38 +236,38 @@ export function VisionMcpConfig({ sessionId }: { sessionId?: string | null }) {
           <Eye size={15} aria-hidden="true" />
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.mcpVisionTitle")}</span>
+              <span style={{ fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>{t("desktop.mcpVisionTitle")}</span>
               <span
                 style={{
-                  fontSize: 10,
+                  fontSize: 'var(--text-ui-xs)',
                   padding: "1px 6px",
-                  borderRadius: 3,
+                  borderRadius: 'var(--radius-xs)',
                   background: registered ? "rgba(37,99,235,0.12)" : "rgba(245,158,11,0.12)",
-                  color: registered ? "var(--accent)" : "var(--status-warning)",
+                  color: registered ? "var(--ds-accent)" : "var(--status-warning)",
                   textTransform: "capitalize",
                 }}
               >
                 {registered ? t("desktop.mcpVisionRegistered") : t("desktop.mcpVisionNotRegistered")}
               </span>
             </div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t("desktop.mcpVisionDesc")}</div>
+            <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", marginTop: 2 }}>{t("desktop.mcpVisionDesc")}</div>
           </div>
         </div>
       </SettingRow>
 
       {!loaded ? (
         <SettingRowLast>
-          <div style={{ padding: "8px 0", fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.loading")}</div>
+          <div style={{ padding: "8px 0", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{t("desktop.loading")}</div>
         </SettingRowLast>
       ) : loadError ? (
         <SettingRowLast>
-          <div style={{ padding: "8px 0", fontSize: 12, color: "var(--status-error)" }}>{loadError}</div>
+          <div style={{ padding: "8px 0", fontSize: 'var(--text-ui-sm)', color: "var(--status-error)" }}>{loadError}</div>
         </SettingRowLast>
       ) : (
         <>
           {/* ---- MCP registration ---- */}
           <SettingRow>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", padding: "10px 0 2px" }}>
+            <div style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-primary)", padding: "10px 0 2px" }}>
               {t("desktop.mcpVisionRegistration")}
             </div>
           </SettingRow>
@@ -290,7 +290,7 @@ export function VisionMcpConfig({ sessionId }: { sessionId?: string | null }) {
                 <option value="lazy">lazy</option>
               </select>
               <span style={labelStyle()}>{t("desktop.mcpVisionTransport")}</span>
-              <div style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono)", padding: "7px 0" }}>
+              <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", fontFamily: "var(--font-mono)", padding: "7px 0" }}>
                 {t("desktop.mcpVisionTransportFixed")}
               </div>
             </div>
@@ -315,24 +315,24 @@ export function VisionMcpConfig({ sessionId }: { sessionId?: string | null }) {
                     padding: "7px 12px",
                     background: "none",
                     border: "1px solid var(--border)",
-                    borderRadius: 6,
+                    borderRadius: 'var(--radius-sm)',
                     color: "var(--status-error)",
                     cursor: savingReg ? "not-allowed" : "pointer",
-                    fontSize: 12,
+                    fontSize: 'var(--text-ui-sm)',
                   }}
                 >
                   {t("desktop.mcpVisionRemove")}
                 </button>
               )}
-              {regSaved && <span style={{ color: "var(--status-success)", fontSize: 12 }}>{t("desktop.mcpVisionSavedReg")}</span>}
-              {regRemoved && <span style={{ color: "var(--status-success)", fontSize: 12 }}>{t("desktop.mcpVisionRemoved")}</span>}
-              {regError && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{regError}</span>}
+              {regSaved && <span style={{ color: "var(--status-success)", fontSize: 'var(--text-ui-sm)' }}>{t("desktop.mcpVisionSavedReg")}</span>}
+              {regRemoved && <span style={{ color: "var(--status-success)", fontSize: 'var(--text-ui-sm)' }}>{t("desktop.mcpVisionRemoved")}</span>}
+              {regError && <span style={{ color: "var(--status-error)", fontSize: 'var(--text-ui-sm)' }}>{regError}</span>}
             </div>
           </SettingRow>
 
           {/* ---- Model configuration ---- */}
           <SettingRow>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", padding: "10px 0 2px" }}>
+            <div style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-primary)", padding: "10px 0 2px" }}>
               {t("desktop.mcpVisionModelConfig")}
             </div>
           </SettingRow>
@@ -382,24 +382,24 @@ export function VisionMcpConfig({ sessionId }: { sessionId?: string | null }) {
                     padding: "7px 12px",
                     background: "none",
                     border: "1px solid var(--border)",
-                    borderRadius: 6,
-                    color: "var(--text-muted)",
+                    borderRadius: 'var(--radius-sm)',
+                    color: "var(--ds-text-secondary)",
                     cursor: restarting || !sessionId || !registered ? "not-allowed" : "pointer",
-                    fontSize: 12,
+                    fontSize: 'var(--text-ui-sm)',
                     opacity: restarting || !sessionId || !registered ? 0.5 : 1,
                   }}
                 >
                   {restarting ? t("desktop.mcpVisionRestarting") : t("desktop.mcpVisionRestart")}
                 </button>
-                {modelSaved && <span style={{ color: "var(--status-success)", fontSize: 12 }}>{t("desktop.mcpVisionSavedModel")}</span>}
-                {restartDone && <span style={{ color: "var(--status-success)", fontSize: 12 }}>{t("desktop.mcpVisionRestarted")}</span>}
-                {modelError && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{modelError}</span>}
-                {restartError && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{restartError}</span>}
+                {modelSaved && <span style={{ color: "var(--status-success)", fontSize: 'var(--text-ui-sm)' }}>{t("desktop.mcpVisionSavedModel")}</span>}
+                {restartDone && <span style={{ color: "var(--status-success)", fontSize: 'var(--text-ui-sm)' }}>{t("desktop.mcpVisionRestarted")}</span>}
+                {modelError && <span style={{ color: "var(--status-error)", fontSize: 'var(--text-ui-sm)' }}>{modelError}</span>}
+                {restartError && <span style={{ color: "var(--status-error)", fontSize: 'var(--text-ui-sm)' }}>{restartError}</span>}
               </div>
               <SettingNote>
                 {t("desktop.mcpVisionModelNote")}
-                {envPath && <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10 }}>{envPath}</div>}
-                {mcpFilePath && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}>{mcpFilePath}</div>}
+                {envPath && <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 'var(--text-ui-xs)' }}>{envPath}</div>}
+                {mcpFilePath && <div style={{ fontFamily: "var(--font-mono)", fontSize: 'var(--text-ui-xs)' }}>{mcpFilePath}</div>}
               </SettingNote>
             </div>
           </SettingRowLast>

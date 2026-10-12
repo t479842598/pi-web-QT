@@ -67,9 +67,9 @@ function findInstalledPackage(
 }
 
 function statusColor(status: PluginPackageInfo["status"]): string {
-  if (status === "loaded") return "var(--accent)";
+  if (status === "loaded") return "var(--ds-accent)";
   if (status === "installed") return "var(--status-warning)";
-  if (status === "disabled") return "var(--text-dim)";
+  if (status === "disabled") return "var(--ds-text-muted)";
   return "var(--status-error)";
 }
 
@@ -90,7 +90,7 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
 
   if (groups.length === 0) {
     return (
-      <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+      <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-muted)" }}>
         {pkg.disabled ? t("desktop.packageDisabled") : t("desktop.noResolvedResources")}
       </div>
     );
@@ -114,9 +114,9 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
         >
           <div
             style={{
-              fontSize: 10,
+              fontSize: 'var(--text-ui-xs)',
               fontWeight: 700,
-              color: "var(--text-dim)",
+              color: "var(--ds-text-muted)",
               textTransform: "uppercase",
               marginBottom: 6,
             }}
@@ -128,8 +128,8 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
               <div key={`${resource.kind}:${resource.path}`} style={{ minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: 12,
-                    color: "var(--text)",
+                    fontSize: 'var(--text-ui-sm)',
+                    color: "var(--ds-text-primary)",
                     fontFamily: "var(--font-mono)",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
@@ -141,8 +141,8 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
                 </div>
                 <div
                   style={{
-                    fontSize: 10,
-                    color: "var(--text-dim)",
+                    fontSize: 'var(--text-ui-xs)',
+                    color: "var(--ds-text-muted)",
                     fontFamily: "var(--font-mono)",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
@@ -167,12 +167,12 @@ function ScopeTag({ scope }: { scope: PluginScope }) {
   return (
     <span
       style={{
-        fontSize: 10,
+        fontSize: 'var(--text-ui-xs)',
         padding: "1px 5px",
-        borderRadius: 3,
+        borderRadius: 'var(--radius-xs)',
         flexShrink: 0,
         background: scope === "project" ? "rgba(99,102,241,0.12)" : "rgba(120,120,120,0.12)",
-        color: scope === "project" ? "rgba(99,102,241,0.85)" : "var(--text-dim)",
+        color: scope === "project" ? "rgba(99,102,241,0.85)" : "var(--ds-text-muted)",
       }}
     >
       {t(`desktop.${scope}`)}
@@ -185,10 +185,10 @@ function buttonStyle(disabled?: boolean, danger?: boolean): React.CSSProperties 
     padding: "6px 12px",
     background: danger ? "rgba(239,68,68,0.08)" : "none",
     border: "1px solid var(--border)",
-    borderRadius: 6,
-    color: danger ? "var(--status-error)" : "var(--text-muted)",
+    borderRadius: 'var(--radius-sm)',
+    color: danger ? "var(--status-error)" : "var(--ds-text-secondary)",
     cursor: disabled ? "not-allowed" : "pointer",
-    fontSize: 12,
+    fontSize: 'var(--text-ui-sm)',
     opacity: disabled ? 0.5 : 1,
   };
 }
@@ -216,11 +216,11 @@ function Toggle({
         flexShrink: 0,
         width: 40,
         height: 22,
-        borderRadius: 11,
+        borderRadius: 'var(--radius-md-plus)',
         border: "none",
         padding: 0,
         cursor: loading ? "wait" : "pointer",
-        background: enabled ? "var(--accent)" : "var(--border)",
+        background: enabled ? "var(--ds-accent)" : "var(--ds-border-default)",
         position: "relative",
         transition: "background 0.18s",
         outline: "none",
@@ -257,7 +257,7 @@ function SegmentedScope({
       style={{
         display: "inline-flex",
         border: "1px solid var(--border)",
-        borderRadius: 7,
+        borderRadius: 'var(--radius-md)',
         overflow: "hidden",
         height: 30,
       }}
@@ -272,10 +272,10 @@ function SegmentedScope({
               width: 76,
               border: "none",
               borderRight: scope === "global" ? "1px solid var(--border)" : "none",
-              background: active ? "var(--bg-selected)" : "none",
-              color: active ? "var(--text)" : "var(--text-muted)",
+              background: active ? "var(--ds-bg-active)" : "none",
+              color: active ? "var(--ds-text-primary)" : "var(--ds-text-secondary)",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: 'var(--text-ui-sm)',
             }}
           >
             {t(`desktop.${scope}`)}
@@ -317,25 +317,25 @@ function AddPluginPanel({
     <div className="settings-content-detail-stack" style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 660, minHeight: "100%" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+          <div style={{ fontSize: 'var(--text-ui-base)', fontWeight: 700, color: "var(--ds-text-primary)" }}>
             {t("desktop.addPluginTitle")}
           </div>
           <a
             href="https://pi.dev/packages"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: "var(--accent)", fontSize: 12, textDecoration: "none", whiteSpace: "nowrap" }}
+            style={{ color: "var(--ds-accent)", fontSize: 'var(--text-ui-sm)', textDecoration: "none", whiteSpace: "nowrap" }}
           >
             pi.dev/packages ↗
           </a>
         </div>
-        <div style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+        <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-muted)", fontFamily: "var(--font-mono)" }}>
           {installLocation(scope, cwd)}
         </div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-        <label htmlFor="plugin-source" style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+        <label htmlFor="plugin-source" style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-secondary)" }}>
           {t("desktop.pluginSource")}
         </label>
         <input
@@ -357,11 +357,11 @@ function AddPluginPanel({
             height: 36,
             padding: "0 11px",
             border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "var(--bg-panel)",
-            color: "var(--text)",
+            borderRadius: 'var(--radius-sm)',
+            background: "var(--ds-bg-secondary)",
+            color: "var(--ds-text-primary)",
             fontFamily: "var(--font-mono)",
-            fontSize: 13,
+            fontSize: 'var(--text-ui-base)',
             outline: "none",
           }}
           onKeyDown={(e) => {
@@ -378,9 +378,9 @@ function AddPluginPanel({
           disabled={busy || !source.trim()}
           style={{
             ...buttonStyle(busy || !source.trim()),
-            background: "var(--accent)",
+            background: "var(--ds-accent)",
             color: "white",
-            borderColor: "var(--accent)",
+            borderColor: "var(--ds-accent)",
           }}
         >
           {busy ? t("desktop.installing") : t("desktop.install")}
@@ -388,7 +388,7 @@ function AddPluginPanel({
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+        <div style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-secondary)" }}>
           {t("desktop.examples")}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -403,20 +403,20 @@ function AddPluginPanel({
                 textAlign: "left",
                 padding: "6px 9px",
                 border: "1px solid var(--border)",
-                borderRadius: 6,
-                background: "var(--bg-panel)",
-                color: "var(--text-dim)",
+                borderRadius: 'var(--radius-sm)',
+                background: "var(--ds-bg-secondary)",
+                color: "var(--ds-text-muted)",
                 cursor: "pointer",
                 fontFamily: "var(--font-mono)",
-                fontSize: 11,
+                fontSize: 'var(--text-ui-xs)',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = "var(--text-muted)";
+                e.currentTarget.style.background = "var(--ds-bg-hover)";
+                e.currentTarget.style.color = "var(--ds-text-secondary)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = "var(--bg-panel)";
-                e.currentTarget.style.color = "var(--text-dim)";
+                e.currentTarget.style.background = "var(--ds-bg-secondary)";
+                e.currentTarget.style.color = "var(--ds-text-muted)";
               }}
             >
               {example}
@@ -426,7 +426,7 @@ function AddPluginPanel({
       </div>
 
       {actionError && (
-        <div style={{ fontSize: 12, color: "var(--status-error)", whiteSpace: "pre-wrap" }}>
+        <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--status-error)", whiteSpace: "pre-wrap" }}>
           {actionError}
         </div>
       )}
@@ -484,11 +484,11 @@ function PackageDetail({
           {pkg.disabled ? (
             <span
               style={{
-                fontSize: 10,
+                fontSize: 'var(--text-ui-xs)',
                 padding: "1px 5px",
-                borderRadius: 3,
+                borderRadius: 'var(--radius-xs)',
                 background: "rgba(120,120,120,0.12)",
-                color: "var(--text-dim)",
+                color: "var(--ds-text-muted)",
               }}
             >
               {t("desktop.disabled")}
@@ -496,9 +496,9 @@ function PackageDetail({
           ) : pkg.filtered && (
             <span
               style={{
-                fontSize: 10,
+                fontSize: 'var(--text-ui-xs)',
                 padding: "1px 5px",
-                borderRadius: 3,
+                borderRadius: 'var(--radius-xs)',
                 background: "rgba(245,158,11,0.12)",
                 color: "var(--status-warning)",
               }}
@@ -509,8 +509,8 @@ function PackageDetail({
           <span
             style={{
               fontFamily: "var(--font-mono)",
-              fontSize: 12,
-              color: "var(--text)",
+              fontSize: 'var(--text-ui-sm)',
+              color: "var(--ds-text-primary)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -558,40 +558,40 @@ function PackageDetail({
           display: "grid",
           gridTemplateColumns: "minmax(96px, 130px) minmax(0, 1fr)",
           gap: "9px 14px",
-          fontSize: 12,
+          fontSize: 'var(--text-ui-sm)',
           lineHeight: 1.45,
         }}
       >
         {description && (
           <>
-            <div style={{ color: "var(--text-dim)" }}>{t("desktop.description")}</div>
-            <div style={{ color: "var(--text-muted)", overflowWrap: "anywhere" }}>
+            <div style={{ color: "var(--ds-text-muted)" }}>{t("desktop.description")}</div>
+            <div style={{ color: "var(--ds-text-secondary)", overflowWrap: "anywhere" }}>
               {description}
             </div>
           </>
         )}
-        <div style={{ color: "var(--text-dim)" }}>{t("desktop.status")}</div>
+        <div style={{ color: "var(--ds-text-muted)" }}>{t("desktop.status")}</div>
         <div style={{ color: statusColor(pkg.status), textTransform: "capitalize" }}>{pkg.status}</div>
-        <div style={{ color: "var(--text-dim)" }}>{t("desktop.version")}</div>
+        <div style={{ color: "var(--ds-text-muted)" }}>{t("desktop.version")}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{versionSummary(pkg, t)}</span>
+            <span style={{ color: "var(--ds-text-secondary)", fontFamily: "var(--font-mono)" }}>{versionSummary(pkg, t)}</span>
             {updateAvailable && (
-              <span title={updateStatus?.displayName} style={{ fontSize: 11, color: "var(--status-warning)", fontWeight: 600 }}>
+              <span title={updateStatus?.displayName} style={{ fontSize: 'var(--text-ui-xs)', color: "var(--status-warning)", fontWeight: 600 }}>
                 {t("desktop.updateAvailable")}
               </span>
             )}
             {canCheckForUpdates && (checkingUpdate || (updateStatus && !updateAvailable)) && (
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: 'var(--text-ui-xs)',
                   color: checkingUpdate
-                    ? "var(--text-dim)"
+                    ? "var(--ds-text-muted)"
                     : updateStatus?.state === "up-to-date"
                       ? "var(--status-success)"
                       : updateStatus?.state === "error"
                         ? "var(--status-error)"
-                        : "var(--text-dim)",
+                        : "var(--ds-text-muted)",
                 }}
               >
                 {checkingUpdate
@@ -605,45 +605,45 @@ function PackageDetail({
             )}
           </div>
           {updateError && (
-            <span style={{ fontSize: 12, color: "var(--status-error)" }}>{updateError}</span>
+            <span style={{ fontSize: 'var(--text-ui-sm)', color: "var(--status-error)" }}>{updateError}</span>
           )}
         </div>
-        <div style={{ color: "var(--text-dim)" }}>{t("desktop.package")}</div>
-        <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
+        <div style={{ color: "var(--ds-text-muted)" }}>{t("desktop.package")}</div>
+        <div style={{ color: "var(--ds-text-secondary)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
           {pkg.packageName ?? t("desktop.unknown")}
         </div>
-        <div style={{ color: "var(--text-dim)" }}>{t("desktop.resources")}</div>
-        <div style={{ color: "var(--text-muted)" }}>{resourceSummary(pkg, t)}</div>
-        <div style={{ color: "var(--text-dim)" }}>{t("desktop.installedPath")}</div>
+        <div style={{ color: "var(--ds-text-muted)" }}>{t("desktop.resources")}</div>
+        <div style={{ color: "var(--ds-text-secondary)" }}>{resourceSummary(pkg, t)}</div>
+        <div style={{ color: "var(--ds-text-muted)" }}>{t("desktop.installedPath")}</div>
         <div
           style={{
-            color: pkg.installedPath ? "var(--text-muted)" : "var(--status-error)",
+            color: pkg.installedPath ? "var(--ds-text-secondary)" : "var(--status-error)",
             fontFamily: "var(--font-mono)",
             overflowWrap: "anywhere",
           }}
         >
           {pkg.installedPath ? shortenPath(pkg.installedPath) : t("desktop.notFound")}
         </div>
-        <div style={{ color: "var(--text-dim)" }}>{t("desktop.cwd")}</div>
-        <div style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
+        <div style={{ color: "var(--ds-text-muted)" }}>{t("desktop.cwd")}</div>
+        <div style={{ color: "var(--ds-text-muted)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
           {shortenPath(cwd)}
         </div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>
+        <div style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 700, color: "var(--ds-text-primary)" }}>
           {t("desktop.resolvedResources")}
         </div>
         <ResourceList pkg={pkg} />
       </div>
 
       {actionMessage && (
-        <div style={{ fontSize: 12, color: "var(--status-success)" }}>
+        <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--status-success)" }}>
           {actionMessage}
         </div>
       )}
       {actionError && (
-        <div style={{ fontSize: 12, color: "var(--status-error)", whiteSpace: "pre-wrap" }}>
+        <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--status-error)", whiteSpace: "pre-wrap" }}>
           {actionError}
         </div>
       )}
@@ -661,9 +661,9 @@ function StandaloneExtensionDetail({ extension }: { extension: PluginStandaloneE
         <ScopeTag scope={extension.scope} />
         <span
           style={{
-            fontSize: 14,
+            fontSize: 'var(--text-ui-base)',
             fontWeight: 700,
-            color: "var(--text)",
+            color: "var(--ds-text-primary)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -677,14 +677,14 @@ function StandaloneExtensionDetail({ extension }: { extension: PluginStandaloneE
           display: "grid",
           gridTemplateColumns: "minmax(96px, 130px) minmax(0, 1fr)",
           gap: "9px 14px",
-          fontSize: 12,
+          fontSize: 'var(--text-ui-sm)',
           lineHeight: 1.45,
         }}
       >
-        <div style={{ color: "var(--text-dim)" }}>{t("desktop.status")}</div>
-        <div style={{ color: extension.enabled ? "var(--accent)" : "var(--text-dim)" }}>{status}</div>
-        <div style={{ color: "var(--text-dim)" }}>{t("desktop.installedPath")}</div>
-        <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
+        <div style={{ color: "var(--ds-text-muted)" }}>{t("desktop.status")}</div>
+        <div style={{ color: extension.enabled ? "var(--ds-accent)" : "var(--ds-text-muted)" }}>{status}</div>
+        <div style={{ color: "var(--ds-text-muted)" }}>{t("desktop.installedPath")}</div>
+        <div style={{ color: "var(--ds-text-secondary)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
           {shortenPath(extension.path)}
         </div>
       </div>
@@ -915,16 +915,16 @@ export function PluginsConfig({
         className="settings-content-surface"
         style={embedded
           ? { display: "flex", flex: 1, minWidth: 0, minHeight: 0, flexDirection: "column", overflow: "hidden" }
-          : { width: isMobile ? "calc(100vw - 16px)" : 860, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "76vh", maxHeight: "calc(100dvh - 16px)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }
+          : { width: isMobile ? "calc(100vw - 16px)" : 860, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "76vh", maxHeight: "calc(100dvh - 16px)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-md)', display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }
         }
       >
         {!embedded && (
           <div className="settings-content-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0 }}>
-              <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{t("desktop.plugins")}</span>
-              <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortenPath(cwd)}</code>
+              <span style={{ fontSize: 15, fontWeight: 700, color: "var(--ds-text-primary)" }}>{t("desktop.plugins")}</span>
+              <code style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortenPath(cwd)}</code>
             </div>
-            <button onClick={onCloseAction} title={t("desktop.close")} aria-label={t("desktop.close")} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
+            <button onClick={onCloseAction} title={t("desktop.close")} aria-label={t("desktop.close")} style={{ background: "none", border: "none", color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
           </div>
         )}
 
@@ -933,7 +933,7 @@ export function PluginsConfig({
         <div className="settings-content-detail" style={{ flex: 1, overflowY: "auto", padding: "var(--settings-content-detail-padding, 20px)", display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-              <span style={{ fontSize: 14, fontWeight: 650, color: "var(--text)" }}>{t("desktop.plugins")}</span>
+              <span style={{ fontSize: 'var(--text-ui-base)', fontWeight: 650, color: "var(--ds-text-primary)" }}>{t("desktop.plugins")}</span>
               {packages.length + standaloneExtensions.length > 0 && (
                 <span className="models-sidebar-badge">{packages.length + standaloneExtensions.length}</span>
               )}
@@ -949,15 +949,15 @@ export function PluginsConfig({
           <div className="settings-panel">
             <div style={{ padding: "8px 6px" }}>
               {loading ? (
-                <div style={{ padding: "10px 8px", fontSize: 12, color: "var(--text-muted)" }}>
+                <div style={{ padding: "10px 8px", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>
                   {t("desktop.loading")}
                 </div>
               ) : error ? (
-                <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--status-error)" }}>
+                <div style={{ padding: "10px 8px", fontSize: 'var(--text-ui-xs)', color: "var(--status-error)" }}>
                   {error}
                 </div>
               ) : packages.length === 0 && standaloneExtensions.length === 0 ? (
-                <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--text-dim)" }}>
+                <div style={{ padding: "10px 8px", fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)" }}>
                   {t("desktop.noPluginsConfigured")}
                 </div>
               ) : (
@@ -967,9 +967,9 @@ export function PluginsConfig({
                       <div
                         style={{
                           padding: "4px 8px 3px",
-                          fontSize: 10,
+                          fontSize: 'var(--text-ui-xs)',
                           fontWeight: 600,
-                          color: "var(--text-dim)",
+                          color: "var(--ds-text-muted)",
                           textTransform: "uppercase",
                         }}
                       >
@@ -992,12 +992,12 @@ export function PluginsConfig({
                               alignItems: "center",
                               gap: 7,
                               padding: "8px 8px",
-                              borderRadius: 5,
+                              borderRadius: 'var(--radius-sm)',
                               cursor: "pointer",
-                              background: isSelected ? "var(--bg-selected)" : "none",
+                              background: isSelected ? "var(--ds-bg-active)" : "none",
                             }}
                             onMouseEnter={(e) => {
-                              if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)";
+                              if (!isSelected) e.currentTarget.style.background = "var(--ds-bg-hover)";
                             }}
                             onMouseLeave={(e) => {
                               if (!isSelected) e.currentTarget.style.background = "none";
@@ -1009,15 +1009,15 @@ export function PluginsConfig({
                                 width: 7,
                                 height: 7,
                                 borderRadius: "50%",
-                                background: extension.enabled ? "var(--accent)" : "var(--text-dim)",
+                                background: extension.enabled ? "var(--ds-accent)" : "var(--ds-text-muted)",
                               }}
                             />
                             <div style={{ minWidth: 0, flex: 1 }}>
                               <div
                                 style={{
-                                  fontSize: 12,
+                                  fontSize: 'var(--text-ui-sm)',
                                   fontWeight: isSelected ? 600 : 400,
-                                  color: "var(--text)",
+                                  color: "var(--ds-text-primary)",
                                   fontFamily: "var(--font-mono)",
                                   overflow: "hidden",
                                   textOverflow: "ellipsis",
@@ -1037,9 +1037,9 @@ export function PluginsConfig({
                     <div
                       style={{
                         padding: "4px 8px 3px",
-                        fontSize: 10,
+                        fontSize: 'var(--text-ui-xs)',
                         fontWeight: 600,
-                        color: "var(--text-dim)",
+                        color: "var(--ds-text-muted)",
                         textTransform: "uppercase",
                       }}
                     >
@@ -1062,12 +1062,12 @@ export function PluginsConfig({
                             alignItems: "center",
                             gap: 7,
                             padding: "8px 8px",
-                            borderRadius: 5,
+                            borderRadius: 'var(--radius-sm)',
                             cursor: "pointer",
-                            background: isSelected ? "var(--bg-selected)" : "none",
+                            background: isSelected ? "var(--ds-bg-active)" : "none",
                           }}
                           onMouseEnter={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)";
+                            if (!isSelected) e.currentTarget.style.background = "var(--ds-bg-hover)";
                           }}
                           onMouseLeave={(e) => {
                             if (!isSelected) e.currentTarget.style.background = "none";
@@ -1085,9 +1085,9 @@ export function PluginsConfig({
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div
                               style={{
-                                fontSize: 12,
+                                fontSize: 'var(--text-ui-sm)',
                                 fontWeight: isSelected ? 600 : 400,
-                                color: "var(--text)",
+                                color: "var(--ds-text-primary)",
                                 fontFamily: "var(--font-mono)",
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
@@ -1098,8 +1098,8 @@ export function PluginsConfig({
                             </div>
                             <div
                               style={{
-                                fontSize: 10,
-                                color: "var(--text-dim)",
+                                fontSize: 'var(--text-ui-xs)',
+                                color: "var(--ds-text-muted)",
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
                                 whiteSpace: "nowrap",
@@ -1111,8 +1111,8 @@ export function PluginsConfig({
                             {(pkg.version || pkg.configuredVersion) && (
                               <div
                                 style={{
-                                  fontSize: 10,
-                                  color: "var(--text-dim)",
+                                  fontSize: 'var(--text-ui-xs)',
+                                  color: "var(--ds-text-muted)",
                                   overflow: "hidden",
                                   textOverflow: "ellipsis",
                                   whiteSpace: "nowrap",
@@ -1124,7 +1124,7 @@ export function PluginsConfig({
                             )}
                           </div>
                           {updateStatuses[packageKey(pkg)]?.state === "update-available" && (
-                            <span title={t("desktop.updateAvailable")} style={{ flexShrink: 0, fontSize: 12, color: "var(--status-warning)" }}>
+                            <span title={t("desktop.updateAvailable")} style={{ flexShrink: 0, fontSize: 'var(--text-ui-sm)', color: "var(--status-warning)" }}>
                               ↑
                             </span>
                           )}
@@ -1149,16 +1149,16 @@ export function PluginsConfig({
                   alignItems: "center",
                   gap: 6,
                   padding: "7px 8px",
-                  borderRadius: 5,
+                  borderRadius: 'var(--radius-sm)',
                   border: "none",
                   width: "100%",
                   cursor: "pointer",
-                  background: addMode ? "var(--bg-selected)" : "none",
-                  color: addMode ? "var(--accent)" : "var(--text-dim)",
-                  fontSize: 12,
+                  background: addMode ? "var(--ds-bg-active)" : "none",
+                  color: addMode ? "var(--ds-accent)" : "var(--ds-text-muted)",
+                  fontSize: 'var(--text-ui-sm)',
                 }}
                 onMouseEnter={(e) => {
-                  if (!addMode) e.currentTarget.style.background = "var(--bg-hover)";
+                  if (!addMode) e.currentTarget.style.background = "var(--ds-bg-hover)";
                 }}
                 onMouseLeave={(e) => {
                   if (!addMode) e.currentTarget.style.background = "none";
@@ -1179,14 +1179,14 @@ export function PluginsConfig({
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              style={{ width: 680, maxWidth: "calc(100vw - 32px)", maxHeight: "min(84vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 12, display: "flex", flexDirection: "column", boxShadow: "0 12px 40px rgba(0,0,0,0.28)", overflow: "hidden" }}
+              style={{ width: 680, maxWidth: "calc(100vw - 32px)", maxHeight: "min(84vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-lg-plus)', display: "flex", flexDirection: "column", boxShadow: "0 12px 40px rgba(0,0,0,0.28)", overflow: "hidden" }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "8px 12px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
                 <button
                   type="button"
                   onClick={() => { setAddMode(false); setSelected(null); }}
                   aria-label={t("desktop.close")}
-                  style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 8px" }}
+                  style={{ background: "none", border: "none", color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 8px" }}
                 >
                   ×
                 </button>
@@ -1239,7 +1239,7 @@ export function PluginsConfig({
             flexShrink: 0,
           }}
         >
-          <div style={{ minWidth: 0, flex: 1, fontSize: 11, color: "var(--text-dim)", overflow: "hidden" }}>
+          <div style={{ minWidth: 0, flex: 1, fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", overflow: "hidden" }}>
             {data?.diagnostics.length ? (
               <span
                 title={data.diagnostics.map((d) => `${d.type}: ${d.source ? `${d.source}: ` : ""}${d.message}`).join("\n")}

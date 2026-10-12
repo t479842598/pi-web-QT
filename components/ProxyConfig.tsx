@@ -184,9 +184,9 @@ export function ProxyConfig() {
             display: "flex",
             alignItems: "center",
             gap: 8,
-            fontSize: 14,
+            fontSize: 'var(--text-ui-base)',
             fontWeight: 500,
-            color: "var(--text)",
+            color: "var(--ds-text-primary)",
             cursor: "pointer",
           }}
         >
@@ -194,19 +194,19 @@ export function ProxyConfig() {
             type="checkbox"
             checked={config.enabled}
             onChange={(e) => handleChange("enabled", e.target.checked)}
-            style={{ width: 16, height: 16, accentColor: "var(--accent)" }}
+            style={{ width: 16, height: 16, accentColor: "var(--ds-accent)" }}
           />
           {t("desktop.proxyEnable")}
         </label>
         {config.enabled && previewUrl && (
           <span
             style={{
-              fontSize: 12,
-              color: "var(--text-muted)",
+              fontSize: 'var(--text-ui-sm)',
+              color: "var(--ds-text-secondary)",
               fontFamily: "var(--font-mono)",
-              backgroundColor: "var(--bg-hover)",
+              backgroundColor: "var(--ds-bg-hover)",
               padding: "2px 10px",
-              borderRadius: 4,
+              borderRadius: 'var(--radius-xs)',
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -232,17 +232,17 @@ export function ProxyConfig() {
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.proxyProtocol")}</label>
+          <label style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{t("desktop.proxyProtocol")}</label>
           <select
             value={config.protocol}
             onChange={(e) => handleChange("protocol", e.target.value as ProxyConfigData["protocol"])}
             style={{
               padding: "6px 10px",
-              borderRadius: 6,
+              borderRadius: 'var(--radius-sm)',
               border: "1px solid var(--border)",
               background: "var(--bg)",
-              color: "var(--text)",
-              fontSize: 13,
+              color: "var(--ds-text-primary)",
+              fontSize: 'var(--text-ui-base)',
               fontFamily: "var(--font-mono)",
               outline: "none",
             }}
@@ -254,7 +254,7 @@ export function ProxyConfig() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.proxyHost")}</label>
+          <label style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{t("desktop.proxyHost")}</label>
           <input
             type="text"
             value={config.host}
@@ -262,11 +262,11 @@ export function ProxyConfig() {
             placeholder="127.0.0.1"
             style={{
               padding: "6px 10px",
-              borderRadius: 6,
+              borderRadius: 'var(--radius-sm)',
               border: "1px solid var(--border)",
               background: "var(--bg)",
-              color: "var(--text)",
-              fontSize: 13,
+              color: "var(--ds-text-primary)",
+              fontSize: 'var(--text-ui-base)',
               fontFamily: "var(--font-mono)",
               outline: "none",
             }}
@@ -274,7 +274,7 @@ export function ProxyConfig() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.proxyPort")}</label>
+          <label style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{t("desktop.proxyPort")}</label>
           <input
             type="number"
             value={config.port}
@@ -284,11 +284,11 @@ export function ProxyConfig() {
             max={65535}
             style={{
               padding: "6px 10px",
-              borderRadius: 6,
+              borderRadius: 'var(--radius-sm)',
               border: "1px solid var(--border)",
               background: "var(--bg)",
-              color: "var(--text)",
-              fontSize: 13,
+              color: "var(--ds-text-primary)",
+              fontSize: 'var(--text-ui-base)',
               fontFamily: "var(--font-mono)",
               outline: "none",
             }}
@@ -296,7 +296,7 @@ export function ProxyConfig() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.proxyUsername")}</label>
+          <label style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{t("desktop.proxyUsername")}</label>
           <input
             type="text"
             value={config.username}
@@ -304,11 +304,11 @@ export function ProxyConfig() {
             placeholder={config.username ? "" : t("desktop.proxyUsername")}
             style={{
               padding: "6px 10px",
-              borderRadius: 6,
+              borderRadius: 'var(--radius-sm)',
               border: "1px solid var(--border)",
               background: "var(--bg)",
-              color: "var(--text)",
-              fontSize: 13,
+              color: "var(--ds-text-primary)",
+              fontSize: 'var(--text-ui-base)',
               fontFamily: "var(--font-mono)",
               outline: "none",
             }}
@@ -316,7 +316,7 @@ export function ProxyConfig() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.proxyPassword")}</label>
+          <label style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{t("desktop.proxyPassword")}</label>
           <input
             type="password"
             value={config.password}
@@ -324,11 +324,11 @@ export function ProxyConfig() {
             placeholder={config.hasPassword ? "••••••••" : t("desktop.proxyPassword")}
             style={{
               padding: "6px 10px",
-              borderRadius: 6,
+              borderRadius: 'var(--radius-sm)',
               border: "1px solid var(--border)",
               background: "var(--bg)",
-              color: "var(--text)",
-              fontSize: 13,
+              color: "var(--ds-text-primary)",
+              fontSize: 'var(--text-ui-base)',
               fontFamily: "var(--font-mono)",
               outline: "none",
             }}
@@ -336,7 +336,7 @@ export function ProxyConfig() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
-          <label style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          <label style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>
             {t("desktop.proxyNoProxy")}
           </label>
           <input
@@ -346,11 +346,11 @@ export function ProxyConfig() {
             placeholder="localhost,127.0.0.1,.local"
             style={{
               padding: "6px 10px",
-              borderRadius: 6,
+              borderRadius: 'var(--radius-sm)',
               border: "1px solid var(--border)",
               background: "var(--bg)",
-              color: "var(--text)",
-              fontSize: 13,
+              color: "var(--ds-text-primary)",
+              fontSize: 'var(--text-ui-base)',
               fontFamily: "var(--font-mono)",
               outline: "none",
             }}
@@ -365,11 +365,11 @@ export function ProxyConfig() {
           disabled={saving}
           style={{
             padding: "6px 18px",
-            borderRadius: 6,
+            borderRadius: 'var(--radius-sm)',
             border: "none",
-            background: "var(--accent)",
+            background: "var(--ds-accent)",
             color: "var(--accent-fg)",
-            fontSize: 13,
+            fontSize: 'var(--text-ui-base)',
             fontWeight: 500,
             cursor: saving ? "not-allowed" : "pointer",
             opacity: saving ? 0.5 : 1,
@@ -379,7 +379,7 @@ export function ProxyConfig() {
             if (!saving) e.currentTarget.style.background = "var(--accent-hover)";
           }}
           onMouseLeave={(e) => {
-            if (!saving) e.currentTarget.style.background = "var(--accent)";
+            if (!saving) e.currentTarget.style.background = "var(--ds-accent)";
           }}
         >
           {saving ? t("desktop.proxySaving") : t("desktop.proxySave")}
@@ -391,18 +391,18 @@ export function ProxyConfig() {
           disabled={testing || !config.enabled}
           style={{
             padding: "6px 18px",
-            borderRadius: 6,
+            borderRadius: 'var(--radius-sm)',
             border: "1px solid var(--border)",
             background: "var(--bg)",
-            color: config.enabled ? "var(--text)" : "var(--text-muted)",
-            fontSize: 13,
+            color: config.enabled ? "var(--ds-text-primary)" : "var(--ds-text-secondary)",
+            fontSize: 'var(--text-ui-base)',
             fontWeight: 500,
             cursor: config.enabled ? "pointer" : "not-allowed",
             opacity: config.enabled ? 1 : 0.5,
             transition: "background 0.15s",
           }}
           onMouseEnter={(e) => {
-            if (config.enabled) e.currentTarget.style.background = "var(--bg-hover)";
+            if (config.enabled) e.currentTarget.style.background = "var(--ds-bg-hover)";
           }}
           onMouseLeave={(e) => {
             if (config.enabled) e.currentTarget.style.background = "var(--bg)";
@@ -420,10 +420,10 @@ export function ProxyConfig() {
             alignItems: "center",
             gap: 8,
             padding: "6px 12px",
-            borderRadius: 6,
+            borderRadius: 'var(--radius-sm)',
             backgroundColor: "rgba(34, 197, 94, 0.12)",
             color: "var(--status-success)",
-            fontSize: 13,
+            fontSize: 'var(--text-ui-base)',
           }}
         >
           <CheckCircle size={16} weight="fill" />
@@ -438,10 +438,10 @@ export function ProxyConfig() {
             alignItems: "center",
             gap: 8,
             padding: "6px 12px",
-            borderRadius: 6,
+            borderRadius: 'var(--radius-sm)',
             backgroundColor: "rgba(239, 68, 68, 0.10)",
             color: "var(--status-error)",
-            fontSize: 13,
+            fontSize: 'var(--text-ui-base)',
           }}
         >
           <XCircle size={16} weight="fill" />
@@ -456,12 +456,12 @@ export function ProxyConfig() {
             alignItems: "center",
             gap: 8,
             padding: "6px 12px",
-            borderRadius: 6,
+            borderRadius: 'var(--radius-sm)',
             backgroundColor: testResult.ok
               ? "rgba(34, 197, 94, 0.10)"
               : "rgba(239, 68, 68, 0.10)",
             color: testResult.ok ? "var(--status-success)" : "var(--status-error)",
-            fontSize: 13,
+            fontSize: 'var(--text-ui-base)',
           }}
         >
           {testResult.ok ? (
@@ -471,7 +471,7 @@ export function ProxyConfig() {
           )}
           {testResult.message}
           {testResult.latencyMs !== undefined && (
-            <span style={{ color: "var(--text-muted)", fontSize: 12, marginLeft: 4 }}>
+            <span style={{ color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-sm)', marginLeft: 4 }}>
               ({testResult.latencyMs}ms)
             </span>
           )}
@@ -485,10 +485,10 @@ export function ProxyConfig() {
             alignItems: "center",
             gap: 8,
             padding: "4px 12px",
-            borderRadius: 6,
-            backgroundColor: "var(--bg-hover)",
-            color: "var(--text-muted)",
-            fontSize: 12,
+            borderRadius: 'var(--radius-sm)',
+            backgroundColor: "var(--ds-bg-hover)",
+            color: "var(--ds-text-secondary)",
+            fontSize: 'var(--text-ui-sm)',
           }}
         >
           <Circle size={12} weight="fill" />

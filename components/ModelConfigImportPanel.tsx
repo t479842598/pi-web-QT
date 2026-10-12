@@ -143,14 +143,14 @@ export function ModelConfigImportPanel({
       </div>
 
       {state.phase === "error" && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--status-error)", fontSize: 12 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--status-error)", fontSize: 'var(--text-ui-sm)' }}>
           <WarningCircleIcon size={15} />
           <span>{state.message}</span>
         </div>
       )}
 
       {state.phase === "ready" && candidates.length === 0 && (
-        <div className="settings-row" style={{ color: "var(--text-dim)", fontSize: 12 }}>
+        <div className="settings-row" style={{ color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-sm)' }}>
           {t("desktop.modelImportNone")}
         </div>
       )}
@@ -159,7 +159,7 @@ export function ModelConfigImportPanel({
         <>
           <label className="settings-row is-hoverable" style={{ padding: "8px 12px", background: "var(--ds-tile)" }}>
             <span className="settings-row-copy" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ accentColor: "var(--accent)" }} />
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ accentColor: "var(--ds-accent)" }} />
               <span className="settings-row-title">{t("desktop.modelImportSelectAll", { count: candidates.length })}</span>
             </span>
             <button
@@ -177,7 +177,7 @@ export function ModelConfigImportPanel({
           <div style={{ maxHeight: 320, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
             {groups.map(([source, items]) => (
               <div key={source} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.07em", padding: "2px 4px" }}>
+                <div style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 700, color: "var(--ds-text-muted)", textTransform: "uppercase", letterSpacing: "0.07em", padding: "2px 4px" }}>
                   {t(SOURCE_LABEL_KEY[source] ?? source)} · {items.length}
                 </div>
                 {items.map((candidate) => {
@@ -185,17 +185,17 @@ export function ModelConfigImportPanel({
                   const checked = selected.has(key);
                   return (
                     <label key={key} className="settings-row is-hoverable" style={{ padding: "8px 12px", gap: 10, cursor: "pointer" }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggleKey(key)} style={{ accentColor: "var(--accent)", flexShrink: 0 }} />
+                      <input type="checkbox" checked={checked} onChange={() => toggleKey(key)} style={{ accentColor: "var(--ds-accent)", flexShrink: 0 }} />
                       <span style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column" }}>
                         <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                           <span className="settings-row-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{candidate.name}</span>
                           {candidate.hasKey && (
-                            <span title={t("desktop.modelImportHasKey")} style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "var(--status-success-bg)", color: "var(--status-success)", border: "1px solid var(--status-success-border)", flexShrink: 0 }}>
+                            <span title={t("desktop.modelImportHasKey")} style={{ fontSize: 'var(--text-ui-xs)', padding: "1px 5px", borderRadius: 'var(--radius-xs)', background: "var(--status-success-bg)", color: "var(--status-success)", border: "1px solid var(--status-success-border)", flexShrink: 0 }}>
                               key
                             </span>
                           )}
                         </span>
-                        <span style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {candidate.api} · {candidate.models.length} {t("desktop.modelsPlural")}
                           {hostOf(candidate.baseUrl) ? ` · ${hostOf(candidate.baseUrl)}` : ""}
                         </span>
@@ -210,7 +210,7 @@ export function ModelConfigImportPanel({
       )}
 
       {result && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--status-success)", fontSize: 12 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--status-success)", fontSize: 'var(--text-ui-sm)' }}>
           <CheckIcon size={14} />
           <span>{result}</span>
         </div>

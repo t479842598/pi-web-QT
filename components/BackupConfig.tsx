@@ -228,15 +228,15 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
   return (
     <div className="settings-content-panel" style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
       <header className="settings-content-header" style={{ padding: "var(--settings-content-header-padding, 18px 22px 14px)", borderBottom: "var(--settings-content-header-border, 1px solid var(--border))" }}>
-        <h1 className="settings-content-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.backup")}</h1>
+        <h1 className="settings-content-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--ds-text-primary)" }}>{t("desktop.backup")}</h1>
       </header>
 
       {/* ── Export ── */}
       <section className="settings-content-card settings-content-section" style={{ padding: "var(--settings-content-section-padding, 18px 22px)", borderBottom: "var(--settings-content-section-divider, 1px solid var(--border))" }}>
-        <h2 className="settings-content-section-title" style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+        <h2 className="settings-content-section-title" style={{ margin: 0, fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>
           {t("desktop.backupExportTitle")}
         </h2>
-        <p style={{ margin: "6px 0 12px", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+        <p style={{ margin: "6px 0 12px", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", lineHeight: 1.5 }}>
           {t("desktop.backupExportDescription")}
         </p>
 
@@ -247,9 +247,9 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
             onChange={(e) => setIncludeSecrets(e.target.checked)}
             style={{ marginTop: 2 }}
           />
-          <span style={{ fontSize: 12, color: "var(--text)" }}>
+          <span style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)" }}>
             {t("desktop.backupIncludeSecrets")}
-            <span style={{ display: "block", fontSize: 11, color: "var(--status-error)" }}>{t("desktop.backupSecretsWarning")}</span>
+            <span style={{ display: "block", fontSize: 'var(--text-ui-xs)', color: "var(--status-error)" }}>{t("desktop.backupSecretsWarning")}</span>
           </span>
         </label>
 
@@ -260,9 +260,9 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
             onChange={(e) => setIncludeSessions(e.target.checked)}
             style={{ marginTop: 2 }}
           />
-          <span style={{ fontSize: 12, color: "var(--text)" }}>
+          <span style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)" }}>
             {t("desktop.backupIncludeSessions")}
-            <span style={{ display: "block", fontSize: 11, color: "var(--text-dim)" }}>{t("desktop.backupSessionsHint")}</span>
+            <span style={{ display: "block", fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)" }}>{t("desktop.backupSessionsHint")}</span>
           </span>
         </label>
 
@@ -270,22 +270,22 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
           type="button"
           onClick={handleExport}
           disabled={exporting}
-          style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--accent)", border: "none", borderRadius: 6, color: "var(--accent-fg)", fontSize: 12, fontWeight: 600, cursor: exporting ? "wait" : "pointer" }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--ds-accent)", border: "none", borderRadius: 'var(--radius-sm)', color: "var(--accent-fg)", fontSize: 'var(--text-ui-sm)', fontWeight: 600, cursor: exporting ? "wait" : "pointer" }}
         >
           <Download size={15} aria-hidden="true" />
           {exporting ? t("desktop.backupExporting") : t("desktop.backupExportButton")}
         </button>
         {exportError && (
-          <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--status-error)" }}>{exportError}</p>
+          <p style={{ margin: "8px 0 0", fontSize: 'var(--text-ui-xs)', color: "var(--status-error)" }}>{exportError}</p>
         )}
       </section>
 
       {/* ── Import ── */}
       <section className="settings-content-card settings-content-section" style={{ padding: "var(--settings-content-section-padding, 18px 22px)" }}>
-        <h2 className="settings-content-section-title" style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+        <h2 className="settings-content-section-title" style={{ margin: 0, fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>
           {t("desktop.backupImportTitle")}
         </h2>
-        <p style={{ margin: "6px 0 12px", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+        <p style={{ margin: "6px 0 12px", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", lineHeight: 1.5 }}>
           {t("desktop.backupImportDescription")}
         </p>
 
@@ -299,21 +299,21 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--ds-bg-secondary)", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-sm)', fontWeight: 600, cursor: "pointer" }}
         >
           <Upload size={15} aria-hidden="true" />
           {t("desktop.backupImportButton")}
         </button>
 
         {importError && (
-          <p style={{ margin: "0 0 10px", fontSize: 11, color: "var(--status-error)", lineHeight: 1.5 }}>{importError}</p>
+          <p style={{ margin: "0 0 10px", fontSize: 'var(--text-ui-xs)', color: "var(--status-error)", lineHeight: 1.5 }}>{importError}</p>
         )}
 
         {/* Preview */}
         {preview && (
-          <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "var(--bg-panel)", display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
-              <span style={{ color: "var(--text)", fontWeight: 600 }}>{t("desktop.backupManifest")}:</span>{" "}
+          <div style={{ border: "1px solid var(--border)", borderRadius: 'var(--radius-md)', padding: 14, background: "var(--ds-bg-secondary)", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", lineHeight: 1.6 }}>
+              <span style={{ color: "var(--ds-text-primary)", fontWeight: 600 }}>{t("desktop.backupManifest")}:</span>{" "}
               {new Date(preview.preview.manifest.createdAt).toLocaleString()} · {platformLabel(preview.preview.manifest.sourcePlatform)} →
               {platformLabel(navigator.platform.includes("Win") ? "win32" : navigator.platform.includes("Linux") ? "linux" : "darwin")} · pi-web {preview.preview.manifest.piWebVersion}
               {preview.preview.manifest.includeSecrets ? "" : ` · ${t("desktop.backupNoSecrets")}`}
@@ -321,12 +321,12 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
 
             {/* Categories */}
             <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+              <div style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--ds-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
                 {t("desktop.backupCategories")}
               </div>
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
                 {preview.preview.categories.map((cat) => (
-                  <label key={cat} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", fontSize: 12, color: "var(--text)" }}>
+                  <label key={cat} style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)" }}>
                     <input
                       type="checkbox"
                       checked={selectedCategories.has(cat)}
@@ -346,12 +346,12 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
             {/* MCP servers */}
             {preview.preview.servers.length > 0 && (
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                <div style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--ds-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
                   {t("desktop.backupMcpServers")}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {preview.preview.servers.map((server) => (
-                    <div key={server.name} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12 }}>
+                    <div key={server.name} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 'var(--text-ui-sm)' }}>
                       <input
                         type="checkbox"
                         checked={!skippedServers.has(server.name)}
@@ -365,24 +365,24 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
                       />
                       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                          <code style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text)" }}>{server.name}</code>
-                          <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: server.action === "manual" || server.action === "keep-with-warning" ? "rgba(239,68,68,0.15)" : "var(--bg-selected)", color: server.action === "manual" || server.action === "keep-with-warning" ? "var(--status-error)" : "var(--text-muted)" }}>
+                          <code style={{ fontSize: 'var(--text-ui-xs)', fontFamily: "var(--font-mono)", color: "var(--ds-text-primary)" }}>{server.name}</code>
+                          <span style={{ fontSize: 'var(--text-ui-xs)', padding: "1px 6px", borderRadius: 'var(--radius-md)', background: server.action === "manual" || server.action === "keep-with-warning" ? "rgba(239,68,68,0.15)" : "var(--ds-bg-active)", color: server.action === "manual" || server.action === "keep-with-warning" ? "var(--status-error)" : "var(--ds-text-secondary)" }}>
                             {ACTION_LABELS[server.action]}
                           </span>
                         </div>
-                        <div style={{ fontSize: 11, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           <code style={{ fontFamily: "var(--font-mono)" }}>{server.original.command}</code>
                           {server.adapted && server.adapted.command !== server.original.command && (
-                            <> → <code style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>{server.adapted.command}</code></>
+                            <> → <code style={{ fontFamily: "var(--font-mono)", color: "var(--ds-text-primary)" }}>{server.adapted.command}</code></>
                           )}
                         </div>
-                        {server.reason && <div style={{ fontSize: 11, color: "var(--status-error)" }}>{server.reason}</div>}
+                        {server.reason && <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--status-error)" }}>{server.reason}</div>}
                         {server.action === "manual" && server.installPrompt && cwd && (
                           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
                             <select
                               value={installModel}
                               onChange={(e) => setInstallModel(e.target.value)}
-                              style={{ fontSize: 11, padding: "4px 6px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", maxWidth: 220 }}
+                              style={{ fontSize: 'var(--text-ui-xs)', padding: "4px 6px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-xs)', color: "var(--ds-text-primary)", maxWidth: 220 }}
                               title={t("desktop.backupInstallModel")}
                             >
                               {availableModels.map((m) => (
@@ -395,14 +395,14 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
                               type="button"
                               disabled={installingServer === server.name}
                               onClick={() => handleCreateInstallSession(server)}
-                              style={{ padding: "4px 10px", fontSize: 11, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", cursor: installingServer === server.name ? "wait" : "pointer" }}
+                              style={{ padding: "4px 10px", fontSize: 'var(--text-ui-xs)', background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 'var(--radius-xs)', color: "var(--ds-text-primary)", cursor: installingServer === server.name ? "wait" : "pointer" }}
                             >
                               {installingServer === server.name ? "…" : t("desktop.backupInstallSession")}
                             </button>
                             {installDone?.server === server.name && (
                               <a
                                 href={`?session=${encodeURIComponent(installDone.sessionId)}`}
-                                style={{ fontSize: 11, color: "var(--accent)" }}
+                                style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-accent)" }}
                               >
                                 {t("desktop.backupOpenSession")}
                               </a>
@@ -419,15 +419,15 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
             {/* npm packages (opt-in reinstall) */}
             {preview.preview.npmPackages.length > 0 && (
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                <div style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--ds-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
                   {t("desktop.backupNpmPackages")}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
                   {preview.preview.npmPackages.map((spec) => (
-                    <code key={spec} style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text)" }}>{spec}</code>
+                    <code key={spec} style={{ fontSize: 'var(--text-ui-xs)', fontFamily: "var(--font-mono)", color: "var(--ds-text-primary)" }}>{spec}</code>
                   ))}
                 </div>
-                <label style={{ display: "flex", gap: 6, alignItems: "flex-start", cursor: "pointer", fontSize: 12, color: "var(--text)", lineHeight: 1.4 }}>
+                <label style={{ display: "flex", gap: 6, alignItems: "flex-start", cursor: "pointer", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)", lineHeight: 1.4 }}>
                   <input
                     type="checkbox"
                     checked={reinstallNpm}
@@ -436,7 +436,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
                   />
                   <span>
                     {t("desktop.backupReinstallNpm")}
-                    <span style={{ display: "block", fontSize: 11, color: "var(--text-dim)" }}>
+                    <span style={{ display: "block", fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)" }}>
                       {t("desktop.backupReinstallNpmHint")}
                     </span>
                   </span>
@@ -446,7 +446,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
 
             {/* Warnings */}
             {preview.preview.warnings.length > 0 && (
-              <div style={{ fontSize: 11, color: "var(--status-error)", lineHeight: 1.5 }}>
+              <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--status-error)", lineHeight: 1.5 }}>
                 {preview.preview.warnings.map((w, i) => (
                   <div key={i}>⚠ {w}</div>
                 ))}
@@ -458,7 +458,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
                 type="button"
                 onClick={handleRestore}
                 disabled={restoring || selectedCategories.size === 0}
-                style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--accent)", border: "none", borderRadius: 6, color: "var(--accent-fg)", fontSize: 12, fontWeight: 600, cursor: restoring ? "wait" : "pointer", opacity: selectedCategories.size === 0 ? 0.5 : 1 }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", background: "var(--ds-accent)", border: "none", borderRadius: 'var(--radius-sm)', color: "var(--accent-fg)", fontSize: 'var(--text-ui-sm)', fontWeight: 600, cursor: restoring ? "wait" : "pointer", opacity: selectedCategories.size === 0 ? 0.5 : 1 }}
               >
                 <Upload size={15} aria-hidden="true" />
                 {restoring ? t("desktop.backupRestoring") : t("desktop.backupRestoreButton")}
@@ -467,7 +467,7 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
                 type="button"
                 onClick={() => { setPreview(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
                 disabled={restoring}
-                style={{ padding: "8px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", fontSize: 12, cursor: "pointer" }}
+                style={{ padding: "8px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-sm)', cursor: "pointer" }}
               >
                 {t("desktop.cancel")}
               </button>
@@ -477,47 +477,47 @@ export function BackupConfig({ cwd }: { cwd: string | null }) {
 
         {/* Report */}
         {report && (
-          <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "var(--bg-panel)", display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+          <div style={{ border: "1px solid var(--border)", borderRadius: 'var(--radius-md)', padding: 14, background: "var(--ds-bg-secondary)", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>
               <Database size={16} aria-hidden="true" />
               {t("desktop.backupRestoreReport")}
             </div>
 
             {report.restored.length > 0 && (
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--status-success)", marginBottom: 4 }}>✓ {t("desktop.backupReportRestored")}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.6, fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>
+                <div style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--status-success)", marginBottom: 4 }}>✓ {t("desktop.backupReportRestored")}</div>
+                <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", lineHeight: 1.6, fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>
                   {report.restored.join("\n")}
                 </div>
               </div>
             )}
             {report.needsRestart.length > 0 && (
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--status-warning)", marginBottom: 4 }}>🔄 {t("desktop.backupReportRestart")}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.6, fontFamily: "var(--font-mono)" }}>
+                <div style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--status-warning)", marginBottom: 4 }}>🔄 {t("desktop.backupReportRestart")}</div>
+                <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", lineHeight: 1.6, fontFamily: "var(--font-mono)" }}>
                   {report.needsRestart.join("\n")}
                 </div>
               </div>
             )}
             {report.manual.length > 0 && (
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--status-error)", marginBottom: 4 }}>
+                <div style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 600, color: "var(--status-error)", marginBottom: 4 }}>
                   <Warning size={12} style={{ verticalAlign: -2 }} aria-hidden="true" /> {t("desktop.backupReportManual")}
                 </div>
                 {report.manual.map((m, i) => (
-                  <div key={i} style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.6 }}>
-                    <strong style={{ color: "var(--text)" }}>{m.server}</strong>: {m.message}
+                  <div key={i} style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", lineHeight: 1.6 }}>
+                    <strong style={{ color: "var(--ds-text-primary)" }}>{m.server}</strong>: {m.message}
                   </div>
                 ))}
               </div>
             )}
             {report.warnings.length > 0 && (
-              <div style={{ fontSize: 11, color: "var(--status-error)", lineHeight: 1.6 }}>
+              <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--status-error)", lineHeight: 1.6 }}>
                 {report.warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
               </div>
             )}
             {report.needsRestart.length > 0 && (
-              <p style={{ margin: 0, fontSize: 11, color: "var(--status-warning)", lineHeight: 1.5 }}>
+              <p style={{ margin: 0, fontSize: 'var(--text-ui-xs)', color: "var(--status-warning)", lineHeight: 1.5 }}>
                 {t("desktop.backupRestartHint")}
               </p>
             )}

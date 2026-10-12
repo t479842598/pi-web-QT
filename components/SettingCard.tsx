@@ -33,9 +33,9 @@ export function SettingNote({ children }: { children: ReactNode }) {
       style={{
         gap: 8,
         padding: "10px 12px",
-        fontSize: 12,
+        fontSize: 'var(--text-ui-sm)',
         lineHeight: 1.5,
-        color: "var(--text-muted)",
+        color: "var(--ds-text-secondary)",
       }}
     >
       {children}

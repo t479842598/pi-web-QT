@@ -111,9 +111,9 @@ test("shows disabled controls with a gray background", () => {
   assert.match(source, /<textarea[^>]*aria-label=\{t\("agents\.prompt"\)\}[\s\S]*?disabled=\{disabled\}/);
   assert.match(source, /height: 195,[\s\S]*?minHeight: 195,[\s\S]*?maxHeight: "60vh"[\s\S]*?resize: disabled \? "none" : "vertical"/);
   assert.doesNotMatch(source, /agents-system-prompt[^\n]*fontFamily/);
-  assert.match(disabledStyle, /background: "var\(--bg-panel\)"/);
-  assert.match(disabledStyle, /color: "var\(--text-dim\)"/);
-  assert.match(modelSelectorSource, /background: locked \? "var\(--bg-panel\)" : "var\(--bg\)"/);
+  assert.match(disabledStyle, /background: "var\(--ds-bg-secondary\)"/);
+  assert.match(disabledStyle, /color: "var\(--ds-text-muted\)"/);
+  assert.match(modelSelectorSource, /background: locked \? "var\(--ds-bg-secondary\)" : "var\(--ds-bg-primary\)"/);
 });
 
 test("keeps a larger resize corner when system instructions need a scrollbar", () => {

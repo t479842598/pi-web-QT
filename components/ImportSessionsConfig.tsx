@@ -84,7 +84,7 @@ function BottomSheet({ open, onClose, children }: { open: boolean; onClose: () =
         }}>
           <div style={{
             width: 36, height: 4, borderRadius: 2,
-            background: "var(--border)",
+            background: "var(--ds-border-default)",
           }} />
         </div>
         <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
@@ -310,12 +310,12 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
       <div className="settings-content-panel settings-content-card settings-content-stack" style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14, background: "var(--settings-content-card-bg, transparent)", border: "var(--settings-content-card-border, none)" }}>
         <div className="settings-content-section-header" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <CheckCircle size={20} weight="fill" style={{ color: "var(--status-success)" }} />
-          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>
+          <span style={{ fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>
             {t("desktop.importDone") ?? "导入完成"}
           </span>
         </div>
 
-        <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
+        <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", lineHeight: 1.6 }}>
           {t("desktop.importedSummary", { imported: progress.imported }) ??
             `成功导入 ${progress.imported} 个会话`}
           {progress.skipped > 0 && (
@@ -337,8 +337,8 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
           onClick={generateTitles}
           style={{
             display: "inline-flex", alignItems: "center", gap: 7,
-            padding: "8px 14px", background: "var(--accent)", border: "none",
-            borderRadius: 6, color: "var(--accent-fg)", fontSize: 12, fontWeight: 600,
+            padding: "8px 14px", background: "var(--ds-accent)", border: "none",
+            borderRadius: 'var(--radius-sm)', color: "var(--accent-fg)", fontSize: 'var(--text-ui-sm)', fontWeight: 600,
             cursor: "pointer", alignSelf: "flex-start",
           }}
         >
@@ -356,7 +356,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
           style={{
             display: "inline-flex", alignItems: "center", gap: 7,
             padding: "8px 14px", background: "none", border: "1px solid var(--border)",
-            borderRadius: 6, color: "var(--text-muted)", fontSize: 12,
+            borderRadius: 'var(--radius-sm)', color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-sm)',
             cursor: "pointer", alignSelf: "flex-start",
           }}
         >
@@ -374,7 +374,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
     <div className="settings-content-panel settings-content-stack" style={{ padding: isMobile ? "12px 18px" : "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
       {/* 错误 */}
       {error && (
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: "var(--status-error)", lineHeight: 1.5 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 'var(--text-ui-sm)', color: "var(--status-error)", lineHeight: 1.5 }}>
           <Warning size={14} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>{error}</span>
         </div>
@@ -383,7 +383,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
       {/* 来源选择 */}
       {!jobId && (
         <>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
+          <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", lineHeight: 1.6 }}>
             {t("desktop.importSessionsDesc") ?? "从其他 AI 编码工具导入历史对话记录到 pi-web。目前支持 Reasonix，更多工具陆续支持中。"}
           </div>
 
@@ -395,7 +395,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
                 style={{
                   display: "flex", alignItems: "center", gap: 10,
                   padding: "10px 14px", border: "var(--settings-content-card-border, 1px solid var(--border))",
-                  borderRadius: 8, cursor: src.status === "available" ? "pointer" : "default",
+                  borderRadius: 'var(--radius-md)', cursor: src.status === "available" ? "pointer" : "default",
                   background: selectedSource === src.key ? "var(--settings-content-card-selected-bg, var(--bg-selected))" : "var(--settings-content-card-bg, var(--bg-panel))",
                   opacity: src.status === "unavailable" ? 0.5 : src.status === "coming-soon" ? 0.7 : 1,
                   transition: "background 0.12s",
@@ -410,17 +410,17 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
                   onChange={() => setSelectedSource(src.key)}
                 />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                  <div style={{ fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>
                     {src.label}
                   </div>
                   {src.status === "coming-soon" && (
-                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 1 }}>
+                    <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", marginTop: 1 }}>
                       {t("desktop.comingSoon") ?? "即将支持"}
                     </div>
                   )}
                 </div>
                 {src.key === "reasonix" && reasonixData.length > 0 && (
-                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)" }}>
                     {reasonixData.length} {t("desktop.projects") ?? "个项目"} · {reasonixData.reduce((s, p) => s + p.sessions, 0)} {t("desktop.sessions") ?? "会话"}
                   </span>
                 )}
@@ -432,7 +432,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
           {selectedSource === "reasonix" && reasonixData.length > 0 && (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
+                <span style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-primary)" }}>
                   {t("desktop.importSelectProjects") ?? "选择要导入的项目"}
                 </span>
                 <button type="button" onClick={selectAll} style={linkBtnStyle}>
@@ -451,7 +451,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
                     style={{
                       display: "flex", alignItems: "center", gap: 10,
                       padding: "8px 12px", border: "var(--settings-content-card-border, 1px solid var(--border))",
-                      borderRadius: 6, cursor: "pointer",
+                      borderRadius: 'var(--radius-sm)', cursor: "pointer",
                       background: selectedProjects.has(proj.name) ? "var(--settings-content-card-selected-bg, var(--bg-selected))" : "var(--settings-content-card-bg, transparent)",
                       transition: "background 0.12s",
                     }}
@@ -462,19 +462,19 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
                       onChange={() => toggleProject(proj.name)}
                     />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 500, color: "var(--ds-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {proj.name}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
+                      <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", marginTop: 2 }}>
                         {proj.sessions} {t("desktop.sessions") ?? "会话"}
                         {proj.matched && (
-                          <span style={{ marginLeft: 8, color: "var(--accent)" }}>
+                          <span style={{ marginLeft: 8, color: "var(--ds-accent)" }}>
                             → {t("desktop.importMerged") ?? "合并到现有项目"}
                             {proj.existingCount > 0 && ` (${t("desktop.importExistingCount", { count: proj.existingCount }) ?? `${proj.existingCount} 个已有`})`}
                           </span>
                         )}
                         {!proj.matched && (
-                          <span style={{ marginLeft: 8, color: "var(--text-muted)" }}>
+                          <span style={{ marginLeft: 8, color: "var(--ds-text-secondary)" }}>
                             → {t("desktop.importNewProject") ?? "新建项目"}
                           </span>
                         )}
@@ -490,8 +490,8 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
                 disabled={loading || selectedProjects.size === 0}
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 7,
-                  padding: "8px 14px", background: "var(--accent)", border: "none",
-                  borderRadius: 6, color: "var(--accent-fg)", fontSize: 12, fontWeight: 600,
+                  padding: "8px 14px", background: "var(--ds-accent)", border: "none",
+                  borderRadius: 'var(--radius-sm)', color: "var(--accent-fg)", fontSize: 'var(--text-ui-sm)', fontWeight: 600,
                   cursor: selectedProjects.size === 0 ? "not-allowed" : "pointer",
                   alignSelf: "flex-start",
                   opacity: selectedProjects.size === 0 ? 0.5 : 1,
@@ -508,7 +508,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
 
           {/* 无数据 */}
           {selectedSource === "reasonix" && reasonixData.length === 0 && !loading && (
-            <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "12px 0" }}>
+            <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", padding: "12px 0" }}>
               {t("desktop.importNoData") ?? "未找到 Reasonix 数据。请确认 ~/.reasonix/projects/ 目录存在且包含会话文件。"}
             </div>
           )}
@@ -518,22 +518,22 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
       {/* 进度条 */}
       {jobId && !progress.done && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)" }}>
             <Spinner size={14} style={{ animation: "spin 1s linear infinite" }} />
             {t("desktop.importing") ?? "导入中…"}
           </div>
           <div style={{
-            height: 6, borderRadius: 3, background: "var(--bg-panel)",
+            height: 6, borderRadius: 'var(--radius-xs)', background: "var(--ds-bg-secondary)",
             overflow: "hidden",
           }}>
             <div style={{
-              height: "100%", borderRadius: 3,
-              background: "var(--accent)",
+              height: "100%", borderRadius: 'var(--radius-xs)',
+              background: "var(--ds-accent)",
               width: `${progress.total > 0 ? (progress.imported + progress.skipped + progress.errors) / progress.total * 100 : 0}%`,
               transition: "width 0.3s ease",
             }} />
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)" }}>
             {progress.imported + progress.skipped + progress.errors} / {progress.total}
             {progress.skipped > 0 && ` · ${t("desktop.importSkippedCount", { skipped: progress.skipped }) ?? `${progress.skipped} 跳过`}`}
           </div>
@@ -555,8 +555,8 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
           style={{
             display: "flex", alignItems: "center", gap: 8,
             padding: "10px 14px", width: "100%",
-            background: "var(--bg-panel)", border: "1px solid var(--border)",
-            borderRadius: 8, color: "var(--text)", fontSize: 12, cursor: "pointer",
+            background: "var(--ds-bg-secondary)", border: "1px solid var(--border)",
+            borderRadius: 'var(--radius-md)', color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-sm)', cursor: "pointer",
           }}
         >
           <DownloadSimple size={16} />
@@ -565,7 +565,7 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
 
         <BottomSheet open={mobileSheetOpen} onClose={() => setMobileSheetOpen(false)}>
           <div className="settings-content-header" style={{ padding: "4px 18px 14px", borderBottom: "var(--settings-content-header-border, 1px solid var(--border))", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--ds-text-primary)" }}>
               {t("desktop.importSessions") ?? "导入会话"}
             </span>
             <button onClick={() => setMobileSheetOpen(false)} style={closeBtnStyle}>
@@ -586,11 +586,11 @@ export function ImportSessionsConfig({ onSessionsChanged }: Props) {
 }
 
 const linkBtnStyle: React.CSSProperties = {
-  background: "none", border: "none", color: "var(--accent)",
-  fontSize: 11, cursor: "pointer", padding: "2px 4px",
+  background: "none", border: "none", color: "var(--ds-accent)",
+  fontSize: 'var(--text-ui-xs)', cursor: "pointer", padding: "2px 4px",
 };
 
 const closeBtnStyle: React.CSSProperties = {
-  background: "none", border: "none", color: "var(--text-muted)",
+  background: "none", border: "none", color: "var(--ds-text-secondary)",
   cursor: "pointer", padding: 4, display: "flex",
 };

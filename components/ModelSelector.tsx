@@ -112,12 +112,12 @@ export function ModelSelector({
         height: 34,
         padding: "0 9px",
         overflow: "hidden",
-        border: "1px solid var(--border)",
-        borderRadius: 5,
-        background: locked ? "var(--bg-panel)" : "var(--bg)",
-        color: locked ? "var(--text-dim)" : "var(--text)",
+        border: "1px solid var(--ds-border-default)",
+        borderRadius: 'var(--radius-sm)',
+        background: locked ? "var(--ds-bg-secondary)" : "var(--ds-bg-primary)",
+        color: locked ? "var(--ds-text-muted)" : "var(--ds-text-primary)",
         cursor: locked ? "default" : "pointer",
-        fontSize: 12,
+        fontSize: 'var(--text-ui-sm)',
         textAlign: "left",
       }
     : {
@@ -131,11 +131,11 @@ export function ModelSelector({
         padding: isMobile ? "8px 10px" : "8px 12px",
         overflow: "hidden",
         border: "none",
-        borderRadius: 9,
-        background: open ? "var(--bg-hover)" : "none",
-        color: "var(--text-muted)",
+        borderRadius: 'var(--radius-md)',
+        background: open ? "var(--ds-bg-hover)" : "none",
+        color: "var(--ds-text-secondary)",
         cursor: locked ? "not-allowed" : "pointer",
-        fontSize: 12,
+        fontSize: 'var(--text-ui-sm)',
         opacity: locked ? 0.5 : 1,
         transition: "background 0.12s, color 0.12s",
       };
@@ -179,17 +179,17 @@ export function ModelSelector({
         }}
         onMouseEnter={(event) => {
           if (locked) return;
-          event.currentTarget.style.background = "var(--bg-hover)";
-          event.currentTarget.style.color = "var(--text)";
+          event.currentTarget.style.background = "var(--ds-bg-hover)";
+          event.currentTarget.style.color = "var(--ds-text-primary)";
         }}
         onMouseLeave={(event) => {
           if (locked) {
-            event.currentTarget.style.background = variant === "field" ? "var(--bg-panel)" : "none";
-            event.currentTarget.style.color = variant === "field" ? "var(--text-dim)" : "var(--text-muted)";
+            event.currentTarget.style.background = variant === "field" ? "var(--ds-bg-secondary)" : "none";
+            event.currentTarget.style.color = variant === "field" ? "var(--ds-text-muted)" : "var(--ds-text-secondary)";
             return;
           }
-          event.currentTarget.style.background = open ? "var(--bg-hover)" : variant === "field" ? "var(--bg)" : "none";
-          event.currentTarget.style.color = variant === "field" ? "var(--text)" : "var(--text-muted)";
+          event.currentTarget.style.background = open ? "var(--ds-bg-hover)" : variant === "field" ? "var(--ds-bg-primary)" : "none";
+          event.currentTarget.style.color = variant === "field" ? "var(--ds-text-primary)" : "var(--ds-text-secondary)";
         }}
       >
         {busy ? (
@@ -208,7 +208,7 @@ export function ModelSelector({
         )}
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentName}</span>
         {variant === "field" && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, color: "var(--text-dim)" }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, color: "var(--ds-text-muted)" }}>
             <polyline points="6 9 12 15 18 9" />
           </svg>
         )}
@@ -242,14 +242,14 @@ export function ModelSelector({
               flexDirection: "column",
               maxHeight,
               overflow: "hidden",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              background: "var(--bg)",
+              border: "1px solid var(--ds-border-default)",
+              borderRadius: 'var(--radius-md)',
+              background: "var(--ds-bg-primary)",
               boxShadow: openAbove ? "0 -4px 16px rgba(0,0,0,0.10)" : "0 4px 16px rgba(0,0,0,0.10)",
             }}
           >
             {showFilter && (
-              <div style={{ flexShrink: 0, padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ flexShrink: 0, padding: "6px 8px", borderBottom: "1px solid var(--ds-border-default)" }}>
                 <input
                   value={filter}
                   onChange={(event) => setFilter(event.target.value)}
@@ -263,13 +263,13 @@ export function ModelSelector({
                     width: "100%",
                     minWidth: isMobile ? 0 : 220,
                     padding: "5px 8px",
-                    border: "1px solid var(--border)",
-                    borderRadius: 5,
+                    border: "1px solid var(--ds-border-default)",
+                    borderRadius: 'var(--radius-sm)',
                     outline: "none",
-                    background: "var(--bg)",
-                    color: "var(--text)",
+                    background: "var(--ds-bg-primary)",
+                    color: "var(--ds-text-primary)",
                     fontFamily: "var(--font-mono)",
-                    fontSize: 11,
+                    fontSize: 'var(--text-ui-xs)',
                   }}
                 />
               </div>
@@ -283,13 +283,13 @@ export function ModelSelector({
                 }} />
               )}
               {modelsByProvider.length === 0 ? (
-                <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
+                <div style={{ padding: "8px 12px", color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-sm)', whiteSpace: "nowrap" }}>
                   {filter.trim() ? t("chat.noMatchingModels") : "No available models"}
                 </div>
               ) : modelsByProvider.map((group, index) => (
                 <div key={group.provider}>
                   {modelsByProvider.length > 1 && (
-                    <div style={{ padding: "6px 12px 4px", borderTop: index > 0 || onClear ? "1px solid var(--border)" : "none", color: "var(--text-dim)", fontSize: 10, fontWeight: 600, letterSpacing: 0, textTransform: "uppercase" }}>
+                    <div style={{ padding: "6px 12px 4px", borderTop: index > 0 || onClear ? "1px solid var(--ds-border-default)" : "none", color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)', fontWeight: 600, letterSpacing: 0, textTransform: "uppercase" }}>
                       {group.provider}
                     </div>
                   )}
@@ -318,12 +318,12 @@ function ModelOptionButton({ active, label, onClick }: { active: boolean; label:
       role="option"
       aria-selected={active}
       onClick={onClick}
-      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 12px", border: "none", background: active ? "var(--bg-selected)" : "none", color: active ? "var(--text)" : "var(--text-muted)", cursor: "pointer", fontSize: 12, fontWeight: active ? 600 : 400, textAlign: "left", whiteSpace: "nowrap" }}
-      onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = "var(--bg-hover)"; }}
+      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 12px", border: "none", background: active ? "var(--ds-bg-active)" : "none", color: active ? "var(--ds-text-primary)" : "var(--ds-text-secondary)", cursor: "pointer", fontSize: 'var(--text-ui-sm)', fontWeight: active ? 600 : 400, textAlign: "left", whiteSpace: "nowrap" }}
+      onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = "var(--ds-bg-hover)"; }}
       onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = "none"; }}
     >
       {active
-        ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true"><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
+        ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--ds-accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true"><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
         : <span style={{ width: 10, flexShrink: 0 }} />}
       <span title={label} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
     </button>

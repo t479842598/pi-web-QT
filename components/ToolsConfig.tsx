@@ -146,7 +146,7 @@ export function ToolsConfig({ sessionId, onSessionReloaded }: Props) {
           />
         </SettingRow>
         <SettingRowLast>
-          <div style={{ padding: "10px 0", fontSize: 12, lineHeight: 1.5, color: "var(--text-dim)" }}>
+          <div style={{ padding: "10px 0", fontSize: 'var(--text-ui-sm)', lineHeight: 1.5, color: "var(--ds-text-muted)" }}>
             {shellSettings?.isWindows
               ? t("desktop.shellToolWindowsOnly")
               : (shellError ?? t("desktop.shellToolMacOnly"))}
@@ -159,14 +159,14 @@ export function ToolsConfig({ sessionId, onSessionReloaded }: Props) {
           write-capable one out of a read-only session. */}
       <SettingsContentCard>
         <SettingRow>
-          <div className="settings-content-section-title" style={{ padding: "12px 0 4px", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+          <div className="settings-content-section-title" style={{ padding: "12px 0 4px", fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>
             {t("desktop.extensionToolsTitle")}
           </div>
-          <div style={{ paddingBottom: 8, fontSize: 11, lineHeight: 1.5, color: "var(--text-dim)" }}>
+          <div style={{ paddingBottom: 8, fontSize: 'var(--text-ui-xs)', lineHeight: 1.5, color: "var(--ds-text-muted)" }}>
             {sessionId ? t("desktop.extensionToolsHint") : t("desktop.toolsListNoSession")}
           </div>
           {extensionTools.length === 0 && sessionId && !toolsLoading && (
-            <div style={{ paddingBottom: 8, fontSize: 11, color: "var(--text-dim)" }}>
+            <div style={{ paddingBottom: 8, fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)" }}>
               {t("desktop.extensionToolsEmpty")}
             </div>
           )}
@@ -181,7 +181,7 @@ export function ToolsConfig({ sessionId, onSessionReloaded }: Props) {
           ))}
         </SettingRow>
         <SettingRowLast>
-          <div style={{ padding: "8px 0 10px", fontSize: 11, lineHeight: 1.5, color: disabledError ? "var(--status-error)" : "var(--text-dim)" }}>
+          <div style={{ padding: "8px 0 10px", fontSize: 'var(--text-ui-xs)', lineHeight: 1.5, color: disabledError ? "var(--status-error)" : "var(--ds-text-muted)" }}>
             {disabledError ?? (savingDisabled ? t("desktop.saving") : t("desktop.extensionToolsApplyNote"))}
           </div>
         </SettingRowLast>
@@ -190,16 +190,16 @@ export function ToolsConfig({ sessionId, onSessionReloaded }: Props) {
       {/* Read-only inventory of the tools the live session exposes. */}
       <SettingsContentCard>
         <SettingRowLast>
-          <div className="settings-content-section-title" style={{ padding: "12px 0 4px", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+          <div className="settings-content-section-title" style={{ padding: "12px 0 4px", fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>
             {t("tools.title")}
           </div>
-          <div style={{ paddingBottom: 10, fontSize: 11, lineHeight: 1.5, color: "var(--text-dim)" }}>
+          <div style={{ paddingBottom: 10, fontSize: 'var(--text-ui-xs)', lineHeight: 1.5, color: "var(--ds-text-muted)" }}>
             {sessionId ? t("desktop.toolsListHint") : t("desktop.toolsListNoSession")}
           </div>
         </SettingRowLast>
       </SettingsContentCard>
       {sessionId && (
-        <div className="settings-content-card" style={{ border: "var(--settings-content-card-border, 1px solid var(--border))", borderRadius: 8, overflow: "hidden" }}>
+        <div className="settings-content-card" style={{ border: "var(--settings-content-card-border, 1px solid var(--border))", borderRadius: 'var(--radius-md)', overflow: "hidden" }}>
           <ToolDefinitionsPanel loading={toolsLoading} tools={tools} translate={t} />
         </div>
       )}

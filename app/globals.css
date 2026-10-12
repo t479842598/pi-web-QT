@@ -183,9 +183,11 @@
   --ds-bg-chip: var(--bg-hover);
   /* One ink ramp: primary, then three descending steps of it. */
   --ds-text-primary: var(--text);
+  /* Four distinct steps, built from the theme's own two tuned inks so each
+     theme keeps its contrast decisions; only the faintest step is derived. */
   --ds-text-secondary: var(--text-muted);
-  --ds-text-muted: var(--text-muted);
-  --ds-text-faint: var(--text-dim);
+  --ds-text-muted: var(--text-dim);
+  --ds-text-faint: color-mix(in srgb, var(--text-dim) 72%, var(--bg));
   --ds-border-default: var(--border);
   --ds-border-subtle: color-mix(in srgb, var(--border) 55%, transparent);
   --ds-border-strong: color-mix(in srgb, var(--border) 160%, var(--text-dim));

@@ -56,7 +56,7 @@ function SegmentedModeSelector<M extends string>({
       style={{
         display: "flex",
         border: "1px solid var(--border)",
-        borderRadius: 8,
+        borderRadius: 'var(--radius-md)',
         overflow: "hidden",
         height: 28,
         flexShrink: 0,
@@ -76,16 +76,16 @@ function SegmentedModeSelector<M extends string>({
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               height: "100%", padding: "0 12px",
-              background: isActive ? "var(--bg-selected)" : "none",
+              background: isActive ? "var(--ds-bg-active)" : "none",
               border: "none",
-              color: isActive ? (accent ?? "var(--accent)") : "var(--text-muted)",
+              color: isActive ? (accent ?? "var(--ds-accent)") : "var(--ds-text-secondary)",
               cursor: disabled ? "not-allowed" : "pointer",
-              fontSize: 11.5, fontWeight: isActive ? 650 : 500,
+              fontSize: 'var(--text-ui-sm)', fontWeight: isActive ? 650 : 500,
               opacity: disabled ? 0.5 : 1,
               whiteSpace: "nowrap",
               transition: "background 0.12s, color 0.12s",
             }}
-            onMouseEnter={(e) => { if (!isActive && !disabled) e.currentTarget.style.background = "var(--bg-hover)"; }}
+            onMouseEnter={(e) => { if (!isActive && !disabled) e.currentTarget.style.background = "var(--ds-bg-hover)"; }}
             onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
           >
             {t(option.labelKey)}
@@ -186,7 +186,7 @@ export function FeaturesConfig() {
     <div className="settings-content-panel settings-content-stack" style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="settings-content-card-host" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {!loaded ? (
-          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>
             {t("desktop.featuresLoading")}
           </div>
         ) : (
@@ -200,7 +200,7 @@ export function FeaturesConfig() {
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                       <SquaresFour size={14} aria-hidden="true" />
                       {t("desktop.featuresTasksBoard")}
-                      <span style={{ borderRadius: 999, background: "rgba(37,99,235,0.12)", color: "var(--accent)", padding: "1px 7px", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      <span style={{ borderRadius: 'var(--radius-full)', background: "rgba(37,99,235,0.12)", color: "var(--ds-accent)", padding: "1px 7px", fontSize: 'var(--text-ui-xs)', fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                         Beta
                       </span>
                     </span>
@@ -215,8 +215,8 @@ export function FeaturesConfig() {
                 <SettingRow>
                   <div className="settings-content-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 0" }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.featuresCollabDefault")}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t("desktop.featuresCollabDefaultDesc")}</div>
+                      <div style={{ fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>{t("desktop.featuresCollabDefault")}</div>
+                      <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", marginTop: 2 }}>{t("desktop.featuresCollabDefaultDesc")}</div>
                     </div>
                     <SegmentedModeSelector
                       options={COLLAB_OPTIONS}
@@ -229,8 +229,8 @@ export function FeaturesConfig() {
                 <SettingRow>
                   <div className="settings-content-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 0" }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.featuresTokenDefault")}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t("desktop.featuresTokenDefaultDesc")}</div>
+                      <div style={{ fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>{t("desktop.featuresTokenDefault")}</div>
+                      <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", marginTop: 2 }}>{t("desktop.featuresTokenDefaultDesc")}</div>
                     </div>
                     <SegmentedModeSelector
                       options={TOKEN_OPTIONS}
@@ -243,8 +243,8 @@ export function FeaturesConfig() {
                 <SettingRowLast>
                   <div className="settings-content-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 0" }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.featuresApprovalDefault")}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t("desktop.featuresApprovalDefaultDesc")}</div>
+                      <div style={{ fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>{t("desktop.featuresApprovalDefault")}</div>
+                      <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", marginTop: 2 }}>{t("desktop.featuresApprovalDefaultDesc")}</div>
                     </div>
                     <SegmentedModeSelector
                       options={APPROVAL_OPTIONS}
@@ -261,7 +261,7 @@ export function FeaturesConfig() {
         )}
         <SettingNote>{t("desktop.featuresDesc")}</SettingNote>
         {saving && (
-          <div style={{ padding: "0 2px", fontSize: 11, color: "var(--text-muted)" }}>
+          <div style={{ padding: "0 2px", fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)" }}>
             {t("desktop.featuresSaving")}
           </div>
         )}

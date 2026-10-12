@@ -49,8 +49,8 @@ const inputStyle: React.CSSProperties = {
   background: "var(--ds-tile-hover)",
   border: "none",
   borderRadius: "var(--radius-2xs)",
-  color: "var(--text)",
-  fontSize: 12,
+  color: "var(--ds-text-primary)",
+  fontSize: 'var(--text-ui-sm)',
   fontFamily: "var(--font-mono)",
   width: "100%",
   boxSizing: "border-box",
@@ -58,14 +58,14 @@ const inputStyle: React.CSSProperties = {
 };
 
 function labelStyle(): React.CSSProperties {
-  return { fontSize: 12, color: "var(--text-muted)" };
+  return { fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" };
 }
 
 function badgeStyle(color: string, bg: string): React.CSSProperties {
   return {
-    fontSize: 10,
+    fontSize: 'var(--text-ui-xs)',
     padding: "1px 6px",
-    borderRadius: 3,
+    borderRadius: 'var(--radius-xs)',
     background: bg,
     color,
     flexShrink: 0,
@@ -286,15 +286,15 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
     <div className="settings-content-panel settings-content-stack" style={{ flex: 1, overflow: "auto", minWidth: 0, padding: "20px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="settings-content-card-host" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {!loaded ? (
-          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("desktop.loading")}</div>
+          <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{t("desktop.loading")}</div>
         ) : loadError ? (
-          <div style={{ fontSize: 12, color: "var(--status-error)" }}>{loadError}</div>
+          <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--status-error)" }}>{loadError}</div>
         ) : (
           <>
             <div className="settings-content-section-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <div style={{ minWidth: 0 }}>
-                <div className="settings-content-section-title" style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>{t("desktop.mcpServers")}</div>
-                <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div className="settings-content-section-title" style={{ fontSize: 'var(--text-ui-base)', fontWeight: 700, color: "var(--ds-text-primary)" }}>{t("desktop.mcpServers")}</div>
+                <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", fontFamily: "var(--font-mono)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {filePath}
                 </div>
               </div>
@@ -309,11 +309,11 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                     gap: 6,
                     padding: "7px 12px",
                     border: "none",
-                    borderRadius: 6,
-                    background: "var(--accent)",
+                    borderRadius: 'var(--radius-sm)',
+                    background: "var(--ds-accent)",
                     color: "var(--accent-fg)",
                     cursor: "pointer",
-                    fontSize: 12,
+                    fontSize: 'var(--text-ui-sm)',
                     flexShrink: 0,
                   }}
                 >
@@ -325,7 +325,7 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
 
             {allEntries.length > 0 && (
               <label className="settings-search-pill" style={{ display: "flex" }}>
-                <MagnifyingGlassIcon size={14} style={{ color: "var(--text-dim)", flexShrink: 0 }} />
+                <MagnifyingGlassIcon size={14} style={{ color: "var(--ds-text-muted)", flexShrink: 0 }} />
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
@@ -342,7 +342,7 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
             {entries.length === 0 && !editing ? (
               <SettingsContentCard>
                 <SettingRowLast>
-                  <div style={{ padding: "14px 0", fontSize: 12, color: "var(--text-dim)" }}>
+                  <div style={{ padding: "14px 0", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-muted)" }}>
                     {servers[VISION_SERVER_NAME] ? t("desktop.mcpEmptyOther") : t("desktop.mcpEmpty")}
                   </div>
                 </SettingRowLast>
@@ -354,17 +354,17 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                     <div className="settings-content-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 0", minWidth: 0 }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", fontFamily: "var(--font-mono)" }}>
+                          <span style={{ fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)", fontFamily: "var(--font-mono)" }}>
                             {name}
                           </span>
-                          <span style={badgeStyle("var(--accent)", "rgba(37,99,235,0.12)")}>
+                          <span style={badgeStyle("var(--ds-accent)", "rgba(37,99,235,0.12)")}>
                             {server.transport ?? "stdio"}
                           </span>
                           <span style={badgeStyle("var(--status-warning)", "rgba(245,158,11,0.12)")}>
                             {server.lifecycle ?? "lazy"}
                           </span>
                         </div>
-                        <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", fontFamily: "var(--font-mono)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {isUrlTransport(normalizeMcpTransport(server.transport))
                             ? server.url
                             : `${server.command ?? ""}${Array.isArray(server.args) && server.args.length > 0
@@ -384,10 +384,10 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                             padding: "6px 10px",
                             background: "none",
                             border: "1px solid var(--border)",
-                            borderRadius: 6,
-                            color: "var(--text-muted)",
+                            borderRadius: 'var(--radius-sm)',
+                            color: "var(--ds-text-secondary)",
                             cursor: saving ? "not-allowed" : "pointer",
-                            fontSize: 12,
+                            fontSize: 'var(--text-ui-sm)',
                             opacity: saving ? 0.5 : 1,
                           }}
                         >
@@ -406,10 +406,10 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                             padding: "6px 9px",
                             background: "rgba(239,68,68,0.08)",
                             border: "1px solid var(--border)",
-                            borderRadius: 6,
+                            borderRadius: 'var(--radius-sm)',
                             color: "var(--status-error)",
                             cursor: saving ? "not-allowed" : "pointer",
-                            fontSize: 12,
+                            fontSize: 'var(--text-ui-sm)',
                             opacity: saving ? 0.5 : 1,
                           }}
                         >
@@ -425,7 +425,7 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
             {editing && (
               <SettingsContentCard>
                 <SettingRow>
-                  <div className="settings-content-section-title" style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", padding: "12px 0 4px" }}>
+                  <div className="settings-content-section-title" style={{ fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)", padding: "12px 0 4px" }}>
                     {editing.isNew ? t("desktop.mcpNewServer") : t("desktop.mcpEditServer", { name: editing.name })}
                   </div>
                 </SettingRow>
@@ -520,11 +520,11 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                       style={{
                         padding: "7px 12px",
                         border: "none",
-                        borderRadius: 6,
-                        background: "var(--accent)",
+                        borderRadius: 'var(--radius-sm)',
+                        background: "var(--ds-accent)",
                         color: "var(--accent-fg)",
                         cursor: saving ? "wait" : "pointer",
-                        fontSize: 12,
+                        fontSize: 'var(--text-ui-sm)',
                       }}
                     >
                       {saving ? t("desktop.saving") : t("desktop.mcpSave")}
@@ -537,22 +537,22 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                         padding: "7px 12px",
                         background: "none",
                         border: "1px solid var(--border)",
-                        borderRadius: 6,
-                        color: "var(--text-muted)",
+                        borderRadius: 'var(--radius-sm)',
+                        color: "var(--ds-text-secondary)",
                         cursor: saving ? "not-allowed" : "pointer",
-                        fontSize: 12,
+                        fontSize: 'var(--text-ui-sm)',
                       }}
                     >
                       {t("desktop.mcpCancel")}
                     </button>
-                    {saveError && <span style={{ color: "var(--status-error)", fontSize: 12 }}>{saveError}</span>}
+                    {saveError && <span style={{ color: "var(--status-error)", fontSize: 'var(--text-ui-sm)' }}>{saveError}</span>}
                   </div>
                 </SettingRowLast>
               </SettingsContentCard>
             )}
 
             {saved && !editing && (
-              <div style={{ fontSize: 12, color: "var(--status-success)" }}>{t("desktop.mcpSavedRestart")}</div>
+              <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--status-success)" }}>{t("desktop.mcpSavedRestart")}</div>
             )}
           </>
         )}

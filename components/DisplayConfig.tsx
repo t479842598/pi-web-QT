@@ -15,25 +15,25 @@ const tagGroupStyle: React.CSSProperties = {
 
 function tagStyle(active: boolean, hovered: boolean, disabled?: boolean): React.CSSProperties {
   const borderColor = active
-    ? "var(--accent)"
+    ? "var(--ds-accent)"
     : hovered
       ? "var(--border-hover)"
-      : "var(--border)";
+      : "var(--ds-border-default)";
   const bg = active
     ? "color-mix(in srgb, var(--accent) 12%, var(--bg))"
     : hovered
-      ? "var(--bg-hover)"
+      ? "var(--ds-bg-hover)"
       : "var(--bg-card)";
-  const color = active ? "var(--accent)" : hovered ? "var(--text)" : "var(--text-muted)";
+  const color = active ? "var(--ds-accent)" : hovered ? "var(--ds-text-primary)" : "var(--ds-text-secondary)";
 
   return {
     display: "inline-flex", alignItems: "center", gap: 7,
     padding: "7px 14px",
     border: `1px solid ${borderColor}`,
-    borderRadius: 8,
+    borderRadius: 'var(--radius-md)',
     background: bg,
     color,
-    fontSize: 13, fontWeight: active ? 600 : 400,
+    fontSize: 'var(--text-ui-base)', fontWeight: active ? 600 : 400,
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.5 : 1,
     transition: "border-color 0.15s, background 0.15s, color 0.15s",
@@ -44,8 +44,8 @@ function tagStyle(active: boolean, hovered: boolean, disabled?: boolean): React.
 function SectionLabel({ icon, label, actions }: { icon: React.ReactNode; label: string; actions?: React.ReactNode }) {
   return (
     <div className="settings-content-section-label" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, width: "100%" }}>
-      <span style={{ color: "var(--text-dim)", display: "inline-flex", flexShrink: 0 }}>{icon}</span>
-      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+      <span style={{ color: "var(--ds-text-muted)", display: "inline-flex", flexShrink: 0 }}>{icon}</span>
+      <span style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 700, color: "var(--ds-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
         {label}
       </span>
       {actions && <span style={{ display: "inline-flex", alignItems: "center", gap: 12, marginLeft: "auto" }}>{actions}</span>}
@@ -60,8 +60,8 @@ const textActionButtonStyle: React.CSSProperties = {
   padding: 0,
   border: 0,
   background: "transparent",
-  color: "var(--accent)",
-  fontSize: 11,
+  color: "var(--ds-accent)",
+  fontSize: 'var(--text-ui-xs)',
   cursor: "pointer",
   whiteSpace: "nowrap",
 };
@@ -79,8 +79,8 @@ const underlineOnHover = {
 function ConfigSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return (
     <section className="settings-content-card settings-content-section" style={{ padding: "var(--settings-content-section-padding, 20px 22px)", borderBottom: "var(--settings-content-section-divider, 1px solid var(--border))" }}>
-      <h2 className="settings-content-section-title" style={{ margin: 0, fontSize: 14, fontWeight: 650, color: "var(--text)" }}>{title}</h2>
-      <p className="settings-content-section-description" style={{ margin: "5px 0 16px", fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)" }}>{description}</p>
+      <h2 className="settings-content-section-title" style={{ margin: 0, fontSize: 'var(--text-ui-base)', fontWeight: 650, color: "var(--ds-text-primary)" }}>{title}</h2>
+      <p className="settings-content-section-description" style={{ margin: "5px 0 16px", fontSize: 'var(--text-ui-sm)', lineHeight: 1.5, color: "var(--ds-text-secondary)" }}>{description}</p>
       {children}
     </section>
   );
@@ -96,7 +96,7 @@ function BorderIcon({ depth }: { depth: number }) {
         x={1.5} y={1.5} width={11} height={11} rx={2.5}
         style={{
           fill: "none",
-          stroke: "var(--text-dim)",
+          stroke: "var(--ds-text-muted)",
           strokeWidth: 1 + n * 2,
           opacity: 0.2 + n * 0.8,
         }}
@@ -104,7 +104,7 @@ function BorderIcon({ depth }: { depth: number }) {
       <rect
         x={4} y={4} width={6} height={6} rx={1}
         style={{
-          fill: "var(--text-dim)",
+          fill: "var(--ds-text-muted)",
           opacity: 0.05 + n * 0.35,
         }}
       />
@@ -144,7 +144,7 @@ function ThemeCardPreview({ colors }: { colors: ThemePreviewColors }) {
       style={{
         display: "flex",
         height: 62,
-        borderRadius: 6,
+        borderRadius: 'var(--radius-sm)',
         overflow: "hidden",
         background: colors.bg,
         border: `1px solid ${colors.border}`,
@@ -160,7 +160,7 @@ function ThemeCardPreview({ colors }: { colors: ThemePreviewColors }) {
       {/* Conversation */}
       <div style={{ flex: 1, minWidth: 0, padding: "5px 6px", display: "flex", flexDirection: "column", gap: 4 }}>
         {/* user bubble */}
-        <div style={{ alignSelf: "flex-end", maxWidth: "78%", borderRadius: 5, background: colors.userBg, padding: "3px 5px", display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ alignSelf: "flex-end", maxWidth: "78%", borderRadius: 'var(--radius-sm)', background: colors.userBg, padding: "3px 5px", display: "flex", flexDirection: "column", gap: 2 }}>
           <span style={{ height: 2.5, borderRadius: 2, background: colors.text, opacity: 0.75, width: 34 }} />
           <span style={{ height: 2.5, borderRadius: 2, background: colors.text, opacity: 0.5, width: 22 }} />
         </div>
@@ -170,7 +170,7 @@ function ThemeCardPreview({ colors }: { colors: ThemePreviewColors }) {
           <span style={{ height: 2.5, borderRadius: 2, background: colors.muted, opacity: 0.65, width: "64%" }} />
         </div>
         {/* tool block */}
-        <div style={{ borderRadius: 4, background: colors.toolBg, borderLeft: `2px solid ${colors.accent}`, padding: "3px 5px", display: "flex", alignItems: "center", gap: 4 }}>
+        <div style={{ borderRadius: 'var(--radius-xs)', background: colors.toolBg, borderLeft: `2px solid ${colors.accent}`, padding: "3px 5px", display: "flex", alignItems: "center", gap: 4 }}>
           <span style={{ width: 5, height: 5, borderRadius: "50%", background: colors.accent, flexShrink: 0 }} />
           <span style={{ height: 2.5, borderRadius: 2, background: colors.muted, opacity: 0.7, width: "52%" }} />
         </div>
@@ -203,8 +203,8 @@ function ThemeCard({
   onHoverEnd: () => void;
 }) {
   const borderColor = active
-    ? "var(--accent)"
-    : hovered ? "var(--border-hover)" : "var(--border)";
+    ? "var(--ds-accent)"
+    : hovered ? "var(--border-hover)" : "var(--ds-border-default)";
   return (
     <button
       type="button"
@@ -221,8 +221,8 @@ function ThemeCard({
         gap: 7,
         padding: 8,
         border: `1px solid ${borderColor}`,
-        borderRadius: 9,
-        background: hovered && !active ? "var(--bg-hover)" : "var(--bg-card)",
+        borderRadius: 'var(--radius-md)',
+        background: hovered && !active ? "var(--ds-bg-hover)" : "var(--bg-card)",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.5 : 1,
         textAlign: "left",
@@ -232,13 +232,13 @@ function ThemeCard({
     >
       {colors
         ? <ThemeCardPreview colors={colors} />
-        : <div aria-hidden="true" style={{ height: 62, borderRadius: 6, background: "var(--bg-panel)", border: "1px solid var(--border)" }} />}
+        : <div aria-hidden="true" style={{ height: 62, borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)", border: "1px solid var(--border)" }} />}
       <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: active ? 600 : 400, color: active ? "var(--accent)" : "var(--text)" }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 'var(--text-ui-sm)', fontWeight: active ? 600 : 400, color: active ? "var(--ds-accent)" : "var(--ds-text-primary)" }}>
           {displayName}
         </span>
         <VariantDots hasDark={hasDark} hasLight={hasLight} darkColor={colors?.accent} lightColor={colors?.accent} t={() => ""} />
-        {active && <CheckCircle size={13} weight="fill" color="var(--accent)" aria-hidden="true" style={{ flexShrink: 0 }} />}
+        {active && <CheckCircle size={13} weight="fill" color="var(--ds-accent)" aria-hidden="true" style={{ flexShrink: 0 }} />}
       </span>
     </button>
   );
@@ -332,7 +332,7 @@ export function DisplayConfig() {
   return (
     <div className="settings-content-panel" style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
       <header className="settings-content-header" style={{ padding: "var(--settings-content-header-padding, 18px 22px 14px)", borderBottom: "var(--settings-content-header-border, 1px solid var(--border))" }}>
-        <h1 className="settings-content-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{t("desktop.display")}</h1>
+        <h1 className="settings-content-title" style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--ds-text-primary)" }}>{t("desktop.display")}</h1>
       </header>
 
       {/* ── Theme ── */}
@@ -365,7 +365,7 @@ export function DisplayConfig() {
           }
         />
         {loading ? (
-          <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{t("desktop.loadingThemes")}</span>
+          <span style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-muted)" }}>{t("desktop.loadingThemes")}</span>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
             <ThemeCard
@@ -406,7 +406,7 @@ export function DisplayConfig() {
             label={`${t("desktop.borderVisibility")} (${borderDepth})`}
           />
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>{t("desktop.borderSubtle")}</span>
+            <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", flexShrink: 0 }}>{t("desktop.borderSubtle")}</span>
             <input
               type="range"
               min={0} max={100} step={1}
@@ -414,12 +414,12 @@ export function DisplayConfig() {
               onChange={(e) => setBorderDepth(Number(e.target.value))}
               style={{
                 flex: 1,
-                accentColor: "var(--accent)",
+                accentColor: "var(--ds-accent)",
                 height: 6,
                 cursor: "pointer",
               }}
             />
-            <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>{t("desktop.borderBold")}</span>
+            <span style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", flexShrink: 0 }}>{t("desktop.borderBold")}</span>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
             {[0, 25, 50, 75, 100].map((d) => {
@@ -433,8 +433,8 @@ export function DisplayConfig() {
                   onClick={() => setBorderDepth(d)}
                   style={{
                     width: 28, height: 20,
-                    border: `2px solid ${active ? "var(--accent)" : previewBorder}`,
-                    borderRadius: 5,
+                    border: `2px solid ${active ? "var(--ds-accent)" : previewBorder}`,
+                    borderRadius: 'var(--radius-sm)',
                     background: "var(--bg-card)",
                     cursor: "pointer",
                     transition: "border-color 0.1s",
@@ -475,10 +475,10 @@ export function DisplayConfig() {
         </div>
 
         {!loading && themeSets.length === 0 && (
-          <p style={{ margin: "14px 0 0", fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+          <p style={{ margin: "14px 0 0", fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-muted)", lineHeight: 1.5 }}>
             {t("desktop.noCustomThemes")}{" "}
             {t("desktop.noCustomThemesHint")}{" "}
-            <code style={{ fontSize: 10, background: "var(--bg-secondary)", padding: "1px 5px", borderRadius: 3, fontFamily: "var(--font-mono)" }}>~/.pi/agent/themes/*.json</code>{" "}
+            <code style={{ fontSize: 'var(--text-ui-xs)', background: "var(--bg-secondary)", padding: "1px 5px", borderRadius: 'var(--radius-xs)', fontFamily: "var(--font-mono)" }}>~/.pi/agent/themes/*.json</code>{" "}
             {t("desktop.noCustomThemesHint2")}
           </p>
         )}
@@ -524,7 +524,7 @@ export function DisplayConfig() {
               {loggingOut ? t("auth.loggingOut") : t("auth.logOut")}
             </button>
           </div>
-          {logoutError && <p role="alert" style={{ margin: "8px 0 0", color: "var(--status-error)", fontSize: 12 }}>{logoutError}</p>}
+          {logoutError && <p role="alert" style={{ margin: "8px 0 0", color: "var(--status-error)", fontSize: 'var(--text-ui-sm)' }}>{logoutError}</p>}
         </ConfigSection>
       )}
     </div>

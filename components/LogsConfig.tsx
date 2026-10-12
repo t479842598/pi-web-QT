@@ -87,38 +87,38 @@ export function LogsConfig() {
   return (
     <div className="settings-content-panel settings-content-stack" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
       <div className="settings-content-card settings-content-toolbar" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "var(--settings-content-card-bg, transparent)", border: "var(--settings-content-card-border, none)" }}>
-        <select value={level} onChange={(event) => setLevel(event.target.value)} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }}>
+        <select value={level} onChange={(event) => setLevel(event.target.value)} style={{ padding: "7px 9px", background: "var(--ds-bg-secondary)", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-sm)' }}>
           <option value="">{t("desktop.logsAllLevels")}</option>
           {["error", "warning", "info"].map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
-        <select value={statusCode} onChange={(event) => setStatusCode(event.target.value)} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }}>
+        <select value={statusCode} onChange={(event) => setStatusCode(event.target.value)} style={{ padding: "7px 9px", background: "var(--ds-bg-secondary)", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-sm)' }}>
           <option value="">{t("desktop.logsAllCodes")}</option>
           {availableStatusCodes.map((code) => <option key={code} value={code}>{code}</option>)}
         </select>
-        <select value={source} onChange={(event) => setSource(event.target.value)} style={{ padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }}>
+        <select value={source} onChange={(event) => setSource(event.target.value)} style={{ padding: "7px 9px", background: "var(--ds-bg-secondary)", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-sm)' }}>
           <option value="">{t("desktop.logsAllSources")}</option>
           {availableSources.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("desktop.logsSearch")} style={{ flex: 1, minWidth: 180, padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)", fontSize: 12 }} />
-        <button type="button" onClick={() => void load()} title={t("desktop.refresh")} aria-label={t("desktop.refresh")} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--text-muted)", cursor: "pointer" }}><ArrowClockwise size={14} /></button>
-        <button type="button" onClick={() => void clear()} title={t("desktop.logsClear")} aria-label={t("desktop.logsClear")} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-panel)", color: "var(--status-error)", cursor: "pointer" }}><Trash size={14} /></button>
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("desktop.logsSearch")} style={{ flex: 1, minWidth: 180, padding: "7px 9px", background: "var(--ds-bg-secondary)", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-sm)' }} />
+        <button type="button" onClick={() => void load()} title={t("desktop.refresh")} aria-label={t("desktop.refresh")} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)", color: "var(--ds-text-secondary)", cursor: "pointer" }}><ArrowClockwise size={14} /></button>
+        <button type="button" onClick={() => void clear()} title={t("desktop.logsClear")} aria-label={t("desktop.logsClear")} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)", color: "var(--status-error)", cursor: "pointer" }}><Trash size={14} /></button>
       </div>
-      {loading && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>{t("desktop.loading")}</div>}
-      {error && <div style={{ color: "var(--status-error)", fontSize: 12 }}>{error}</div>}
-      {!loading && !error && entries.length === 0 && <div style={{ color: "var(--text-muted)", fontSize: 12 }}>{t("desktop.logsEmpty")}</div>}
+      {loading && <div style={{ color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-sm)' }}>{t("desktop.loading")}</div>}
+      {error && <div style={{ color: "var(--status-error)", fontSize: 'var(--text-ui-sm)' }}>{error}</div>}
+      {!loading && !error && entries.length === 0 && <div style={{ color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-sm)' }}>{t("desktop.logsEmpty")}</div>}
       <div className="settings-content-stack" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {entries.map((entry) => (
-          <details key={entry.id} className="settings-content-card settings-content-log-entry" style={{ border: "var(--settings-content-card-border, 1px solid var(--border))", borderRadius: 7, background: "var(--settings-content-card-bg, var(--bg-panel))", padding: "8px 10px" }}>
-            <summary style={{ cursor: "pointer", color: entry.level === "error" ? "var(--status-error)" : entry.level === "warning" ? "var(--status-warning)" : "var(--text)", fontSize: 12 }}>
+          <details key={entry.id} className="settings-content-card settings-content-log-entry" style={{ border: "var(--settings-content-card-border, 1px solid var(--border))", borderRadius: 'var(--radius-md)', background: "var(--settings-content-card-bg, var(--bg-panel))", padding: "8px 10px" }}>
+            <summary style={{ cursor: "pointer", color: entry.level === "error" ? "var(--status-error)" : entry.level === "warning" ? "var(--status-warning)" : "var(--ds-text-primary)", fontSize: 'var(--text-ui-sm)' }}>
               <span style={{ fontFamily: "var(--font-mono)", marginRight: 8 }}>{entry.statusCode ?? "—"}</span>
               <span style={{ marginRight: 8 }}>{new Date(entry.timestamp).toLocaleString()}</span>
               <span style={{ overflowWrap: "anywhere" }}>{entry.message.length > 180 ? `${entry.message.slice(0, 180)}…` : entry.message}</span>
             </summary>
-            <div style={{ padding: "8px 0 0 18px", color: "var(--text-muted)", fontSize: 11, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            <div style={{ padding: "8px 0 0 18px", color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-xs)', lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
               <div>{entry.source}{entry.provider ? ` · ${entry.provider}` : ""}{entry.model ? ` · ${entry.model}` : ""}</div>
               <div style={{ marginTop: 5, maxHeight: 260, overflow: "auto" }}>{entry.message}</div>
               {entry.details && <div style={{ marginTop: 5, maxHeight: 260, overflow: "auto" }}>{entry.details}</div>}
-              <button type="button" onClick={() => void copyEntry(entry)} style={{ marginTop: 8, padding: "4px 7px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg)", color: "var(--text-muted)", cursor: "pointer", fontSize: 11 }}>
+              <button type="button" onClick={() => void copyEntry(entry)} style={{ marginTop: 8, padding: "4px 7px", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', background: "var(--bg)", color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 'var(--text-ui-xs)' }}>
                 {t("desktop.logsCopy")}
               </button>
             </div>

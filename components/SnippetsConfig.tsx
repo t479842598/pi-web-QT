@@ -18,13 +18,13 @@ interface SnippetItem {
 }
 
 const inputStyle: React.CSSProperties = {
-  padding: "7px 9px", background: "var(--bg-panel)", border: "1px solid var(--border)",
-  borderRadius: 6, color: "var(--text)", fontSize: 12, width: "100%",
+  padding: "7px 9px", background: "var(--ds-bg-secondary)", border: "1px solid var(--border)",
+  borderRadius: 'var(--radius-sm)', color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-sm)', width: "100%",
 };
 
 const buttonStyle: React.CSSProperties = {
-  padding: "6px 12px", border: "none", borderRadius: 6,
-  background: "var(--accent)", color: "var(--accent-fg)", cursor: "pointer", fontSize: 12,
+  padding: "6px 12px", border: "none", borderRadius: 'var(--radius-sm)',
+  background: "var(--ds-accent)", color: "var(--accent-fg)", cursor: "pointer", fontSize: 'var(--text-ui-sm)',
 };
 
 export function SnippetsConfig() {
@@ -117,8 +117,8 @@ export function SnippetsConfig() {
           <div className="settings-content-section-header" style={{ display: "flex", alignItems: "center", gap: 7, padding: "12px 0" }}>
           <ListBullets size={15} aria-hidden="true" />
           <div>
-            <div className="settings-content-section-title" style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("desktop.snippets")}</div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{t("desktop.snippetsDesc")}</div>
+            <div className="settings-content-section-title" style={{ fontSize: 'var(--text-ui-base)', fontWeight: 600, color: "var(--ds-text-primary)" }}>{t("desktop.snippets")}</div>
+            <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", marginTop: 2 }}>{t("desktop.snippetsDesc")}</div>
           </div>
         </div>
       </SettingRow>
@@ -130,7 +130,7 @@ export function SnippetsConfig() {
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Plus size={13} /> {t("desktop.snippetNew")}</span>
             </button>
             {editing && (
-              <button type="button" onClick={startCreate} style={{ ...buttonStyle, background: "var(--bg-hover)", color: "var(--text-muted)" }}>
+              <button type="button" onClick={startCreate} style={{ ...buttonStyle, background: "var(--ds-bg-hover)", color: "var(--ds-text-secondary)" }}>
                 <X size={13} />
               </button>
             )}
@@ -138,12 +138,12 @@ export function SnippetsConfig() {
 
           <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 200px) 1fr", gap: 8, alignItems: "start", marginBottom: 8 }}>
             <div>
-              <span style={{ fontSize: 12, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>{t("desktop.snippetName")}</span>
+              <span style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", display: "block", marginBottom: 4 }}>{t("desktop.snippetName")}</span>
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="#name" style={inputStyle} />
             </div>
             <div>
-              <span style={{ fontSize: 12, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>{t("desktop.snippetContent")}</span>
-              <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 11 }} />
+              <span style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)", display: "block", marginBottom: 4 }}>{t("desktop.snippetContent")}</span>
+              <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 'var(--text-ui-xs)' }} />
             </div>
           </div>
 
@@ -151,11 +151,11 @@ export function SnippetsConfig() {
             <button type="button" onClick={() => void save()} disabled={saving} style={{ ...buttonStyle, cursor: saving ? "wait" : "pointer" }}>
               {t("desktop.snippetSave")}
             </button>
-            {error && <span style={{ color: "var(--status-error, #ef4444)", fontSize: 12 }}>{error}</span>}
+            {error && <span style={{ color: "var(--status-error, #ef4444)", fontSize: 'var(--text-ui-sm)' }}>{error}</span>}
           </div>
 
           {loading ? (
-            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{t("desktop.loadingThemes")}</span>
+            <span style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-muted)" }}>{t("desktop.loadingThemes")}</span>
           ) : snippets.length === 0 ? (
             <SettingNote>{t("desktop.snippetEmpty")}</SettingNote>
           ) : (
@@ -169,19 +169,19 @@ export function SnippetsConfig() {
                     padding: "6px 10px",
                     background: "var(--settings-content-card-bg, var(--bg-panel))",
                     border: "var(--settings-content-card-border, 1px solid var(--border))",
-                    borderRadius: 6,
+                    borderRadius: 'var(--radius-sm)',
                   }}
                 >
-                  <span style={{ color: "var(--accent)", fontFamily: "var(--font-mono)", fontSize: 11 }}>#</span>
-                  <span style={{ fontWeight: 600, fontSize: 12, flexShrink: 0 }}>{snippet.name}</span>
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-muted)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                  <span style={{ color: "var(--ds-accent)", fontFamily: "var(--font-mono)", fontSize: 'var(--text-ui-xs)' }}>#</span>
+                  <span style={{ fontWeight: 600, fontSize: 'var(--text-ui-sm)', flexShrink: 0 }}>{snippet.name}</span>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-xs)', fontFamily: "var(--font-mono)" }}>
                     {snippet.content.split("\n")[0]}
                   </span>
                   <button
                     type="button"
                     onClick={() => startEdit(snippet)}
                     title={t("desktop.snippetEdit")}
-                    style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", padding: 2 }}
+                    style={{ background: "none", border: "none", color: "var(--ds-text-muted)", cursor: "pointer", padding: 2 }}
                   >
                     <PencilSimple size={13} />
                   </button>
@@ -189,7 +189,7 @@ export function SnippetsConfig() {
                     type="button"
                     onClick={() => void remove(snippet.id)}
                     title={t("desktop.snippetDelete")}
-                    style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", padding: 2 }}
+                    style={{ background: "none", border: "none", color: "var(--ds-text-muted)", cursor: "pointer", padding: 2 }}
                   >
                     <Trash size={13} />
                   </button>
