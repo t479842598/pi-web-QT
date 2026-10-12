@@ -180,14 +180,14 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
 
           {/* Session list */}
           <div className="settings-content-card" style={{ borderRadius: 'var(--radius-lg-plus)', border: "var(--settings-content-card-border, 1px solid var(--border))", overflow: "hidden" }}>
-            <div className="settings-content-section-title" style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 600, color: "var(--ds-text-primary)", padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+            <div className="settings-content-section-title" style={{ fontSize: 'var(--text-ui-sm)', fontWeight: 500, color: "var(--ds-text-primary)", padding: "10px 14px", borderBottom: "none", background: "var(--ds-tile)" }}>
               {t("desktop.usageTopSessions")}
             </div>
             {report && report.sessions.length === 0 ? (
               <div style={{ padding: "14px", fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{t("desktop.usageNoData")}</div>
             ) : (
               (report?.sessions ?? []).slice(0, 12).map((s) => (
-                <div key={s.path} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderBottom: "1px solid var(--border)" }}>
+                <div key={s.path} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderBottom: "none" }}>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {sessionDisplayTitle({ name: s.name, firstMessage: s.firstMessage, id: s.id })}
                   </span>

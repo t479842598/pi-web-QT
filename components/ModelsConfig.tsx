@@ -442,8 +442,8 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
               <label
                 style={{
                   minHeight: 32, padding: "5px 9px", display: "flex", alignItems: "center", gap: 8,
-                  position: "sticky", top: 0, zIndex: 1, borderBottom: "1px solid var(--border)",
-                  background: "var(--bg)", cursor: selectableShownIds.length ? "pointer" : "default",
+                  position: "sticky", top: 0, zIndex: 1, borderBottom: "none",
+                  background: "var(--ds-tile-hover)", cursor: selectableShownIds.length ? "pointer" : "default",
                   color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-xs)', fontWeight: 600,
                 }}
               >
