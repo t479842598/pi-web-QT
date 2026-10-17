@@ -43,6 +43,38 @@ function relative(ts?: number): string | null {
   return `${Math.round(delta / 86_400_000)}d ago`;
 }
 
+/**
+ * Plain rendering of a message body when no `contentRenderer` is supplied.
+ *
+ * Deliberately not a Markdown pipeline: `MarkdownBody` carries the KaTeX/Mermaid
+ * stack and belongs to the caller. This keeps the text visible — a user turn with
+ * no text is worse than a user turn without pretty code blocks.
+ */
+function FallbackMessageBody({ message }: { message: AgentMessage }) {
+  const text = (() => {
+    // `AgentMessage` is a union and not every member carries `content`.
+    if (!("content" in message)) return "";
+    const content = message.content;
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object" && "text" in part && typeof part.text === "string") {
+          return part.text;
+        }
+        return "";
+      })
+      .join("\n")
+      .trim();
+  })();
+
+  if (!text) return null;
+  return (
+    <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{text}</span>
+  );
+}
+
 function ClaudeMessageShellInner({
   message,
   isStreaming,
@@ -54,7 +86,12 @@ function ClaudeMessageShellInner({
 }: ClaudeMessageShellProps) {
   const role = message.role;
   const isUser = role === "user";
-  const body = contentRenderer ? contentRenderer(message) : null;
+  // The slot is typed on `ComponentProps<typeof MessageView>`, which has no
+  // `contentRenderer` — so nothing ever supplies one and the body came out null.
+  // That is why the Claude transcript rendered tool rows with no user turns.
+  // Fall back to reading the message content directly; the caller's renderer
+  // still wins when someone does pass one.
+  const body = contentRenderer ? contentRenderer(message) : <FallbackMessageBody message={message} />;
 
   const stamp = useMemo(() => {
     if (!showTimestamp) return null;

@@ -40,6 +40,59 @@ function stepTone(block: ProcessContentBlock): { color: string; label: string } 
   return { color: "var(--status-success)", label: "done" };
 }
 
+/**
+ * Body for a step when the caller supplies no `renderStep`.
+ *
+ * No consumer passes one today, so this is the only path that actually runs.
+ * It renders whatever text the block carries — the call arguments for a tool
+ * call, the prose for a text block — which is what makes the transcript readable
+ * instead of a list of tool names.
+ */
+function FallbackStepBody({ block }: { block: ProcessContentBlock }) {
+  const body = (() => {
+    switch (block.type) {
+      case "text":
+        return block.text;
+      case "thinking":
+        return block.thinking ?? "";
+      case "toolCall": {
+        const input = block.input;
+        if (typeof input === "string") return input;
+        try {
+          return JSON.stringify(input, null, 2);
+        } catch {
+          return "";
+        }
+      }
+      case "custom":
+        // A custom block carries a whole message; its text is the useful part.
+        return typeof block.message.content === "string" ? block.message.content : "";
+      default:
+        return "";
+    }
+  })();
+
+  if (!body.trim()) return null;
+
+  return (
+    <pre
+      style={{
+        margin: 0,
+        fontSize: "var(--text-ui-xs)",
+        lineHeight: 1.55,
+        color: "var(--cds-text-secondary, var(--text-muted))",
+        fontFamily: "var(--font-mono)",
+        whiteSpace: "pre-wrap",
+        overflowWrap: "anywhere",
+        maxHeight: "16rem",
+        overflowY: "auto",
+      }}
+    >
+      {body.length > 4000 ? body.slice(0, 4000) + "…" : body}
+    </pre>
+  );
+}
+
 function stepTitle(block: ProcessContentBlock, index: number): string {
   switch (block.type) {
     case "toolCall":
@@ -63,7 +116,14 @@ export function ClaudeToolCard({
   defaultExpanded = false,
   renderStep,
 }: ClaudeToolCardProps) {
-  const [open, setOpen] = useState(defaultExpanded || isStreaming);
+  // Collapsed by default, which is the convention this shell follows: a run of
+  // tool calls reads as one scannable row. Expanding everything instead produced
+  // 30k characters where pi shows 2k — the opposite failure.
+  //
+  // What a collapsed row must not do is hide *what happened*, so the summary
+  // line carries the first step's title and the count; the bodies are one click
+  // away.
+  const [open, setOpen] = useState(defaultExpanded);
   const total = blocks?.length ?? 0;
   if (total === 0) return null;
 
@@ -115,6 +175,26 @@ export function ClaudeToolCard({
         <span style={{ fontWeight: 500 }}>
           {total} step{total === 1 ? "" : "s"}
           {failures > 0 ? ` · ${failures} failed` : ""}
+        </span>
+        {/* Collapsed rows must still say *what* ran. A bare count made every run
+            look the same; naming the tools is what a reader scans for. */}
+        <span
+          style={{
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            color: "var(--cds-text-faint, var(--text-dim))",
+            fontSize: "var(--text-ui-xs)",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          {blocks
+            .slice(0, 4)
+            .map((block) => stepTitle(block, 0))
+            .filter(Boolean)
+            .join(" · ")}
+          {blocks.length > 4 ? ` · +${blocks.length - 4}` : ""}
         </span>
         <span
           aria-hidden="true"
@@ -174,11 +254,13 @@ export function ClaudeToolCard({
                   >
                     {stepTitle(block, index)}
                   </div>
-                  {renderStep && (
-                    <div style={{ marginTop: 4 }}>
-                      {renderStep(block, index)}
-                    </div>
-                  )}
+                  {/* `renderStep` is optional, and no caller passes one today.
+                      Without a fallback the "expanded" body showed only the title
+                      line, so the content loss survived the first fix. Render the
+                      block's own text when the caller does not supply a body. */}
+                  <div style={{ marginTop: 4 }}>
+                    {renderStep ? renderStep(block, index) : <FallbackStepBody block={block} />}
+                  </div>
                 </div>
               </div>
             );
