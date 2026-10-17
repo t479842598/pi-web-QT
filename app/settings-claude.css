@@ -2906,12 +2906,8 @@ html[data-ui-kit="claude"] .settings-row .settings-segmented.settings-segmented:
    from flipping the kit while configuring it.
    ========================================================================== */
 
-body:has(.settings-page-overlay) .claude-title-bar-right > *,
-body:has(.settings-page-overlay) .app-titlebar-right > * {
+body:has(.settings-page-overlay) .app-title-bar > div:last-child {
   visibility: hidden;
-}
-body:has(.settings-page-overlay) .claude-title-bar-right,
-body:has(.settings-page-overlay) .app-titlebar-right {
   pointer-events: none;
 }
 
