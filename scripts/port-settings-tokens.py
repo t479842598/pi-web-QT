@@ -12,6 +12,8 @@ Two classes of change, both purely mechanical and both idempotent:
    becomes the `--text-ui-base` step, and the small radii become `--radius-*`.
    Only the settings-owned files are touched; chat surfaces keep their own
    scale.
+3. Elevation: the hand-written box-shadow literals in the model-settings forms
+   become the --cds-shadow-* steps, which derive from the active theme.
 
 Run with `--check` to list what would change without writing.
 """
@@ -49,6 +51,15 @@ TARGETS = [
     "components/SettingCard.tsx",
     "components/SettingToggle.tsx",
     "components/ApplyNowButton.tsx",
+    # Model settings that are still being split out of ModelsConfig: listed up
+    # front so each new file is ported the moment it lands, and skipped with a
+    # "missing:" line until then.
+    "components/model-config/ServiceChooser.tsx",
+    "components/model-config/ProviderSetupSheet.tsx",
+    "components/model-config/ModelSelectionPanes.tsx",
+    "components/model-config/DefaultModelRow.tsx",
+    "hooks/useProviderModels.ts",
+    "hooks/useListReorder.ts",
 ]
 
 COLOR_PAIRS = [
@@ -103,6 +114,18 @@ INSET_FIELD_RE = re.compile(
     r'(background: "var\(--ds-bg-secondary\)",\s*\n)(\s*)border: "1px solid var\(--border\)",\n',
 )
 
+# Fourth class: elevation. These are the shadow literals the model-settings
+# forms still spelled by hand; the CDS tokens derive from the active theme, so
+# the elevation follows it instead of staying a fixed black wash. Only the
+# quoted JSX property form is matched, exactly like the classes above. The
+# same value appears under two literals (0 8px 32px @ .22), so the list carries
+# it once.
+SHADOW_PAIRS = [
+    ('boxShadow: "0 8px 32px rgba(0, 0, 0, 0.18)"', 'boxShadow: "var(--cds-shadow-lg)"'),
+    ('boxShadow: "0 8px 32px rgba(0, 0, 0, 0.22)"', 'boxShadow: "var(--cds-shadow-popover)"'),
+    ('boxShadow: "0 12px 40px rgba(0, 0, 0, 0.28)"', 'boxShadow: "var(--cds-shadow-lg)"'),
+]
+
 
 def drop_inline_border(text: str) -> tuple[str, int]:
     total = 0
@@ -141,6 +164,7 @@ def main():
             ("color", COLOR_PAIRS),
             ("font", FONT_PAIRS),
             ("radius", RADIUS_PAIRS),
+            ("shadow", SHADOW_PAIRS),
         ):
             text, n = apply(text, pairs)
             counts.append("%s=%d" % (label, n))

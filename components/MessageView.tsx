@@ -822,7 +822,7 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
     return <div data-message-text data-search-target={searchTarget || undefined}><TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} /></div>;
   }
   if (block.type === "thinking") {
-    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
+    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} isStreaming={isStreaming} />;
   }
   if (block.type === "image") {
     const flat = block as unknown as { data?: string; mimeType?: string };
@@ -926,7 +926,7 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
   }
 
   return (
-    <div className="thinking-block">
+    <div className={`thinking-block ${isStreaming ? "is-live" : ""}`}>
       <button
         onClick={() => setExpanded((v) => !v)}
         className="thinking-block-trigger"
@@ -939,11 +939,20 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
           <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
         )}
       </button>
-      {expanded && (
-        <div className={`thinking-block-content ${error ? "is-error" : ""}`}>
+      {/* Always mounted so the grid 0fr → 1fr transition has a height to
+          animate to. The deferred fetch stays gated on `expanded` in the load
+          effect above, so a collapsed block issues no request. `inert` keeps
+          the collapsed body's links out of tab order and the a11y tree, which
+          the old `{expanded && …}` render got for free by not existing. */}
+      <div
+        className={`thinking-block-content ${error ? "is-error" : ""} ${expanded ? "is-expanded" : ""}`}
+        aria-hidden={!expanded}
+        inert={!expanded}
+      >
+        <div className="thinking-block-content-inner">
           {loading ? t("desktop.loadingThinking") : error ?? (block.deferred ? content : block.thinking)}
         </div>
-      )}
+      </div>
       {duration !== undefined && (
         <span style={{ flexShrink: 0, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
       )}

@@ -217,6 +217,55 @@
   --motion-duration-fast: 0.12s;
   --motion-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
 
+  /* Claude Design System (CDS) — mapping layer only.
+     Every value derives from this fork's semantic tokens, so all 24 shipped
+     themes (and Pi JSON themes) keep working unchanged. See ADR 0009. */
+  --cds-surface-0: var(--bg);
+  --cds-surface-1: var(--bg-secondary);
+  --cds-surface-2: var(--bg-card);
+  --cds-surface-3: var(--bg-card);
+  --cds-surface-popover: var(--bg-panel);
+  --cds-text-primary: var(--text);
+  --cds-text-secondary: var(--text-muted);
+  --cds-text-muted: var(--text-dim);
+  --cds-text-faint: color-mix(in srgb, var(--text-dim) 72%, var(--bg));
+  --cds-hairline-1: color-mix(in srgb, var(--border) 55%, transparent);
+  --cds-hairline-2: var(--border);
+  --cds-hairline-3: color-mix(in srgb, var(--border) 160%, var(--text-dim));
+  --cds-fill-secondary: var(--bg-hover);
+  --cds-fill-ghost-hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --cds-clay: var(--accent);
+  --cds-clay-hover: var(--accent-hover);
+  --cds-clay-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --cds-radius: 8px;
+  --cds-radius-composer: 20px;
+  /* CDS spells these as `radius + .25rem`, which only equals +4px when the
+     root font is 16px. This shell's root is 15px, so the rem form landed the
+     bubble at 11.75px instead of the 18px the Claude surface uses. Both are
+     therefore written in px: the bubble is CDS's own production value, and the
+     card offset is the +4px the formula stood for. */
+  --cds-radius-card: calc(var(--cds-radius) + 4px);
+  --cds-radius-bubble: 18px;
+  --cds-shadow-sm: 0 1px 2px color-mix(in srgb, var(--bg) 88%, #000), 0 2px 8px color-mix(in srgb, var(--bg) 84%, #000);
+  --cds-shadow-md: 0 2px 4px color-mix(in srgb, var(--bg) 90%, #000), 0 6px 16px color-mix(in srgb, var(--bg) 82%, #000);
+  --cds-shadow-lg: 0 4px 8px color-mix(in srgb, var(--bg) 90%, #000), 0 12px 28px -2px color-mix(in srgb, var(--bg) 80%, #000);
+  --cds-shadow-popover: 0 0 0 1px var(--cds-hairline-2), 0 8px 24px color-mix(in srgb, var(--bg) 78%, #000), 0 2px 6px color-mix(in srgb, var(--bg) 86%, #000);
+  --cds-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
+  --cds-ease-expand: cubic-bezier(0.19, 1, 0.22, 1);
+  --cds-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
+  --cds-ease-out: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --cds-ease-snap: cubic-bezier(0.32, 0.72, 0, 1);
+  --cds-ease-overshoot: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --cds-ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --cds-ease-pulse: cubic-bezier(0.4, 0, 0.2, 1);
+  --cds-ease-rise: cubic-bezier(0.3, 0.7, 0.4, 1);
+  --cds-ease-fall: cubic-bezier(0, 0, 0.2, 1);
+  --cds-dur-fast: 120ms;
+  --cds-dur-snap: 160ms;
+  --cds-dur-slow: 240ms;
+  --cds-btn-spring: linear(0, 0.2459, 0.6526, 0.9468, 1.0764, 1.0915, 1.0585, 1.0219, 0.9993, 0.9914, 0.9921, 0.9957, 0.9988, 1.0004, 1);
+  --cds-scroll-fade-size: 28px;
+
   /* Full-height containers use this instead of a bare `100dvh`: under the
      global `zoom` (see useFontScale) a raw `100dvh` is multiplied by the zoom
      factor and overflows the viewport, while `position: fixed; inset: 0`
@@ -783,7 +832,9 @@ pre, code {
   max-height: 300px;
   padding: 9px 14px;
   border: none;
-  border-radius: 9px;
+  /* Long messages scroll inside the bubble; a mask here would hide the
+     content instead of revealing it, so the radius is the only visual. */
+  border-radius: var(--cds-radius-bubble);
   background: var(--user-bg);
   color: var(--text);
   font-size: 14px;
@@ -869,6 +920,62 @@ pre, code {
   margin-top: 2px;
 }
 
+/* Claude's 7-stop non-linear fade: the alpha ramp approximates y ≈ x^1.5, which
+   avoids the colour banding a two-stop transparent→opaque ramp shows on
+   high-DPI screens. Gated on mask-composite support so older Safari keeps the
+   plain gradient layers ChatWindow rendered before.
+
+   The `#000xxxxxx` values are MASK ALPHA, not colours — the mask-image
+   gradient carries luminance/alpha only, and the hex form is the only way to
+   express a partial alpha stop inside a gradient. Do not swap them for theme
+   variables: --bg/--text would be interpreted as colour stops and paint the
+   message list instead of fading it out. */
+@supports (mask-composite: intersect) or (-webkit-mask-composite: source-in) {
+  .chat-scroll-fade {
+    --chat-fade-top: 0px;
+    --chat-fade-bottom: 0px;
+    -webkit-mask-image: linear-gradient(to bottom,
+      transparent 0,
+      #0000000d calc(var(--chat-fade-top) * 0.15),
+      #00000026 calc(var(--chat-fade-top) * 0.3),
+      #0000004d calc(var(--chat-fade-top) * 0.45),
+      #00000080 calc(var(--chat-fade-top) * 0.6),
+      #000000b3 calc(var(--chat-fade-top) * 0.75),
+      #000000d9 calc(var(--chat-fade-top) * 0.87),
+      #000 var(--chat-fade-top),
+      #000 calc(100% - var(--chat-fade-bottom)),
+      #000000d9 calc(100% - var(--chat-fade-bottom) * 0.87),
+      #000000b3 calc(100% - var(--chat-fade-bottom) * 0.75),
+      #00000080 calc(100% - var(--chat-fade-bottom) * 0.6),
+      #0000004d calc(100% - var(--chat-fade-bottom) * 0.45),
+      #00000026 calc(100% - var(--chat-fade-bottom) * 0.3),
+      #0000000d calc(100% - var(--chat-fade-bottom) * 0.15),
+      transparent 100%);
+    mask-image: linear-gradient(to bottom,
+      transparent 0,
+      #0000000d calc(var(--chat-fade-top) * 0.15),
+      #00000026 calc(var(--chat-fade-top) * 0.3),
+      #0000004d calc(var(--chat-fade-top) * 0.45),
+      #00000080 calc(var(--chat-fade-top) * 0.6),
+      #000000b3 calc(var(--chat-fade-top) * 0.75),
+      #000000d9 calc(var(--chat-fade-top) * 0.87),
+      #000 var(--chat-fade-top),
+      #000 calc(100% - var(--chat-fade-bottom)),
+      #000000d9 calc(100% - var(--chat-fade-bottom) * 0.87),
+      #000000b3 calc(100% - var(--chat-fade-bottom) * 0.75),
+      #00000080 calc(100% - var(--chat-fade-bottom) * 0.6),
+      #0000004d calc(100% - var(--chat-fade-bottom) * 0.45),
+      #00000026 calc(100% - var(--chat-fade-bottom) * 0.3),
+      #0000000d calc(100% - var(--chat-fade-bottom) * 0.15),
+      transparent 100%);
+  }
+  /* The mask replaces the old two-layer gradient entirely where it is
+     supported; keeping both would double-darken the same 32px band. */
+  .chat-fade-fallback {
+    display: none;
+  }
+}
+
 .thinking-block {
   min-width: 0;
 }
@@ -897,9 +1004,18 @@ pre, code {
 }
 .thinking-block-caret.is-expanded { transform: rotate(90deg); }
 .thinking-block-icon { color: var(--accent-blue); font-size: 12px; }
+/* Grid row interpolation: `0fr → 1fr` lets the collapse animate to the
+   content's natural height without a JS-measured max-height. Padding lives on
+   the -inner element because the outer box's padding/border would still take
+   up space at `0fr` and leave a visible slab on a collapsed block. */
 .thinking-block-content {
-  margin-top: 4px;
-  padding: 8px 11px;
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--cds-dur-slow) var(--cds-ease-expand),
+              opacity var(--cds-dur-snap) var(--cds-ease-expand),
+              margin-top var(--cds-dur-snap) var(--cds-ease-expand);
+  margin-top: 0;
   border-left: 2px solid var(--accent-blue);
   background: var(--bg-secondary);
   color: var(--text-dim);
@@ -909,7 +1025,36 @@ pre, code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.thinking-block-content.is-expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  margin-top: 4px;
+}
+.thinking-block-content-inner {
+  overflow: hidden;
+  min-height: 0;
+  padding: 8px 11px;
+}
 .thinking-block-content.is-error { border-left-color: var(--accent-red); color: var(--accent-red); }
+
+/* Streaming thinking: the spark icon breathes instead of sitting static while
+   tokens arrive. `is-live` reuses the existing `isStreaming` prop, so no new
+   state was introduced for it. (The brief's snippet named the keyframes
+   `thinking-pulse-dot` but referenced `thinking-block-pulse` in the
+   animation — one of the two had to give; both sides use
+   `thinking-pulse-dot` here.) */
+@keyframes thinking-pulse-dot {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-1px); }
+}
+.thinking-block.is-live .thinking-block-icon {
+  animation: thinking-pulse-dot 1.9s var(--cds-ease-pulse) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-block-content { transition: none; }
+  .thinking-block-content.is-expanded { transition: none; }
+  .thinking-block.is-live .thinking-block-icon { animation: none; }
+}
 
 .tool-call-block {
   overflow: hidden;
@@ -985,7 +1130,10 @@ pre, code {
   overflow-wrap: anywhere;
 }
 
-/* Composer: matches the reference ChatInput's two-row, low-contrast form. */
+/* Composer: matches the reference ChatInput's two-row, low-contrast form.
+   Three shadow states (rest / hover / focus) come from the CDS elevation
+   tokens; streaming pins the composer back to the resting shadow so a live
+   run does not pulse the elevation on every pointer move. */
 .chat-input-shell {
   position: relative;
   min-width: 0;
@@ -993,22 +1141,38 @@ pre, code {
   margin-left: -10px;
   overflow: visible;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--cds-radius-composer);
   background: var(--bg-secondary);
-  box-shadow: none;
+  box-shadow: var(--cds-shadow-sm);
+  transition: box-shadow var(--cds-dur-fast) var(--cds-ease-swift),
+              border-color var(--cds-dur-fast) var(--cds-ease-swift);
+}
+.chat-input-shell:hover {
+  box-shadow: var(--cds-shadow-md);
 }
 .chat-input-shell:focus-within {
   border-color: var(--accent-blue);
+  box-shadow: var(--cds-shadow-md);
 }
 .chat-input-shell.is-streaming {
   border-color: var(--border);
+  box-shadow: var(--cds-shadow-sm);
+}
+.chat-input-shell.is-streaming:hover {
+  box-shadow: var(--cds-shadow-sm);
 }
 .chat-input-shell.is-streaming:focus-within {
   border-color: var(--accent-blue);
 }
 /* Yolo approval mode: red ring around the whole composer as a visible
-   "unrestricted" warning. */
-.chat-input-shell.is-yolo {
+   "unrestricted" warning. Declared after the generic hover/focus/streaming
+   shadow rules on purpose: the ring must outrank them by source order, so it
+   wins the cascade at equal specificity without `!important`. `:hover` is
+   folded into the selector list rather than restated in a second block, so a
+   hovering yolo composer keeps the ring instead of falling back to the raised
+   shadow at the same (0,3,0) specificity. */
+.chat-input-shell.is-yolo,
+.chat-input-shell.is-yolo:hover {
   border-color: color-mix(in srgb, #ef4444 55%, var(--border));
   box-shadow: 0 0 0 1px color-mix(in srgb, #ef4444 18%, transparent);
 }
@@ -1020,7 +1184,7 @@ pre, code {
   position: absolute;
   inset: 0;
   z-index: 0;
-  border-radius: 7px;
+  border-radius: calc(var(--cds-radius-composer) - 1px);
   opacity: 0.3;
   pointer-events: none;
 }

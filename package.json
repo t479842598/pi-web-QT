@@ -1,6 +1,6 @@
 {
   "name": "@qt4798/pi-web",
-  "version": "0.18.17",
+  "version": "0.18.19",
   "description": "Web workspace for the pi coding agent",
   "homepage": "https://github.com/t479842598/pi-web-QT#readme",
   "repository": {
@@ -68,6 +68,7 @@
     "adm-zip": "^0.6.0",
     "ansi_up": "^6.0.6",
     "cmdk": "^1.1.1",
+    "framer-motion": "^12.43.0",
     "js-yaml": "^5.2.3",
     "katex": "^0.16.47",
     "lucide-react": "^1.37.0",

@@ -15,8 +15,8 @@ test("keeps same-name profiles selectable by scope and groups writable sources f
 
 test("uses the shared enabled status treatment", () => {
   assert.match(source, /<ConfigStatusDot active=\{profile\.enabled\}/);
-  assert.match(source, /className=\{`is-grow\$\{profile\.enabled \? "" : " is-muted"\}`\}/);
-  assert.match(cssSource, /\.config-sidebar-text\.is-muted \{[\s\S]*?color: var\(--ds-text-muted\)/);
+  assert.match(source, /className=\{`agents-capability-row-name\$\{profile\.enabled \? "" : " is-muted"\}`\}/);
+  assert.match(cssSource, /\.agents-capability-row-name\.is-muted \{[\s\S]*?color: var\(--ds-text-muted\)/);
 });
 
 test("offers a persisted built-in sub-agent switch with explicit session reload", () => {
@@ -41,7 +41,7 @@ test("marks profiles shadowed by a higher-precedence source", () => {
 test("treats global and project profiles as directly editable", () => {
   assert.match(source, /scope === "global" \|\| scope === "project"/);
   assert.match(source, /setMode\(isWritableScope\(profile\.scope\) \? "edit" : "view"\)/);
-  assert.match(source, /selected && isWritableScope\(selected\.scope\) && mode === "edit"/);
+  assert.match(source, /!creating && selected && isWritableScope\(selected\.scope\)/);
 });
 
 test("offers both writable scopes when creating a profile", () => {
@@ -50,9 +50,9 @@ test("offers both writable scopes when creating a profile", () => {
   assert.doesNotMatch(source, /beginOverride|mode === "override"|agents\.readOnly|agents\.override/);
 });
 
-test("uses the shared sidebar action for new profiles", () => {
-  assert.match(source, /<ConfigListAction[\s\S]*?active=\{creating\}[\s\S]*?onClick=\{beginCreate\}/);
-  assert.match(source, /t\("agents\.new"\)[\s\S]*?<\/ConfigListAction>/);
+test("offers a toolbar action for new profiles", () => {
+  assert.match(source, /className="agents-list-toolbar"[\s\S]*?onClick=\{beginCreate\}/);
+  assert.match(source, /t\("agents\.new"\)/);
 });
 
 test("sends the selected scope for saves and the source scope for deletes", () => {
@@ -78,11 +78,13 @@ test("keeps the enabled switch live for built-ins whose fields stay read-only", 
 });
 
 test("persists existing profile toggles immediately without submitting unsaved fields", () => {
-  assert.match(source, /const toggleEnabled = async \(enabled: boolean\)/);
+  assert.match(source, /const toggleProfile = async \(profile: SubagentProfile, enabled: boolean\)/);
   assert.match(source, /method: "PATCH"/);
-  assert.match(source, /JSON\.stringify\(\{ cwd, scope: selected\.scope, name: selected\.name, enabled \}\)/);
-  assert.match(source, /setDraft\(\(current\) => \(\{ \.\.\.current, enabled: saved\.enabled \}\)\)/);
-  assert.doesNotMatch(source, /method: "PATCH"[\s\S]*?profile: draft/);
+  assert.match(source, /JSON\.stringify\(\{ cwd, scope: profile\.scope, name: profile\.name, enabled \}\)/);
+  assert.match(source, /setDraft\(\(current\) => \(selectedKey === profileKey\(saved\) \? \{ \.\.\.current, enabled: saved\.enabled \} : current\)\)/);
+  // The PATCH payload must stay toggle-only: bound the window so a later PUT
+  // (which does send `profile: draft`) cannot satisfy this negative assertion.
+  assert.doesNotMatch(source, /method: "PATCH"[\s\S]{0,300}?profile: draft/);
 });
 
 
@@ -134,11 +136,11 @@ test("duplicates any selected profile through the existing create flow", () => {
 });
 
 test("places duplicate and delete immediately before the enabled switch", () => {
-  assert.match(source, /onClick=\{beginDuplicate\}[\s\S]*?onClick=\{\(\) => void remove\(\)\}[\s\S]*?<ConfigSwitch checked=\{draft\.enabled\}/);
+  assert.match(source, /onClick=\{\(\) => void remove\(\)\}[\s\S]*?onClick=\{beginDuplicate\}[\s\S]*?<ConfigSwitch checked=\{draft\.enabled\}/);
 });
 
 test("confirms deletion and limits it to writable profiles", () => {
   assert.match(source, /window\.confirm\(t\("agents\.deleteConfirm", \{ name: selected\.displayName \}\)\)/);
-  assert.match(source, /selected && isWritableScope\(selected\.scope\) && mode === "edit"/);
+  assert.match(source, /!creating && selected && isWritableScope\(selected\.scope\)/);
   assert.match(source, /method: "DELETE"/);
 });

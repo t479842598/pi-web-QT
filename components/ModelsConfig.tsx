@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   CheckIcon,
   CpuIcon,
@@ -14,12 +14,19 @@ import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { TitleModelSetting } from "@/components/TitleModelSetting";
+import { DefaultModelRow } from "@/components/model-config/DefaultModelRow";
+import { ServiceChooser } from "@/components/model-config/ServiceChooser";
+import { ProviderSetupSheet, type ProviderSetupSaveInput } from "@/components/model-config/ProviderSetupSheet";
+import { ModelSelectionPanes } from "@/components/model-config/ModelSelectionPanes";
+import { syncSlotsAfterReorder } from "@/components/model-config/model-config-utils";
+import { useProviderModels } from "@/hooks/useProviderModels";
+import type { NamedEndpointPreset } from "@/lib/provider-presets";
 import { BuiltinModelsDetail } from "@/components/BuiltinModelsDetail";
 import { ProviderUsageSummary } from "@/components/ProviderUsageSummary";
 import { ApplyNowButton } from "./ApplyNowButton";
 import { ModelConfigImportPanel } from "./ModelConfigImportPanel";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
-import type { DiscoveredModel } from "@/lib/model-discovery";
+import type { ModelsFetchErrorKind } from "@/lib/model-fetch-error";
 import {
   savedModelIds,
   trackAddedModels,
@@ -97,12 +104,6 @@ type ModelTestState =
   | { phase: "success"; latencyMs?: number; status?: number; responseText?: string }
   | { phase: "error"; message: string; latencyMs?: number; status?: number };
 
-type ModelDiscoveryState =
-  | { phase: "idle" }
-  | { phase: "loading" }
-  | { phase: "success"; models: DiscoveredModel[]; endpoint: string }
-  | { phase: "error"; message: string };
-
 type ModelCatalogState =
   | { phase: "idle" }
   | { phase: "loading" }
@@ -121,6 +122,18 @@ type BuiltinProviderChange = (provider: Record<string, unknown> | null) => void;
 type RegisterModelsFlush = (flush: BuiltinFlush) => (() => void) | void;
 
 const API_OPTIONS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai", "mistral-conversations"] as const;
+/** Probe failure kinds → the copy the panel already carries for each one. */
+const PROBE_ERROR_KEYS: Record<ModelsFetchErrorKind, string> = {
+  unauthorized: "desktop.modelsProbeErrorUnauthorized",
+  forbidden: "desktop.modelsProbeErrorForbidden",
+  notFound: "desktop.modelsProbeErrorNotFound",
+  rateLimited: "desktop.modelsProbeErrorRateLimited",
+  upstream: "desktop.modelsProbeErrorUpstream",
+  timeout: "desktop.modelsProbeErrorTimeout",
+  network: "desktop.modelsProbeErrorNetwork",
+  invalidResponse: "desktop.modelsProbeErrorInvalidResponse",
+  unknown: "desktop.modelsProbeErrorUpstream",
+};
 const CUSTOM_CALL_FORMAT = "__custom__";
 
 function customSelectionExists(config: ModelsJson, selection: Selection): boolean {
@@ -261,20 +274,18 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Provider detail ───────────────────────────────────────────────────────────
 
-function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddModels, onAddModel, enabledModels }: {
+function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddModel, onModelsChange, onOpenSetup, enabledModels }: {
   name: string; provider: ProviderEntry;
   onChange: (p: ProviderEntry) => void; onRename: (n: string) => void; onDelete: () => void;
-  onAddModels: (models: DiscoveredModel[]) => void;
   onAddModel: () => void;
+  /** The pane owns selection and order; slots move with it in the parent. */
+  onModelsChange: (models: { id: string; name?: string }[]) => void;
+  /** Re-opens the setup sheet for this provider (endpoint, key, full catalog). */
+  onOpenSetup: () => void;
   enabledModels: EnabledModelsController;
 }) {
   const t = useModelTranslation();
   const [editingName, setEditingName] = useState(name);
-  const [discoveryState, setDiscoveryState] = useState<ModelDiscoveryState>({ phase: "idle" });
-  const [discoveryQuery, setDiscoveryQuery] = useState("");
-  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
-  const discoveryRequestIdRef = useRef(0);
-  const selectShownRef = useRef<HTMLInputElement>(null);
   useEffect(() => setEditingName(name), [name]);
   const set = <K extends keyof ProviderEntry>(k: K, v: ProviderEntry[K]) => onChange({ ...provider, [k]: v });
 
@@ -283,79 +294,43 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider.api]);
 
-  useEffect(() => {
-    discoveryRequestIdRef.current += 1;
-    setDiscoveryState({ phase: "idle" });
-    setDiscoveryQuery("");
-    setSelectedModelIds([]);
-  }, [name, provider.baseUrl, provider.api, provider.apiKey]);
+  const models = provider.models ?? [];
+  // The same probe the setup sheet runs: this pane is where a provider that
+  // already exists in models.json gains the rest of its catalog.
+  //
+  // The stored list is passed as a *snapshot* keyed on the provider name, not
+  // as the live draft. The hook derives its request key from those ids, so
+  // passing the draft would fire a fresh upstream /models request on every
+  // checkbox and every drag. The snapshot only has to say "this provider has
+  // models, so models.json holds a credential the route can resolve".
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const savedHint = useMemo(() => (provider.models ?? []).map((model) => ({ id: model.id })), [name]);
+  const discovery = useProviderModels(
+    true,
+    {
+      providerName: name,
+      baseUrl: provider.baseUrl ?? "",
+      apiKey: provider.apiKey ?? "",
+      api: provider.api ?? "openai-completions",
+      headers: provider.headers,
+    },
+    savedHint,
+  );
 
-  const handleDiscoverModels = useCallback(async () => {
-    // 内置提供商（deepseek 等）未配置 baseUrl 时也允许：服务端从 SDK 注册表解析。
-    if (discoveryState.phase === "loading") return;
-    const requestId = ++discoveryRequestIdRef.current;
-    setDiscoveryState({ phase: "loading" });
-    setSelectedModelIds([]);
-    try {
-      const res = await fetch("/api/models-config/discover", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerName: name, provider: { ...provider, models: undefined } }),
-      });
-      const data = await res.json() as { models?: DiscoveredModel[]; endpoint?: string; error?: string };
-      if (requestId !== discoveryRequestIdRef.current) return;
-      if (!res.ok || data.error || !data.models) {
-        setDiscoveryState({ phase: "error", message: data.error ?? `HTTP ${res.status}` });
-        return;
-      }
-      setDiscoveryState({ phase: "success", models: data.models, endpoint: data.endpoint ?? provider.baseUrl ?? "" });
-    } catch (error) {
-      if (requestId !== discoveryRequestIdRef.current) return;
-      setDiscoveryState({ phase: "error", message: error instanceof Error ? error.message : String(error) });
+  const probeLine = (() => {
+    if (discovery.status === "loading") return { text: t("desktop.modelsProbeLoading"), isError: false };
+    if (discovery.status === "error") {
+      const key = discovery.errorKind ? PROBE_ERROR_KEYS[discovery.errorKind] : "desktop.modelsProbeErrorUpstream";
+      return { text: t(key), isError: true };
     }
-  }, [discoveryState.phase, name, provider]);
-
-  const existingModelIds = new Set((provider.models ?? []).map((model) => model.id));
-  const discoveredModels = discoveryState.phase === "success" ? discoveryState.models : [];
-  const normalizedDiscoveryQuery = discoveryQuery.trim().toLocaleLowerCase();
-  const filteredDiscoveredModels = discoveredModels.filter((model) => !normalizedDiscoveryQuery
-    || model.id.toLocaleLowerCase().includes(normalizedDiscoveryQuery)
-    || model.name?.toLocaleLowerCase().includes(normalizedDiscoveryQuery));
-  const shownDiscoveredModels = filteredDiscoveredModels.slice(0, 300);
-  const selectableShownIds = shownDiscoveredModels
-    .filter((model) => !existingModelIds.has(model.id))
-    .map((model) => model.id);
-  const selectedCount = selectedModelIds.filter((id) => !existingModelIds.has(id)).length;
-  const allShownSelected = selectableShownIds.length > 0
-    && selectableShownIds.every((id) => selectedModelIds.includes(id));
-  const someShownSelected = !allShownSelected
-    && selectableShownIds.some((id) => selectedModelIds.includes(id));
-
-  useEffect(() => {
-    if (selectShownRef.current) selectShownRef.current.indeterminate = someShownSelected;
-  }, [someShownSelected]);
-
-  const toggleDiscoveredModel = (id: string) => {
-    setSelectedModelIds((current) => current.includes(id)
-      ? current.filter((entry) => entry !== id)
-      : [...current, id]);
-  };
-
-  const toggleShownModels = () => {
-    const shownIds = new Set(selectableShownIds);
-    setSelectedModelIds((current) => allShownSelected
-      ? current.filter((id) => !shownIds.has(id))
-      : Array.from(new Set([...current, ...selectableShownIds])));
-  };
-
-  const addSelectedModels = () => {
-    if (discoveryState.phase !== "success") return;
-    const selected = new Set(selectedModelIds);
-    const additions = discoveryState.models.filter((model) => selected.has(model.id) && !existingModelIds.has(model.id));
-    if (additions.length === 0) return;
-    onAddModels(additions);
-    setSelectedModelIds([]);
-  };
+    if (discovery.status === "ready" && discovery.source === "saved") {
+      return { text: t("desktop.modelsProbeFromSaved"), isError: false };
+    }
+    if (discovery.status === "ready") {
+      return { text: t("desktop.modelsProbeReady", { count: discovery.models.length }), isError: false };
+    }
+    return { text: t("desktop.modelsProbeIdle"), isError: false };
+  })();
 
   return (
     <div className="settings-content-detail-stack" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -397,116 +372,41 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
         <Select value={provider.api ?? "openai-completions"} onChange={(v) => set("api", v)} options={API_OPTIONS} required />
       </Field>
 
-      <div style={{ paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ paddingTop: 6, display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {discoveryState.phase !== "success" && (
-            <button
-              onClick={handleDiscoverModels}
-              disabled={discoveryState.phase === "loading"}
-              style={{
-                height: 30, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)',
-                background: "var(--ds-bg-secondary)", color: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "var(--ds-text-muted)" : "var(--ds-text-secondary)",
-                cursor: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "not-allowed" : "pointer", fontSize: 'var(--text-ui-xs)',
-              }}
-            >
-              {discoveryState.phase === "loading" ? t("desktop.modelsDiscoveryFetching") : t("desktop.modelsDiscoveryFetch")}
-            </button>
-          )}
+          <span style={{ flex: 1, minWidth: 0, color: probeLine.isError ? "var(--status-error)" : "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)' }}>
+            {probeLine.text}
+          </span>
+          <button
+            onClick={onOpenSetup}
+            title={t("desktop.modelsDiscoveryFetch")}
+            style={{ height: 28, padding: "0 11px", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)", color: "var(--ds-text-secondary)", cursor: "pointer", fontSize: 'var(--text-ui-xs)' }}
+          >
+            {t("desktop.modelsDiscoveryFetch")}
+          </button>
           <button
             onClick={onAddModel}
             title={t("desktop.modelsAddModelManual")}
-            style={{ height: 30, padding: "0 12px", border: "none", borderRadius: 'var(--radius-sm)', background: "var(--ds-accent)", color: "var(--accent-fg)", cursor: "pointer", fontSize: 'var(--text-ui-xs)', fontWeight: 600 }}
+            style={{ height: 28, padding: "0 11px", border: "none", borderRadius: 'var(--radius-sm)', background: "var(--ds-accent)", color: "var(--accent-fg)", cursor: "pointer", fontSize: 'var(--text-ui-xs)', fontWeight: 600 }}
           >
             {t("desktop.modelsAddModelManual")}
           </button>
         </div>
 
-        {discoveryState.phase === "error" && (
-          <div style={{ padding: "7px 9px", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 'var(--radius-sm)', color: "var(--status-error)", fontSize: 'var(--text-ui-xs)', lineHeight: 1.4 }}>
-            {discoveryState.message}
+        {discovery.error && discovery.status === "error" && (
+          <div style={{ padding: "7px 9px", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 'var(--radius-sm)', color: "var(--status-error)", fontSize: 'var(--text-ui-xs)', lineHeight: 1.4, overflowWrap: "anywhere" }}>
+            {discovery.error}
           </div>
         )}
 
-        {discoveryState.phase === "success" && (
-          <>
-            <input
-              value={discoveryQuery}
-              onChange={(event) => setDiscoveryQuery(event.target.value)}
-              placeholder={t("desktop.modelsDiscoveryFilterPlaceholder", { count: discoveryState.models.length })}
-              aria-label={t("desktop.modelsDiscoveryFilter")}
-              style={{ ...inputStyle, width: "100%", minWidth: 0 }}
-            />
-
-            <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)" }}>
-              <label
-                style={{
-                  minHeight: 32, padding: "5px 9px", display: "flex", alignItems: "center", gap: 8,
-                  position: "sticky", top: 0, zIndex: 1, borderBottom: "none",
-                  background: "var(--ds-tile-hover)", cursor: selectableShownIds.length ? "pointer" : "default",
-                  color: "var(--ds-text-secondary)", fontSize: 'var(--text-ui-xs)', fontWeight: 600,
-                }}
-              >
-                <input
-                  ref={selectShownRef}
-                  type="checkbox"
-                  checked={allShownSelected}
-                  disabled={selectableShownIds.length === 0}
-                  onChange={toggleShownModels}
-                  style={{ width: 13, height: 13, accentColor: "var(--ds-accent)", flexShrink: 0 }}
-                />
-                {t("desktop.modelsDiscoverySelectShown")}
-              </label>
-              {shownDiscoveredModels.length === 0 ? (
-                <div style={{ padding: 12, color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)' }}>{t("desktop.modelsDiscoveryNoMatches")}</div>
-              ) : shownDiscoveredModels.map((model, index) => {
-                const alreadyAdded = existingModelIds.has(model.id);
-                const checked = selectedModelIds.includes(model.id);
-                return (
-                  <label
-                    key={model.id}
-                    style={{
-                      minHeight: 36, padding: "6px 9px", display: "flex", alignItems: "center", gap: 8,
-                      borderTop: index === 0 ? "none" : "1px solid var(--border)", cursor: alreadyAdded ? "default" : "pointer",
-                      opacity: alreadyAdded ? 0.65 : 1,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked || alreadyAdded}
-                      disabled={alreadyAdded}
-                      onChange={() => toggleDiscoveredModel(model.id)}
-                      style={{ width: 13, height: 13, accentColor: "var(--ds-accent)", flexShrink: 0 }}
-                    />
-                    <span style={{ minWidth: 0, flex: 1 }}>
-                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ds-text-primary)", fontSize: 'var(--text-ui-xs)' }}>{model.name ?? model.id}</span>
-                      {model.name && <code style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)', fontFamily: "var(--font-mono)" }}>{model.id}</code>}
-                    </span>
-                    {alreadyAdded && <span style={{ color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)' }}>{t("desktop.modelsDiscoveryAdded")}</span>}
-                  </label>
-                );
-              })}
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <span title={discoveryState.endpoint} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ds-text-muted)", fontSize: 'var(--text-ui-xs)' }}>
-                {filteredDiscoveredModels.length > shownDiscoveredModels.length
-                  ? t("desktop.modelsDiscoveryShowing", { shown: shownDiscoveredModels.length, total: filteredDiscoveredModels.length })
-                  : t("desktop.modelsDiscoveryFetched", { count: discoveryState.models.length })}
-              </span>
-              <button
-                onClick={addSelectedModels}
-                disabled={selectedCount === 0}
-                style={{ height: 28, padding: "0 11px", border: "none", borderRadius: 'var(--radius-sm)', background: selectedCount ? "var(--ds-accent)" : "var(--ds-bg-secondary)", color: selectedCount ? "var(--accent-contrast)" : "var(--ds-text-muted)", cursor: selectedCount ? "pointer" : "not-allowed", fontSize: 'var(--text-ui-xs)', fontWeight: 600, whiteSpace: "nowrap" }}
-              >
-                {selectedCount
-                  ? t("desktop.modelsDiscoveryAddSelectedCount", { count: selectedCount })
-                  : t("desktop.modelsDiscoveryAddSelected")}
-              </button>
-            </div>
-          </>
-        )}
+        <ModelSelectionPanes
+          discovered={discovery.models}
+          models={models}
+          onModelsChange={onModelsChange}
+          defaultModelId={models[0]?.id}
+          discoveryStatus={discovery.status}
+        />
       </div>
-
     </div>
   );
 }
@@ -1853,6 +1753,10 @@ export function ModelsConfig({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  /** Service chooser: the entry point for adding a provider. */
+  const [chooserOpen, setChooserOpen] = useState(false);
+  /** Setup sheet for a preset endpoint, or an edit of an existing provider. */
+  const [setupSheet, setSetupSheet] = useState<{ preset: NamedEndpointPreset | null; editingName: string | null } | null>(null);
   const configRef = useRef<ModelsJson>({ providers: {} });
   const builtinFlushesRef = useRef<Map<string, BuiltinFlush>>(new Map());
   const configVersionRef = useRef(0);
@@ -1965,16 +1869,29 @@ export function ModelsConfig({
     refreshAuthenticationProviders();
   }, [refreshAuthenticationProviders, reloadConfig]);
 
+  /**
+   * Inserts a provider under a name that is not taken yet.
+   * WHY shared: the setup sheet and the custom-provider dialog must produce the
+   * same `name`, `name-1`, `name-2` sequence, or the two paths disagree about
+   * what "the provider I just added" is called.
+   */
+  const insertProvider = useCallback((baseName: string, entry: ProviderEntry): string => {
+    let finalName = baseName;
+    let n = 1;
+    while (configRef.current.providers?.[finalName]) finalName = `${baseName}-${n++}`;
+    updateConfigState((previous) => ({
+      ...previous,
+      providers: { ...(previous.providers ?? {}), [finalName]: entry },
+    }));
+    return finalName;
+  }, [updateConfigState]);
+
   const createCustomProvider = useCallback(async (input: CustomProviderSubmit) => {
     if (selectionBusyRef.current) return;
     selectionBusyRef.current = true;
     setSaveError(null);
     try {
       await flushBuiltinModels();
-      const baseName = input.name.trim() || "new-provider";
-      let finalName = baseName;
-      let n = 1;
-      while (configRef.current.providers?.[finalName]) finalName = `${baseName}-${n++}`;
       const entry: ProviderEntry = {
         api: input.api || "openai-completions",
         ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
@@ -1982,10 +1899,7 @@ export function ModelsConfig({
         ...(input.headers ? { headers: input.headers } : {}),
         ...(input.model ? { models: [input.model] } : {}),
       };
-      updateConfigState((previous) => ({
-        ...previous,
-        providers: { ...(previous.providers ?? {}), [finalName]: entry },
-      }));
+      const finalName = insertProvider(input.name.trim() || "new-provider", entry);
       setSelection({ type: "provider", name: finalName });
       setCustomDialogOpen(false);
     } catch (error) {
@@ -1993,11 +1907,40 @@ export function ModelsConfig({
     } finally {
       selectionBusyRef.current = false;
     }
-  }, [flushBuiltinModels, updateConfigState]);
+  }, [flushBuiltinModels, insertProvider]);
 
   const updateProvider = useCallback((name: string, p: ProviderEntry) => {
     updateConfigState((previous) => ({ ...previous, providers: { ...(previous.providers ?? {}), [name]: p } }));
   }, [updateConfigState]);
+
+  /**
+   * Saves the setup sheet. A new provider gets the discovered list as its
+   * models; an edit replaces the existing entry's models and keeps everything
+   * the sheet does not own (headers, compat, modelOverrides).
+   */
+  const saveProviderSetup = useCallback((input: ProviderSetupSaveInput) => {
+    const models = input.models.map((model) => (model.name ? { id: model.id, name: model.name } : { id: model.id }));
+    const entry: ProviderEntry = {
+      api: input.api,
+      ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
+      ...(input.apiKey ? { apiKey: input.apiKey } : {}),
+      ...(input.headers ? { headers: input.headers } : {}),
+      ...(models.length > 0 ? { models } : {}),
+    };
+    const editingName = setupSheet?.editingName ?? null;
+    if (editingName) {
+      const existing = configRef.current.providers?.[editingName] ?? {};
+      updateProvider(editingName, { ...existing, ...entry });
+      setSetupSheet(null);
+      setSelection({ type: "provider", name: editingName });
+      return;
+    }
+    const finalName = insertProvider(input.name.trim() || "new-provider", entry);
+    trackAddedModels(savedModelIdsRef.current, finalName, models.length);
+    setSetupSheet(null);
+    setSelection({ type: "provider", name: finalName });
+  }, [insertProvider, setupSheet, updateProvider]);
+
 
   const renameProvider = useCallback((oldName: string, newName: string) => {
     // Remember where each saved provider ended up, so the enabledModels entries
@@ -2063,23 +2006,49 @@ export function ModelsConfig({
     }
   }, [flushBuiltinModels, updateConfigState]);
 
-  const addDiscoveredModels = useCallback((providerName: string, discovered: DiscoveredModel[]) => {
-    const known = new Set((configRef.current.providers?.[providerName]?.models ?? []).map((model) => model.id));
-    trackAddedModels(
-      savedModelIdsRef.current,
-      providerName,
-      discovered.filter((model) => !known.has(model.id)).length,
-    );
+  /**
+   * Replaces a provider's whole model list from the selection panes.
+   *
+   * The saved-slot map has to move with it: `collectModelRenames()` compares a
+   * slot with the model that now sits in it, so a reorder without a slot move
+   * reads as N renames (`a→c`, `b→a`, `c→b`) and `enabledModels.resync()`
+   * rewrites entries the user never touched. A slot holds the id saved at that
+   * position, so handing the new order to `syncSlotsAfterReorder()` re-points
+   * every surviving slot at its model's new index and leaves a model added
+   * since the last save at `null` — which is exactly what a deletion and an
+   * addition already look like to `collectModelRenames()`.
+   */
+  const replaceProviderModels = useCallback((providerName: string, next: { id: string; name?: string }[]) => {
+    const nextIds = next.map((model) => model.id).filter((id) => id.trim() !== "");
+    const previousSlots = savedModelIdsRef.current.get(providerName);
+    // The draft's own ids, positionally against the slots: a model renamed in
+    // the detail editor still owns its slot under the old spelling, and this is
+    // what keeps that rename from collapsing into "unsaved" on the next drag.
+    const previousIds = (configRef.current.providers?.[providerName]?.models ?? []).map((model) => model.id);
+    if (previousSlots) {
+      savedModelIdsRef.current.set(
+        providerName,
+        syncSlotsAfterReorder(previousSlots, nextIds, previousIds) ?? [],
+      );
+    } else if (nextIds.length > 0) {
+      // A provider created since the last save has no saved slots at all.
+      trackAddedModels(savedModelIdsRef.current, providerName, nextIds.length);
+    }
+
     updateConfigState((previous) => {
       const provider = previous.providers?.[providerName] ?? {};
-      const models = [...(provider.models ?? [])];
-      const existingIds = new Set(models.map((model) => model.id));
-      for (const discoveredModel of discovered) {
-        if (existingIds.has(discoveredModel.id)) continue;
-        existingIds.add(discoveredModel.id);
-        models.push({ id: discoveredModel.id, name: discoveredModel.name });
-      }
-      return { ...previous, providers: { ...(previous.providers ?? {}), [providerName]: { ...provider, models } } };
+      return {
+        ...previous,
+        providers: {
+          ...(previous.providers ?? {}),
+          [providerName]: {
+            ...provider,
+            models: next.length > 0
+              ? next.map((model) => (model.name ? { id: model.id, name: model.name } : { id: model.id }))
+              : undefined,
+          },
+        },
+      };
     });
   }, [updateConfigState]);
 
@@ -2246,8 +2215,9 @@ export function ModelsConfig({
           onChange={(p) => updateProvider(selection.name, p)}
           onRename={(n) => renameProvider(selection.name, n)}
           onDelete={() => deleteProvider(selection.name)}
-          onAddModels={(models) => addDiscoveredModels(selection.name, models)}
+          onModelsChange={(next) => replaceProviderModels(selection.name, next)}
           onAddModel={() => { void addModel(selection.name); }}
+          onOpenSetup={() => setSetupSheet({ preset: null, editingName: selection.name })}
           enabledModels={enabledModels}
         />
       );
@@ -2292,6 +2262,9 @@ export function ModelsConfig({
         {/* Global title model setting */}
         <TitleModelSetting />
 
+        {/* Global default model: what a brand-new session starts with. */}
+        <DefaultModelRow cwd={cwd} onChangedAction={onSavedAction} />
+
         <EnabledModelsBanner controller={enabledModels} />
 
         {/* Body: single-column provider list (PI-Desktop model-page shape). */}
@@ -2316,8 +2289,16 @@ export function ModelsConfig({
                 </button>
                 <button
                   type="button"
-                  className="config-button config-button-primary config-button-small"
+                  className="config-button config-button-ghost config-button-small"
                   onClick={() => setPickerOpen(true)}
+                  title={t("desktop.modelsSearchProviders")}
+                >
+                  {t("desktop.modelsSearchProviders")}
+                </button>
+                <button
+                  type="button"
+                  className="config-button config-button-primary config-button-small"
+                  onClick={() => setChooserOpen(true)}
                 >
                   {t("desktop.modelsAddProvider")}
                 </button>
@@ -2341,7 +2322,7 @@ export function ModelsConfig({
                     <div className="settings-row-title">{t("desktop.modelsNoProviders")}</div>
                     <div className="settings-row-description">{t("desktop.modelsNoProvidersDesc")}</div>
                   </div>
-                  <button type="button" className="config-button config-button-primary config-button-small" onClick={() => setPickerOpen(true)}>
+                  <button type="button" className="config-button config-button-primary config-button-small" onClick={() => setChooserOpen(true)}>
                     {t("desktop.modelsAddProvider")}
                   </button>
                 </div>
@@ -2520,6 +2501,45 @@ export function ModelsConfig({
         </div>
       </div>
     )}
+    <ServiceChooser
+      open={chooserOpen}
+      onClose={() => setChooserOpen(false)}
+      oauthProviders={oauthProviders}
+      apiKeyProviders={visibleApiKeyProviders}
+      onPickOAuth={(id) => {
+        setChooserOpen(false);
+        void selectSelection({ type: "oauth", providerId: id });
+      }}
+      onPickApiKey={(id) => {
+        setChooserOpen(false);
+        void selectSelection({ type: "apikey", providerId: id });
+      }}
+      onPickPreset={(preset) => {
+        setChooserOpen(false);
+        setSetupSheet({ preset, editingName: null });
+      }}
+      onPickCustom={() => {
+        setChooserOpen(false);
+        setCustomDialogOpen(true);
+      }}
+    />
+    <ProviderSetupSheet
+      open={setupSheet !== null}
+      onClose={() => setSetupSheet(null)}
+      editing={setupSheet?.editingName
+        ? { name: setupSheet.editingName, provider: config.providers?.[setupSheet.editingName] ?? {} }
+        : null}
+      preset={setupSheet?.preset ?? null}
+      existingProviderNames={Object.keys(config.providers ?? {})}
+      onSave={saveProviderSetup}
+      onRequestCustom={() => {
+        setSetupSheet(null);
+        setCustomDialogOpen(true);
+      }}
+    />
+    {/* The old grid stays as the "search every provider" browser: the chooser
+        covers presets and the two auth groups, while this one keeps the flat,
+        unfiltered list (including already-configured providers) reachable. */}
     {pickerOpen && (
       <AddProviderPicker
         oauthProviders={oauthProviders}

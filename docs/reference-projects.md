@@ -65,6 +65,28 @@ Electron + Rust host core + pi Agent Harness，0.15.x。技术栈与 pi-web 差�
 
 ---
 
+## 一之二、open-claude-ui（Caho1/open-claude-ui）
+
+基于 REA 对 macOS 生产包 `/Applications/Claude.app` 的逆向还原，提供 Claude Design System（CDS）的单文件参考实现与 3000+ 行分析手册。**本仓库在 v0.18.19 采纳了其中两项**，其余为候选。
+
+### 已采纳
+
+- **7 档非线性滚动遮罩** — 28px 羽化内用 `0 / .15 / .30 / .45 / .60 / .75 / .87 / 1` 七级 alpha 逼近 y≈x^1.5，消除双色渐变的色带断层。落地为 `.chat-scroll-fade`，由既有 fade 布尔驱动，`@supports (mask-composite)` 门控，旧 Safari 回退原渐变层。**没有**采用其 `animation-timeline: scroll()` 方案（Safari 16.2 不支持，本仓库 browserslist 就是 16.2）。
+- **弹簧物理预设矩阵** — 二阶阻尼谐振子 `m·x'' + c·x' + k(x−x_target) = 0` 的 ζ 三支闭式解，落地为 `lib/motion-presets.ts`（framer-motion 侧与纯 CSS 侧共用同一组数值）。**未采纳**其 framer `stagger`/shader 类重效果。
+
+### 未采纳（候选）
+
+- 20px composer 圆角 + 三态双环弥散投影 → 已采纳半径与三态投影，但投影值改写为 `--cds-shadow-*`（主题派生），未用其固定 rgba。
+- `field-sizing: content` 自适应输入高度 → 本仓库 browserslist 含 Safari 16.2，该属性不可用，继续用 JS autosize（上限令牌化为 `COMPOSER_MAX_HEIGHT_PX`）。
+- 陶土橙色阶（clay ramp 35 阶）→ 只取了 accent 两端作为 `claude` 主题的 `accent`/`accentHover`，未引入整套色阶（会与 24 套主题的双色阶模型冲突）。
+- 媒体灯箱 pan/zoom 的鼠标不动点仿射方程、6 频段麦克风 Gamma 压缩、iframe 双击 50/50 吸附 → 本仓库无对应场景（已有 `ZoomPanViewer` 与 mermaid 缩放），暂不引入。
+
+### 一个必须记住的换算坑
+
+CDS 把卡片/气泡圆角写成 `calc(var(--cds-radius) + .25rem)`，`--cds-radius` 在其生产环境是 14px，故 16px 根字号下气泡为 **18px**。本仓库根字号是 **15px**，直接照抄 rem 公式会得到 `8px + 3.75px = 11.75px`。因此 `--cds-radius-bubble` 直接写 `18px`，`--cds-radius-card` 用 `calc(var(--cds-radius) + 4px)`（即公式原本代表的 +4px）。**任何从 CDS 搬运的 rem 尺寸都必须先确认根字号。**
+
+---
+
 ## 二、ZCode（本地源码 `zcode-selfhost/upstream`）
 
 调研时用于对齐本次侧边栏与布局改造，实测数据如下（源码路径相对 `packages/ui/src/`）。

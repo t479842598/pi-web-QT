@@ -2,6 +2,50 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.18.19 — 2026-10-17（Claude 设计语言落地 + 模型渠道发现优先）
+
+参照 vastsa/PI-Desktop 的模型渠道链路与 Caho1/open-claude-ui 的 Claude Design System，做四层改造。**既有功能语义（会话、SSE、队列、工具、权限、24 套主题）零改动**。
+
+**令牌层**
+- `globals.css` 新增 `--cds-*` 映射块：表面/墨色/发丝线/半径/运动/阴影全部 `color-mix` 或直接引用本 fork 的语义令牌，**不写死任何主题色**，因此 24 套既有主题与 Pi JSON 主题照常生效。
+- 新增 `claude` 主题（`lib/theme/openchamber/claude.json`，暖灰底 + 陶土橙 accent，light/dark 双态），主题总数 25；正文对比度 light 16.23:1 / dark 14.26:1。
+
+**模型渠道（对齐 PI-Desktop 的发现优先流程）**
+- `lib/provider-presets.ts`：28 条命名端点预设（含国内厂商），全部映射到 pi 的 `KnownApi` 词汇；`filterServiceOptions` 的 haystack 覆盖名称/别名/域名，搜 `kimi` / `moonshot` / `api.moonshot.cn` 命中同一条。
+- `hooks/useProviderModels.ts`：600ms 防抖 + 请求序列防乱序 + AbortController；编辑既有 provider 时先画 `models.json` 已存模型再发探测（服务端用已存凭据），错误经 `describeModelsFetchError` 归为 9 类。
+- `lib/provider-api-style.ts`：表驱动格式推断，**推断生效时必显示一行说明**，用户手选/预设自带/已存值永不被覆盖。
+- `lib/recommended-models.ts`：非聊天 id 过滤 → catalog 元数据降权（$100/M 溢价）→ 无元数据只取 1 个 → 探测失败不预选；预选只跑一次（ref 键）。
+- `components/model-config/`：`ServiceChooser`（四分组搜索）、`ProviderSetupSheet`（同屏表单单 + 双栏模型选择 + 测试连接）、`ModelSelectionPanes`（拖拽/上下移/键盘排序、默认徽章、自定义 ID）、`DefaultModelRow`。
+- **排序即契约**：已选模型是有序草稿，首位即 provider 默认；重排同步 `savedModelIdsRef`，否则 `collectModelRenames` 会把重排误判成 rename 并错改 `enabledModels`（已补单测固定）。
+- 新增 `GET/PUT /api/settings/default-model`：默认模型为全局单值，`stored` 与 `resolved` 分开返回，指向已删除模型时显示未设置且**不回写**用户设置；清除走 `mutateSettingsJson` 删字段（SDK 对空串会把 `""` 写进 settings.json，实测确认后改用删字段）。
+
+**设置页与聊天区**
+- `settings.css` 的 `agents-sheet*` 泛化为 `settings-sheet*`（旧类名保留为别名），8 处硬编码阴影/遮罩按用途收口到 `--cds-shadow-*` 与 `color-mix` 遮罩。
+- Composer 20px 圆角 + 三态投影；用户气泡 18px（CDS 生产中该值是 `radius + .25rem`，在 16px 根字号下等于 18px；本 shell 根字号 15px，故直接写 18px 并注明原因）；`.is-yolo` 红环保留且优先级最高。
+- 滚动边缘改为 7 档非线性 `mask-image`（28px 羽化，近似 y≈x^1.5），由既有 fade 布尔驱动；`@supports` 门控，旧 Safari 回退原渐变层。未引入 `animation-timeline: scroll()`（Safari 16.2 不支持）。
+- Thinking 块改 grid `0fr → 1fr` 展开 + 流式呼吸脉冲；deferred 正文仍只在展开时请求（守卫行未改），折叠态用 `inert` 补回旧渲染白送的可达性。
+
+**动效**
+- 引入 `framer-motion@^12.43.0`（pin 12.x：三个月运行时证据；14.x 发布仅两天）。
+- `lib/motion-presets.ts`：二阶阻尼谐振子闭式解、4 个 spring 预设（zeta 由公式回填）、`springToLinearCss`（采样总长用 `springSettleTime` 而非 first-entry，否则过冲会被整段裁掉）、`springDuration` 与 `springSettleTime` 语义分开。
+- `MotionProvider`：`LazyMotion features={domAnimation} strict` + `MotionConfig` + `useReducedMotion` 双重门控；`strict` 下只允许 `m.*`（实测 `motion.*` 会硬抛）。首个接入点：子代理侧滑进出。
+
+**修复**
+- 默认模型行在 dev Strict Mode 下骨架屏常驻：effect 的 `finally` 被首次运行的 `cancelled`/序列号判定跳过，改为按请求序列号 + `mountedRef` 收口，实测 3 秒内正常出值。
+
+**验证**：`tsc --noEmit` 0 error；全套 1938 tests / 1937 pass / 0 fail / 1 既有 skip；主题 parity 15/15；端到端实测 composer 20px、气泡 18px、遮罩 28px、默认模型行载入真实值、服务选择器 4 分组 75 卡片、页面零 console 错误。
+
+## v0.18.18 — 2026-10-16（子代理页侧滑编辑，对齐 PI-Desktop）
+
+设置页最后一个未对齐的分类：子代理页此前仍是「左列表 + 右内嵌表单」双栏，与 PI-Desktop 的「列表 + 侧滑编辑面板」形态不一致。本版只改结构与样式，**全部字段、API、i18n 键与保存/删除/启用逻辑不变**。
+
+- **列表**：全宽能力列表（分组仍为 项目 / 全局 / 工作区 / 内置），每行左侧状态点 + 显示名 + 子代理 id 元数据，右侧独立启用开关（内置项可开关，只读项禁用）。行点击不再就地编辑，改为打开侧滑面板。
+- **侧滑编辑面板**：`agents-sheet-overlay` + `agents-sheet`（宽 560px，右侧贴边，左侧描边 + 投影），头部为标题/路径 + 删除 + 创建副本 + 关闭，主体为原表单，底部为状态区 + 启用开关 + 保存。Escape 与点击遮罩关闭（`useEscapeKey`）。
+- **新建**：改为列表上方的「新建子代理」工具条按钮，仍在面板内选择保存范围（全局 / 项目）。
+- **启用开关**：新增 `toggleProfile(profile, enabled)` 直接按行 PATCH，无需先打开面板；草稿同步改为按 `selectedKey` 匹配，避免切换行时串写。
+- **测试**：`AgentsConfig.test.mjs` 断言随结构更新（18/18 通过）；PATCH 反向断言加 300 字符窗口，避免误匹配后续 PUT 的 `profile: draft`。
+
+
 ## v0.18.17 — 2026-10-12（设置页全量复刻 PI-Desktop 视觉语言）
 
 按 vastsa/PI-Desktop 0.18 的设计语言重做设置页样式层。**组件结构与全部功能不变**，只换视觉。

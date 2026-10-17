@@ -13,6 +13,7 @@ import "@fontsource/ia-writer-quattro/700.css";
 import "@fontsource/ia-writer-quattro/700-italic.css";
 import "@fontsource/lilex";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { MotionProvider } from "@/components/MotionProvider";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -48,7 +49,7 @@ export default function RootLayout({
       </head>
       <body translate="no" className="notranslate" style={{ height: "var(--app-viewport-height)", display: "flex", flexDirection: "column" }}>
         <ErrorBoundary>
-          {children}
+          <MotionProvider>{children}</MotionProvider>
         </ErrorBoundary>
       </body>
     </html>

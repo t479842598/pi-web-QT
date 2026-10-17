@@ -869,7 +869,17 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           </div>
         </div>
         <div className="relative flex-1 min-h-0 min-w-0">
-          <div ref={scrollContainerRef} className="scrollbar-subtle h-full min-w-0 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-gutter:stable]">
+          {/* The mask must live on the scroll container itself (a sibling or
+              overlay cannot clip the scrolled content), so the two fade booleans
+              are projected as CSS variables instead of extra DOM. */}
+          <div
+            ref={scrollContainerRef}
+            className="scrollbar-subtle chat-scroll-fade h-full min-w-0 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-gutter:stable]"
+            style={{
+              ["--chat-fade-top" as string]: showChatTopFade ? "var(--cds-scroll-fade-size)" : "0px",
+              ["--chat-fade-bottom" as string]: showChatBottomFade ? "var(--cds-scroll-fade-size)" : "0px",
+            }}
+          >
             <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
             <div style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
               <div ref={virtualListHeaderRef}>
@@ -1386,13 +1396,13 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           {showChatTopFade && (
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-[var(--bg)] to-transparent"
+              className="chat-fade-fallback pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-[var(--bg)] to-transparent"
             />
           )}
           {showChatBottomFade && (
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-[var(--bg)] to-transparent"
+              className="chat-fade-fallback pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-[var(--bg)] to-transparent"
             />
           )}
           {/* Scroll-to-bottom moved into the composer's top-center slot

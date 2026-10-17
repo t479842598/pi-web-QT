@@ -1,0 +1,41 @@
+{
+  "displayName": "Claude",
+  "dark": {
+    "bg": "#1c1c1b",
+    "panel": "#20201f",
+    "hover": "#272725",
+    "selected": "#2e2e2b",
+    "border": "#3b3b37",
+    "text": "#ecebe3",
+    "muted": "#a8a49b",
+    "dim": "#94908a",
+    "accent": "#e08a6b",
+    "accentHover": "#f0a184",
+    "userBg": "#2a2a27",
+    "assistantBg": "#20201f",
+    "toolBg": "#232322",
+    "subtle": "rgba(236,235,227,0.05)",
+    "red": "#e08a7a",
+    "green": "#9dc08a",
+    "orange": "#e0a468"
+  },
+  "light": {
+    "bg": "#fcfcfb",
+    "panel": "#f7f6f3",
+    "hover": "#f1efea",
+    "selected": "#eae7e0",
+    "border": "#e0dbd2",
+    "text": "#1f1e1c",
+    "muted": "#5c5852",
+    "dim": "#6e6a63",
+    "accent": "#d97757",
+    "accentHover": "#cc5a36",
+    "userBg": "#f4f1ec",
+    "assistantBg": "#fcfcfb",
+    "toolBg": "#f6f4f0",
+    "subtle": "rgba(31,30,28,0.04)",
+    "red": "#b3402e",
+    "green": "#4f7a3f",
+    "orange": "#a8702a"
+  }
+}
