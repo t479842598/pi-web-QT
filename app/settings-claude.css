@@ -2857,3 +2857,22 @@ html[data-ui-kit="claude"] .session-group-header:hover {
   color: var(--cds-text-primary, var(--text));
 }
 
+
+
+/* ==========================================================================
+   Session rows — kit-independent hook
+   ==========================================================================
+   The variable route above depends on the row's ancestor chain containing
+   `.claude-sidebar`, which a React re-render can break: the row survives while
+   its frame is replaced. Setting the three variables from `html` instead removes
+   the dependency entirely — they inherit to every row on the page, and the pi
+   kit never matches the selector so it keeps its own literals.
+   ========================================================================== */
+
+html[data-ui-kit="claude"] {
+  --session-row-bg-selected: var(--cds-fill-secondary, var(--bg-selected));
+  --session-row-bg-hover: var(--cds-fill-ghost-hover, var(--bg-hover));
+  --session-row-accent: var(--cds-clay, var(--accent));
+  --session-row-radius: var(--cds-radius, 8px);
+}
+
