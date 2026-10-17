@@ -8,7 +8,7 @@ import { buildHistoryPipeline, hasDisplayableProcessMessage, withAssistantBlocks
 import { type WrittenFile } from "@/lib/turn-written-files";
 import { collectProcessContentBlocks, splitAssistantContentBlocks, splitProcessSegments } from "@/lib/process-content";
 import { MarkdownBody } from "./MarkdownBody";
-import { PlanReviewDialog } from "./PlanReviewDialog";
+import { OverlayPlanReview as PlanReviewDialog } from "./shell-render-proxy";
 import { GoalBanner } from "./GoalBanner";
 import { OverlayApproval as ApprovalModal } from "./shell-render-proxy";
 import { requestCreateTaskFromText } from "@/lib/task-compose-events";
@@ -16,8 +16,9 @@ import { requestCreateTaskFromText } from "@/lib/task-compose-events";
 /** Fired after parking a task draft — AppShell listens and opens the board. */
 export const OPEN_TASKS_VIEW_EVENT = "pi:open-tasks-view";
 import { type SubagentRunTimes } from "./SubagentRunRow";
-import { ChatInput, type ChatInputHandle } from "./ChatInput";
-import { QueueRecoveryDialog } from "./QueueRecoveryDialog";
+import { type ChatInputHandle } from "./ChatInput";
+import { ShellComposer as ChatInput } from "./shell-render-proxy";
+import { OverlayQueueRecovery as QueueRecoveryDialog } from "./shell-render-proxy";
 import { SessionInfoBar } from "./SessionInfoBar";
 import {
   MessageRow as MessageView,

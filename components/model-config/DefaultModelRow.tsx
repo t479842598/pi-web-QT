@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
-import { ModelSelector, type ModelSelectorOption } from "@/components/ModelSelector";
+import { type ModelSelectorOption } from "@/components/ModelSelector";
+import { ShellModelSwitcher as ModelSelector } from "@/components/shell-render-proxy";
 
 interface DefaultModelRef {
   provider: string;

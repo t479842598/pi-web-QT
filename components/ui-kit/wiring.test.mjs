@@ -55,6 +55,40 @@ for (const slot of WIRED) {
   });
 }
 
+test("each proxy export is consumed by something outside the kit layer", () => {
+  // The slot helper only proves *a proxy* mentions the slot. It cannot tell
+  // whether any component renders that proxy, which is how `thinking` stayed
+  // dead while every assertion passed: ThinkingRow existed and nothing imported
+  // it. This walks the proxy module's own exports instead.
+  const proxy = read("components/conversation-render-proxy.tsx");
+  const shell = read("components/shell-render-proxy.tsx");
+  const exported = [
+    ...proxy.matchAll(/export function (\w+)/g),
+    ...shell.matchAll(/export const (\w+)/g),
+  ].map((match) => match[1]);
+
+  assert.ok(exported.length >= 12, `expected the proxies to export their rows, saw ${exported.length}`);
+
+  const callers = [
+    "components/AppShell.tsx",
+    "components/ChatWindow.tsx",
+    "components/MessageView.tsx",
+    "components/AgentsConfig.tsx",
+    "components/model-config/DefaultModelRow.tsx",
+  ]
+    .map((file) => {
+      try {
+        return read(file);
+      } catch {
+        return "";
+      }
+    })
+    .join("\n");
+
+  const unrendered = exported.filter((name) => !new RegExp(`\\b${name}\\b`).test(callers));
+  assert.deepEqual(unrendered, [], "a proxy is exported but no component renders it");
+});
+
 test("every registry slot is in the wired list", () => {
   const uiKit = read("lib/ui-kit.ts");
   const declared = [...uiKit.matchAll(/^\s{2}"([a-zA-Z]+)",\s*$/gm)].map((m) => m[1]);

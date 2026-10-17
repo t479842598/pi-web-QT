@@ -19,11 +19,12 @@ import {
   ConfigButton,
   ConfigEmptyState,
   ConfigField,
-  ConfigPanelShell,
   ConfigSidebarGroupLabel,
   ConfigStatusDot,
   ConfigSwitch,
 } from "./SettingsUi";
+// The panel frame is a kit slot: the Claude kit draws its own dialog chrome.
+import { OverlayDialogShell as ConfigPanelShell } from "./shell-render-proxy";
 import { ModelSelector } from "./ModelSelector";
 
 const TOOL_OPTIONS = ["read", "bash", "edit", "write", "grep", "find", "ls"];

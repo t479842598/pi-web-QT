@@ -5,9 +5,11 @@ import ReactMarkdown from "react-markdown";
 import { MarkdownBody } from "./MarkdownBody";
 import { copyText, markdownToPlainText } from "@/lib/clipboard";
 import { resolveSlashDisplayText } from "@/lib/slash-display";
-import { ImagePreview } from "./ImagePreview";
+
 
 import { getThinkingPreview, isEmptyThinkingBlock } from "@/lib/message-display";
+import { ThinkingRow as ThinkingSlot } from "./conversation-render-proxy";
+import { OverlayImageLightbox as ImagePreview } from "./shell-render-proxy";
 import { ConversationCompaction as CompactionSlot } from "./shell-render-proxy";
 import { parseUnifiedPatch, type SplitDiffCell, type SplitDiffFile } from "@/lib/patch";
 import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
@@ -822,7 +824,9 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
     return <div data-message-text data-search-target={searchTarget || undefined}><TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} onQuoteReply={onQuoteReply} /></div>;
   }
   if (block.type === "thinking") {
-    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} isStreaming={isStreaming} />;
+    // Through the slot proxy, aliased to the pi name so this file keeps reading
+    // the same to the tests that lift its JSX and to anyone following it.
+    return <ThinkingSlot block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} isStreaming={isStreaming} />;
   }
   if (block.type === "image") {
     const flat = block as unknown as { data?: string; mimeType?: string };
