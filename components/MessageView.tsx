@@ -8,7 +8,7 @@ import { resolveSlashDisplayText } from "@/lib/slash-display";
 import { ImagePreview } from "./ImagePreview";
 
 import { getThinkingPreview, isEmptyThinkingBlock } from "@/lib/message-display";
-import { CompactionSummary } from "./CompactionSummary";
+import { ConversationCompaction as CompactionSlot } from "./shell-render-proxy";
 import { parseUnifiedPatch, type SplitDiffCell, type SplitDiffFile } from "@/lib/patch";
 import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
 import { isApplyPatchToolName } from "@/lib/tool-names";
@@ -169,7 +169,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
   }
   if (message.role === "custom") {
     if ((message as CustomMessage).customType === "compaction") {
-      return <CompactionSummary content={(message as CustomMessage).content} />;
+      return <CompactionSlot content={(message as CustomMessage).content} />;
     }
     return <CustomMessageView message={message as CustomMessage} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} />;
   }

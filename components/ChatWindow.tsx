@@ -10,7 +10,7 @@ import { collectProcessContentBlocks, splitAssistantContentBlocks, splitProcessS
 import { MarkdownBody } from "./MarkdownBody";
 import { PlanReviewDialog } from "./PlanReviewDialog";
 import { GoalBanner } from "./GoalBanner";
-import { ApprovalModal } from "./ApprovalModal";
+import { OverlayApproval as ApprovalModal } from "./shell-render-proxy";
 import { requestCreateTaskFromText } from "@/lib/task-compose-events";
 
 /** Fired after parking a task draft — AppShell listens and opens the board. */
