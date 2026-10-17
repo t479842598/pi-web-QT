@@ -40,6 +40,8 @@ export function SettingToggle({
   );
 }
 
+/** A named group of rows inside one card — the CDS section caption is a 10px
+ *  uppercase label, so the heading reads as structure rather than content. */
 export function SettingSection({
   title,
   description,
@@ -51,8 +53,8 @@ export function SettingSection({
 }) {
   return (
     <section className="settings-content-card settings-content-section" style={{ padding: "var(--settings-content-section-padding, 20px 22px)" }}>
-      <h2 className="settings-content-section-title" style={{ margin: 0, fontSize: 'var(--text-ui-base)', fontWeight: 650, color: "var(--ds-text-primary)" }}>{title}</h2>
-      <p className="settings-content-section-description" style={{ margin: "5px 0 14px", fontSize: 'var(--text-ui-sm)', lineHeight: 1.5, color: "var(--ds-text-secondary)" }}>{description}</p>
+      <h2 className="settings-content-section-title settings-section-title">{title}</h2>
+      <p className="settings-content-section-description settings-section-description">{description}</p>
       <div className="settings-content-section-body">{children}</div>
     </section>
   );

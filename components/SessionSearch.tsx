@@ -7,12 +7,22 @@ import { sessionDisplayTitle } from "@/lib/session-display-title";
 import type { SessionInfo } from "@/lib/types";
 import type { SessionSearchResponse } from "@/lib/session-search";
 
-export function SessionSearch({ open, query, children, selectedSessionId, onSelectSession }: {
+export function SessionSearch({ open, query, children, selectedSessionId, onSelectSession, mode = "replace", className, headerLabel }: {
   open: boolean;
   query: string;
   children: ReactNode;
   selectedSessionId: string | null;
   onSelectSession: (session: SessionInfo, entryId?: string, blockIndex?: number) => void;
+  /**
+   * "replace" (default) swaps `children` out while a query is typed.
+   * "append" keeps `children` — the caller's local title filter — and adds the
+   * server-side transcript hits as a second section underneath.
+   */
+  mode?: "replace" | "append";
+  /** Classes for the appended results section. Defaults to a top separator. */
+  className?: string;
+  /** Optional label rendered above the status line of the appended section. */
+  headerLabel?: string;
 }) {
   const { t, locale } = useI18n();
   const [state, setState] = useState<{ query: string; response?: SessionSearchResponse; failed?: boolean }>({ query: "" });
@@ -44,8 +54,10 @@ export function SessionSearch({ open, query, children, selectedSessionId, onSele
     };
   }, [open, search]);
 
-  return !open || !search ? children : (
-    <div className="min-h-20 flex-1 overflow-y-auto" aria-busy={!response && !failed}>
+  if (!open || !search) return children;
+
+  const results = (
+    <>
       <div role="status" className="px-3 py-2 text-xs text-text-muted">
         {failed ? t("sidebar.sessionSearchFailed") : !response ? t("sidebar.sessionSearching")
           : response.results.length === 0 ? t("sidebar.sessionSearchEmpty")
@@ -72,6 +84,28 @@ export function SessionSearch({ open, query, children, selectedSessionId, onSele
           </span>
         </button>
       ))}
+    </>
+  );
+
+  if (mode === "append") {
+    return (
+      <>
+        {children}
+        <div className={className ?? "border-t border-border"} aria-busy={!response && !failed}>
+          {headerLabel && (
+            <div className="px-3 pt-3 pb-0.5 text-[10px] font-semibold tracking-[0.05em] text-text-dim uppercase">
+              {headerLabel}
+            </div>
+          )}
+          {results}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="min-h-20 flex-1 overflow-y-auto" aria-busy={!response && !failed}>
+      {results}
     </div>
   );
 }

@@ -19,6 +19,7 @@ import type { SessionInfo } from "@/lib/types";
 import { DynamicIsland } from "./desktop";
 import type { DesktopChrome } from "./desktop/useDesktopChrome";
 import { DesktopServerHint } from "./DesktopServerHint";
+import { UiKitSwitch } from "./UiKitSwitch";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
 
@@ -320,6 +321,11 @@ export function AppTitleBar({
         >
           <SidebarSimple size={16} aria-hidden="true" style={{ transform: "scaleX(-1)" }} />
         </button>
+
+        {/* Kit switch (Pi / Claude). Sits beside the theme toggle because it is
+            the same kind of choice: whole-app appearance, reached often. The
+            per-scope overrides stay in Settings → 界面体系. */}
+        {!isMobile && <UiKitSwitch />}
 
         {/* Theme toggle — defer render until client mount to avoid
             SSR hydration mismatch on icon and attributes. */}

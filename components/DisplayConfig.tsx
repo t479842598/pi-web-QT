@@ -43,12 +43,10 @@ function tagStyle(active: boolean, hovered: boolean, disabled?: boolean): React.
 
 function SectionLabel({ icon, label, actions }: { icon: React.ReactNode; label: string; actions?: React.ReactNode }) {
   return (
-    <div className="settings-content-section-label" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, width: "100%" }}>
-      <span style={{ color: "var(--ds-text-muted)", display: "inline-flex", flexShrink: 0 }}>{icon}</span>
-      <span style={{ fontSize: 'var(--text-ui-xs)', fontWeight: 700, color: "var(--ds-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-        {label}
-      </span>
-      {actions && <span style={{ display: "inline-flex", alignItems: "center", gap: 12, marginLeft: "auto" }}>{actions}</span>}
+    <div className="settings-content-section-label settings-section-label">
+      <span className="settings-section-label-icon">{icon}</span>
+      <span className="settings-section-label-text">{label}</span>
+      {actions && <span className="settings-section-label-actions">{actions}</span>}
     </div>
   );
 }
@@ -141,6 +139,7 @@ function ThemeCardPreview({ colors }: { colors: ThemePreviewColors }) {
   return (
     <div
       aria-hidden="true"
+      className="theme-card-preview"
       style={{
         display: "flex",
         height: 62,
@@ -215,6 +214,9 @@ function ThemeCard({
       onFocus={onHoverStart}
       onBlur={onHoverEnd}
       aria-pressed={active}
+      // Class hooks so the CDS layer can restyle the card without another
+      // pile of inline declarations. The inline style stays as the pi look.
+      className={`theme-card${active ? " is-active" : ""}${hovered ? " is-hovered" : ""}`}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -232,7 +234,7 @@ function ThemeCard({
     >
       {colors
         ? <ThemeCardPreview colors={colors} />
-        : <div aria-hidden="true" style={{ height: 62, borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)", border: "1px solid var(--border)" }} />}
+        : <div aria-hidden="true" className="theme-card-preview theme-card-preview-empty" style={{ height: 62, borderRadius: 'var(--radius-sm)', background: "var(--ds-bg-secondary)", border: "1px solid var(--border)" }} />}
       <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 'var(--text-ui-sm)', fontWeight: active ? 600 : 400, color: active ? "var(--ds-accent)" : "var(--ds-text-primary)" }}>
           {displayName}

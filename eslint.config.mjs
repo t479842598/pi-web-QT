@@ -3,7 +3,7 @@ import typescript from "eslint-config-next/typescript";
 
 const eslintConfig = [
   // Reference trees and packaged/generated output are not source to lint.
-  { ignores: ["ref-repos/**", "release/**", ".next/**", "desktop/target/**", "desktop/resources/backend/**"] },
+  { ignores: ["ref-repos/**", "release/**", ".next/**", "desktop/target/**", "desktop/resources/backend/**", ".reasonix/**", "mobile2/**"] },
   ...coreWebVitals,
   ...typescript,
   {

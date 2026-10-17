@@ -4,7 +4,7 @@ export interface SettingsDirectoryItem {
 }
 
 export const SETTINGS_DIRECTORY_GROUPS = [
-  { id: "basics", labelKey: "desktop.settingsGroupBasics", ids: ["server", "display", "chat"] },
+  { id: "basics", labelKey: "desktop.settingsGroupBasics", ids: ["server", "display", "ui-kit", "chat"] },
   { id: "agent", labelKey: "desktop.settingsGroupAgent", ids: ["models", "skills", "plugins"] },
   { id: "application", labelKey: "desktop.settingsGroupApplication", ids: ["proxy", "features", "logs", "snippets", "usage"] },
   { id: "tools", labelKey: "desktop.settingsGroupTools", ids: ["mcp", "subagents", "tools"] },

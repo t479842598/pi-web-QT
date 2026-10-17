@@ -19,7 +19,7 @@ import { TasksViewProvider } from "@/contexts/tasks-view-context";
 import { TasksBoard, TasksBoardTitle } from "./tasks/tasks-board";
 import { OPEN_TASKS_VIEW_EVENT } from "./ChatWindow";
 import { AppTitleBar } from "./AppTitleBar";
-import { AgentSessionPanel } from "./AgentSessionPanel";
+import { SubagentBoard } from "./conversation-render-proxy";
 import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
@@ -2164,7 +2164,7 @@ export function AppShell() {
               zIndex: 500,
             }}>
               {activeTopPanel === "agents" && activeSessionFamily && selectedSession && (
-                <AgentSessionPanel
+                <SubagentBoard
                   rootSession={activeSessionFamily.root}
                   subagents={activeSessionFamily.subagents}
                   selectedSessionId={selectedSession.id}
@@ -2579,7 +2579,7 @@ export function AppShell() {
               );
             }
             return (
-              <AgentSessionPanel
+              <SubagentBoard
                 rootSession={family.root}
                 subagents={family.subagents}
                 selectedSessionId={selectedSession?.id ?? ""}

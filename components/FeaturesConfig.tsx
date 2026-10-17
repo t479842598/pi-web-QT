@@ -51,20 +51,10 @@ function SegmentedModeSelector<M extends string>({
 }) {
   const { t } = useI18n();
   return (
-    <div
-      role="radiogroup"
-      style={{
-        display: "flex",
-        border: "1px solid var(--border)",
-        borderRadius: 'var(--radius-md)',
-        overflow: "hidden",
-        height: 28,
-        flexShrink: 0,
-      }}
-    >
+    <div role="radiogroup" className="settings-segmented settings-segmented-radio">
       {options.map((option) => {
         const isActive = option.value === value;
-        const accent = accentFor?.(option.value);
+        const danger = Boolean(accentFor?.(option.value));
         return (
           <button
             key={option.value}
@@ -73,20 +63,7 @@ function SegmentedModeSelector<M extends string>({
             aria-checked={isActive}
             disabled={disabled}
             onClick={() => { if (option.value !== value) onChange(option.value); }}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              height: "100%", padding: "0 12px",
-              background: isActive ? "var(--ds-bg-active)" : "none",
-              border: "none",
-              color: isActive ? (accent ?? "var(--ds-accent)") : "var(--ds-text-secondary)",
-              cursor: disabled ? "not-allowed" : "pointer",
-              fontSize: 'var(--text-ui-sm)', fontWeight: isActive ? 650 : 500,
-              opacity: disabled ? 0.5 : 1,
-              whiteSpace: "nowrap",
-              transition: "background 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => { if (!isActive && !disabled) e.currentTarget.style.background = "var(--ds-bg-hover)"; }}
-            onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
+            data-tone={danger ? "danger" : undefined}
           >
             {t(option.labelKey)}
           </button>

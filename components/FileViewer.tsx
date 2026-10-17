@@ -18,6 +18,8 @@ import { parsePdfPageFragment, resolveLocalFileHref } from "@/lib/file-links";
 import { headingId, markdownAppUrlTransform, markdownRehypePlugins, markdownRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
 import { prismTheme } from "@/lib/prism-theme";
 import { CodeBlock, MermaidBlock } from "@/components/MarkdownBody";
+import { FrontmatterCard } from "@/components/FrontmatterCard";
+import { parseFrontmatter } from "@/lib/frontmatter";
 import type {
   FileViewerDisplayMode as DisplayMode,
   FileViewerState,
@@ -1101,9 +1103,16 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
     });
   }, []);
 
+  // A YAML header is metadata, not body: strip it from the rendered source and
+  // hand it to FrontmatterCard. Without a header `rest` is the untouched input,
+  // so those files render exactly as before.
+  const markdownFrontmatter = useMemo(
+    () => (data?.language === "markdown" ? parseFrontmatter(data.content) : null),
+    [data?.content, data?.language],
+  );
   const normalizedMarkdown = useMemo(
-    () => normalizeDisplayMath(data?.content ?? ""),
-    [data?.content],
+    () => normalizeDisplayMath(markdownFrontmatter?.rest ?? data?.content ?? ""),
+    [data?.content, markdownFrontmatter],
   );
   const hasGitDiff = gitDiff?.supported === true && typeof gitDiff.patch === "string";
 
@@ -1525,6 +1534,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
             className="markdown-body markdown-file-preview"
             style={{ padding: "24px 32px" }}
           >
+            {markdownFrontmatter?.data && <FrontmatterCard data={markdownFrontmatter.data} />}
             <ReactMarkdown
               remarkPlugins={markdownRemarkPlugins}
               rehypePlugins={markdownRehypePlugins}

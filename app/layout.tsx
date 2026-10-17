@@ -7,6 +7,13 @@ import "./settings.css";
 // paints correctly on the FIRST frame instead of waiting for the async
 // /api/themes fetch that useTheme performs.
 import "./theme-presets.css";
+// Kit geometry/shadows for the Claude design system. Scoped to
+// html[data-ui-kit="claude"], so the pi kit is unaffected. Loaded last so it
+// can override both globals.css and settings.css.
+import "./ui-kit-claude.css";
+// Settings shell geometry. Unlayered like settings.css, imported last so plain
+// source order decides the cascade — no !important involved.
+import "./settings-claude.css";
 import "@fontsource/ia-writer-quattro";
 import "@fontsource/ia-writer-quattro/400-italic.css";
 import "@fontsource/ia-writer-quattro/700.css";
@@ -43,7 +50,7 @@ export default function RootLayout({
         <meta name="google" content="notranslate" />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var h=document.documentElement,m=localStorage.getItem("pi-theme-mode")||"dark",t=localStorage.getItem("pi-theme")||"",q=localStorage.getItem("pi-locale"),g=localStorage.getItem("pi-language"),l=q||g,r=m;if(!q&&g){localStorage.setItem("pi-locale",g);localStorage.removeItem("pi-language")}if(!l){var n=(navigator.languages&&navigator.languages[0])||navigator.language||"";if(/^zh(?:-|$)/i.test(n))l="zh-CN"}if(!t){var od=localStorage.getItem("pi-theme-dark"),ol=localStorage.getItem("pi-theme-light");if(od||ol){t=od||ol;try{localStorage.setItem("pi-theme",t);localStorage.removeItem("pi-theme-dark");localStorage.removeItem("pi-theme-light")}catch(e){}}}if(m==="system"){r=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}if(r==="dark")h.classList.add("dark");if(t){h.dataset.theme=t}h.dataset.themeMode=m;h.dataset.themeResolvedMode=r;if(l==="zh-CN"){h.lang=l;h.dataset.language=l}else{h.lang="en";h.dataset.language="en"}}catch(e){var n=(navigator.languages&&navigator.languages[0])||navigator.language||"";h.lang=/^zh(?:-|$)/i.test(n)?"zh-CN":"en";h.dataset.language=h.lang}})();`,
+            __html: `(function(){try{var h=document.documentElement,m=localStorage.getItem("pi-theme-mode")||"dark",t=localStorage.getItem("pi-theme")||"",q=localStorage.getItem("pi-locale"),g=localStorage.getItem("pi-language"),l=q||g,r=m;if(!q&&g){localStorage.setItem("pi-locale",g);localStorage.removeItem("pi-language")}if(!l){var n=(navigator.languages&&navigator.languages[0])||navigator.language||"";if(/^zh(?:-|$)/i.test(n))l="zh-CN"}if(!t){var od=localStorage.getItem("pi-theme-dark"),ol=localStorage.getItem("pi-theme-light");if(od||ol){t=od||ol;try{localStorage.setItem("pi-theme",t);localStorage.removeItem("pi-theme-dark");localStorage.removeItem("pi-theme-light")}catch(e){}}}if(m==="system"){r=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}if(r==="dark")h.classList.add("dark");if(t){h.dataset.theme=t}h.dataset.themeMode=m;h.dataset.themeResolvedMode=r;if(l==="zh-CN"){h.lang=l;h.dataset.language=l}else{h.lang="en";h.dataset.language="en"}try{var uk=localStorage.getItem("pi-ui-kit");uk=(uk==="claude")?"claude":"pi";var uy=localStorage.getItem("pi-ui-kit-layout");uy=(uy==="compact"||uy==="comfortable")?uy:"standard";var ut=localStorage.getItem("pi-ui-kit-sidebar-toggle");ut=(ut==="titlebar")?"titlebar":"sidebar";h.dataset.uiKit=uk;h.dataset.uiKitScopes=localStorage.getItem("pi-ui-kit-scopes")||"";h.dataset.uiKitSlots=localStorage.getItem("pi-ui-kit-slots")||"";h.dataset.uiKitLayout=uy;h.dataset.uiKitSidebarToggle=ut}catch(e){}}catch(e){var n=(navigator.languages&&navigator.languages[0])||navigator.language||"";h.lang=/^zh(?:-|$)/i.test(n)?"zh-CN":"en";h.dataset.language=h.lang}})();`,
           }}
         />
       </head>

@@ -1,0 +1,157 @@
+/*
+ * Claude kit layer.
+ *
+ * Everything here is scoped to `html[data-ui-kit="claude"]`, so the pi kit is
+ * untouched by construction. No palette value is defined in this file: the
+ * surfaces below derive from the active theme's semantic tokens
+ * (`--bg`, `--bg-panel`, `--text`, `--accent` …), which is what keeps all 23
+ * shipped themes (and user themes from ~/.pi/agent/themes) working in both
+ * kits. Only geometry, shadow composition, hairlines and motion are set here.
+ *
+ * Deep component styling lives in the per-slot Claude components; this file is
+ * the shared substrate they all inherit.
+ */
+
+html[data-ui-kit="claude"] {
+  /* ── Radius matrix (CDS): control 8 · card 12 · bubble 18 · composer 20 ── */
+  --cds-radius: 8px;
+  --cds-radius-card: 12px;
+  --cds-radius-bubble: 18px;
+  --cds-radius-composer: 20px;
+
+  /* ── Hairlines: 0.5px on retina, 1/3px on very high DPI ── */
+  --cds-ring-hairline: 0.5px;
+  --cds-hairline-1: color-mix(in srgb, var(--border) 45%, transparent);
+  --cds-hairline-2: var(--border);
+  --cds-hairline-3: color-mix(in srgb, var(--text) 18%, transparent);
+
+  /* ── Surfaces keep the theme's own colours; only the ladder order is CDS ── */
+  --cds-surface-0: var(--bg);
+  --cds-surface-1: var(--bg-panel);
+  --cds-surface-2: var(--bg-card, var(--bg-panel));
+  --cds-surface-3: var(--bg-card-hover, var(--bg-card, var(--bg-panel)));
+  --cds-surface-popover: var(--bg-panel);
+
+  /* ── Fills ── */
+  --cds-fill-secondary: color-mix(in srgb, var(--text) 7%, transparent);
+  --cds-fill-secondary-hover: color-mix(in srgb, var(--text) 12%, transparent);
+  --cds-fill-ghost-hover: color-mix(in srgb, var(--text) 6%, transparent);
+
+  /* ── Shadow tint derives from the text colour, so light themes get a soft
+        warm shadow and dark themes a deep one without hardcoding black. ── */
+  --cds-shadow-tint: color-mix(in srgb, var(--text) 10%, transparent);
+  --cds-shadow-sm: 0 1px 2px 0 var(--cds-shadow-tint), 0 2px 8px 0 var(--cds-shadow-tint);
+  --cds-shadow-md: 0 2px 4px 0 var(--cds-shadow-tint), 0 6px 16px 0 var(--cds-shadow-tint);
+  --cds-shadow-lg: 0 4px 8px 0 var(--cds-shadow-tint), 0 12px 28px -2px var(--cds-shadow-tint);
+  --cds-shadow-popover:
+    0 0 0 1px var(--cds-hairline-2),
+    0 8px 24px color-mix(in srgb, var(--text) 12%, transparent),
+    0 2px 6px color-mix(in srgb, var(--text) 8%, transparent);
+  --cds-shadow-composer: 0 4px 20px var(--cds-shadow-tint), inset 0 0 0 1px var(--cds-hairline-1);
+  --cds-shadow-composer-focus:
+    0 4px 24px color-mix(in srgb, var(--text) 14%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, var(--border)),
+    0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  --cds-focus-shadow:
+    inset 0 0 0 1px var(--cds-surface-1),
+    0 0 0 1.5px var(--cds-clay),
+    0 0 6px 1px var(--cds-clay-soft);
+
+  /* ── Motion ── */
+  --cds-dur-fast: 120ms;
+  --cds-dur-snap: 160ms;
+  --cds-dur-slow: 240ms;
+
+  /* ── Scroll fade ── */
+  --cds-scroll-fade-size: 28px;
+
+  /* ── Density presets shared with the shell (composer chin, settings rows) ── */
+  --cds-gap-1: 4px;
+  --cds-gap-2: 6px;
+  --cds-gap-3: 10px;
+  --cds-control-height: 28px;
+  --cds-control-height-lg: 32px;
+
+  /* ── Settings surface follows the same ladder instead of the PI-Desktop one ── */
+  --ds-radius-sm: var(--cds-radius);
+  --ds-radius-md: var(--cds-radius);
+  --ds-radius-lg: var(--cds-radius-card);
+  --ds-field-height: var(--cds-control-height-lg);
+  --ds-settings-nav-width: 264px;
+  --ds-toolbar-height: 40px;
+  --ds-raised-shadow: var(--cds-shadow-sm);
+  --radius-md: var(--cds-radius);
+  --radius-lg: var(--cds-radius-card);
+}
+
+/* Density: the composer chin and settings action rows read these. */
+html[data-ui-kit="claude"][data-ui-kit-layout="compact"] {
+  --cds-gap-2: 4px;
+  --cds-gap-3: 8px;
+  --cds-control-height: 24px;
+  --cds-control-height-lg: 28px;
+}
+html[data-ui-kit="claude"][data-ui-kit-layout="comfortable"] {
+  --cds-gap-2: 8px;
+  --cds-gap-3: 14px;
+  --cds-control-height: 32px;
+  --cds-control-height-lg: 36px;
+}
+
+/* ── Composer shell: 20px, single closed ring, glow on focus ── */
+html[data-ui-kit="claude"] .chat-input-shell {
+  border-radius: var(--cds-radius-composer);
+  box-shadow: var(--cds-shadow-composer);
+  transition: box-shadow var(--cds-dur-fast) var(--cds-ease-swift),
+              border-color var(--cds-dur-fast) var(--cds-ease-swift);
+}
+html[data-ui-kit="claude"] .chat-input-shell:focus-within {
+  box-shadow: var(--cds-shadow-composer-focus);
+}
+
+/* ── Sidebar: surface 1 with a hairline seam instead of a hard border ── */
+html[data-ui-kit="claude"] .sidebar-container {
+  border-inline-end: var(--cds-ring-hairline) solid var(--cds-hairline-1);
+}
+html[data-ui-kit="claude"] .sidebar-container.sidebar-closed {
+  border-inline-end-color: transparent;
+}
+
+/* ── Tabs: pill track, like the CDS segmented control ── */
+html[data-ui-kit="claude"] .tab-bar {
+  gap: var(--cds-gap-1);
+}
+html[data-ui-kit="claude"] .tab-bar .tab {
+  border-radius: calc(var(--cds-radius) - 2px);
+  transition: background var(--cds-dur-fast) var(--cds-ease-swift);
+}
+
+/* ── Settings cards follow the card radius when rendered inside the kit ── */
+html[data-ui-kit="claude"] .settings-row,
+html[data-ui-kit="claude"] .settings-panel {
+  border-radius: var(--cds-radius-card);
+}
+
+/* ── Popovers/menus that still render from the pi tree get the CDS elevation ── */
+html[data-ui-kit="claude"] .chat-input-model-dropdown,
+html[data-ui-kit="claude"] .model-menu,
+html[data-ui-kit="claude"] [role="menu"] {
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-shadow-popover);
+  border: var(--cds-ring-hairline) solid var(--cds-hairline-1);
+}
+
+/* ── Focus ring: clay, hairline-thin, never a default browser outline ── */
+html[data-ui-kit="claude"] :where(button, [role="button"], input, textarea, select):focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* ── Reduced motion wins over every CDS transition ── */
+@media (prefers-reduced-motion: reduce) {
+  html[data-ui-kit="claude"] * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

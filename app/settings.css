@@ -1422,17 +1422,6 @@
   }
 }
 
-@keyframes saved-pop {
-  0%   { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
-  40%  { transform: scale(1.08); box-shadow: 0 0 0 6px rgba(74, 222, 128, 0.25); }
-  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
-}
-
-@keyframes saved-check-draw {
-  from { stroke-dashoffset: 18; opacity: 0; }
-  to   { stroke-dashoffset: 0;  opacity: 1; }
-}
-
 /* iOS standalone: env() can report 0, so keep a device-sized fallback on the
    status-bar edge and cap dialog surfaces to the resulting safe box. */
 @supports (-webkit-touch-callout: none) {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { formatUpdatedTime } from "@/lib/i18n/format";
 import { isProviderUsageId } from "@/lib/provider-usage-ids";
+import { clearPreference, readPreference, writePreference } from "@/lib/storage-prefs";
 
 type UsageBucket = {
   id: string;
@@ -43,7 +44,7 @@ function ProviderUsageContent({ providerId, enabled }: { providerId: string; ena
     setRefreshDone(false);
     setSnapshot(null);
     try {
-      const cached = localStorage.getItem(`${STORAGE_PREFIX}${providerId}`);
+      const cached = readPreference(`${STORAGE_PREFIX}${providerId}`);
       if (cached) {
         const parsed = JSON.parse(cached) as UsageResponse;
         if (parsed?.status === "ready" && parsed.report && Array.isArray(parsed.report.buckets) && Array.isArray(parsed.report.metrics)) {
@@ -51,7 +52,7 @@ function ProviderUsageContent({ providerId, enabled }: { providerId: string; ena
         }
       }
     } catch {
-      try { localStorage.removeItem(`${STORAGE_PREFIX}${providerId}`); } catch {}
+      clearPreference(`${STORAGE_PREFIX}${providerId}`);
     }
     setError(null);
     return () => {
@@ -72,7 +73,7 @@ function ProviderUsageContent({ providerId, enabled }: { providerId: string; ena
       if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
       if (result.status === "ready") {
         setSnapshot(result);
-        try { localStorage.setItem(`${STORAGE_PREFIX}${providerId}`, JSON.stringify(result)); } catch {}
+        writePreference(`${STORAGE_PREFIX}${providerId}`, JSON.stringify(result));
         setRefreshDone(true);
         if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = setTimeout(() => setRefreshDone(false), 2000);

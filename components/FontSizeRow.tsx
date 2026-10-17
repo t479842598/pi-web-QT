@@ -28,7 +28,7 @@ export function FontSizeRow() {
   const { scale, setScale, saving, error } = useFontScale();
 
   return (
-    <div className="settings-row is-stacked" style={{ flexDirection: "column", alignItems: "stretch", gap: 12, cursor: "default" }}>
+    <div className="settings-row is-stacked settings-font-scale-row">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div className="settings-row-copy">
           <span className="settings-row-title">{t("desktop.fontSize")}</span>
@@ -36,14 +36,7 @@ export function FontSizeRow() {
         </div>
         <span
           aria-live="polite"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 12,
-            color: "var(--text-muted)",
-            minWidth: 46,
-            textAlign: "right",
-            fontVariantNumeric: "tabular-nums",
-          }}
+          className="settings-font-scale-value"
         >
           {saving ? "…" : fontScalePercent(scale)}
         </span>
@@ -73,7 +66,7 @@ export function FontSizeRow() {
         style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer" }}
       />
 
-      {error && <span style={{ fontSize: 11, color: "var(--status-error)" }}>{error}</span>}
+      {error && <span className="settings-font-scale-error">{error}</span>}
     </div>
   );
 }

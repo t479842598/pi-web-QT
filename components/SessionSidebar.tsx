@@ -14,6 +14,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
+import { SessionSearch } from "./SessionSearch";
 import { QuickChangesPanel } from "./QuickChangesPanel";
 import { ProjectsPanel, type HiddenProjectEntry } from "./sidebar/ProjectsPanel";
 import { formatRelativeTime, RunningSessionIndicator, UnreadSessionIndicator } from "./sidebar/session-indicators";
@@ -2317,6 +2318,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {error}
             </div>
           )}
+          {/* Local title filter first, server-side transcript hits appended
+              underneath once a query is typed (mode="append" keeps the list). */}
+          <SessionSearch
+            open={searchQuery.trim().length > 0}
+            query={searchQuery}
+            mode="append"
+            headerLabel={t("sidebar.toggleSessionSearch")}
+            selectedSessionId={selectedSessionId}
+            onSelectSession={handleSelectSessionFromList}
+          >
           {!loading && !error && viewStyle === "list" && (
             <>
               {searchFilteredSessions.length === 0 && (
@@ -2371,6 +2382,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               })}
             </>
           )}
+          </SessionSearch>
         </div>
       )}
 

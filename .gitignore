@@ -112,3 +112,9 @@ progress.md
 .playwright-mcp/
 .zcode/plans/
 .mimosa/
+
+# cloudflared diagnostic bundles (throwaway, never committed)
+cloudflared-diag-*.zip
+
+# Local scratch: screenshots, fixtures and one-off audit scripts.
+/work/

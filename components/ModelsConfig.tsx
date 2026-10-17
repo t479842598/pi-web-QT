@@ -2273,13 +2273,13 @@ export function ModelsConfig({
           style={{ flex: 1, overflowY: "auto", padding: "var(--settings-content-detail-padding, 20px)", display: "flex", flexDirection: "column", gap: 18 }}
         >
           {/* ── Providers ── */}
-          <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-                <span style={{ fontSize: 'var(--text-ui-base)', fontWeight: 650, color: "var(--ds-text-primary)" }}>{t("desktop.modelsProvidersSection")}</span>
+          <section className="settings-section">
+            <div className="settings-section-header">
+              <div className="settings-section-heading">
+                <span className="settings-section-text">{t("desktop.modelsProvidersSection")}</span>
                 {providerCount > 0 && <span className="models-sidebar-badge">{providerCount}</span>}
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <div className="settings-section-actions">
                 <button
                   type="button"
                   className={`config-button config-button-small ${importOpen ? "config-button-primary" : "config-button-secondary"}`}

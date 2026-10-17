@@ -7,7 +7,6 @@ import { splitFinalAssistantBlocks, extractPlanText, isMessageGroupAnchor } from
 import { buildHistoryPipeline, hasDisplayableProcessMessage, withAssistantBlocks } from "@/lib/chat-history-pipeline";
 import { type WrittenFile } from "@/lib/turn-written-files";
 import { collectProcessContentBlocks, splitAssistantContentBlocks, splitProcessSegments } from "@/lib/process-content";
-import { MessageView } from "./MessageView";
 import { MarkdownBody } from "./MarkdownBody";
 import { PlanReviewDialog } from "./PlanReviewDialog";
 import { GoalBanner } from "./GoalBanner";
@@ -16,12 +15,21 @@ import { requestCreateTaskFromText } from "@/lib/task-compose-events";
 
 /** Fired after parking a task draft — AppShell listens and opens the board. */
 export const OPEN_TASKS_VIEW_EVENT = "pi:open-tasks-view";
-import { ProcessGroup } from "./ProcessGroup";
-import { SubagentRunRow, type SubagentRunTimes } from "./SubagentRunRow";
+import { type SubagentRunTimes } from "./SubagentRunRow";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { QueueRecoveryDialog } from "./QueueRecoveryDialog";
 import { SessionInfoBar } from "./SessionInfoBar";
-import { VirtualizedMessageList } from "./VirtualizedMessageList";
+import {
+  MessageRow as MessageView,
+  ProcessRow as ProcessGroup,
+  SubagentRow as SubagentRunRow,
+  TranscriptList as VirtualizedMessageList,
+} from "./conversation-render-proxy";
+// The slot proxies are imported under the pi component names because
+// `ChatWindow.turn-key.test.mjs` lifts these JSX expressions out of this file and
+// evaluates them in its own scope, asserting on the rendered output. Same tags,
+// same names — only the implementation behind them follows the active kit.
+
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ArrowDownIcon } from "@phosphor-icons/react/ArrowDown";
 import type { Virtualizer } from "@tanstack/react-virtual";

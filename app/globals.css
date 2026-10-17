@@ -1,6 +1,29 @@
 @import "@xterm/xterm/css/xterm.css";
 @import "tailwindcss";
 
+/* The app toggles dark mode with a class on <html>, not with the OS setting.
+   Tailwind v4 defaults `dark:` to prefers-color-scheme, which would make the
+   vendored CDS components follow the OS instead of the chosen theme. */
+@custom-variant dark (&:where(html.dark, html.dark *));
+
+/* Bridge for the Claude Design System utilities used by the vendored
+   components (`bg-clay`, `bg-surface-2`, `shadow-field`, …). Values point at
+   the token layer, so every one of the 23 shipped themes keep working: no
+   palette value is pinned here. See docs/adr/0006-ui-kit-two-sets.md. */
+@theme inline {
+  --color-clay: var(--cds-clay);
+  --color-clay-hover: var(--cds-clay-hover);
+  --color-clay-soft: var(--cds-clay-soft);
+  --color-surface-0: var(--cds-surface-0);
+  --color-surface-1: var(--cds-surface-1);
+  --color-surface-2: var(--cds-surface-2);
+  --color-surface-3: var(--cds-surface-3);
+  --color-hairline: var(--cds-hairline-2);
+  --shadow-field: 0 0 0 1px var(--cds-hairline-1), 0 1px 2px var(--cds-shadow-tint);
+  --shadow-cds-popover: var(--cds-shadow-popover);
+  --radius-cds: var(--cds-radius);
+}
+
 @theme {
   --color-bg: var(--bg);
   --color-bg-panel: var(--bg-panel);
@@ -266,6 +289,15 @@
   --cds-btn-spring: linear(0, 0.2459, 0.6526, 0.9468, 1.0764, 1.0915, 1.0585, 1.0219, 0.9993, 0.9914, 0.9921, 0.9957, 0.9988, 1.0004, 1);
   --cds-scroll-fade-size: 28px;
 
+  /* Stacking scale. Every new overlay reads one of these instead of inventing
+     a z-index; the values keep the existing order (toasts above dialogs above
+     popovers above the shell). */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-popover: 100;
+  --z-dialog: 1000;
+  --z-toast: 1100;
+
   /* Full-height containers use this instead of a bare `100dvh`: under the
      global `zoom` (see useFontScale) a raw `100dvh` is multiplied by the zoom
      factor and overflows the viewport, while `position: fixed; inset: 0`
@@ -419,10 +451,10 @@ html[data-theme="pine"],
 .catppuccin-file-icon {
   display: block;
   flex-shrink: 0;
-  background: center / contain no-repeat var(--catppuccin-icon-light);
+  background: center / contain no-repeat var(--catppuccin-icon-light, none);
 }
 html.dark .catppuccin-file-icon {
-  background-image: var(--catppuccin-icon-dark);
+  background-image: var(--catppuccin-icon-dark, none);
 }
 
 /* Use the SVG alpha channel as a mask so file icons follow the app's
@@ -430,13 +462,13 @@ html.dark .catppuccin-file-icon {
 @supports (mask-image: url("mask.svg")) or (-webkit-mask-image: url("mask.svg")) {
   .catppuccin-file-icon {
     background: var(--text-dim);
-    mask: center / contain no-repeat var(--catppuccin-icon-light);
-    -webkit-mask: center / contain no-repeat var(--catppuccin-icon-light);
+    mask: center / contain no-repeat var(--catppuccin-icon-light, none);
+    -webkit-mask: center / contain no-repeat var(--catppuccin-icon-light, none);
   }
   html.dark .catppuccin-file-icon {
     background: var(--text-dim);
-    mask-image: var(--catppuccin-icon-dark);
-    -webkit-mask-image: var(--catppuccin-icon-dark);
+    mask-image: var(--catppuccin-icon-dark, none);
+    -webkit-mask-image: var(--catppuccin-icon-dark, none);
   }
 }
 
@@ -464,11 +496,11 @@ html.dark .catppuccin-file-icon {
 .catppuccin-file-icon {
   display: block;
   flex: 0 0 auto;
-  background: var(--catppuccin-icon-light) center / contain no-repeat;
+  background: var(--catppuccin-icon-light, none) center / contain no-repeat;
 }
 
 html.dark .catppuccin-file-icon {
-  background-image: var(--catppuccin-icon-dark);
+  background-image: var(--catppuccin-icon-dark, none);
 }
 
 html {

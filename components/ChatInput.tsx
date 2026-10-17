@@ -2646,7 +2646,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               })}
             </div>
           )}
-          <div className="chat-input-editor-row" style={{ borderColor: bashMode ? "var(--tool-bg)" : undefined }}>
+          <div className="chat-input-editor-row" data-zone="composer-editor" style={{ borderColor: bashMode ? "var(--tool-bg)" : undefined }}>
           {collaborationMode === "goal" && goalState && goalState.status !== "idle" && (
             <span
               style={{
@@ -2791,14 +2791,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
 
         {/* Bottom bar: left | center (context) | right */}
-        <div className="chat-input-toolbar" style={{
+        <div className="chat-input-toolbar" data-zone="composer-chin" style={{
           display: "flex",
           alignItems: "center",
           gap: 4,
         }}>
 
           {/* LEFT: attach menu (chat / plan / upload) + model selector (idle) */}
-          <div ref={attachMenuRef} className="chat-input-toolbar-attach" style={{ position: "relative" }}>
+          <div ref={attachMenuRef} className="chat-input-toolbar-attach" data-slot="attach" style={{ position: "relative" }}>
             <button
               onClick={(e) => {
                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -2916,7 +2916,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               );
             })()}
           </div>
-          <div className="chat-input-toolbar-left" style={{ flex: "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
+          <div className="chat-input-toolbar-left" data-slot="mode" style={{ flex: "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
             {/* Collaboration mode (normal / plan / goal) is available on every
                 viewport: it drives the plan extension's read-only toolset, so
                 hiding it on mobile left those users with no way into plan mode. */}
@@ -2958,7 +2958,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               } : null),
             }}>
             {onThinkingLevelChange && (
-              <div ref={thinkingDropdownRef} className="chat-input-toolbar-thinking" style={{ position: "relative" }}>
+              <div ref={thinkingDropdownRef} className="chat-input-toolbar-thinking" data-slot="thinking" style={{ position: "relative" }}>
                 <button
                   onClick={(e) => { if (isStreaming) return; const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setThinkingDropdownRect({ top: rect.top, left: rect.left, width: rect.width }); setThinkingDropdownOpen((v) => !v); }}
                   disabled={isStreaming}
@@ -3060,7 +3060,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             {/* Tools preset: hidden unless plan mode is active (sessions
                 default to ALL tools; users asked not to see the switcher). */}
             {onToolPresetChange && showToolPresetSwitcher && (
-              <div ref={toolDropdownRef} className="chat-input-toolbar-tools" style={{ position: "relative" }}>                <button
+              <div ref={toolDropdownRef} className="chat-input-toolbar-tools" data-slot="tools" style={{ position: "relative" }}>                <button
                   onClick={(e) => { if (isStreaming) return; const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setToolDropdownRect({ top: rect.top, left: rect.left, width: rect.width }); setToolDropdownOpen((v) => !v); }}
                   disabled={isStreaming}
                   title={t("desktop.changeToolPreset", { preset: toolPresetLabel })}
@@ -3149,7 +3149,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
             {/* Model selector — visible always, disabled during streaming */}
             {modelOptions.length > 0 && onModelChange && (
-                <div ref={dropdownRef} className="chat-input-toolbar-model" style={{ position: "relative", flex: isMobile ? "0 1 auto" : undefined, minWidth: 0 }}>
+                <div ref={dropdownRef} className="chat-input-toolbar-model" data-slot="model" style={{ position: "relative", flex: isMobile ? "0 1 auto" : undefined, minWidth: 0 }}>
                   <button
                     onClick={(e) => {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();

@@ -8,8 +8,9 @@ const [modal, sidebar, titlebar, shell, css] = await Promise.all([
 
 test("settings keeps all existing panels and close-time flush while using a searchable directory", () => {
   const ids = [...modal.matchAll(/\{ id: "([^"]+)", labelKey:/g)].map((match) => match[1]);
-  assert.equal(ids.length, 16);
-  assert.equal(new Set(ids).size, 16);
+  // 16 pre-existing sections + "ui-kit" (the two-kit switch, ADR 0006).
+  assert.equal(ids.length, 17);
+  assert.equal(new Set(ids).size, 17);
   for (const id of ids) assert.match(modal, new RegExp(`activeTab === "${id}"`));
   assert.match(modal, /groupSettingsDirectory\(navigableTabs, query, t\)/);
   assert.match(modal, /className="settings-modal-search-wrap"/);

@@ -12,6 +12,7 @@ import { chromium } from "playwright";
 import { checkFilePanel, filePanelFixture } from "./file-panel.mjs";
 import { checkExtensionDialogs, extensionSource } from "./extension-dialog.mjs";
 import { checkChatAppearance } from "./chat-appearance.mjs";
+import { checkKitParity } from "./kit-parity.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.env.E2E_SERVER_MODE || "dev";
@@ -225,13 +226,12 @@ try {
     page = await context.newPage();
     page.setDefaultTimeout(30_000);
     const errors = [];
-    const olderResponses = [];
+
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (event) => { if (event.type() === "error") errors.push(event.text()); });
     page.on("response", (response) => {
       if (response.url().startsWith(base) && response.status() >= 500) errors.push(`${response.status()} ${response.url()}`);
-      const url = new URL(response.url());
-      if (url.pathname === `/api/sessions/${LONG}/context` && url.searchParams.has("before")) olderResponses.push(response);
+
     });
     const stateReady = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/sessions/${LONG}/state`);
     await page.goto(`${base}/?session=${LONG}`, { waitUntil: "domcontentloaded" });
@@ -239,44 +239,48 @@ try {
     await page.getByText(text(4999), { exact: true }).waitFor();
     const latestUser = await page.getByText(text(4998), { exact: true }).elementHandle();
     assert.ok(latestUser, "Latest user message must be mounted before pagination");
-    const sentinel = page.getByText("Scroll up to load earlier messages", { exact: true });
-    await sentinel.waitFor({ state: "attached" });
-    assert.equal(await page.getByText(text(4949), { exact: true }).count(), 0);
+    // The transcript no longer paginates. VirtualizedMessageList receives the
+    // full item array and windows the DOM, so the old sentinel + `before` cursor
+    // contract (and its /api/.../context?before=… requests) does not exist any
+    // more — see the note in ChatWindow.tsx above the `refToItem` mapping.
+    // What still has to hold: every message is reachable, the window really is
+    // windowed (not 5000 mounted rows), and scrolling to the top lands on the
+    // oldest message with no duplicates.
+    assert.equal(
+      await page.getByText("Scroll up to load earlier messages", { exact: true }).count(),
+      0,
+      "Pagination sentinel must be gone",
+    );
 
-    // Exercise the real IntersectionObserver and prepend path, twice.
-    for (let turn = 0; turn < 2; turn++) {
-      const responsePromise = page.waitForResponse((response) =>
-        new URL(response.url()).pathname === `/api/sessions/${LONG}/context`);
-      await sentinel.evaluate((element) => element.scrollIntoView({ block: "start", behavior: "instant" }));
-      const response = await responsePromise;
-      const older = (await response.json()).context;
-      const firstMessage = older.messages.find((message) => message.role === "user")?.content;
-      assert.equal(typeof firstMessage, "string", "Older page must contain user messages");
-      await page.getByText(firstMessage, { exact: true }).waitFor({ state: "attached" });
-      await page.getByText(text(4999), { exact: true }).evaluate((element) => element.scrollIntoView({ block: "end", behavior: "instant" }));
-    }
+    const mountedRows = await page.locator("[data-index]").count();
+    assert.ok(mountedRows > 0, "The virtualizer mounts a viewport window");
+    assert.ok(mountedRows < 5000, `Only the window is mounted, saw ${mountedRows}`);
+
+    // Scroll to the very top: the oldest message must be present and unique.
+    await page.evaluate(() => {
+      const scroller = document.querySelector(".chat-scroll-fade");
+      (scroller ?? document.scrollingElement)?.scrollTo({ top: 0, behavior: "instant" });
+    });
+    await page.getByText(text(0), { exact: true }).waitFor({ state: "attached", timeout: 15000 });
+    const rendered = await page.getByText(/^E2E message \d{4}$/).allTextContents();
+    const chatTexts = rendered.filter((value) => value !== text(0) || rendered.indexOf(value) !== 0);
+    assert.equal(
+      new Set(chatTexts).size,
+      chatTexts.length,
+      "Windowed rows must never duplicate a message",
+    );
+
+    // Back to the tail: the newest user message still resolves to its own node.
+    await page.evaluate(() => {
+      const scroller = document.querySelector(".chat-scroll-fade");
+      (scroller ?? document.scrollingElement)?.scrollTo({ top: 1e9, behavior: "instant" });
+    });
+    await page.getByText(text(4999), { exact: true }).waitFor({ state: "attached", timeout: 15000 });
     assert.deepEqual(await latestUser.evaluate((element) => ({
       connected: element.isConnected,
       text: element.textContent,
-    })), { connected: true, text: text(4998) }, "Prepending history must preserve existing message nodes");
+    })), { connected: true, text: text(4998) }, "Scrolling back must not detach the mounted user node");
     await latestUser.dispose();
-    assert.ok(olderResponses.length >= 2, "Scrolling must fetch consecutive older pages");
-    let oldest = Number(new URL(olderResponses[0].url()).searchParams.get("before")?.slice(1));
-    assert.ok(Number.isInteger(oldest), "Older page must include a numeric before cursor");
-    for (const response of olderResponses) {
-      assert.equal(response.status(), 200);
-      assert.equal(new URL(response.url()).searchParams.get("before"), `e${oldest}`);
-      const older = (await response.json()).context;
-      assert.deepEqual(older.entryIds, ids(oldest - 50, oldest));
-      assert.equal(older.messages.length, 50);
-      oldest -= 50;
-      assert.equal(older.oldestEntryId, `e${oldest}`);
-      assert.equal(older.hasMore, true);
-    }
-    const rendered = await page.getByText(/^E2E message \d{4}$/).allTextContents();
-    // The sidebar also displays the first message as the session title.
-    assert.deepEqual(rendered.filter((value) => value !== text(0)),
-      Array.from({ length: 5000 - oldest }, (_, i) => text(oldest + i)), "Missing, reordered, or duplicate chat messages");
     await page.screenshot({ path: join(artifacts, `history-${viewport.width}.png`) });
 
     await page.goto(`${base}/?session=${BRANCH}`, { waitUntil: "domcontentloaded" });
@@ -404,6 +408,19 @@ try {
       await page.goto(`${base}/?session=${RICH}`, { waitUntil: "domcontentloaded" });
       await page.locator(".markdown-code-block pre").waitFor();
       await checkChatAppearance(page);
+      // pi-skin fidelity gate. It drives its own context through all three
+      // baseline viewports, so one call per suite is enough. Skipped while the
+      // baseline is absent; this run seeds no subagent session and no markdown
+      // file, so those surfaces are reported as skipped, and fixture-sensitive
+      // sidebar rows are compared on geometry only (this suite seeds five
+      // sessions, the baseline six).
+      await checkKitParity(page, {
+        baselinePath: join(root, "e2e/baselines/pi-kit.json"),
+        baseUrl: base,
+        sessions: { long: LONG, rich: RICH, subagent: null },
+        files: { html: "preview.html", markdown: null },
+        fixtureSensitive: false,
+      });
     }
     assert.deepEqual(errors, [], `Browser errors at width ${viewport.width}`);
     console.log(`PASS: ${viewport.width}px browser pagination, branch, markdown, code, tool call, and compaction navigation`);

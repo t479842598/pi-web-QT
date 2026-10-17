@@ -1,0 +1,99 @@
+"use client";
+
+/**
+ * Claude Design System — segmented control.
+ *
+ * Adapted from open-claude-ui `code-examples/SegmentedControl.tsx` (MIT, see
+ * ../../vendor/NOTICE.md). Kept: the 1px track padding and the pure-geometry
+ * indicator formula `left = 1px + index * (100% - 2px) / count`.
+ *
+ * What changed: the framer-motion `layoutId` thumb is replaced by the upstream
+ * CSS branch — one absolutely positioned indicator whose `left`/`width` are
+ * computed from the index, transitioned with `--cds-dur-snap` /
+ * `--cds-ease-snap`. No motion library is imported, so `LazyMotion strict`
+ * stays satisfied. Roles follow this repo's slot contract (`group` +
+ * `aria-pressed` for a toggle group, with `ariaLabel` as the accessible name)
+ * rather than upstream's `tablist`, because the contract's call site treats the
+ * control as a set of pressed buttons. Container-query label collapsing is not
+ * carried over: the shell already sizes these tracks.
+ */
+
+import type { CSSProperties } from "react";
+
+import type { SegmentedSlotProps } from "@/components/ui-kit/types";
+
+const MOTION = "duration-[var(--cds-dur-snap)] ease-[var(--cds-ease-snap)]";
+
+export function CdsSegmented({
+  items,
+  value,
+  onChange,
+  size = "md",
+  ariaLabel,
+  className,
+}: SegmentedSlotProps) {
+  const found = items.findIndex((item) => item.id === value);
+  const index = found >= 0 ? found : 0;
+  const count = Math.max(items.length, 1);
+
+  const indicator: CSSProperties = {
+    left: `calc(1px + ${index} * (100% - 2px) / ${count})`,
+    width: `calc((100% - 2px) / ${count})`,
+    transition: "left var(--cds-dur-snap) var(--cds-ease-snap), width var(--cds-dur-snap) var(--cds-ease-snap)",
+  };
+
+  return (
+    <div
+      data-cds="SegmentedControl"
+      data-segmented=""
+      role="group"
+      aria-label={ariaLabel}
+      className={[
+        "relative inline-flex select-none items-stretch rounded-full p-px transition-colors",
+        size === "sm" ? "h-7 text-[11.5px]" : "h-8 text-xs",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      style={{ background: "var(--cds-segmented-track, var(--cds-fill-secondary))" }}
+    >
+      <div
+        aria-hidden="true"
+        data-cds-part="indicator"
+        className="pointer-events-none absolute bottom-px top-px rounded-full bg-[var(--cds-surface-1)] shadow-[0_0_0_0.5px_var(--cds-hairline-2),0_1px_2px_var(--cds-shadow-tint)]"
+        style={indicator}
+      />
+
+      {items.map((item, idx) => {
+        const active = idx === index;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            aria-pressed={active}
+            data-active={active ? "" : undefined}
+            onClick={() => onChange(item.id)}
+            className={[
+              "relative z-10 flex h-full flex-1 items-center justify-center gap-1.5 truncate rounded-full px-3",
+              "transition-colors",
+              MOTION,
+              active
+                ? "font-medium text-[var(--text)]"
+                : "font-normal text-[var(--text-muted)] hover:text-[var(--text)]",
+            ].join(" ")}
+          >
+            {item.icon ? (
+              <span className="flex shrink-0 items-center justify-center">{item.icon}</span>
+            ) : null}
+            <span className="truncate">{item.label}</span>
+            {item.badge !== undefined ? (
+              <span className="rounded-full bg-[var(--cds-fill-secondary)] px-1.5 text-[10px] leading-tight tabular-nums">
+                {item.badge}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
