@@ -49,7 +49,8 @@ export function CdsSegmented({
       role="group"
       aria-label={ariaLabel}
       className={[
-        "relative inline-flex select-none items-stretch rounded-full p-px transition-colors",
+        "relative inline-flex max-w-full select-none items-stretch overflow-x-auto rounded-full p-px transition-colors [scrollbar-width:none]",
+        "[&::-webkit-scrollbar]:hidden",
         size === "sm" ? "h-7 text-[11.5px]" : "h-8 text-xs",
         className,
       ]
@@ -74,7 +75,11 @@ export function CdsSegmented({
             data-active={active ? "" : undefined}
             onClick={() => onChange(item.id)}
             className={[
-              "relative z-10 flex h-full flex-1 items-center justify-center gap-1.5 truncate rounded-full px-3",
+              // No `truncate` here: a segmented control that ellipsises its own
+              // labels ("侧边栏内" -> "侧边…") hides which option is which, which is
+              // worse than a track that scrolls. `flex-none` + nowrap keeps every
+              // label readable and lets the track size to its content.
+              "relative z-10 flex h-full flex-none items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3",
               "transition-colors",
               MOTION,
               active
@@ -85,7 +90,7 @@ export function CdsSegmented({
             {item.icon ? (
               <span className="flex shrink-0 items-center justify-center">{item.icon}</span>
             ) : null}
-            <span className="truncate">{item.label}</span>
+            <span>{item.label}</span>
             {item.badge !== undefined ? (
               <span className="rounded-full bg-[var(--cds-fill-secondary)] px-1.5 text-[10px] leading-tight tabular-nums">
                 {item.badge}

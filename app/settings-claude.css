@@ -24,7 +24,7 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -471,6 +471,11 @@
 .settings-segmented.settings-segmented button {
   min-height: 22px;
   padding: 2px 11px;
+  flex: 0 0 auto;
+  /* Labels like 侧边栏内 were ellipsised to 侧边... because the row is narrow
+     and the button had no nowrap. A segmented control that hides which option
+     is which is worse than one that scrolls. */
+  white-space: nowrap;
   border: 0;
   border-radius: var(--radius-full);
   background: transparent;
@@ -2874,5 +2879,39 @@ html[data-ui-kit="claude"] {
   --session-row-bg-hover: var(--cds-fill-ghost-hover, var(--bg-hover));
   --session-row-accent: var(--cds-clay, var(--accent));
   --session-row-radius: var(--cds-radius, 8px);
+}
+
+
+/* A settings row whose right-hand control is a segmented track: the label
+   column was taking the space the track needed, so the last chip ellipsised.
+   Give the control its intrinsic width and let the label shrink instead. */
+html[data-ui-kit="claude"] .settings-row .settings-segmented.settings-segmented {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+html[data-ui-kit="claude"] .settings-row .settings-segmented.settings-segmented::-webkit-scrollbar {
+  display: none;
+}
+
+
+/* ==========================================================================
+   Title bar inside an open settings dialog
+   ==========================================================================
+   The panel is 1180px wide on a 1440 viewport, so ~130px of title bar stays
+   visible on each side. The kit switch sat right there and was half-covered by
+   the panel edge, which reads as a rendering bug. Hiding the trailing controls
+   while a modal is open is what the CDS shell does, and it also stops a user
+   from flipping the kit while configuring it.
+   ========================================================================== */
+
+body:has(.settings-page-overlay) .claude-title-bar-right > *,
+body:has(.settings-page-overlay) .app-titlebar-right > * {
+  visibility: hidden;
+}
+body:has(.settings-page-overlay) .claude-title-bar-right,
+body:has(.settings-page-overlay) .app-titlebar-right {
+  pointer-events: none;
 }
 
