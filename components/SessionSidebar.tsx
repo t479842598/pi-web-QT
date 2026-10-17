@@ -3336,9 +3336,14 @@ function AccordionGroup({
   const cardBg = "var(--bg-panel)";
 
   return (
-    <div style={{ margin: "0 8px 6px", borderRadius: 10, background: cardBg, border: "1px solid var(--border)", overflow: "hidden" }}>
+    <div
+      className={`session-group${isOpen ? " is-open" : ""}`}
+      data-group={groupKey}
+      style={{ margin: "0 8px 6px", borderRadius: 10, background: cardBg, border: "1px solid var(--border)", overflow: "hidden" }}
+    >
       <button
         type="button"
+        className="session-group-header"
         onClick={onToggle}
         aria-expanded={isOpen}
         style={{
@@ -3499,6 +3504,17 @@ function SessionCompactRow({
   return (
     <div
       ref={rowRef}
+      // Class hooks: pi draws this row with inline styles, so no kit could reach
+      // it. These names carry the state the Claude layer needs (selected fork
+      // depth) without touching a single declaration or handler.
+      className={[
+        "session-row",
+        isSelected ? "is-selected" : "",
+        isRunning ? "is-running" : "",
+        isUnread ? "is-unread" : "",
+        forkDepth > 0 ? "is-fork" : "",
+      ].filter(Boolean).join(" ")}
+      data-fork-depth={forkDepth}
       onClick={confirmDelete || renaming ? undefined : onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); setForkTooltip(false); }}
@@ -3508,13 +3524,17 @@ function SessionCompactRow({
         paddingLeft: 10 + forkDepth * 14,
         position: "relative",
         cursor: confirmDelete || renaming ? "default" : "pointer",
-        background: confirmDelete
-          ? "var(--bg-selected)"
-          : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
-        borderLeft: confirmDelete
-          ? "2px solid var(--accent)"
-          : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
-        borderRadius: 6,
+        // Read through variables so a kit can restate the row without an
+        // `!important`: an inline declaration of `background` would win over any
+        // stylesheet selector, but an inline `var()` reference loses to whoever
+        // sets the variable on an ancestor.
+        background: confirmDelete || isSelected
+          ? "var(--session-row-bg-selected, var(--bg-selected))"
+          : hovered ? "var(--session-row-bg-hover, var(--bg-hover))" : "transparent",
+        borderLeft: confirmDelete || isSelected
+          ? "2px solid var(--session-row-accent, var(--accent))"
+          : "2px solid transparent",
+        borderRadius: "var(--session-row-radius, 6px)",
         transition: "background 0.1s",
         opacity: deleting ? 0.5 : 1,
       }}

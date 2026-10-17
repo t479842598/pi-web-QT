@@ -2790,3 +2790,70 @@ html[data-ui-kit="claude"] .sidebar-search-band input::placeholder {
   color: var(--cds-text-muted, var(--text-muted));
 }
 
+
+
+/* ==========================================================================
+   Sidebar interior — session rows and group cards
+   ==========================================================================
+   `SessionCompactRow` and `AccordionGroup` used to be inline-only, so the kit
+   could not reach them and the sidebar stayed pi inside the Claude frame. They
+   now emit `session-row` (with state modifiers) and `session-group`, which is
+   all this layer needs: the inline declarations stay as the pi look, and these
+   rules restate the same boxes for the Claude kit.
+
+   Nothing here changes behaviour. Selection, running/unread state and fork
+   depth are carried by classes and `data-fork-depth`, both derived from props
+   the row already had.
+   ========================================================================== */
+
+html[data-ui-kit="claude"] .session-row {
+  border-radius: var(--cds-radius, 8px);
+  border-left-width: 0;
+  /* The pi row draws a 2px accent bar on the left edge; CDS uses a filled
+     secondary surface plus a 2px clay indicator drawn as an inset shadow, so
+     the text does not shift when the state changes. */
+  box-shadow: none;
+  transition: background var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
+              box-shadow var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
+}
+/* The row reads its surface through `--session-row-*`, so setting the variables
+   on the sidebar is enough — no `!important`, and the pi kit keeps its own
+   values because it never sets them. */
+html[data-ui-kit="claude"] .claude-sidebar {
+  --session-row-bg-selected: var(--cds-fill-secondary, var(--bg-selected));
+  --session-row-bg-hover: var(--cds-fill-ghost-hover, var(--bg-hover));
+  --session-row-accent: var(--cds-clay, var(--accent));
+  --session-row-radius: var(--cds-radius, 8px);
+}
+html[data-ui-kit="claude"] .session-row.is-running .session-row-title,
+html[data-ui-kit="claude"] .session-row.is-running {
+  color: var(--cds-text-primary, var(--text));
+}
+html[data-ui-kit="claude"] .session-row.is-unread {
+  font-weight: 500;
+}
+/* Fork indent guide: one hairline per level instead of the pi 2px border. */
+html[data-ui-kit="claude"] .session-row.is-fork > span[aria-hidden="true"] {
+  width: 1px;
+  border-radius: 0;
+  background: var(--cds-hairline-2, var(--border));
+}
+
+/* Group card: CDS surface, hairline, card radius. */
+html[data-ui-kit="claude"] .session-group {
+  border-radius: var(--cds-radius-card, 12px);
+  border: 0.5px solid var(--cds-hairline-1, var(--border));
+  background: var(--cds-surface-1, var(--bg-panel));
+  margin: 0 8px 8px;
+}
+html[data-ui-kit="claude"] .session-group-header {
+  color: var(--cds-text-muted, var(--text-muted));
+  font-size: var(--text-ui-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+html[data-ui-kit="claude"] .session-group-header:hover {
+  color: var(--cds-text-primary, var(--text));
+}
+
