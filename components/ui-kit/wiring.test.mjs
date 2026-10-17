@@ -34,12 +34,24 @@ const consumers = [
  */
 export const NOT_YET_WIRED = ["sessionRow"];
 
+/**
+ * Slots whose Claude side is not a drop-in proxy.
+ *
+ * `composer` is the only one: `ClaudeComposerChrome` takes four ReactNode slots
+ * (leading / editor / trailing / footer) that `ChatInput`'s prop contract does
+ * not carry, so binding the slot renders an empty shell. The Claude look for the
+ * composer comes from the chin rules in app/settings-claude.css instead. Listed
+ * here so the "has a live consumer" assertion stays honest rather than being
+ * loosened.
+ */
+export const CSS_ONLY = ["composer"];
+
 /** Slots that are wired through a proxy module. */
 const WIRED = [
   // conversation
   "messageList", "messageShell", "thinking", "toolCard", "subagentRow", "subagentPanel",
-  // shell
-  "titleBar", "sidebar", "tabBar", "composer", "modelSwitcher", "fileViewer",
+  // shell (composer is CSS-only, see CSS_ONLY)
+  "titleBar", "sidebar", "tabBar", "modelSwitcher", "fileViewer",
   // overlay
   "dialogShell", "palette", "approvalCard", "planReview", "trustDialog", "queueRecovery", "imageLightbox",
   // conversation (compaction lives with the transcript)
@@ -93,7 +105,9 @@ test("every registry slot is in the wired list", () => {
   const uiKit = read("lib/ui-kit.ts");
   const declared = [...uiKit.matchAll(/^\s{2}"([a-zA-Z]+)",\s*$/gm)].map((m) => m[1]);
   assert.ok(declared.length >= 27, `expected 27 slots, saw ${declared.length}`);
-  const missing = declared.filter((slot) => !WIRED.includes(slot) && !NOT_YET_WIRED.includes(slot));
+  const missing = declared.filter(
+    (slot) => !WIRED.includes(slot) && !NOT_YET_WIRED.includes(slot) && !CSS_ONLY.includes(slot),
+  );
   assert.deepEqual(missing, [], "a slot exists in the model but no component renders it");
   // The pending list must stay exactly what is documented above, so finishing a
   // wiring job forces this line to change.

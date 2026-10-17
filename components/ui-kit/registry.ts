@@ -103,7 +103,13 @@ export const UI_KIT_REGISTRY: Record<SlotId, SlotRegistryEntry> = {
   sidebar: { pi: SessionSidebar, claude: ClaudeSidebar },
   sessionRow: { pi: PiSessionRow, claude: ClaudeSessionRow },
   tabBar: { pi: TabBar, claude: ClaudeTabBar },
-  composer: { pi: ChatInput, claude: ClaudeComposerChrome },
+  // `ClaudeComposerChrome` is a frame that takes four ReactNode slots
+  // (leading / editor / trailing / footer); `ChatInput`'s prop contract carries
+  // none of them, so binding the slot to it renders an empty shell — which is
+  // exactly what happened when the proxy was first mounted. The composer is
+  // restyled from app/settings-claude.css instead (see the chin rules there),
+  // and this slot keeps pointing at ChatInput until the frame owns the editor.
+  composer: { pi: ChatInput, claude: ChatInput },
   modelSwitcher: { pi: ModelSelector, claude: ClaudeModelSwitcher },
   fileViewer: { pi: FileViewer, claude: ClaudeFileViewer },
 

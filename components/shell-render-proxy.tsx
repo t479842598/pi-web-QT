@@ -44,7 +44,11 @@ function makeProxy<P extends object>(slot: Parameters<typeof useSlot>[0], Pi: Co
 export const ShellTitleBar = makeProxy("titleBar", AppTitleBar);
 export const ShellSidebar = makeProxy("sidebar", SessionSidebar);
 export const ShellTabBar = makeProxy("tabBar", TabBar);
-export const ShellComposer = makeProxy("composer", ChatInput);
+// No `ShellComposer`: the composer slot's Claude side is a frame that takes
+// ReactNode slots ChatInput does not provide, so there is no drop-in proxy for
+// it. The composer is restyled by app/settings-claude.css instead. Removing the
+// export (rather than leaving it unrendered) is what keeps the wiring test
+// meaningful — it asserts every export here is mounted somewhere.
 export const ShellModelSwitcher = makeProxy("modelSwitcher", ModelSelector);
 export const ShellFileViewer = makeProxy("fileViewer", FileViewer);
 export const ConversationCompaction = makeProxy("compaction", CompactionSummary);

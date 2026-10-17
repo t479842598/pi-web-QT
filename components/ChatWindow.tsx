@@ -16,8 +16,7 @@ import { requestCreateTaskFromText } from "@/lib/task-compose-events";
 /** Fired after parking a task draft — AppShell listens and opens the board. */
 export const OPEN_TASKS_VIEW_EVENT = "pi:open-tasks-view";
 import { type SubagentRunTimes } from "./SubagentRunRow";
-import { type ChatInputHandle } from "./ChatInput";
-import { ShellComposer as ChatInput } from "./shell-render-proxy";
+import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { OverlayQueueRecovery as QueueRecoveryDialog } from "./shell-render-proxy";
 import { SessionInfoBar } from "./SessionInfoBar";
 import {
