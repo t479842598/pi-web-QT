@@ -2843,6 +2843,17 @@ const SessionItem = memo(function SessionItem({
   return (
     <div
       ref={rowRef}
+      // Same contract as `SessionCompactRow`: the list view is the default, so
+      // these hooks are what let the Claude layer restyle the rows a reader
+      // actually sees. State comes from props this component already had.
+      className={[
+        "session-row",
+        isSelected ? "is-selected" : "",
+        isRunning ? "is-running" : "",
+        isUnread ? "is-unread" : "",
+        depth > 0 ? "is-fork" : "",
+      ].filter(Boolean).join(" ")}
+      data-fork-depth={depth}
       onClick={confirmDelete || renaming ? undefined : onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
@@ -2853,12 +2864,15 @@ const SessionItem = memo(function SessionItem({
         paddingLeft: depth > 0 ? depth * 12 + 14 : 14,
         paddingRight: 8,
         cursor: confirmDelete || renaming ? "default" : "pointer",
-        background: confirmDelete
-          ? "var(--bg-selected)"
-          : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
-        borderLeft: confirmDelete
-          ? "2px solid var(--accent)"
-          : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
+        // Variables, not literals: an inline `background` would beat every
+        // selector, but an inline `var()` loses to whoever sets the variable.
+        background: confirmDelete || isSelected
+          ? "var(--session-row-bg-selected, var(--bg-selected))"
+          : hovered ? "var(--session-row-bg-hover, var(--bg-hover))" : "transparent",
+        borderLeft: confirmDelete || isSelected
+          ? "2px solid var(--session-row-accent, var(--accent))"
+          : "2px solid transparent",
+        borderRadius: "var(--session-row-radius, 0)",
         transition: "background 0.1s",
         opacity: deleting ? 0.5 : 1,
         gap: 6,
