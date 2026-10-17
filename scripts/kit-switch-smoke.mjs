@@ -65,12 +65,21 @@ const read = () =>
   page.evaluate(() => {
     const row = document.querySelector(".session-row");
     const sidebar = document.querySelector(".claude-sidebar");
+    const composer = document.querySelector(".chat-input-shell");
     return {
       kit: document.documentElement.dataset.uiKit,
       rows: document.querySelectorAll(".session-row").length,
       rowRadius: row ? getComputedStyle(row).borderRadius : null,
       claudeSidebar: Boolean(sidebar),
       claudeTabBar: document.querySelectorAll(".claude-tab-bar").length,
+      claudeTitleBar: document.querySelectorAll(".claude-title-bar").length,
+      // Presence, not styling: a proxy that forwards the wrong prop contract
+      // renders an empty shell and the type checker cannot see it. Mounting
+      // ShellComposer removed the composer exactly this way once.
+      composerExists: Boolean(composer),
+      composerTypable: Boolean(composer && composer.querySelector("textarea")),
+      userTurnsWithText: [...document.querySelectorAll('[data-role="user"]')]
+        .filter((node) => (node.innerText ?? "").trim().length > 0).length,
     };
   });
 
@@ -100,6 +109,13 @@ if (!after.claudeSidebar) problems.push("the claude sidebar did not mount");
 if (after.rows < 1) problems.push("no session rows rendered");
 if (after.rowRadius === before.rowRadius) {
   problems.push(`session rows did not change between kits (both ${before.rowRadius})`);
+}
+if (!after.composerExists) problems.push("the composer disappeared after switching");
+if (!after.composerTypable) problems.push("the composer has no textarea");
+if (after.claudeTitleBar < 1) problems.push("the claude title bar did not mount");
+// Only meaningful when the session under test has user turns at all.
+if (before.userTurnsWithText > 0 && after.userTurnsWithText === 0) {
+  problems.push(`user turns lost their text after switching (${before.userTurnsWithText} -> 0)`);
 }
 if (errors.length) problems.push(`page errors: ${errors.slice(0, 3).join(" | ")}`);
 
