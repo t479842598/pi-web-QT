@@ -79,3 +79,25 @@ or freeze it mid-refactor, and there is no pixel-level safety net.
   the props contracts would still have to exist, and it complicates the
   bootstrap pass. Revisited if bundle size becomes a problem; `registry.ts` is
   the single place to change.
+
+
+## 已知限制：pi 侧栏内部仍未完全 Claude 化
+
+**现象**：切到 Claude 后，侧栏的**外壳**（rail、footer、search band、表面色、发丝边）是 Claude 的，
+但内部的会话树、分组标题、工具条仍是 pi 几何。
+
+**根因**：`SessionSidebar` 用大量**内联 style** 渲染这些节点（审计 F2：80 个 tsx、2331 处内联样式）。
+内联声明无法被无 `!important` 的样式表覆盖，而项目门禁禁止新增 `!important`。
+
+**已做**：给搜索区加了两个 class 钩子（`sidebar-search-band` / `sidebar-search-field`），
+Claude 层得以接管该区域。
+
+**未做**：会话行、分组标题、工具条仍需逐个加 class 钩子。这是机械工作，
+每处都是「加 className + 写 CSS」，不涉及逻辑。
+
+**代价评估**：`SessionSidebar` 3647 行，会话行渲染函数约在 2345–2400 行区间，
+需要先把它抽成独立组件才能干净地加钩子。约 3–4 小时。
+
+**决定**：留作后续。当前切换已覆盖 26/27 槽位，观感差异真实存在（见
+`work/e2e/shell-pi.png` 与 `shell-claude.png` 对比），但侧栏深度未达 100%。
+

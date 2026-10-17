@@ -2754,3 +2754,39 @@ html[data-ui-kit="claude"] .chat-input-send:not(:disabled):hover {
   html[data-ui-kit="claude"] .chat-input-toolbar-model > button { max-width: 34vw; }
 }
 
+
+
+/* ==========================================================================
+   Sidebar search band (hooks added to SessionSidebar)
+   ==========================================================================
+   pi renders this block with inline styles only, so no kit could reach it. The
+   two class hooks (`.sidebar-search-band` / `.sidebar-search-field`) are the
+   whole change on the pi side — zero behaviour, zero geometry difference — and
+   they let the Claude layer restate the surface, radius and focus ring.
+   ========================================================================== */
+
+html[data-ui-kit="claude"] .sidebar-search-band {
+  background: var(--cds-surface-1, var(--bg-secondary));
+  padding: 6px 10px 8px;
+}
+html[data-ui-kit="claude"] .sidebar-search-band .sidebar-search-field {
+  height: 30px;
+  border-radius: var(--cds-radius, 8px);
+  background: var(--cds-fill-secondary, var(--bg-hover));
+  border: 0.5px solid transparent;
+  transition: border-color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
+              background var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
+}
+html[data-ui-kit="claude"] .sidebar-search-band .sidebar-search-field:focus-within {
+  border-color: color-mix(in srgb, var(--cds-clay, var(--accent)) 50%, var(--border));
+  background: var(--cds-surface-2, var(--bg-card));
+}
+html[data-ui-kit="claude"] .sidebar-search-band input {
+  color: var(--cds-text-primary, var(--text));
+  font-family: inherit;
+  font-size: var(--text-ui-sm);
+}
+html[data-ui-kit="claude"] .sidebar-search-band input::placeholder {
+  color: var(--cds-text-muted, var(--text-muted));
+}
+

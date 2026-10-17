@@ -2284,8 +2284,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       {sessionsOpen && (
         <div className="scroll-overlay" style={{ flex: explorerOpen ? "0 1 auto" : "1 1 0", padding: "0", minHeight: 0, maxHeight: explorerOpen ? "min(40%, 360px)" : "none" }}>
           {/* Search bar — visible in both views, sticky under the header */}
-          <div style={{ position: "sticky", top: 0, zIndex: 1, padding: "4px 10px 6px", background: "var(--bg)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-hover)", borderRadius: 8, padding: "0 9px", height: 30 }}>
+          <div className="sidebar-search-band" style={{ position: "sticky", top: 0, zIndex: 1, padding: "4px 10px 6px", background: "var(--bg)" }}>
+            <div className="sidebar-search-field" style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-hover)", borderRadius: 8, padding: "0 9px", height: 30 }}>
               <MagnifyingGlass size={13} color="var(--text-dim)" style={{ flexShrink: 0 }} aria-hidden="true" />
               <input
                 value={searchQuery}
