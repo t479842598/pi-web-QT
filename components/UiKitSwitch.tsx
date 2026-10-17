@@ -29,15 +29,23 @@ const OPTIONS: { id: KitId; label: string; titleKey: string }[] = [
   { id: "claude", label: "Claude", titleKey: "uiKit.kitClaudeDescription" },
 ];
 
-export function UiKitSwitch() {
+export function UiKitSwitch({ compact = false }: { compact?: boolean } = {}) {
   const { t } = useI18n();
   const { settings, setKit } = useUiKit();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // On a phone the title bar has room for one more control, not 116px of it.
+  // The same pill renders with tighter padding and a smaller label; the aria
+  // label and title stay full so the control still reads correctly.
+  const pillHeight = compact ? 24 : 26;
+  const buttonHeight = compact ? 20 : 22;
+  const buttonPad = compact ? "0 6px" : "0 9px";
+  const fontSize = compact ? 10 : 11;
+
   if (!mounted) {
     // Reserve the same footprint so the title bar does not shift on hydration.
-    return <span aria-hidden="true" style={{ width: 116, height: 26, flexShrink: 0 }} />;
+    return <span aria-hidden="true" style={{ width: compact ? 84 : 116, height: pillHeight, flexShrink: 0 }} />;
   }
 
   return (
@@ -50,7 +58,7 @@ export function UiKitSwitch() {
         alignItems: "center",
         gap: 1,
         padding: 1,
-        height: 26,
+        height: pillHeight,
         flexShrink: 0,
         borderRadius: 999,
         border: "0.5px solid var(--cds-hairline-1, var(--border))",
@@ -67,12 +75,12 @@ export function UiKitSwitch() {
             aria-pressed={active}
             title={t(titleKey)}
             style={{
-              height: 22,
-              padding: "0 9px",
+              height: buttonHeight,
+              padding: buttonPad,
               border: "none",
               borderRadius: 999,
               cursor: "pointer",
-              fontSize: 11,
+              fontSize,
               fontWeight: active ? 600 : 400,
               lineHeight: 1,
               whiteSpace: "nowrap",

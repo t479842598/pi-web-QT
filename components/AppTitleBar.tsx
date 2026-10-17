@@ -325,7 +325,11 @@ export function AppTitleBar({
         {/* Kit switch (Pi / Claude). Sits beside the theme toggle because it is
             the same kind of choice: whole-app appearance, reached often. The
             per-scope overrides stay in Settings → 界面体系. */}
-        {!isMobile && <UiKitSwitch />}
+        {/* The switch used to be desktop-only, which left a phone with no way to
+            reach the other kit at all. It stays compact on narrow screens
+            (the pill already collapses to its short form) so the title bar
+            still has room for the settings and theme controls. */}
+        <UiKitSwitch compact={isMobile} />
 
         {/* Theme toggle — defer render until client mount to avoid
             SSR hydration mismatch on icon and attributes. */}
