@@ -1,14 +1,17 @@
 /**
- * Kit switch smoke test.
+ * Kit-switch smoke test.
  *
- * The reason this exists as a script: verifying the switch by seeding
- * `localStorage` in `addInitScript` does not work. The app's own bootstrap
- * script runs after it and rewrites `html.dataset.uiKit` from the same keys, so
- * a probe that seeds storage can silently measure the *previous* kit — which is
- * exactly how a working switch got reported as broken for two rounds.
+ * Verifying the switch by seeding `localStorage` in `addInitScript` does not
+ * work. The app's own bootstrap script runs after it and rewrites
+ * `html.dataset.uiKit` from the same keys, so a probe that seeds storage can
+ * silently measure the *previous* kit — which is exactly how a working switch
+ * got reported as broken for two rounds.
  *
  * The reliable path is the one a user takes: load the page, click the title-bar
  * switch, and read the DOM before and after in the same session.
+ *
+ * The assertions themselves live in `e2e/kit-switch.mjs` so this script and the
+ * full e2e suite cannot drift apart.
  *
  * Usage: node scripts/kit-switch-smoke.mjs --port 30777 [--out work/e2e]
  */
@@ -16,6 +19,8 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
+
+import { flipToClaude, kitSwitchProblems, readKitSurface } from "../e2e/kit-switch.mjs";
 
 const args = process.argv.slice(2);
 const arg = (name, fallback) => {
@@ -61,62 +66,17 @@ await page
     await page.waitForTimeout(2000);
   });
 
-const read = () =>
-  page.evaluate(() => {
-    const row = document.querySelector(".session-row");
-    const sidebar = document.querySelector(".claude-sidebar");
-    const composer = document.querySelector(".chat-input-shell");
-    return {
-      kit: document.documentElement.dataset.uiKit,
-      rows: document.querySelectorAll(".session-row").length,
-      rowRadius: row ? getComputedStyle(row).borderRadius : null,
-      claudeSidebar: Boolean(sidebar),
-      claudeTabBar: document.querySelectorAll(".claude-tab-bar").length,
-      claudeTitleBar: document.querySelectorAll(".claude-title-bar").length,
-      // Presence, not styling: a proxy that forwards the wrong prop contract
-      // renders an empty shell and the type checker cannot see it. Mounting
-      // ShellComposer removed the composer exactly this way once.
-      composerExists: Boolean(composer),
-      composerTypable: Boolean(composer && composer.querySelector("textarea")),
-      userTurnsWithText: [...document.querySelectorAll('[data-role="user"]')]
-        .filter((node) => (node.innerText ?? "").trim().length > 0).length,
-    };
-  });
-
-const before = await read();
+const before = await readKitSurface(page);
 await page.screenshot({ path: join(outDir, "kit-smoke-pi.png") });
 
-// Flip through the real control the user clicks, never through storage.
-const flipped = await page.evaluate(() => {
-  const button = [...document.querySelectorAll("button")].find(
-    (node) => (node.textContent ?? "").trim() === "Claude",
-  );
-  if (!button) return false;
-  button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  return true;
-});
+const flipped = await flipToClaude(page);
 await page.waitForTimeout(3000);
-const after = await read();
+const after = await readKitSurface(page);
 await page.screenshot({ path: join(outDir, "kit-smoke-claude.png") });
 
 await browser.close();
 
-const problems = [];
-if (!flipped) problems.push("the Claude switch was not found in the title bar");
-if (before.kit !== "pi") problems.push(`expected the page to start on pi, saw ${before.kit}`);
-if (after.kit !== "claude") problems.push(`clicking the switch did not change the kit (saw ${after.kit})`);
-if (!after.claudeSidebar) problems.push("the claude sidebar did not mount");
-if (after.rows < 1) problems.push("no session rows rendered");
-if (after.rowRadius === before.rowRadius) {
-  problems.push(`session rows did not change between kits (both ${before.rowRadius})`);
-}
-if (!after.composerExists) problems.push("the composer disappeared after switching");
-if (!after.composerTypable) problems.push("the composer has no textarea");
-if (after.claudeTitleBar < 1) problems.push("the claude title bar did not mount");
-// Only meaningful when the session under test has user turns at all.
-if (before.userTurnsWithText > 0 && after.userTurnsWithText === 0) {
-  problems.push(`user turns lost their text after switching (${before.userTurnsWithText} -> 0)`);
-}
+const problems = kitSwitchProblems(before, after, flipped);
 if (errors.length) problems.push(`page errors: ${errors.slice(0, 3).join(" | ")}`);
 
 console.log(JSON.stringify({ before, after, flipped, problems }, null, 1));

@@ -101,3 +101,25 @@ Claude 层得以接管该区域。
 **决定**：留作后续。当前切换已覆盖 26/27 槽位，观感差异真实存在（见
 `work/e2e/shell-pi.png` 与 `shell-claude.png` 对比），但侧栏深度未达 100%。
 
+
+
+## 既有 e2e 失效（非双套件引入）
+
+`e2e/run.mjs` 的富消息块里有 6 个选择器指向**重构前就已消失的 UI**：
+
+- `getByRole("button", { name: /^Process details/ })` — 树中不存在该字符串；
+  `ProcessGroup` 的摘要按钮只有文本内容，无 `aria-label`。
+- `getByRole("button", { name: /^Thinking/ })` — 同上；`ThinkingBlock` 在
+  `MessageView.tsx` 内，是带 `aria-expanded` 的按钮，没有 `Thinking` 名称。
+- 早期分页断言依赖 "Scroll up to load earlier messages" 哨兵，而虚拟列表
+  已取代该机制。
+
+**证据**：`git show 3535982e:components/ThinkingBlock.tsx` 不存在；
+`grep -r "Process details" components` 无结果。这些断言在双套件之前就失效。
+
+**影响**：`npm run test:e2e` 跑到富消息块会失败，与 kit 切换无关。
+
+**决定**：本轮只把 kit 切换检查（`e2e/kit-switch.mjs`，16 行接线）并入
+`run.mjs`；上述过时断言原样保留，作为独立问题另行处理，避免把两件事混在
+一次提交里。
+

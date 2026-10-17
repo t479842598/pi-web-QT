@@ -13,6 +13,7 @@ import { checkFilePanel, filePanelFixture } from "./file-panel.mjs";
 import { checkExtensionDialogs, extensionSource } from "./extension-dialog.mjs";
 import { checkChatAppearance } from "./chat-appearance.mjs";
 import { checkKitParity } from "./kit-parity.mjs";
+import { flipToClaude, kitSwitchProblems, readKitSurface } from "./kit-switch.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.env.E2E_SERVER_MODE || "dev";
@@ -421,6 +422,21 @@ try {
         files: { html: "preview.html", markdown: null },
         fixtureSensitive: false,
       });
+
+      // Kit switch. Runs after the fidelity gate so the pi snapshot it just
+      // compared is untouched; this flips to claude, asserts the surfaces a
+      // flip must move, then flips back so the next viewport starts on pi.
+      const kitBefore = await readKitSurface(page);
+      const kitFlipped = await flipToClaude(page);
+      await page.waitForTimeout(2500);
+      const kitAfter = await readKitSurface(page);
+      assert.deepEqual(kitSwitchProblems(kitBefore, kitAfter, kitFlipped), [], `Kit switch at ${viewport.width}px`);
+      console.log(`PASS: ${viewport.width}px kit switch (pi -> claude)`);
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("button")].find((node) => (node.textContent ?? "").trim() === "Pi");
+        button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await page.waitForTimeout(1500);
     }
     assert.deepEqual(errors, [], `Browser errors at width ${viewport.width}`);
     console.log(`PASS: ${viewport.width}px browser pagination, branch, markdown, code, tool call, and compaction navigation`);
