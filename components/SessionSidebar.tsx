@@ -2858,7 +2858,11 @@ const SessionItem = memo(function SessionItem({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
       style={{
-        height: ITEM_HEIGHT,
+        // Height through a variable: a kit may want a roomier row, and an
+        // inline `height` would win over any stylesheet. `min-height` cannot
+        // do the job because the inline value is what actually applies.
+        height: "var(--session-row-height, " + ITEM_HEIGHT + "px)",
+        minHeight: "var(--session-row-height, " + ITEM_HEIGHT + "px)",
         display: "flex",
         alignItems: "center",
         paddingLeft: depth > 0 ? depth * 12 + 14 : 14,

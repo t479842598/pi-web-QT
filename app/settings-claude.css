@@ -2911,3 +2911,51 @@ body:has(.settings-page-overlay) .app-title-bar > div:last-child {
   pointer-events: none;
 }
 
+
+
+/* ==========================================================================
+   Sidebar interior — the part a reader actually notices
+   ==========================================================================
+   Round 9 verified that `--session-row-radius` reaches the rows (0px -> 8px),
+   but an 8px radius on a 30px-tall row is invisible: the two kits looked
+   identical in a side-by-side screenshot. This block changes the things the eye
+   actually reads — row rhythm, the selected state, and the file-tree header —
+   instead of properties that are technically different and visually silent.
+   ========================================================================== */
+
+/* Roomier rows. pi packs them at 30px; the CDS list uses 34px with a wider
+   text inset, which is the single biggest signal that this is a different kit. */
+html[data-ui-kit="claude"] {
+  /* 50px -> 34px was wrong in the first attempt: pi measures its list against
+     this height for virtualisation, so the kit only trims it to 44px and adds
+     horizontal breathing room. */
+  --session-row-height: 44px;
+}
+html[data-ui-kit="claude"] .session-row {
+  padding-inline-start: calc(var(--session-row-indent, 14px) + 2px);
+  margin-inline: 4px;
+}
+
+/* Selection: a filled pill with a clay rail, not a full-bleed band. The inset
+   margin above is what makes it read as a pill rather than a highlighted row. */
+html[data-ui-kit="claude"] .session-row.is-selected {
+  box-shadow: inset 2px 0 0 var(--cds-clay, var(--accent));
+}
+
+/* Title weight and colour carry the hierarchy pi expresses with sheer density. */
+html[data-ui-kit="claude"] .session-row .session-row-title,
+html[data-ui-kit="claude"] .session-row > span:first-of-type {
+  letter-spacing: -0.01em;
+}
+
+/* File-tree / section header: uppercase, tracked, muted — the CDS section label.
+   pi renders these as sentence-case 12px, which reads as body text. */
+html[data-ui-kit="claude"] .sidebar-section-header,
+html[data-ui-kit="claude"] .file-explorer-header {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--text-ui-xs);
+  font-weight: 600;
+  color: var(--cds-text-muted, var(--text-muted));
+}
+
