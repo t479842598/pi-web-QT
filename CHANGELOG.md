@@ -2,6 +2,28 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.18.20 — 2026-10-17（窄屏样式审计修复：设置页 / 模型表单溢出）
+
+发布后对**全站样式做逐视口审计**（7 档视口 × 15 个设置分类 + 聊天区），修掉三处窄屏溢出与一处表单误报。全部为样式与表单状态修正，无功能语义变更。
+
+**窄屏溢出（真实缺陷，320–390px 触发）**
+- 设置笔记（`SettingNote`，MCP 页「保存模型配置…」）不换行，把卡片撑到 507px、页面溢出 155px。补 `minWidth: 0` + `overflowWrap: anywhere`。
+- 代理表单固定 `1fr 1fr` 双列不塌陷，320px 下溢出 172px。改为 `repeat(auto-fit, minmax(min(220px, 100%), 1fr))`，窄屏自动单列。
+- 自定义 provider 列表里的模型 ID：`overflow: hidden` + `text-overflow: ellipsis` 写在**内联 span** 上不生效（inline 元素无宽度约束），长 ID 撑破行。补 `display: block` + `maxWidth: 100%`。
+- 用量页日柱条带缺 `minWidth: 0` / `maxWidth: 100%`，改为在卡片内自身横向滚动，不再撑宽卡片。
+- 默认模型行与 MCP server 摘要同样补 `minWidth: 0` 与换行约束。
+
+**模型渠道表单**
+- 选中名称已被占用的预设（如已有 `deepseek` 时再选 DeepSeek）会**一打开就显示红色重名错误**并禁用保存。改为用 `uniqueProviderName()` 自动落到 `deepseek-2`，红色提示只留给用户手动输入的重名。
+- `ProviderSetupSheet` 的 seeder 依赖补 `takenKey`，避免表单打开期间别处保存导致种子名重新撞名。
+
+**验证**
+- 7 档视口（1440 / 1024 / 768 / 430 / 390 / 360 / 320）× 15 个设置分类：`pageHScroll` 与真实溢出元素均为 0；cookie 内嵌横向滚动的用量柱条正确排除（非页面溢出）。
+- 聊天区 7 档视口 composer 圆角均为 20px；320/390 移动形态零溢出、零 console 错误。
+- 生产构建（`npm run build` + `npm start`）下复跑上述全量，结果一致。
+- 新增 `components/settings-narrow-layout.test.mjs`（6 条）锁死这几处声明，防止回归。
+- `tsc --noEmit` 0 error；**1944 tests / 1943 pass / 0 fail / 1 既有 skip**；eslint 改动文件零告警。
+
 ## v0.18.19 — 2026-10-17（Claude 设计语言落地 + 模型渠道发现优先）
 
 参照 vastsa/PI-Desktop 的模型渠道链路与 Caho1/open-claude-ui 的 Claude Design System，做四层改造。**既有功能语义（会话、SSE、队列、工具、权限、24 套主题）零改动**。

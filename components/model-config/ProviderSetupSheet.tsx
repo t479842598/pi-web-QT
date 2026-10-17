@@ -110,6 +110,25 @@ function presetSlug(preset: NamedEndpointPreset | null): string {
   return base.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+/**
+ * `name` with the smallest numeric suffix that no configured provider claims.
+ *
+ * Picking a preset whose id already exists in models.json is an ordinary case
+ * (adding a second endpoint for a vendor, or re-adding one after a manual
+ * edit). Showing the collision as a red error the moment the sheet opens makes
+ * the form look broken before the user has done anything, so a fresh entry
+ * starts from a free name and keeps the red line for a name the user typed.
+ */
+function uniqueProviderName(base: string, taken: readonly string[]): string {
+  const root = base.trim() || "provider";
+  if (!taken.includes(root)) return root;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${root}-${index}`;
+    if (!taken.includes(candidate)) return candidate;
+  }
+  return `${root}-${Date.now()}`;
+}
+
 /** The path part of an endpoint, shown read-only next to a fixed preset. */
 function endpointSummary(baseUrl: string): string {
   try {
@@ -211,6 +230,9 @@ export function ProviderSetupSheet({
   // a brand-new custom entry is the only form where the field is editable.
   const lockedEndpoint = Boolean(preset);
 
+  /** Stable key for the taken-name list, so the seeding effect can depend on it. */
+  const takenKey = useMemo(() => existingProviderNames.join("\u0000"), [existingProviderNames]);
+
   // A fresh sheet: preset values win for a new provider, the stored entry wins
   // for an edit. Both are reset whenever `open` flips, so a cancelled form
   // cannot leak into the next one.
@@ -219,7 +241,9 @@ export function ProviderSetupSheet({
     const storedApi = editingProvider?.api ?? "";
     const nextBaseUrl = editingProvider?.baseUrl ?? preset?.baseUrl ?? "";
     const nextApi = storedApi || preset?.api || API_CHOICES[0];
-    setName(editing?.name ?? presetSlug(preset));
+    const seeded = editing?.name ?? uniqueProviderName(presetSlug(preset), existingProviderNames);
+    seededNameRef.current = seeded;
+    setName(seeded);
     setBaseUrl(nextBaseUrl);
     setApiKey("");
     setApi(nextApi);
@@ -232,9 +256,13 @@ export function ProviderSetupSheet({
     setRecommended(false);
     // `editingProvider?.models` is deliberately absent: the stored list is read
     // once at open, and re-running this on a config re-render would wipe what
-    // the user has typed into the sheet.
+    // the user has typed into the sheet. `takenKey` stands in for the taken-name
+    // array so the seeded default stays collision-free.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, editing?.name, editingProvider?.api, editingProvider?.baseUrl, preset]);
+  }, [open, editing?.name, editingProvider?.api, editingProvider?.baseUrl, preset, takenKey]);
+
+  /** The name the sheet opened with, so `duplicateName` can tell typed from seeded. */
+  const seededNameRef = useRef("");
 
   const savedModels = useMemo(
     () => editingProvider?.models ?? [],
@@ -278,7 +306,11 @@ export function ProviderSetupSheet({
   const autoDetected = draft.autoDetected;
 
   const trimmedName = name.trim();
-  const duplicateName = !editing && trimmedName !== "" && existingProviderNames.includes(trimmedName);
+  // Only a name the user typed can collide: the seeded default is already
+  // collision-free (see `uniqueProviderName`), so pinning the red line to
+  // "changed since open" keeps a fresh sheet free of errors.
+  const nameTouched = name !== seededNameRef.current;
+  const duplicateName = !editing && nameTouched && trimmedName !== "" && existingProviderNames.includes(trimmedName);
   const baseUrlMissing = !baseUrl.trim() && !preset;
   const canSave = trimmedName !== "" && !duplicateName && !baseUrlMissing;
 

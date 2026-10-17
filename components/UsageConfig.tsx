@@ -163,7 +163,10 @@ export function UsageConfig({ sessionId, cwd }: UsageConfigProps) {
             {daily.length === 0 ? (
               <div style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-secondary)" }}>{loading ? t("desktop.featuresLoading") : t("desktop.usageNoData")}</div>
             ) : (
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 96, overflowX: "auto" }}>
+              /* A bar strip is intrinsically wider than a phone column. It gets
+                 its own horizontal scroll and a shrinkable width, so the card
+                 stays inside the page instead of growing to fit every day. */
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 96, minWidth: 0, maxWidth: "100%", overflowX: "auto", overflowY: "hidden" }}>
                 {daily.map((d) => {
                   const h = maxDay > 0 ? Math.max(4, Math.round((d.tokens / maxDay) * 72)) : 4;
                   return (

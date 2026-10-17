@@ -225,7 +225,9 @@ export function ProxyConfig() {
           border: "var(--settings-content-card-border, none)",
           background: "var(--settings-content-card-bg, transparent)",
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
+          // auto-fit keeps the two-column form on wide settings pages and
+          // collapses to one column before the labels can overflow on a phone.
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))",
           gap: "12px 16px",
           opacity: config.enabled ? 1 : 0.5,
           pointerEvents: config.enabled ? "auto" : "none",

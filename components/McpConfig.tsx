@@ -364,7 +364,7 @@ export function McpConfig({ sessionId }: { sessionId?: string | null }) {
                             {server.lifecycle ?? "lazy"}
                           </span>
                         </div>
-                        <div style={{ fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", fontFamily: "var(--font-mono)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <div style={{ display: "block", minWidth: 0, maxWidth: "100%", fontSize: 'var(--text-ui-xs)', color: "var(--ds-text-secondary)", fontFamily: "var(--font-mono)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {isUrlTransport(normalizeMcpTransport(server.transport))
                             ? server.url
                             : `${server.command ?? ""}${Array.isArray(server.args) && server.args.length > 0

@@ -172,10 +172,12 @@ export function DefaultModelRow({ cwd, onChangedAction }: DefaultModelRowProps) 
   );
 
   const statusLine = error ?? (stale ? t("desktop.defaultModelStale") : null);
+  /** Long model ids have no spaces to break at; let the copy column wrap them. */
+  const wrapCopy: React.CSSProperties = { minWidth: 0, overflowWrap: "anywhere" };
 
   return (
     <div className="settings-row is-stacked" aria-busy={loading || saving}>
-      <div className="settings-row-copy">
+      <div className="settings-row-copy" style={wrapCopy}>
         <span className="settings-row-title">{t("desktop.defaultModelTitle")}</span>
         <span className="settings-row-description">{t("desktop.defaultModelHelp")}</span>
         {!loading && !editable && (
@@ -184,7 +186,7 @@ export function DefaultModelRow({ cwd, onChangedAction }: DefaultModelRowProps) 
           </span>
         )}
         {!loading && statusLine && (
-          <span role="status" style={{ display: "block", marginTop: 3, fontSize: "var(--text-ui-sm)", lineHeight: 1.5, color: "var(--status-error)" }}>
+          <span role="status" style={{ display: "block", minWidth: 0, overflowWrap: "anywhere", marginTop: 3, fontSize: "var(--text-ui-sm)", lineHeight: 1.5, color: "var(--status-error)" }}>
             {statusLine}
           </span>
         )}

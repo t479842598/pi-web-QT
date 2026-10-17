@@ -2398,7 +2398,7 @@ export function ModelsConfig({
                             onClick={() => { void selectSelection({ type: "model", providerName: pName, index: i }); }}
                           >
                             <span className="settings-row-copy">
-                              <span style={{ fontSize: 'var(--text-ui-sm)', fontFamily: "var(--font-mono)", color: m.id ? "var(--ds-text-secondary)" : "var(--ds-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <span style={{ display: "block", maxWidth: "100%", fontSize: 'var(--text-ui-sm)', fontFamily: "var(--font-mono)", color: m.id ? "var(--ds-text-secondary)" : "var(--ds-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {m.id || t("desktop.modelsNewModel")}
                               </span>
                             </span>

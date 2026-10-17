@@ -33,6 +33,12 @@ export function SettingNote({ children }: { children: ReactNode }) {
       style={{
         gap: 8,
         padding: "10px 12px",
+        // A note carries prose, not a single token: it must wrap inside the
+        // card instead of widening it. `minWidth: 0` is what lets a flex item
+        // shrink below its content's intrinsic width, and the CJK text has no
+        // spaces to break at without `overflowWrap`.
+        minWidth: 0,
+        overflowWrap: "anywhere",
         fontSize: 'var(--text-ui-sm)',
         lineHeight: 1.5,
         color: "var(--ds-text-secondary)",
