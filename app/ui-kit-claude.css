@@ -147,6 +147,19 @@
   box-shadow: var(--cds-focus-shadow);
 }
 
+/* The composer textarea is the one exception, and the reason it is a separate
+ * rule rather than a wider `:where` list: `--cds-focus-shadow` leads with an
+ * `inset 0 0 0 1px` line, and the textarea has `border-radius: 0` inside a 20px
+ * shell. The result was a square tinted box drawn inside a rounded composer —
+ * which reads as a stray border, not as focus.
+ *
+ * The focus signal for this control is the shell's own `:focus-within` ring
+ * (see settings-claude.css), so the inner box is simply not drawn. */
+:is(html[data-ui-kit="claude"], .claude-surface-root) textarea.chat-input-textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 /* ── Reduced motion wins over every CDS transition ── */
 @media (prefers-reduced-motion: reduce) {
   :is(html[data-ui-kit="claude"], .claude-surface-root) * {
