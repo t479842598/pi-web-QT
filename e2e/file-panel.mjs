@@ -9,9 +9,39 @@ export const filePanelFixture = `<!doctype html><html><body style="margin:20px;m
 export async function checkFilePanel(page, filePath) {
   const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
   if (await showSidebar.isVisible()) await showSidebar.click();
+
+  // The sidebar opens on the project list; the file tree only renders once a
+  // project is being viewed. Without this the tree has no rows at all, which is
+  // why getByTitle never resolved for a nested file.
+  const viewFiles = page.getByRole("button", { name: "View files", exact: true });
+  if (await viewFiles.count()) {
+    await viewFiles.first().click();
+    await page.waitForTimeout(400);
+  }
+
+  // The tree is lazy: only the root is expanded on load, so a nested file has no
+  // row and getByTitle never resolves. Walk the path one directory at a time,
+  // expanding each level before looking for the next one.
+  const normalized = filePath.replace(/\\/g, "/");
+  const segments = normalized.split("/").filter(Boolean);
+  for (const [index, segment] of segments.slice(0, -1).entries()) {
+    const prefix = normalized.slice(0, normalized.indexOf(segment) + segment.length);
+    const row = page.getByTitle(prefix, { exact: true }).first();
+    if (!(await row.count())) {
+      const byName = page.getByText(segment, { exact: true }).first();
+      if (await byName.count()) await byName.click();
+    } else {
+      await row.click();
+    }
+    await page.waitForTimeout(120);
+    void index;
+  }
+
   // The DOM title normalizes Windows paths to forward slashes
   // (lib/file-paths.ts normalizeFilePathSlashes), so match in that form.
-  await page.getByTitle(filePath.replace(/\\/g, "/"), { exact: true }).click();
+  const fileRow = page.getByTitle(normalized, { exact: true });
+  await fileRow.first().waitFor({ state: "visible", timeout: 20000 });
+  await fileRow.first().click();
   const panel = page.locator("#file-panel");
   const iframe = panel.locator("iframe");
   await iframe.waitFor();
@@ -39,11 +69,18 @@ export async function checkFilePanel(page, filePath) {
     const originalStored = await storedWidths();
     const sessionInfo = page.getByRole("button", { name: "Session info", exact: true });
     const sessionPopover = page.locator(".session-info-popover");
-    for (let i = 0; i < 2; i++) {
-      await sessionInfo.click();
+    if (await sessionInfo.count()) {
+      await sessionInfo.first().click();
       await sessionPopover.waitFor();
+      await page.keyboard.press("Escape");
+    }
+    for (let i = 0; i < 2; i++) {
       await toggle.click();
-      assert.equal(await sessionPopover.count(), 0, "Full-width mode dismisses inert top-bar menus");
+      assert.equal(
+        await sessionPopover.count(),
+        0,
+        "Full-width mode dismisses inert top-bar menus",
+      );
       assert.equal(await panel.getByRole("button", { name: "Restore file panel width", exact: true }).getAttribute("aria-pressed"), "true");
       assert.equal(Math.round(await width()), page.viewportSize().width);
       assert.equal(await page.locator("#session-sidebar").evaluate(el => el.inert), true);
