@@ -2685,16 +2685,30 @@ html .cds-palette-search .cds-palette-input:focus-visible {
    exact geometry (that is the parity baseline).
    ========================================================================== */
 
+/* A 0.5px `border` is not a hairline: Chrome rounds sub-pixel border widths up
+   to 1px and paints a hard ring, which on the composer read as a heavy outline
+   sitting inside the pi yolo/focus rules. The ring is drawn as an inset
+   box-shadow instead — a 0.5px shadow keeps its sub-pixel weight — and the
+   border itself is removed so the two cannot stack.
+   The yolo and focus states restate the same shadow with their own colour
+   rather than a border, so they keep working through the same mechanism. */
 :is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-shell {
   border-radius: var(--cds-radius-composer, 20px);
-  border: 0.5px solid var(--cds-hairline-1, var(--border));
-  box-shadow: var(--cds-shadow-composer, none);
-  transition: border-color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
-              box-shadow var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
+  border: none;
+  /* Resting ring is neutral. It used to resolve to `--cds-clay`, i.e. the
+     accent — so the composer wore a permanent tinted outline that read as a
+     stray hard border rather than a hairline. Accent is for focus only. */
+  box-shadow:
+    inset 0 0 0 0.5px var(--cds-hairline-1, var(--border)),
+    0 4px 20px color-mix(in srgb, var(--bg) 55%, transparent);
+  transition: box-shadow var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
+/* Focus is the one place the accent appears, and it is a 1px inner ring rather
+   than a 0.5px one so it reads as a deliberate state change. */
 :is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-shell:focus-within {
-  border-color: color-mix(in srgb, var(--cds-clay, var(--accent)) 55%, var(--border));
-  box-shadow: var(--cds-shadow-composer-focus, none);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--cds-clay, var(--accent)) 55%, transparent),
+    0 6px 24px color-mix(in srgb, var(--cds-clay, var(--accent)) 14%, transparent);
 }
 
 /* Lead / spacer / trail. */
@@ -2957,5 +2971,34 @@ body:has(.settings-page-overlay) .app-title-bar > div:last-child {
   font-size: var(--text-ui-xs);
   font-weight: 600;
   color: var(--cds-text-muted, var(--text-muted));
+}
+
+
+
+/* ==========================================================================
+   Yolo (unrestricted approval) composer ring
+   ==========================================================================
+   pi paints a 1px red border plus a red glow. The border is the problem: it
+   lands inside the 20px composer radius as a hard ring next to the CDS inset
+   hairline, so the shape reads as two competing outlines. This restates the
+   warning through the same inset-shadow mechanism the rest of the Claude
+   composer uses, keeping the signal and dropping the double edge.
+   ========================================================================== */
+/* Yolo (unrestricted approval) keeps a ring because the state is worth seeing,
+   but a 1px inset plus a 3px halo read as a heavy double outline on a 20px
+   radius composer. One 1px inner ring at low alpha carries the same warning
+   without competing with the hairline the rest of the composer uses. */
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-shell.is-yolo,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-shell.is-yolo:hover {
+  border: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--status-error) 32%, transparent),
+    0 4px 20px color-mix(in srgb, var(--bg) 55%, transparent);
+}
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-shell.is-yolo:focus-within {
+  border: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--status-error) 48%, transparent),
+    0 6px 24px color-mix(in srgb, var(--status-error) 10%, transparent);
 }
 
