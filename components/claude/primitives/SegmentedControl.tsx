@@ -18,7 +18,7 @@
  * carried over: the shell already sizes these tracks.
  */
 
-import type { CSSProperties } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 import type { SegmentedSlotProps } from "@/components/ui-kit/types";
 
@@ -34,13 +34,48 @@ export function CdsSegmented({
 }: SegmentedSlotProps) {
   const found = items.findIndex((item) => item.id === value);
   const index = found >= 0 ? found : 0;
-  const count = Math.max(items.length, 1);
 
-  const indicator: CSSProperties = {
-    left: `calc(1px + ${index} * (100% - 2px) / ${count})`,
-    width: `calc((100% - 2px) / ${count})`,
-    transition: "left var(--cds-dur-snap) var(--cds-ease-snap), width var(--cds-dur-snap) var(--cds-ease-snap)",
-  };
+  // The indicator has to measure the active button, not divide the track.
+  // The upstream formula (`index * (100% - 2px) / count`) assumes every chip is
+  // an equal share, which stopped being true when the labels were allowed their
+  // intrinsic width — the result was a pill sitting under the wrong chip, drawn
+  // over "Claude" while "原版 Pi" was the pressed option.
+  const trackRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [indicator, setIndicator] = useState<CSSProperties>({
+    left: 1,
+    width: 0,
+    opacity: 0,
+  });
+
+  useLayoutEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    const measure = () => {
+      const button = buttonRefs.current[index];
+      if (!button) return;
+      // offsetLeft/offsetWidth are relative to the padded track and are not
+      // affected by the track's own scroll offset, which a bounding-rect
+      // subtraction is. A first layout pass can report 0 while the modal is
+      // still mounting, so the observer below re-runs this once it has a box.
+      setIndicator({
+        left: button.offsetLeft,
+        width: button.offsetWidth,
+        opacity: 1,
+        transition:
+          "left var(--cds-dur-snap) var(--cds-ease-snap), width var(--cds-dur-snap) var(--cds-ease-snap)",
+      });
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(track);
+    for (const button of buttonRefs.current) {
+      if (button) observer.observe(button);
+    }
+    return () => observer.disconnect();
+  }, [index, items.length]);
 
   return (
     <div
@@ -48,6 +83,7 @@ export function CdsSegmented({
       data-segmented=""
       role="group"
       aria-label={ariaLabel}
+      ref={trackRef}
       className={[
         "relative inline-flex max-w-full select-none items-stretch overflow-x-auto rounded-full p-px transition-colors [scrollbar-width:none]",
         "[&::-webkit-scrollbar]:hidden",
@@ -61,7 +97,10 @@ export function CdsSegmented({
       <div
         aria-hidden="true"
         data-cds-part="indicator"
-        className="pointer-events-none absolute bottom-px top-px rounded-full bg-[var(--cds-surface-1)] shadow-[0_0_0_0.5px_var(--cds-hairline-2),0_1px_2px_var(--cds-shadow-tint)]"
+        // The thumb must read as *raised*: a surface darker than the track reads
+        // as a hole. surface-3 is the lightest step, which is what makes the
+        // selected chip look lifted instead of carved out.
+        className="pointer-events-none absolute top-px bottom-px rounded-full bg-[var(--cds-surface-3)] shadow-[0_0_0_0.5px_var(--cds-hairline-2)]"
         style={indicator}
       />
 
@@ -71,6 +110,9 @@ export function CdsSegmented({
           <button
             key={item.id}
             type="button"
+            ref={(node) => {
+              buttonRefs.current[idx] = node;
+            }}
             aria-pressed={active}
             data-active={active ? "" : undefined}
             onClick={() => onChange(item.id)}
