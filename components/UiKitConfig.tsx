@@ -113,10 +113,15 @@ export function UiKitConfig() {
               <span className="text-sm text-text">{t("uiKit.title")}</span>
               <span className="text-xs text-text-muted">{t("uiKit.switchInTitleBar")}</span>
             </div>
-            <div className="flex items-center" style={{ gap: 8 }}>
+            <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap", minWidth: 0 }}>
               <span
                 className="text-xs"
                 style={{
+                  // The badge must never be squeezed: on a phone the description
+                  // beside it is long enough to compress a shrinkable pill into
+                  // an ellipsis.
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
                   padding: "2px 8px",
                   borderRadius: 999,
                   background: "var(--cds-fill-secondary, var(--bg-hover))",
