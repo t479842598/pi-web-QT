@@ -54,6 +54,17 @@ function migrateLegacyTheme(): string | null {
 }
 
 /** Read the theme — single-key model: both modes share it. */
+/**
+ * The theme a fresh install starts on.
+ *
+ * `claude` is the default because the app now ships two UI kits and the CDS
+ * palette is the one the Claude kit is designed against — starting a first-time
+ * user on any other palette makes the Claude kit look like a skin over someone
+ * else's colours. Every other theme stays selectable: this is a starting point,
+ * not a restriction.
+ */
+export const DEFAULT_THEME = "claude";
+
 function readThemeForMode(): string {
   try {
     const v = localStorage.getItem(KEY_THEME);
@@ -61,7 +72,7 @@ function readThemeForMode(): string {
     const migrated = migrateLegacyTheme();
     if (migrated) return migrated;
   } catch {}
-  return "";
+  return DEFAULT_THEME;
 }
 
 /** Write the theme for a resolved mode — single-key model: both modes share it. */
