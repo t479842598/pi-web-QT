@@ -460,6 +460,11 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
         return (
           <div
             key={node.index}
+            // Stable hooks for the e2e suite: the markers used to be positioned
+            // purely with inline styles and carried no identifier, so a test had
+            // nothing to target and the old `data-minimap-node-index` selectors
+            // matched nothing at all.
+            data-minimap-node-index={node.index}
             style={{
               position: "absolute",
               top: node.displayTopPx,
@@ -505,6 +510,10 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
         );
         return (
           <div
+            // Hook for the e2e suite. The preview is a read-only text tooltip, not
+            // a list of buttons, so a test can assert its content but must not
+            // expect to click through it.
+            data-minimap-preview-box=""
             style={{
               position: "absolute",
               top: tooltipCenter,
