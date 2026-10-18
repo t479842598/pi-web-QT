@@ -18,6 +18,25 @@
 - 清理 7 个 ESLint 错误（全部来自 `.reasonix/` 下的陈旧整仓副本，已加入 ignore）。
 - 重写 e2e 分页断言以适配虚拟列表。
 
+### 审查修复（发布前全站截图审计）
+- 分段控件的选中指示器改为测量实际按钮，不再用等分公式：按钮恢复内容宽度后，
+  旧公式把药丸画在了错误的选项下方（「原版 Pi」被选中，药丸却盖住「Claude」）。
+- 药丸表面色由 surface-1 改为 surface-3：前者与输入区同为近黑色，选中的 chip
+  看起来像挖了一个洞。
+- 输入框内不再绘制方形焦点框：`--cds-focus-shadow` 首段是 `inset 0 0 0 1px`，
+  而 textarea 的圆角是 0，方框落在 20px 圆角的外壳里，看起来像残留边框。焦点
+  状态统一由外壳的 `:focus-within` 表达。
+- 输入框描边改为 `inset box-shadow`：`border: 0.5px` 会被 Chrome 向上取整成 1px
+  实线；静止态用中性色，accent 只用于聚焦。
+- 「完全访问」模式的警示环由 1px 边框 + 3px 光晕改为单层 1px 内环，避免与外框
+  叠成双重硬边。
+- 弹窗遮罩由 72% 提至 94%，并允许分段控件在窄屏换行、徽章不再被压缩成省略号。
+- 全局 Pi + 局部槽位覆盖成 Claude 时样式全丢：192 条规则原先只认 `html[data-ui-kit]`，
+  现在同时认组件子树自身标记（`.claude-surface-root`，`display: contents` 不产生盒子）。
+- 进程摘要按钮补可访问名（语言包已有 `chat.processDetails`）：读屏软件原先念的是
+  随运行变化的时长，而不是一个开关。
+- minimap 标记与预览框补回 `data-*` 标识，供 e2e 定位。
+
 ### 说明
 - Pi 套件逐字节保持原样，`e2e/baselines/pi-kit.json`（27 快照 / 324 部件）作为回归基线。
 - 侧栏**内部**会话行已加 class 钩子与变量，但 `SessionTreeItem` 深层节点仍是 Pi 几何，见 `docs/adr/0006-ui-kit-two-sets.md`。
