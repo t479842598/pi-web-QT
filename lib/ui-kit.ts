@@ -318,6 +318,13 @@ export function resolveSlotKit(settings: UiKitSettings, slot: SlotId): KitId {
  * Effective settings for a subtree pinned to one kit (the settings page).
  * Pinning wins over every override inside the subtree.
  */
+/**
+ * Settings as they apply inside a pinned subtree (the settings page itself).
+ *
+ * Exported and covered by `ui-kit.test.mjs` because the pinning rule is a
+ * contract, not an implementation detail: whatever the user's kit, scope and
+ * slot overrides say, a pinned subtree resolves to one kit.
+ */
 export function withPinnedKit(settings: UiKitSettings, kit: KitId): UiKitSettings {
   return { kit, scopes: {}, slots: {}, layout: settings.layout, sidebarToggle: settings.sidebarToggle };
 }

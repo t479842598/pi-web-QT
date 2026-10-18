@@ -908,6 +908,12 @@ export function ProcessGroup({
           })}
           className="group/summary flex min-w-0 items-center gap-1.5 text-left text-sm leading-relaxed text-text-muted transition-colors hover:text-text"
           aria-expanded={areaExpanded}
+          // The visible label is a generated summary ("bash 3s"), which makes a
+          // poor accessible name: it changes with the run and never says what
+          // the control does. The locale already carries a label for exactly
+          // this control (`chat.processDetails`), so it becomes the name and the
+          // summary stays the visible text.
+          aria-label={t("chat.processDetails")}
         >
           <span className="truncate">{summary}</span>
           {isStreaming && tokenRate != null && tokenRate > 0 && (

@@ -3001,4 +3001,3 @@ body:has(.settings-page-overlay) .app-title-bar > div:last-child {
     inset 0 0 0 1px color-mix(in srgb, var(--status-error) 48%, transparent),
     0 6px 24px color-mix(in srgb, var(--status-error) 10%, transparent);
 }
-
