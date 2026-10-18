@@ -1,7 +1,7 @@
 /*
  * Claude kit layer.
  *
- * Everything here is scoped to `html[data-ui-kit="claude"]`, so the pi kit is
+ * Everything here is scoped to `:is(html[data-ui-kit="claude"], .claude-surface-root)`, so the pi kit is
  * untouched by construction. No palette value is defined in this file: the
  * surfaces below derive from the active theme's semantic tokens
  * (`--bg`, `--bg-panel`, `--text`, `--accent` …), which is what keeps all 23
@@ -12,7 +12,7 @@
  * the shared substrate they all inherit.
  */
 
-html[data-ui-kit="claude"] {
+:is(html[data-ui-kit="claude"], .claude-surface-root) {
   /* ── Radius matrix (CDS): control 8 · card 12 · bubble 18 · composer 20 ── */
   --cds-radius: 8px;
   --cds-radius-card: 12px;
@@ -85,13 +85,13 @@ html[data-ui-kit="claude"] {
 }
 
 /* Density: the composer chin and settings action rows read these. */
-html[data-ui-kit="claude"][data-ui-kit-layout="compact"] {
+:is(html[data-ui-kit="claude"], .claude-surface-root)[data-ui-kit-layout="compact"] {
   --cds-gap-2: 4px;
   --cds-gap-3: 8px;
   --cds-control-height: 24px;
   --cds-control-height-lg: 28px;
 }
-html[data-ui-kit="claude"][data-ui-kit-layout="comfortable"] {
+:is(html[data-ui-kit="claude"], .claude-surface-root)[data-ui-kit-layout="comfortable"] {
   --cds-gap-2: 8px;
   --cds-gap-3: 14px;
   --cds-control-height: 32px;
@@ -99,57 +99,57 @@ html[data-ui-kit="claude"][data-ui-kit-layout="comfortable"] {
 }
 
 /* ── Composer shell: 20px, single closed ring, glow on focus ── */
-html[data-ui-kit="claude"] .chat-input-shell {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-shell {
   border-radius: var(--cds-radius-composer);
   box-shadow: var(--cds-shadow-composer);
   transition: box-shadow var(--cds-dur-fast) var(--cds-ease-swift),
               border-color var(--cds-dur-fast) var(--cds-ease-swift);
 }
-html[data-ui-kit="claude"] .chat-input-shell:focus-within {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-shell:focus-within {
   box-shadow: var(--cds-shadow-composer-focus);
 }
 
 /* ── Sidebar: surface 1 with a hairline seam instead of a hard border ── */
-html[data-ui-kit="claude"] .sidebar-container {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .sidebar-container {
   border-inline-end: var(--cds-ring-hairline) solid var(--cds-hairline-1);
 }
-html[data-ui-kit="claude"] .sidebar-container.sidebar-closed {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .sidebar-container.sidebar-closed {
   border-inline-end-color: transparent;
 }
 
 /* ── Tabs: pill track, like the CDS segmented control ── */
-html[data-ui-kit="claude"] .tab-bar {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .tab-bar {
   gap: var(--cds-gap-1);
 }
-html[data-ui-kit="claude"] .tab-bar .tab {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .tab-bar .tab {
   border-radius: calc(var(--cds-radius) - 2px);
   transition: background var(--cds-dur-fast) var(--cds-ease-swift);
 }
 
 /* ── Settings cards follow the card radius when rendered inside the kit ── */
-html[data-ui-kit="claude"] .settings-row,
-html[data-ui-kit="claude"] .settings-panel {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .settings-row,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .settings-panel {
   border-radius: var(--cds-radius-card);
 }
 
 /* ── Popovers/menus that still render from the pi tree get the CDS elevation ── */
-html[data-ui-kit="claude"] .chat-input-model-dropdown,
-html[data-ui-kit="claude"] .model-menu,
-html[data-ui-kit="claude"] [role="menu"] {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-model-dropdown,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .model-menu,
+:is(html[data-ui-kit="claude"], .claude-surface-root) [role="menu"] {
   border-radius: var(--cds-radius-card);
   box-shadow: var(--cds-shadow-popover);
   border: var(--cds-ring-hairline) solid var(--cds-hairline-1);
 }
 
 /* ── Focus ring: clay, hairline-thin, never a default browser outline ── */
-html[data-ui-kit="claude"] :where(button, [role="button"], input, textarea, select):focus-visible {
+:is(html[data-ui-kit="claude"], .claude-surface-root) :where(button, [role="button"], input, textarea, select):focus-visible {
   outline: none;
   box-shadow: var(--cds-focus-shadow);
 }
 
 /* ── Reduced motion wins over every CDS transition ── */
 @media (prefers-reduced-motion: reduce) {
-  html[data-ui-kit="claude"] * {
+  :is(html[data-ui-kit="claude"], .claude-surface-root) * {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

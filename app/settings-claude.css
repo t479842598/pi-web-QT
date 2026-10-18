@@ -9,7 +9,7 @@
  * `!important` is needed: this file is imported after `settings.css`.
  *
  * The settings page is pinned to the Claude kit, so these rules read the
- * `:root`-level `--cds-*` tokens rather than the `html[data-ui-kit="claude"]`
+ * `:root`-level `--cds-*` tokens rather than the `:is(html[data-ui-kit="claude"], .claude-surface-root)`
  * overrides — the user's global kit must not restyle this page. Tokens that only
  * exist inside the Claude dataset (`--cds-gap-*`, `--cds-control-height`) are
  * read with a px fallback for the same reason.
@@ -1720,10 +1720,10 @@
 
 /* The palette's input lives inside the pill that owns the focus ring, and that
    pill already draws the ring through :focus-within — without this reset the
-   input paints a second one inside it. The `html[data-ui-kit="claude"]` prefix
+   input paints a second one inside it. The `:is(html[data-ui-kit="claude"], .claude-surface-root)` prefix
    is what makes it win: the kit layer paints every focus-visible control with a
    `:where(…)` selector at (0,2,1), one point above a two-class rule. */
-html[data-ui-kit="claude"] .cds-palette-search .cds-palette-input:focus-visible,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .cds-palette-search .cds-palette-input:focus-visible,
 html .cds-palette-search .cds-palette-input:focus-visible {
   outline: none;
   box-shadow: none;
@@ -1795,7 +1795,7 @@ html .cds-palette-search .cds-palette-input:focus-visible {
  *
  * Unlayered and imported last, so plain source order beats both the Tailwind
  * utilities in @layer utilities and the unlayered rules in globals.css. Still
- * scoped to html[data-ui-kit="claude"]: the pi kit must stay pixel-identical,
+ * scoped to :is(html[data-ui-kit="claude"], .claude-surface-root): the pi kit must stay pixel-identical,
  * and every selector below is either a new class owned by
  * components/claude/shell/* or an existing class that is only re-shaped inside
  * the Claude dataset.
@@ -1807,7 +1807,7 @@ html .cds-palette-search .cds-palette-input:focus-visible {
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Title bar ────────────────────────────────────────────────────────────── */
-html[data-ui-kit="claude"] .claude-title-bar {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-bar {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1819,15 +1819,15 @@ html[data-ui-kit="claude"] .claude-title-bar {
   position: relative;
   z-index: 600;
 }
-html[data-ui-kit="claude"] .claude-title-bar-zone {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-bar-zone {
   display: flex;
   align-items: center;
   gap: 2px;
   height: 100%;
   min-width: 0;
 }
-html[data-ui-kit="claude"] .claude-title-bar-left { flex: 0 1 auto; position: relative; z-index: 1; }
-html[data-ui-kit="claude"] .claude-title-bar-center {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-bar-left { flex: 0 1 auto; position: relative; z-index: 1; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-bar-center {
   flex: 1 1 auto;
   position: relative;
   justify-content: flex-start;
@@ -1835,7 +1835,7 @@ html[data-ui-kit="claude"] .claude-title-bar-center {
   overflow: visible;
   user-select: none;
 }
-html[data-ui-kit="claude"] .claude-title-bar-right {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-bar-right {
   flex: 0 0 auto;
   margin-left: auto;
   justify-content: flex-end;
@@ -1845,7 +1845,7 @@ html[data-ui-kit="claude"] .claude-title-bar-right {
 }
 
 /* One icon-button shape for the whole bar: 28px, 8px radius, ghost hover. */
-html[data-ui-kit="claude"] .claude-icon-button {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1861,26 +1861,26 @@ html[data-ui-kit="claude"] .claude-icon-button {
   transition: background var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .claude-icon-button:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-icon-button:hover {
   background: var(--cds-fill-ghost-hover, var(--bg-hover));
   color: var(--cds-text-primary, var(--text));
 }
-html[data-ui-kit="claude"] .claude-icon-button.is-active {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-icon-button.is-active {
   background: var(--cds-fill-secondary, var(--bg-hover));
   color: var(--cds-text-primary, var(--text));
 }
-html[data-ui-kit="claude"] .claude-icon-button[aria-pressed="true"] {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-icon-button[aria-pressed="true"] {
   color: var(--cds-text-primary, var(--text));
 }
 
-html[data-ui-kit="claude"] .claude-title-bar-seam {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-bar-seam {
   width: 0.5px;
   height: 16px;
   flex-shrink: 0;
   margin-inline: 4px;
   background: var(--cds-hairline-2, var(--border));
 }
-html[data-ui-kit="claude"] .claude-workspace-host {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-workspace-host {
   flex: 0 1 auto;
   min-width: 0;
   max-width: min(56vw, 760px);
@@ -1889,7 +1889,7 @@ html[data-ui-kit="claude"] .claude-workspace-host {
   align-items: center;
   padding-inline: 2px 4px;
 }
-html[data-ui-kit="claude"] .claude-title-right-host {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-right-host {
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1897,7 +1897,7 @@ html[data-ui-kit="claude"] .claude-title-right-host {
   position: relative;
   z-index: 2;
 }
-html[data-ui-kit="claude"] .claude-session-title {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-title {
   display: block;
   flex: 0 1 auto;
   min-width: 0;
@@ -1915,18 +1915,18 @@ html[data-ui-kit="claude"] .claude-session-title {
   cursor: pointer;
   transition: background var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .claude-session-title:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-title:hover {
   background: var(--cds-fill-ghost-hover, var(--bg-hover));
 }
 
 /* Top panels: one CDS popover surface instead of three ad-hoc boxes. */
-html[data-ui-kit="claude"] .claude-top-panel {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-top-panel {
   position: fixed;
   z-index: 500;
   max-height: calc(100dvh - 64px);
   overflow-y: auto;
 }
-html[data-ui-kit="claude"] .claude-top-panel-surface {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-top-panel-surface {
   background: var(--cds-surface-popover, var(--bg-panel));
   border: 0.5px solid var(--cds-hairline-2, var(--border));
   border-top: 0;
@@ -1934,7 +1934,7 @@ html[data-ui-kit="claude"] .claude-top-panel-surface {
   box-shadow: var(--cds-shadow-popover);
   padding: 12px 16px;
 }
-html[data-ui-kit="claude"] .claude-top-panel-system {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-top-panel-system {
   max-height: min(600px, 75vh);
   overflow-y: auto;
   color: var(--cds-text-secondary, var(--text-muted));
@@ -1943,12 +1943,12 @@ html[data-ui-kit="claude"] .claude-top-panel-system {
   line-height: 1.6;
   white-space: pre-wrap;
 }
-html[data-ui-kit="claude"] .claude-top-panel-empty {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-top-panel-empty {
   color: var(--cds-text-muted, var(--text-dim));
   font-size: var(--text-ui-sm);
   font-style: italic;
 }
-html[data-ui-kit="claude"] .claude-info-grid {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-info-grid {
   display: grid;
   grid-template-columns: minmax(320px, 1.7fr) minmax(140px, 0.55fr) minmax(190px, 0.75fr);
   gap: 24px;
@@ -1957,10 +1957,10 @@ html[data-ui-kit="claude"] .claude-info-grid {
   line-height: 1.5;
 }
 @media (max-width: 900px) {
-  html[data-ui-kit="claude"] .claude-info-grid { grid-template-columns: 1fr; gap: 16px; }
+  :is(html[data-ui-kit="claude"], .claude-surface-root) .claude-info-grid { grid-template-columns: 1fr; gap: 16px; }
 }
-html[data-ui-kit="claude"] .claude-info-section { min-width: 0; }
-html[data-ui-kit="claude"] .claude-info-heading {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-info-section { min-width: 0; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-info-heading {
   margin: 0 0 6px;
   color: var(--cds-text-primary, var(--text));
   font-size: var(--text-ui-xs);
@@ -1968,19 +1968,19 @@ html[data-ui-kit="claude"] .claude-info-heading {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-html[data-ui-kit="claude"] .claude-info-rows {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-info-rows {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   column-gap: 12px;
   row-gap: 6px;
   align-items: start;
 }
-html[data-ui-kit="claude"] .claude-info-rows.is-compact { grid-template-columns: max-content max-content; column-gap: 14px; }
-html[data-ui-kit="claude"] .claude-info-rows.is-right .claude-info-value { justify-self: end; }
-html[data-ui-kit="claude"] .claude-info-label { color: var(--cds-text-muted, var(--text-dim)); white-space: nowrap; }
-html[data-ui-kit="claude"] .claude-info-value { color: var(--cds-text-secondary, var(--text-muted)); min-width: 0; overflow-wrap: anywhere; }
-html[data-ui-kit="claude"] .claude-info-action { display: flex; }
-html[data-ui-kit="claude"] .claude-copy-button {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-info-rows.is-compact { grid-template-columns: max-content max-content; column-gap: 14px; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-info-rows.is-right .claude-info-value { justify-self: end; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-info-label { color: var(--cds-text-muted, var(--text-dim)); white-space: nowrap; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-info-value { color: var(--cds-text-secondary, var(--text-muted)); min-width: 0; overflow-wrap: anywhere; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-info-action { display: flex; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-copy-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1995,13 +1995,13 @@ html[data-ui-kit="claude"] .claude-copy-button {
   transition: color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               border-color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .claude-copy-button:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-copy-button:hover {
   color: var(--cds-clay, var(--accent));
   border-color: var(--cds-clay, var(--accent));
 }
 
 /* Mobile title modal. */
-html[data-ui-kit="claude"] .claude-title-modal-veil {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-modal-veil {
   position: fixed;
   inset: 0;
   z-index: 3000;
@@ -2013,7 +2013,7 @@ html[data-ui-kit="claude"] .claude-title-modal-veil {
   backdrop-filter: blur(4px);
   cursor: pointer;
 }
-html[data-ui-kit="claude"] .claude-title-modal {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-modal {
   position: relative;
   max-width: min(560px, calc(100vw - 32px));
   max-height: min(60vh, 400px);
@@ -2030,7 +2030,7 @@ html[data-ui-kit="claude"] .claude-title-modal {
   word-break: break-word;
   cursor: default;
 }
-html[data-ui-kit="claude"] .claude-title-modal-close {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-modal-close {
   position: sticky;
   top: 0;
   float: right;
@@ -2047,13 +2047,13 @@ html[data-ui-kit="claude"] .claude-title-modal-close {
   color: var(--cds-text-muted, var(--text-dim));
   cursor: pointer;
 }
-html[data-ui-kit="claude"] .claude-title-modal-close:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-title-modal-close:hover {
   background: var(--cds-fill-ghost-hover, var(--bg-hover));
   color: var(--cds-text-primary, var(--text));
 }
 
 /* ── Sidebar frame ───────────────────────────────────────────────────────── */
-html[data-ui-kit="claude"] .claude-sidebar {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -2063,8 +2063,8 @@ html[data-ui-kit="claude"] .claude-sidebar {
 /* The rail is the frame's own top strip, in flow: absolutely positioning it
    over the pi header would cover the new-session / refresh controls, which are
    the top-right cluster there. 30px of reserved height is the honest price. */
-html[data-ui-kit="claude"] .claude-sidebar { position: relative; }
-html[data-ui-kit="claude"] .claude-sidebar-rail {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar { position: relative; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar-rail {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -2073,14 +2073,14 @@ html[data-ui-kit="claude"] .claude-sidebar-rail {
   height: 30px;
   padding-inline: 6px;
 }
-html[data-ui-kit="claude"] .claude-sidebar-body {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar-body {
   flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-html[data-ui-kit="claude"] .claude-sidebar-rail-button {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar-rail-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2096,13 +2096,13 @@ html[data-ui-kit="claude"] .claude-sidebar-rail-button {
   transition: background var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .claude-sidebar-rail-button:hover:not(:disabled) {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar-rail-button:hover:not(:disabled) {
   background: var(--cds-fill-ghost-hover, var(--bg-hover));
   color: var(--cds-text-primary, var(--text));
 }
-html[data-ui-kit="claude"] .claude-sidebar-rail-button:disabled { opacity: 0.4; cursor: default; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar-rail-button:disabled { opacity: 0.4; cursor: default; }
 
-html[data-ui-kit="claude"] .claude-sidebar-footer {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar-footer {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -2112,8 +2112,8 @@ html[data-ui-kit="claude"] .claude-sidebar-footer {
   border-top: 0.5px solid var(--cds-hairline-1, var(--border));
   background: var(--cds-surface-1, var(--bg-secondary));
 }
-html[data-ui-kit="claude"] .claude-sidebar-footer-actions { display: flex; align-items: center; gap: 2px; }
-html[data-ui-kit="claude"] .claude-sidebar-version {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar-footer-actions { display: flex; align-items: center; gap: 2px; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar-version {
   margin-left: auto;
   padding-inline: 6px;
   color: var(--cds-text-faint, var(--text-dim));
@@ -2125,11 +2125,11 @@ html[data-ui-kit="claude"] .claude-sidebar-version {
    is not shown twice inside the Claude shell. AppShell wraps the whole sidebar
    content in .sidebar-container, so the frame sits *inside* it — the nesting
    below is the real one. */
-html[data-ui-kit="claude"] .sidebar-container .claude-sidebar .sidebar-utility-bar { display: none; }
-html[data-ui-kit="claude"] .sidebar-container .claude-sidebar { flex: 1 1 auto; min-height: 0; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .sidebar-container .claude-sidebar .sidebar-utility-bar { display: none; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .sidebar-container .claude-sidebar { flex: 1 1 auto; min-height: 0; }
 
 /* ── Session row ─────────────────────────────────────────────────────────── */
-html[data-ui-kit="claude"] .claude-session-row {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2144,59 +2144,59 @@ html[data-ui-kit="claude"] .claude-session-row {
   transition: background var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .claude-session-row:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-row:hover {
   background: var(--cds-fill-ghost-hover, var(--bg-hover));
   color: var(--cds-text-primary, var(--text));
 }
-html[data-ui-kit="claude"] .claude-session-row[data-active] {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-row[data-active] {
   background: var(--cds-fill-secondary, var(--bg-hover));
   color: var(--cds-text-primary, var(--text));
   box-shadow: inset 2px 0 0 var(--cds-clay, var(--accent));
 }
-html[data-ui-kit="claude"] .claude-session-dot {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-dot {
   width: 6px;
   height: 6px;
   flex-shrink: 0;
   border-radius: 999px;
   background: transparent;
 }
-html[data-ui-kit="claude"] .claude-session-dot.is-running {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-dot.is-running {
   background: var(--cds-clay, var(--accent));
   animation: claude-session-dot-pulse 1.6s var(--cds-ease-pulse, ease-in-out) infinite;
 }
-html[data-ui-kit="claude"] .claude-session-dot.is-unread {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-dot.is-unread {
   background: var(--cds-text-faint, var(--text-dim));
 }
 @keyframes claude-session-dot-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
-html[data-ui-kit="claude"] .claude-session-body {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-body {
   display: flex;
   flex-direction: column;
   gap: 1px;
   flex: 1 1 auto;
   min-width: 0;
 }
-html[data-ui-kit="claude"] .claude-row-title {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-row-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-html[data-ui-kit="claude"] .claude-session-subtitle {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-subtitle {
   color: var(--cds-text-muted, var(--text-dim));
   font-size: var(--text-ui-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-html[data-ui-kit="claude"] .claude-session-meta {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-meta {
   flex-shrink: 0;
   color: var(--cds-text-faint, var(--text-dim));
   font-size: var(--text-ui-xs);
   font-variant-numeric: tabular-nums;
 }
-html[data-ui-kit="claude"] .claude-session-actions {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-actions {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -2204,11 +2204,11 @@ html[data-ui-kit="claude"] .claude-session-actions {
   opacity: 0;
   transition: opacity var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .claude-session-row:hover .claude-session-actions,
-html[data-ui-kit="claude"] .claude-session-row:focus-within .claude-session-actions { opacity: 1; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-row:hover .claude-session-actions,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-row:focus-within .claude-session-actions { opacity: 1; }
 
 /* ── Tab strip ───────────────────────────────────────────────────────────── */
-html[data-ui-kit="claude"] .claude-tab-bar {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab-bar {
   display: flex;
   align-items: center;
   gap: var(--cds-gap-1, 4px);
@@ -2219,8 +2219,8 @@ html[data-ui-kit="claude"] .claude-tab-bar {
   overflow-y: hidden;
   scrollbar-width: none;
 }
-html[data-ui-kit="claude"] .claude-tab-bar::-webkit-scrollbar { display: none; }
-html[data-ui-kit="claude"] .claude-tab {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab-bar::-webkit-scrollbar { display: none; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab {
   position: relative;
   display: flex;
   align-items: center;
@@ -2241,27 +2241,27 @@ html[data-ui-kit="claude"] .claude-tab {
               color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               border-color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .claude-tab:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab:hover {
   background: var(--cds-fill-ghost-hover, var(--bg-hover));
   color: var(--cds-text-primary, var(--text));
 }
-html[data-ui-kit="claude"] .claude-tab[aria-selected="true"] {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab[aria-selected="true"] {
   background: var(--cds-fill-secondary, var(--bg-hover));
   border-color: var(--cds-hairline-1, var(--border));
   color: var(--cds-text-primary, var(--text));
   font-weight: 500;
 }
-html[data-ui-kit="claude"] .claude-tab-icon { display: flex; align-items: center; flex-shrink: 0; opacity: 0.72; }
-html[data-ui-kit="claude"] .claude-tab[aria-selected="true"] .claude-tab-icon,
-html[data-ui-kit="claude"] .claude-tab:hover .claude-tab-icon { opacity: 1; }
-html[data-ui-kit="claude"] .claude-tab-label {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab-icon { display: flex; align-items: center; flex-shrink: 0; opacity: 0.72; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab[aria-selected="true"] .claude-tab-icon,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab:hover .claude-tab-icon { opacity: 1; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab-label {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-html[data-ui-kit="claude"] .claude-tab-close {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2278,33 +2278,33 @@ html[data-ui-kit="claude"] .claude-tab-close {
   transition: opacity var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               background var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .claude-tab:hover .claude-tab-close,
-html[data-ui-kit="claude"] .claude-tab:focus-within .claude-tab-close { opacity: 1; }
-html[data-ui-kit="claude"] .claude-tab-close:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab:hover .claude-tab-close,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab:focus-within .claude-tab-close { opacity: 1; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab-close:hover {
   background: var(--cds-fill-secondary-hover, var(--bg-selected));
   color: var(--cds-text-primary, var(--text));
 }
-html[data-ui-kit="claude"] .claude-tab-close:disabled { opacity: 0.35; cursor: default; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab-close:disabled { opacity: 0.35; cursor: default; }
 @media (pointer: coarse) {
-  html[data-ui-kit="claude"] .claude-tab-close { width: 22px; height: 22px; opacity: 1; }
-  html[data-ui-kit="claude"] .claude-tab { min-width: 0; max-width: 46vw; }
+  :is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab-close { width: 22px; height: 22px; opacity: 1; }
+  :is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab { min-width: 0; max-width: 46vw; }
 }
 
 /* ── Composer frame ──────────────────────────────────────────────────────── */
-html[data-ui-kit="claude"] .claude-composer {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer {
   display: flex;
   flex-direction: column;
   gap: var(--cds-gap-2, 6px);
   min-width: 0;
 }
-html[data-ui-kit="claude"] .claude-composer-status {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-status {
   display: flex;
   flex-direction: column;
   gap: var(--cds-gap-2, 6px);
 }
 
 /* The four slots: editor on top, chin (auto / 1fr / auto) below, footer last. */
-html[data-ui-kit="claude"] .claude-composer-shell {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-shell {
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -2316,20 +2316,20 @@ html[data-ui-kit="claude"] .claude-composer-shell {
   transition: box-shadow var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               border-color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .claude-composer-shell:focus-within {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-shell:focus-within {
   box-shadow: var(--cds-shadow-composer-focus);
 }
-html[data-ui-kit="claude"] .claude-composer-shell.is-streaming {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-shell.is-streaming {
   box-shadow: var(--cds-shadow-composer);
 }
-html[data-ui-kit="claude"] .claude-composer-shell.is-danger {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-shell.is-danger {
   border-color: color-mix(in srgb, var(--status-error) 55%, var(--border));
 }
-html[data-ui-kit="claude"] .claude-composer-editor {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-editor {
   min-width: 0;
   padding: var(--cds-gap-3, 10px) var(--cds-gap-3, 10px) var(--cds-gap-2, 6px);
 }
-html[data-ui-kit="claude"] .claude-composer-chin {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-chin {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -2337,13 +2337,13 @@ html[data-ui-kit="claude"] .claude-composer-chin {
   min-height: var(--cds-control-height, 28px);
   padding: 0 var(--cds-gap-2, 6px) var(--cds-gap-2, 6px);
 }
-html[data-ui-kit="claude"] .claude-composer-left {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-left {
   display: flex;
   align-items: center;
   gap: var(--cds-gap-1, 4px);
   min-width: 0;
 }
-html[data-ui-kit="claude"] .claude-composer-center {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-center {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2351,34 +2351,34 @@ html[data-ui-kit="claude"] .claude-composer-center {
   min-width: 0;
   overflow: hidden;
 }
-html[data-ui-kit="claude"] .claude-composer-right {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-right {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: var(--cds-gap-1, 4px);
   min-width: 0;
 }
-html[data-ui-kit="claude"] .claude-composer-overflow {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-overflow {
   display: flex;
   align-items: center;
   gap: var(--cds-gap-1, 4px);
 }
-html[data-ui-kit="claude"] .claude-composer-footer {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-composer-footer {
   padding: 0 var(--cds-gap-3, 10px) var(--cds-gap-2, 6px);
   color: var(--cds-text-muted, var(--text-dim));
   font-size: var(--text-ui-xs);
 }
 
 /* The pi composer keeps its own markup; only its geometry is re-shaped. */
-html[data-ui-kit="claude"] .chat-input-shell {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-shell {
   width: 100%;
   margin-left: 0;
 }
-html[data-ui-kit="claude"] .chat-input-editor-row {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-editor-row {
   gap: var(--cds-gap-2, 6px);
   padding: var(--cds-gap-3, 10px) var(--cds-gap-3, 10px) var(--cds-gap-2, 6px);
 }
-html[data-ui-kit="claude"] .chat-input-textarea {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-textarea {
   line-height: 1.6;
 }
 
@@ -2396,32 +2396,32 @@ html[data-ui-kit="claude"] .chat-input-textarea {
  * The grid itself lives in ClaudeComposerChrome, which owns its own DOM and
  * needs no !important. This block keeps the pi composer readable until the
  * registry swaps the slot in. */
-html[data-ui-kit="claude"] .chat-input-toolbar {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar {
   min-height: 0;
   padding: 0 var(--cds-gap-2, 6px) var(--cds-gap-2, 6px);
 }
-html[data-ui-kit="claude"] .chat-input-toolbar-attach { order: 0; }
-html[data-ui-kit="claude"] .chat-input-toolbar-left { order: 1; }
-html[data-ui-kit="claude"] .chat-input-toolbar-spacer { order: 2; }
-html[data-ui-kit="claude"] .chat-input-toolbar-controls { order: 3; }
-html[data-ui-kit="claude"] .chat-input-toolbar-model { order: 0; }
-html[data-ui-kit="claude"] .chat-input-toolbar-thinking { order: 1; }
-html[data-ui-kit="claude"] .chat-input-toolbar-tools { order: 2; }
-html[data-ui-kit="claude"] .chat-input-send,
-html[data-ui-kit="claude"] .chat-input-stop { order: 3; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-attach { order: 0; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-left { order: 1; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-spacer { order: 2; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-controls { order: 3; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-model { order: 0; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-thinking { order: 1; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-tools { order: 2; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-send,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-stop { order: 3; }
 
 @media (max-width: 639px) {
   /* Attach, mode, model, thinking, send. The tool preset is the one control
      that goes: it is the least-reached of the five and the row has no room.
      A real overflow menu would need JSX inside ChatInput, which this wave
      may not touch — the composer chrome supplies the slot for it instead. */
-  html[data-ui-kit="claude"] .chat-input-toolbar-tools { display: none; }
+  :is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-tools { display: none; }
 }
 
 /* ── Model switcher ──────────────────────────────────────────────────────── */
-html[data-ui-kit="claude"] .claude-model-switcher { position: relative; min-width: 0; }
-html[data-ui-kit="claude"] .claude-model-switcher.is-field { width: 100%; }
-html[data-ui-kit="claude"] .claude-model-trigger {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-switcher { position: relative; min-width: 0; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-switcher.is-field { width: 100%; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2439,23 +2439,23 @@ html[data-ui-kit="claude"] .claude-model-trigger {
               color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               border-color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .claude-model-trigger:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-trigger:hover {
   background: var(--cds-fill-ghost-hover, var(--bg-hover));
   border-color: var(--cds-hairline-1, var(--border));
   color: var(--cds-text-primary, var(--text));
 }
-html[data-ui-kit="claude"] .claude-model-switcher.is-field .claude-model-trigger {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-switcher.is-field .claude-model-trigger {
   width: 100%;
   max-width: none;
   border-color: var(--cds-hairline-2, var(--border));
   background: var(--cds-surface-1, var(--bg-panel));
 }
-html[data-ui-kit="claude"] .claude-model-switcher.is-disabled .claude-model-trigger {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-switcher.is-disabled .claude-model-trigger {
   opacity: 0.5;
   cursor: not-allowed;
 }
-html[data-ui-kit="claude"] .claude-model-glyph { display: flex; flex-shrink: 0; color: var(--cds-text-muted, var(--text-dim)); }
-html[data-ui-kit="claude"] .claude-model-name {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-glyph { display: flex; flex-shrink: 0; color: var(--cds-text-muted, var(--text-dim)); }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-name {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -2463,8 +2463,8 @@ html[data-ui-kit="claude"] .claude-model-name {
   white-space: nowrap;
   text-align: left;
 }
-html[data-ui-kit="claude"] .claude-model-caret { display: flex; flex-shrink: 0; color: var(--cds-text-muted, var(--text-dim)); }
-html[data-ui-kit="claude"] .claude-model-panel {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-caret { display: flex; flex-shrink: 0; color: var(--cds-text-muted, var(--text-dim)); }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-panel {
   position: fixed;
   z-index: var(--z-popover, 500);
   display: flex;
@@ -2475,12 +2475,12 @@ html[data-ui-kit="claude"] .claude-model-panel {
   background: var(--cds-surface-popover, var(--bg-panel));
   box-shadow: var(--cds-shadow-popover);
 }
-html[data-ui-kit="claude"] .claude-model-filter {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-filter {
   flex-shrink: 0;
   padding: 6px 8px;
   border-bottom: 0.5px solid var(--cds-hairline-1, var(--border));
 }
-html[data-ui-kit="claude"] .claude-model-filter input {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-filter input {
   display: block;
   width: 100%;
   min-width: 220px;
@@ -2494,13 +2494,13 @@ html[data-ui-kit="claude"] .claude-model-filter input {
   font-size: var(--text-ui-xs);
   outline: none;
 }
-html[data-ui-kit="claude"] .claude-model-list { min-height: 0; overflow-y: auto; padding: 4px; }
-html[data-ui-kit="claude"] .claude-model-group + .claude-model-group {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-list { min-height: 0; overflow-y: auto; padding: 4px; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-group + .claude-model-group {
   margin-top: 4px;
   padding-top: 4px;
   border-top: 0.5px solid var(--cds-hairline-1, var(--border));
 }
-html[data-ui-kit="claude"] .claude-model-provider {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-provider {
   padding: 6px 8px 4px;
   color: var(--cds-text-muted, var(--text-dim));
   font-size: var(--text-ui-xs);
@@ -2508,7 +2508,7 @@ html[data-ui-kit="claude"] .claude-model-provider {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-html[data-ui-kit="claude"] .claude-model-option {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-option {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2523,21 +2523,21 @@ html[data-ui-kit="claude"] .claude-model-option {
   white-space: nowrap;
   cursor: pointer;
 }
-html[data-ui-kit="claude"] .claude-model-option:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-option:hover {
   background: var(--cds-fill-ghost-hover, var(--bg-hover));
   color: var(--cds-text-primary, var(--text));
 }
-html[data-ui-kit="claude"] .claude-model-option[aria-selected="true"] {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-option[aria-selected="true"] {
   background: var(--cds-fill-secondary, var(--bg-hover));
   color: var(--cds-text-primary, var(--text));
   font-weight: 500;
 }
-html[data-ui-kit="claude"] .claude-model-option > span:last-child {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-option > span:last-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-html[data-ui-kit="claude"] .claude-model-mark {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2546,7 +2546,7 @@ html[data-ui-kit="claude"] .claude-model-mark {
   flex-shrink: 0;
   color: var(--cds-clay, var(--accent));
 }
-html[data-ui-kit="claude"] .claude-model-empty {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-model-empty {
   padding: 8px 10px;
   color: var(--cds-text-muted, var(--text-dim));
   font-size: var(--text-ui-sm);
@@ -2554,7 +2554,7 @@ html[data-ui-kit="claude"] .claude-model-empty {
 }
 
 /* ── File viewer card ────────────────────────────────────────────────────── */
-html[data-ui-kit="claude"] .claude-file-viewer {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-file-viewer {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -2562,7 +2562,7 @@ html[data-ui-kit="claude"] .claude-file-viewer {
   padding: 6px;
   background: var(--cds-surface-0, var(--bg));
 }
-html[data-ui-kit="claude"] .claude-file-viewer-card {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-file-viewer-card {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -2573,7 +2573,7 @@ html[data-ui-kit="claude"] .claude-file-viewer-card {
   background: var(--cds-surface-1, var(--bg-panel));
   box-shadow: var(--cds-shadow-sm);
 }
-html[data-ui-kit="claude"] .claude-file-viewer-card > * { min-height: 0; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-file-viewer-card > * { min-height: 0; }
 
 /* ==========================================================================
    W2c — the two places W2b reported as still reading as pi.
@@ -2685,78 +2685,78 @@ html[data-ui-kit="claude"] .claude-file-viewer-card > * { min-height: 0; }
    exact geometry (that is the parity baseline).
    ========================================================================== */
 
-html[data-ui-kit="claude"] .chat-input-shell {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-shell {
   border-radius: var(--cds-radius-composer, 20px);
   border: 0.5px solid var(--cds-hairline-1, var(--border));
   box-shadow: var(--cds-shadow-composer, none);
   transition: border-color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               box-shadow var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .chat-input-shell:focus-within {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-shell:focus-within {
   border-color: color-mix(in srgb, var(--cds-clay, var(--accent)) 55%, var(--border));
   box-shadow: var(--cds-shadow-composer-focus, none);
 }
 
 /* Lead / spacer / trail. */
-html[data-ui-kit="claude"] .chat-input-toolbar {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar {
   gap: var(--cds-gap-2, 6px);
   padding-inline: 10px;
   padding-block: 6px;
   align-items: center;
 }
-html[data-ui-kit="claude"] .chat-input-toolbar-controls {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-controls {
   margin-left: auto;
   gap: var(--cds-gap-2, 6px);
   align-items: center;
 }
-html[data-ui-kit="claude"] .chat-input-toolbar-actions {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-actions {
   gap: var(--cds-gap-1, 4px);
   align-items: center;
 }
 
 /* model → thinking → tools → send, left to right. */
-html[data-ui-kit="claude"] .chat-input-toolbar-model { order: 1; }
-html[data-ui-kit="claude"] .chat-input-toolbar-thinking { order: 2; }
-html[data-ui-kit="claude"] .chat-input-toolbar-tools { order: 3; }
-html[data-ui-kit="claude"] .chat-input-send,
-html[data-ui-kit="claude"] .chat-input-stop { order: 4; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-model { order: 1; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-thinking { order: 2; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-tools { order: 3; }
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-send,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-stop { order: 4; }
 
 /* Control chrome: CDS radius and the density-aware height. The pi rules carry
    `!important` on radius/height, so these only restate the border radius on the
    wrappers we own (buttons inside keep the pi radius, which is 4px and reads as
    a deliberate compact control next to an 8px chip). */
-html[data-ui-kit="claude"] .chat-input-toolbar-model > button,
-html[data-ui-kit="claude"] .chat-input-toolbar-thinking > button,
-html[data-ui-kit="claude"] .chat-input-toolbar-tools > button {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-model > button,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-thinking > button,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-tools > button {
   border-radius: var(--cds-radius, 8px);
   color: var(--cds-text-secondary, var(--text-muted));
   transition: background var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .chat-input-toolbar-model > button:hover,
-html[data-ui-kit="claude"] .chat-input-toolbar-thinking > button:hover,
-html[data-ui-kit="claude"] .chat-input-toolbar-tools > button:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-model > button:hover,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-thinking > button:hover,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-tools > button:hover {
   background: var(--cds-fill-ghost-hover, var(--bg-hover));
   color: var(--cds-text-primary, var(--text));
 }
 
 /* The send control is the one accent-coloured affordance in the chin. */
-html[data-ui-kit="claude"] .chat-input-send {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-send {
   border-radius: var(--cds-radius, 8px);
 }
-html[data-ui-kit="claude"] .chat-input-send:not(:disabled) {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-send:not(:disabled) {
   background: var(--cds-clay, var(--accent));
   color: var(--accent-fg, var(--bg));
 }
-html[data-ui-kit="claude"] .chat-input-send:not(:disabled):hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-send:not(:disabled):hover {
   background: var(--cds-clay-hover, var(--accent-hover));
 }
 
 /* Narrow: the tools preset is the least-used control in the chin, so it is the
    one that folds away first — matching what the CDS chin does. */
 @media (max-width: 640px) {
-  html[data-ui-kit="claude"] .chat-input-toolbar-tools { display: none; }
-  html[data-ui-kit="claude"] .chat-input-toolbar-model > button { max-width: 34vw; }
+  :is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-tools { display: none; }
+  :is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-model > button { max-width: 34vw; }
 }
 
 
@@ -2770,11 +2770,11 @@ html[data-ui-kit="claude"] .chat-input-send:not(:disabled):hover {
    they let the Claude layer restate the surface, radius and focus ring.
    ========================================================================== */
 
-html[data-ui-kit="claude"] .sidebar-search-band {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .sidebar-search-band {
   background: var(--cds-surface-1, var(--bg-secondary));
   padding: 6px 10px 8px;
 }
-html[data-ui-kit="claude"] .sidebar-search-band .sidebar-search-field {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .sidebar-search-band .sidebar-search-field {
   height: 30px;
   border-radius: var(--cds-radius, 8px);
   background: var(--cds-fill-secondary, var(--bg-hover));
@@ -2782,16 +2782,16 @@ html[data-ui-kit="claude"] .sidebar-search-band .sidebar-search-field {
   transition: border-color var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease),
               background var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
 }
-html[data-ui-kit="claude"] .sidebar-search-band .sidebar-search-field:focus-within {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .sidebar-search-band .sidebar-search-field:focus-within {
   border-color: color-mix(in srgb, var(--cds-clay, var(--accent)) 50%, var(--border));
   background: var(--cds-surface-2, var(--bg-card));
 }
-html[data-ui-kit="claude"] .sidebar-search-band input {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .sidebar-search-band input {
   color: var(--cds-text-primary, var(--text));
   font-family: inherit;
   font-size: var(--text-ui-sm);
 }
-html[data-ui-kit="claude"] .sidebar-search-band input::placeholder {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .sidebar-search-band input::placeholder {
   color: var(--cds-text-muted, var(--text-muted));
 }
 
@@ -2811,7 +2811,7 @@ html[data-ui-kit="claude"] .sidebar-search-band input::placeholder {
    the row already had.
    ========================================================================== */
 
-html[data-ui-kit="claude"] .session-row {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-row {
   border-radius: var(--cds-radius, 8px);
   border-left-width: 0;
   /* The pi row draws a 2px accent bar on the left edge; CDS uses a filled
@@ -2824,41 +2824,41 @@ html[data-ui-kit="claude"] .session-row {
 /* The row reads its surface through `--session-row-*`, so setting the variables
    on the sidebar is enough — no `!important`, and the pi kit keeps its own
    values because it never sets them. */
-html[data-ui-kit="claude"] .claude-sidebar {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-sidebar {
   --session-row-bg-selected: var(--cds-fill-secondary, var(--bg-selected));
   --session-row-bg-hover: var(--cds-fill-ghost-hover, var(--bg-hover));
   --session-row-accent: var(--cds-clay, var(--accent));
   --session-row-radius: var(--cds-radius, 8px);
 }
-html[data-ui-kit="claude"] .session-row.is-running .session-row-title,
-html[data-ui-kit="claude"] .session-row.is-running {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-row.is-running .session-row-title,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-row.is-running {
   color: var(--cds-text-primary, var(--text));
 }
-html[data-ui-kit="claude"] .session-row.is-unread {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-row.is-unread {
   font-weight: 500;
 }
 /* Fork indent guide: one hairline per level instead of the pi 2px border. */
-html[data-ui-kit="claude"] .session-row.is-fork > span[aria-hidden="true"] {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-row.is-fork > span[aria-hidden="true"] {
   width: 1px;
   border-radius: 0;
   background: var(--cds-hairline-2, var(--border));
 }
 
 /* Group card: CDS surface, hairline, card radius. */
-html[data-ui-kit="claude"] .session-group {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-group {
   border-radius: var(--cds-radius-card, 12px);
   border: 0.5px solid var(--cds-hairline-1, var(--border));
   background: var(--cds-surface-1, var(--bg-panel));
   margin: 0 8px 8px;
 }
-html[data-ui-kit="claude"] .session-group-header {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-group-header {
   color: var(--cds-text-muted, var(--text-muted));
   font-size: var(--text-ui-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
-html[data-ui-kit="claude"] .session-group-header:hover {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-group-header:hover {
   color: var(--cds-text-primary, var(--text));
 }
 
@@ -2874,7 +2874,7 @@ html[data-ui-kit="claude"] .session-group-header:hover {
    kit never matches the selector so it keeps its own literals.
    ========================================================================== */
 
-html[data-ui-kit="claude"] {
+:is(html[data-ui-kit="claude"], .claude-surface-root) {
   --session-row-bg-selected: var(--cds-fill-secondary, var(--bg-selected));
   --session-row-bg-hover: var(--cds-fill-ghost-hover, var(--bg-hover));
   --session-row-accent: var(--cds-clay, var(--accent));
@@ -2885,13 +2885,13 @@ html[data-ui-kit="claude"] {
 /* A settings row whose right-hand control is a segmented track: the label
    column was taking the space the track needed, so the last chip ellipsised.
    Give the control its intrinsic width and let the label shrink instead. */
-html[data-ui-kit="claude"] .settings-row .settings-segmented.settings-segmented {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .settings-row .settings-segmented.settings-segmented {
   flex: 0 0 auto;
   max-width: 100%;
   overflow-x: auto;
   scrollbar-width: none;
 }
-html[data-ui-kit="claude"] .settings-row .settings-segmented.settings-segmented::-webkit-scrollbar {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .settings-row .settings-segmented.settings-segmented::-webkit-scrollbar {
   display: none;
 }
 
@@ -2925,33 +2925,33 @@ body:has(.settings-page-overlay) .app-title-bar > div:last-child {
 
 /* Roomier rows. pi packs them at 30px; the CDS list uses 34px with a wider
    text inset, which is the single biggest signal that this is a different kit. */
-html[data-ui-kit="claude"] {
+:is(html[data-ui-kit="claude"], .claude-surface-root) {
   /* 50px -> 34px was wrong in the first attempt: pi measures its list against
      this height for virtualisation, so the kit only trims it to 44px and adds
      horizontal breathing room. */
   --session-row-height: 44px;
 }
-html[data-ui-kit="claude"] .session-row {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-row {
   padding-inline-start: calc(var(--session-row-indent, 14px) + 2px);
   margin-inline: 4px;
 }
 
 /* Selection: a filled pill with a clay rail, not a full-bleed band. The inset
    margin above is what makes it read as a pill rather than a highlighted row. */
-html[data-ui-kit="claude"] .session-row.is-selected {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-row.is-selected {
   box-shadow: inset 2px 0 0 var(--cds-clay, var(--accent));
 }
 
 /* Title weight and colour carry the hierarchy pi expresses with sheer density. */
-html[data-ui-kit="claude"] .session-row .session-row-title,
-html[data-ui-kit="claude"] .session-row > span:first-of-type {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-row .session-row-title,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .session-row > span:first-of-type {
   letter-spacing: -0.01em;
 }
 
 /* File-tree / section header: uppercase, tracked, muted — the CDS section label.
    pi renders these as sentence-case 12px, which reads as body text. */
-html[data-ui-kit="claude"] .sidebar-section-header,
-html[data-ui-kit="claude"] .file-explorer-header {
+:is(html[data-ui-kit="claude"], .claude-surface-root) .sidebar-section-header,
+:is(html[data-ui-kit="claude"], .claude-surface-root) .file-explorer-header {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-size: var(--text-ui-xs);

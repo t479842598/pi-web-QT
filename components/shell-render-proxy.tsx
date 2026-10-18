@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentProps, ComponentType } from "react";
+import type { ComponentProps, ComponentType, ReactNode } from "react";
 
 import { useSlot } from "@/components/ui-kit";
 
@@ -31,11 +31,39 @@ import { ConfigPanelShell } from "@/components/SettingsUi";
  * they need.
  */
 
+/**
+ * Marks the subtree as a Claude surface.
+ *
+ * The Claude stylesheet used to be gated on `html[data-ui-kit="claude"]`. That
+ * holds only while the *global* kit is Claude — but the settings panel offers
+ * per-scope and per-slot overrides, so a Claude component can render while the
+ * html switch is still "pi". When that happened the component had its classes
+ * and no rules at all: an unstyled title bar stacked vertically, a sidebar
+ * collapsed to its own padding.
+ *
+ * `display: contents` generates no box, so the marker cannot change layout; it
+ * only gives the descendant selectors a subtree to match.
+ */
+function ClaudeSurface({ children }: { children: ReactNode }) {
+  return (
+    <div className="claude-surface-root" style={{ display: "contents" }}>
+      {children}
+    </div>
+  );
+}
+
 function makeProxy<P extends object>(slot: Parameters<typeof useSlot>[0], Pi: ComponentType<P>): ComponentType<P> {
   function SlotProxy(props: P) {
     const Impl = useSlot(slot) as ComponentType<P> | null;
     const Component = Impl ?? Pi;
-    return <Component {...props} />;
+    // Only wrap when the winning implementation is not the pi one; the pi tree
+    // must stay byte-identical, so it keeps rendering exactly as before.
+    if (!Impl || Impl === Pi) return <Component {...props} />;
+    return (
+      <ClaudeSurface>
+        <Component {...props} />
+      </ClaudeSurface>
+    );
   }
   SlotProxy.displayName = `SlotProxy(${slot})`;
   return SlotProxy;
