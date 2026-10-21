@@ -275,7 +275,6 @@ export const enLocale = {
     "desktop.colorScheme": "Color Scheme",
     "desktop.openThemeFolder": "Open Pi theme folder",
     "desktop.learnPiThemes": "Learn about Pi themes",
-    "desktop.defaultTheme": "Default",
     "desktop.appearanceMode": "Appearance Mode",
     "desktop.loadingThemes": "Loading themes…",
     "desktop.borderVisibility": "Border Visibility",

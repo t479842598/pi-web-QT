@@ -252,7 +252,6 @@ export function DisplayConfig() {
   const { mode, resolvedMode, themeName, setMode, setTheme, borderDepth, setBorderDepth } = useTheme();
   const { locale: language, setLocale: setLanguage, t } = useI18n();
   const [themeSets, setThemeSets] = useState<ThemeSetInfo[]>([]);
-  const [defaultPreview, setDefaultPreview] = useState<ThemePreviewColors | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState<string | null>(null);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
@@ -287,10 +286,9 @@ export function DisplayConfig() {
     // needs to know which mode the user is currently looking at.
     fetch(`/api/themes?mode=${resolvedMode}`)
       .then((r) => r.ok ? r.json() : null)
-      .then((data: { themeSets: ThemeSetInfo[]; defaultPreview?: ThemePreviewColors } | null) => {
+      .then((data: { themeSets: ThemeSetInfo[] } | null) => {
         if (cancelled || !data) return;
         setThemeSets(data.themeSets);
-        setDefaultPreview(data.defaultPreview);
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -370,19 +368,10 @@ export function DisplayConfig() {
           <span style={{ fontSize: 'var(--text-ui-sm)', color: "var(--ds-text-muted)" }}>{t("desktop.loadingThemes")}</span>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
-            <ThemeCard
-              active={themeName === ""}
-              hovered={hoveredTag === "__default__"}
-              disabled={applying !== null}
-              displayName={t("desktop.defaultTheme")}
-              colors={defaultPreview}
-              hasDark
-              hasLight
-              onClick={() => handleThemeChange("")}
-              onHoverStart={() => handleThemeHover("")}
-              onHoverEnd={() => handleThemeHover(null)}
-            />
-
+            {/* No "Default" card: the default theme IS `claude` (hooks/useTheme.ts
+               DEFAULT_THEME) and it already appears in `themeSets`. A card that
+               selected the empty name took a different path (remove the key) to the
+               same visual end after a reload, so it was a second source of truth. */}
             {themeSets.map((ts) => (
               <ThemeCard
                 key={ts.name}

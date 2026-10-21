@@ -55,22 +55,43 @@ function migrateLegacyTheme(): string | null {
 
 /** Read the theme — single-key model: both modes share it. */
 /**
- * The theme a fresh install starts on.
+ * The theme a fresh install starts on — and the ONLY definition of "default".
  *
  * `claude` is the default because the app now ships two UI kits and the CDS
  * palette is the one the Claude kit is designed against — starting a first-time
  * user on any other palette makes the Claude kit look like a skin over someone
  * else's colours. Every other theme stays selectable: this is a starting point,
  * not a restriction.
+ *
+ * "Default" is therefore a concrete theme, not an absence. An unset or blank
+ * stored value resolves here, and a write of a blank value stores here, so the
+ * app never leaves `pi-theme` missing to mean "default" — that second encoding
+ * (remove the key, then have the bootstrap re-materialise `claude` on reload)
+ * is what made the old "Default" card disagree with the Claude card.
+ *
+ * The inline bootstrap script in `app/layout.tsx` carries the same literal (it
+ * runs before the bundle, so it cannot import this constant);
+ * `hooks/useTheme.test.mjs` compares the two so the duplication stays honest.
  */
 export const DEFAULT_THEME = "claude";
+
+/**
+ * The stored theme name, with "absent or blank" folded onto `DEFAULT_THEME`.
+ *
+ * Exported and covered by `useTheme.test.mjs`: it is the single rule that says
+ * what "no choice yet" means, so read and write cannot drift apart.
+ */
+export function normalizeThemeName(value: string | null | undefined): string {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed || DEFAULT_THEME;
+}
 
 function readThemeForMode(): string {
   try {
     const v = localStorage.getItem(KEY_THEME);
-    if (v) return v;
+    if (v) return normalizeThemeName(v);
     const migrated = migrateLegacyTheme();
-    if (migrated) return migrated;
+    if (migrated) return normalizeThemeName(migrated);
   } catch {}
   return DEFAULT_THEME;
 }
@@ -78,8 +99,8 @@ function readThemeForMode(): string {
 /** Write the theme for a resolved mode — single-key model: both modes share it. */
 function writeThemeForMode(_mode: ResolvedMode, name: string): void {
   try {
-    if (name) localStorage.setItem(KEY_THEME, name);
-    else localStorage.removeItem(KEY_THEME);
+    // Always a concrete value: a blank write means the default, not "unset".
+    localStorage.setItem(KEY_THEME, normalizeThemeName(name));
     localStorage.removeItem(KEY_THEME_DARK);
     localStorage.removeItem(KEY_THEME_LIGHT);
   } catch {}
@@ -291,18 +312,16 @@ async function applyModeAndTheme(
   if (resolvedMode === "dark") el.classList.add("dark");
   else el.classList.remove("dark");
 
-  if (!themeName) {
-    delete el.dataset.theme;
-    clearCssVars();
-    return;
-  }
+  // A blank name is not a state: it means the default theme, exactly as the
+  // store reads it. Fetching "" would only produce a 400 and a stray warning.
+  const name = normalizeThemeName(themeName);
 
-  el.dataset.theme = themeName;
-  const resolved = await fetchTheme(themeName, resolvedMode);
+  el.dataset.theme = name;
+  const resolved = await fetchTheme(name, resolvedMode);
   if (resolved) {
     applyCssVars(resolved.cssVars);
   } else {
-    console.warn(`Theme "${themeName}" variant "${resolvedMode}" not found, using defaults`);
+    console.warn(`Theme "${name}" variant "${resolvedMode}" not found, using defaults`);
     clearCssVars();
   }
 }
@@ -386,8 +405,9 @@ export function useTheme() {
     el.dataset.themeResolvedMode = rmode;
     if (rmode === "dark") el.classList.add("dark");
     else el.classList.remove("dark");
-    if (t) el.dataset.theme = t;
-    else delete el.dataset.theme;
+    // Always a concrete theme, matching the inline bootstrap in app/layout.tsx:
+    // `data-theme` is never deleted to mean "default".
+    el.dataset.theme = normalizeThemeName(t);
     setResolvedMode(rmode);
   }, []);
 
@@ -431,10 +451,11 @@ export function useTheme() {
     });
   }, [syncDOM]);
 
-  /** Pick a theme set. Does NOT change mode. */
-  const setTheme = useCallback(async (name: string) => {
+  /** Pick a theme set. Does NOT change mode. A blank name means the default. */
+  const setTheme = useCallback(async (rawName: string) => {
     if (applyingRef.current) return;
     applyingRef.current = true;
+    const name = normalizeThemeName(rawName);
 
     try {
       await applyModeAndTheme(resolvedMode, name);

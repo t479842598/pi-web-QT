@@ -275,7 +275,6 @@ export const zhCNLocale = {
     "desktop.colorScheme": "配色方案",
     "desktop.openThemeFolder": "打开本地 Pi theme 文件夹",
     "desktop.learnPiThemes": "了解 Pi theme",
-    "desktop.defaultTheme": "默认",
     "desktop.appearanceMode": "外观模式",
     "desktop.loadingThemes": "加载主题中…",
     "desktop.borderVisibility": "边框可见度",
