@@ -540,6 +540,27 @@ test("the whole chain renders minimap landmarks under the claude kit", async () 
   await act(async () => listRoot.unmount());
 });
 
+test("the claude list disables the virtualizer's own scroll compensation", async () => {
+  // The pi list does this and documents why (VirtualizedMessageList.tsx:86-105):
+  // the compensation is only correct while nobody is scrolling, and measurements
+  // keep landing after the gesture ends, so it drags the reader back toward the
+  // bottom. In tanstack-virtual 3.17.7 it must be an INSTANCE field — resizeItem
+  // reads the field, not the merged option — so a passing implementation that
+  // only sets the option would look right and do nothing.
+  const virtualizerRef = { current: null };
+  const { root } = await mountList(ClaudeMessageList, makeProps(virtualizerRef));
+  const virtualizer = virtualizerRef.current;
+  assert.ok(virtualizer, "the list must publish its virtualizer before this is meaningful");
+
+  const adjust = virtualizer.shouldAdjustScrollPositionOnItemSizeChange;
+  assert.equal(typeof adjust, "function", "instance field must be assigned, not left undefined");
+  assert.equal(adjust(0, 0, 0), false, "compensation must always be declined");
+  assert.equal(virtualizer.options.shouldAdjustScrollPositionOnItemSizeChange, undefined,
+    "the option slot must stay empty: setting only the option has no effect");
+
+  await act(async () => root.unmount());
+});
+
 test("ChatWindow still builds the adapter this test rebuilds", async () => {
   const chatWindow = await readFile(new URL("../../ChatWindow.tsx", import.meta.url), "utf8");
   const pinned = [

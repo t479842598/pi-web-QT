@@ -97,6 +97,19 @@ export function ClaudeMessageList({
     scrollMargin: headerHeight,
   });
 
+  // The virtualizer's own scroll compensation is wrong here, for the same reason
+  // the pi list disables it (components/VirtualizedMessageList.tsx:86-105): it is
+  // only correct while nobody is scrolling. Measurements keep landing after the
+  // gesture ends — rows mount and ResizeObserver reports once isScrolling is
+  // already false — and the delayed compensation then drags scrollTop by the
+  // accumulated estimate-to-measured delta, pulling the reader back toward the
+  // bottom the moment they stop scrolling. scrollTop belongs to the user's
+  // wheel/touch and to the streaming tail-pin below, never to the virtualizer.
+  // In tanstack-virtual 3.17.7 this is an INSTANCE field: passing it as an option
+  // merges into options, but resizeItem reads the instance field, so an option
+  // never takes effect. setOptions does not overwrite it.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
+
   // Hand the instance to the caller. Without this the prop is destructured away,
   // ChatWindow's `messageVirtualizerRef` stays null, its minimap adapter answers
   // 0 for every layout query, and ChatMinimap bails at `totalHeight() <= 0` —
