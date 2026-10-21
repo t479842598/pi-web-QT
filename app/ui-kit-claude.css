@@ -84,7 +84,11 @@
   --radius-lg: var(--cds-radius-card);
 }
 
-/* Density: the composer chin and settings action rows read these. */
+/* Density: the composer chin and settings action rows read these.
+   These two steps are the kit's own; app/globals.css:333-355 now carries the
+   same numbers as a kit-independent fallback so the fixed-Claude settings page
+   still moves when the global kit is "pi". Keep the two ladders in step — this
+   block is more specific (0,2,1 vs 0,1,1), so the Claude look is unchanged. */
 :is(html[data-ui-kit="claude"], .claude-surface-root)[data-ui-kit-layout="compact"] {
   --cds-gap-2: 4px;
   --cds-gap-3: 8px;

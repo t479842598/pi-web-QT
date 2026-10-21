@@ -269,6 +269,15 @@
      card offset is the +4px the formula stood for. */
   --cds-radius-card: calc(var(--cds-radius) + 4px);
   --cds-radius-bubble: 18px;
+  /* Shadow tint: the single colour stop used by `shadow-field` and by the
+     settings knob shadow. It lived only inside the Claude kit's scoped block,
+     so under kit=pi `--shadow-field` (see the `@theme inline` bridge above) had
+     an undefined part and the whole utility resolved to nothing. This default is
+     the expression the repo already carries as that token's fallback
+     (app/settings-claude.css:412/449/501, identical to ui-kit-claude.css:42), so
+     the fixed-Claude settings page keeps its current pixels and the Claude kit
+     still overrides it in its own scoped block. */
+  --cds-shadow-tint: color-mix(in srgb, var(--text) 10%, transparent);
   --cds-shadow-sm: 0 1px 2px color-mix(in srgb, var(--bg) 88%, #000), 0 2px 8px color-mix(in srgb, var(--bg) 84%, #000);
   --cds-shadow-md: 0 2px 4px color-mix(in srgb, var(--bg) 90%, #000), 0 6px 16px color-mix(in srgb, var(--bg) 82%, #000);
   --cds-shadow-lg: 0 4px 8px color-mix(in srgb, var(--bg) 90%, #000), 0 12px 28px -2px color-mix(in srgb, var(--bg) 80%, #000);
@@ -288,6 +297,18 @@
   --cds-dur-slow: 240ms;
   --cds-btn-spring: linear(0, 0.2459, 0.6526, 0.9468, 1.0764, 1.0915, 1.0585, 1.0219, 0.9993, 0.9914, 0.9921, 0.9957, 0.9988, 1.0004, 1);
   --cds-scroll-fade-size: 28px;
+  /* Density ladder (standard step). These are read by the fixed-Claude
+     settings page and by the composer chrome, which until now only resolved
+     through their own px fallbacks because the tokens existed solely inside
+     the Claude kit's scoped block. Values are that block's `standard` step
+     verbatim (app/ui-kit-claude.css:69-73), so nothing new is invented. The
+     scoped block still wins (specificity 0,1,1 over `:root` 0,1,0), and it
+     alone owns the compact/comfortable steps. */
+  --cds-gap-1: 4px;
+  --cds-gap-2: 6px;
+  --cds-gap-3: 10px;
+  --cds-control-height: 28px;
+  --cds-control-height-lg: 32px;
 
   /* Stacking scale. Every new overlay reads one of these instead of inventing
      a z-index; the values keep the existing order (toasts above dialogs above
@@ -307,6 +328,30 @@
   /* Horizontal page margin for the chat column and its composer. */
   --page-margin-mobile: 20px;
   --page-margin-desktop: 32px;
+}
+
+/* Density presets, kit-independent.
+   `html[data-ui-kit-layout]` is written by the inline boot script and mirrored
+   by lib/ui-kit.ts, so the attribute is always present (standard/compact/
+   comfortable). The Claude kit owns the same two steps inside its scoped block
+   (app/ui-kit-claude.css:92-102) with the same numbers; those rules are more
+   specific (0,2,1 vs 0,1,1) and keep winning there, so nothing about the Claude
+   look changes. What this adds is the step the fixed-Claude settings page was
+   missing: its rules read `var(--cds-gap-*, …)` unscoped, so with the global kit
+   set to "pi" the tokens were undefined and every density choice collapsed to
+   the hardcoded fallback — the segmented control could not do anything. Values
+   are copied from the kit's own ladder, not invented. */
+html[data-ui-kit-layout="compact"] {
+  --cds-gap-2: 4px;
+  --cds-gap-3: 8px;
+  --cds-control-height: 24px;
+  --cds-control-height-lg: 28px;
+}
+html[data-ui-kit-layout="comfortable"] {
+  --cds-gap-2: 8px;
+  --cds-gap-3: 14px;
+  --cds-control-height: 32px;
+  --cds-control-height-lg: 36px;
 }
 
 html.dark,
