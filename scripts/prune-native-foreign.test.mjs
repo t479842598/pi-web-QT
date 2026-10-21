@@ -94,6 +94,20 @@ test("darwin-arm64：保留本机 sharp/swc，删掉其余", () => {
   }
 });
 
+test("darwin-x64（arm runner 上打 x64 dmg）：同平台其它架构保留", () => {
+  const { root, backend } = fixture();
+  try {
+    pruneForeignNativePackages({ backendDir: backend, platform: "darwin", arch: "x64", isMusl: false });
+    const nm = join(backend, "node_modules");
+    assert.ok(existsSync(join(nm, "@img/sharp-darwin-arm64")), "同平台其它架构不精删");
+    assert.ok(existsSync(join(nm, "@next/swc-darwin-arm64")), "swc 同平台其它架构保留");
+    assert.ok(!existsSync(join(nm, "@img/sharp-linux-x64")), "异平台仍被删");
+    assert.ok(!existsSync(join(nm, "@next/swc-linux-x64-gnu")), "异平台 swc 仍被删");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("空后端目录不报错", () => {
   const root = mkdtempSync(join(tmpdir(), "prune-empty-"));
   try {

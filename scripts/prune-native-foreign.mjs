@@ -45,35 +45,47 @@ export function pruneForeignNativePackages({
   };
   const nm = join(backendDir, "node_modules");
 
-  // sharp 的平台前缀：linux 要区分 gnu/musl，其余平台即平台名
-  const flavor = platform === "linux" ? (isMusl ? "linuxmusl" : "linux") : platform;
+  // 跨架构保留原则：只有 Linux 需要按 arch/libc 精确裁剪（linuxdeploy 会逐个
+  // 解析 AppDir 内 ELF，异架构/异 libc 必炸，且 Linux runner 就是目标架构）。
+  // macOS 的 x64 dmg 在 arm64 runner 上构建、Windows 也可能多架构，因此这两个
+  // 平台只按"平台"裁剪，同平台的其它架构一律保留。
+  const strictTriple = platform === "linux";
+  // linux 的平台前缀要区分 gnu/musl，其余平台即平台名
+  const flavor = strictTriple ? (isMusl ? "linuxmusl" : "linux") : platform;
 
-  // 1) @img/*：保留 colour、wasm 兜底与本机变体
+  // 1) @img/*：保留 colour、wasm 兜底与本机平台变体
   const imgDir = join(nm, "@img");
   if (existsSync(imgDir)) {
-    const keep = new Set([
-      "colour",
-      "sharp-wasm32",
+    const keepExact = new Set([
       `sharp-${flavor}-${arch}`,
       `sharp-libvips-${flavor}-${arch}`,
     ]);
     for (const entry of readdirSync(imgDir)) {
-      if (!keep.has(entry)) rm(join(imgDir, entry));
+      if (entry === "colour" || entry === "sharp-wasm32") continue;
+      if (!entry.startsWith("sharp-")) continue; // 认不出来的一律保留
+      if (strictTriple) {
+        if (!keepExact.has(entry)) rm(join(imgDir, entry));
+      } else if (!entry.startsWith(`sharp-${platform}-`)) {
+        rm(join(imgDir, entry));
+      }
     }
   }
 
-  // 2) @next/swc-*：只留本机 triple（linux 区分 gnu/musl）。
-  //    仅识别 swc-<已知平台>-… 形态，避免误删 swc-env 这类非平台包。
+  // 2) @next/swc-*：仅识别 swc-<已知平台>-… 形态，避免误删 swc-env 这类非平台包。
   const nextDir = join(nm, "@next");
   if (existsSync(nextDir)) {
-    const abi = platform === "linux" ? (isMusl ? "-musl" : "-gnu") : "";
-    const keep = `swc-${platform}-${arch}${abi}`;
+    const abi = strictTriple ? (isMusl ? "-musl" : "-gnu") : "";
+    const keepExact = `swc-${platform}-${arch}${abi}`;
     const platformPrefixes = ["darwin", "linux", "linuxmusl", "win32", "freebsd"];
     for (const entry of readdirSync(nextDir)) {
       if (!entry.startsWith("swc-")) continue;
       const rest = entry.slice(4);
-      const isPlatformPkg = platformPrefixes.some((p) => rest.startsWith(p + "-"));
-      if (isPlatformPkg && entry !== keep) rm(join(nextDir, entry));
+      if (!platformPrefixes.some((p) => rest.startsWith(p + "-"))) continue;
+      if (strictTriple) {
+        if (entry !== keepExact) rm(join(nextDir, entry));
+      } else if (!entry.startsWith(`swc-${platform}-`)) {
+        rm(join(nextDir, entry));
+      }
     }
   }
 
