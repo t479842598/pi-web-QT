@@ -118,3 +118,6 @@ cloudflared-diag-*.zip
 
 # Local scratch: screenshots, fixtures and one-off audit scripts.
 /work/
+
+# Per-release bilingual notes staging file (consumed by gh release --notes-file)
+/release-notes.md
