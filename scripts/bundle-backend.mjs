@@ -29,6 +29,7 @@ import {
 import { join, resolve, dirname, basename, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { pruneForeignNativePackages } from "./prune-native-foreign.mjs";
 
 const require = createRequire(import.meta.url);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -169,6 +170,17 @@ copyFileSync(
   join(outBackend, "desktop-server.cjs"),
 );
 console.log("[bundle-backend] 写入启动器 desktop-server.cjs");
+
+// 4.7 剔除随包后端里非本机的原生二进制（sharp 的 musl 变体、pi-tui 全平台
+//     prebuilds 等）。AppImage 的 linuxdeploy 会扫描 AppDir 下每一个 ELF 并
+//     逐个解析依赖，musl 变体在 glibc runner 上 "Could not find dependency:
+//     libc.musl-x86_64.so.1" 直接让打包失败。逻辑在 scripts/prune-native-
+//     foreign.mjs，可单测。
+const pruned = pruneForeignNativePackages({ backendDir: outBackend });
+if (pruned.length) {
+  console.log(`[bundle-backend] 剔除非本机原生二进制: ${pruned.length} 个`);
+  for (const p of pruned) console.log(`  - ${p}`);
+}
 
 // 5. Node 二进制 → desktop/resources/node（Win/Linux）
 //    macOS 额外包成 Pi Agent Server.app（LSBackgroundOnly，不进 Dock；

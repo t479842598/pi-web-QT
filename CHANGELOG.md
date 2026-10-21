@@ -11,12 +11,19 @@
   - 根因：桌面端的 `@tauri-apps/cli` 停在 2.11.x，它用的 `tauri-bundler` 会去
     下载 2021 年的老版 `linuxdeploy`，并从 `master` 分支现拉 `linuxdeploy-plugin-gtk.sh`
     （上游 issue tauri-apps/tauri#16062，已在 2.12 修复）。
-  - 修复：`desktop/package.json` 的 `@tauri-apps/cli` 升到 `^2.12.4`，其 `tauri-bundler`
-    2.10.4 内置了 `linuxdeploy` 07333c6 并把 plugin 脚本内联进二进制。
   - 诊断：发布工作流的 Ubuntu job 给 `tauri build` 补上 `-v`。不加 `-v` 时 bundler 用
     `cmd.output()` 执行 linuxdeploy 并吞掉它的 stderr，日志只剩一句无信息量的
     `failed to run linuxdeploy`；加上之后走 `output_ok()` 分支，linuxdeploy 的真实报错
     会带进错误信息。
+  - 修复一（工具链）：`desktop/package.json` 的 `@tauri-apps/cli` 升到 `^2.12.4`，其
+    `tauri-bundler` 2.10.4 内置了 `linuxdeploy` 07333c6 并把 plugin 脚本内联进二进制。
+  - 修复二（真正卡点，由 `-v` 定位）：`linuxdeploy` 会逐个解析 AppDir 内所有 ELF 的依赖，
+    而随包后端里混有 `@img/sharp-linuxmusl-x64`（链接 `libc.musl-x86_64.so.1`，glibc
+    runner 上无解）与 pi-tui 的全平台 prebuilds，报
+    `ERROR: Could not find dependency: libc.musl-x86_64.so.1` 后整包失败。新增
+    `scripts/prune-native-foreign.mjs`：打包时剔除后端 node_modules 里非本机的原生
+    二进制（sharp 异平台/musl 变体、@next/swc 异平台、pi-tui 异 OS prebuilds），
+    保留跨架构的 darwin prebuilds（x64 dmg 在 arm64 runner 上构建）。带 4 个单测。
   - 预防：仍保留 `NO_STRIP=true`（linuxdeploy 自身支持的开关，见 `src/core/appdir.cpp`），
     避免 Ubuntu 22.04 的 binutils 2.38 在带 `.relr.dyn` 段的库上崩溃。
 
