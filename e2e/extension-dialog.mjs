@@ -31,7 +31,11 @@ export async function checkExtensionDialogs(page, artifacts, width) {
     await page.locator("[data-minimap-preview-box]").waitFor({ state: "hidden" });
     const input = page.locator("textarea").last();
     await input.fill(`/e2e-dialog ${mode}`);
-    await page.getByRole("button", { name: "Send", exact: true }).click();
+    // The composer's accessible name is "Send message" (ChatInput.tsx:3547
+    // → desktop.sendMessage, en.ts:526), not "Send": chat.send exists in the
+    // catalog with no consumer. exact:true therefore never matched, and this
+    // scenario only started running now that the file-panel click lands.
+    await page.getByRole("button", { name: "Send message", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: `E2E ${mode}`, exact: true });
     await dialog.waitFor();
     return dialog;
