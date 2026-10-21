@@ -2,6 +2,20 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.19.1 — 2026-10-21（Linux AppImage 打包修复 + 本地客户端同步到 0.19.1）
+
+### 修复
+- **Linux AppImage 打包失败**：`linuxdeploy` 会对打包进来的系统库执行 `strip`，而宿主机的
+  `strip` 在遇到带 `.relr.dyn` 段的库时崩溃（`unknown type [0x13] section .relr.dyn`），
+  于是 deb/rpm 成功后 AppImage 步骤以 `failed to bundle project: failed to run linuxdeploy`
+  收尾。发布工作流的 Ubuntu job 改设 `NO_STRIP=true`（linuxdeploy 自身支持的开关，
+  见 `src/core/appdir.cpp`），代价是 AppImage 体积从几 MB 增至约 77 MB。
+
+### 内部调整
+- `node scripts/sync-version.mjs` 把 `desktop/package.json`、`desktop/Cargo.toml`、
+  `desktop/tauri.conf.json`、`mobile2/pubspec.yaml` 统一同步到 0.19.1。
+- npm 包 `@qt4798/pi-web@0.19.1` 已发布，`dist-tags.latest` = 0.19.1。
+
 ## v0.19.0 — 2026-10-20（双 UI 套件：Pi 与 Claude CDS 可切换）
 
 ### 新增
@@ -11,10 +25,9 @@
 - **对话加载方式**在 Claude 套件下是真实选择：窗口化虚拟列表 + 骨架屏 + 边缘渐隐，替代 Pi 的哨兵游标分页。
 - `scripts/kit-switch-smoke.mjs`：套件切换冒烟测试，走真实 UI 点击而非种子 storage，六类失败都会报错。
 
-> **发布状态（2026-10-18）**：0.19.0 与 0.19.1 的 `npm publish` 均被服务端接收，但
-> `npm view` 仍查不到，`latest` 停在 0.18.20。原因经核实为 npm token 受限：
-> `GET /-/npm/v1/user` 返回 403，且账号要求 2FA，发布进入 staging 需在网页端确认。
-> 代码、tag `v0.19.0` 与 GitHub Release 均已就位；npm 侧需人工确认后才会生效。
+> **发布状态（2026-10-21 更新）**：0.19.0 与 0.19.1 的 `npm publish` 均已生效，
+> `npm view @qt4798/pi-web@0.19.1 version` 返回 `0.19.1`，`latest` 标签指向 0.19.1。
+> 此前记录的「服务端已接收但查不到、latest 停在 0.18.20」是 npm token 受限导致的误判，现已修正。
 
 ### 修复
 - 设置页遮罩由 72% 提至 94%，弹窗打开时隐藏标题栏尾部控件（此前切换器被面板边缘切掉一半）。
