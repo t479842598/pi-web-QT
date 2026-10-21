@@ -8,7 +8,6 @@
  */
 
 export {
-  KitScope,
   useSlot,
   useSlotKit,
   useUiKit,

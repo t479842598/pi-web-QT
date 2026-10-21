@@ -35,18 +35,48 @@ or freeze it mid-refactor, and there is no pixel-level safety net.
   returns the app to a single kit with no dangling imports.
 - `components/ui-kit/` owns the switch: `types.ts` (slot prop contracts),
   `registry.ts` (slot → implementation per kit), `coverage.ts` invariants,
-  `UiKitProvider.tsx` (store + hooks + `KitScope`).
+  `UiKitProvider.tsx` (store + hooks).
 - Resolution order is **slot → scope → global kit → `pi`**. Overrides that
   repeat what they would inherit are not stored, so switching the global kit
   cannot leave a stale override behind.
+
+  Absorbing an override is therefore a *consequence* of switching, and which
+  overrides get absorbed is decided by history that the stored state no longer
+  records: `{scopes:{},slots:{button:"claude"}}` is byte-identical whether the
+  user pinned that slot or it survived an absorbed scope. No rule over stored
+  state can tell the two apart, so the model does not try to. It only counts
+  them (`kitSwitchImpact`) and the title-bar switch shows the counts before and
+  after the click — visibility without a semantics change. The invariant is
+  locked by `lib/ui-kit.test.mjs` (#16-19) plus the exhaustive equivalence
+  between `kitSwitchImpact` and what `withKit` actually drops.
 - The choice lives in localStorage and is mirrored into `html.dataset.*` by
   the inline bootstrap script in `app/layout.tsx`, so the first paint already
   has the right kit. React reads the same dataset through
   `useSyncExternalStore` with a fixed server snapshot, which keeps hydration
   deterministic.
 - **The settings page is not switchable.** It is rebuilt in the Claude design
-  for both kits and pinned with `<KitScope scope="settings" pinned="claude">`
-  (`SETTINGS_PINNED_KIT`).
+  for both kits, and the pin lives in **CSS, not React**: 422 rules in
+  `app/settings-claude.css` carry no kit prefix (only 178 are gated on
+  `html[data-ui-kit="claude"]` / `.claude-surface-root`), and the `--cds-*`
+  tokens those rules read are declared at `:root` in `app/globals.css`, so
+  `kit === "pi"` still gets the Claude settings ladder. `SETTINGS_PINNED_KIT`
+  is the single declaration of that intent and drives the note in the 界面体系
+  panel; `components/ui-kit/settings-page-pinned.test.mjs` locks the contract
+  and fails if the core `.settings-row` / `.settings-panel` /
+  `.settings-segmented` rules are ever gated behind a kit selector.
+
+  The earlier version of this ADR claimed a `<KitScope pinned="claude">` did the
+  pinning. That component had no render site anywhere in the repo, so its
+  `pinned` context was always `null` and every `pinned ?? …` branch in
+  `UiKitProvider` was dead code; the behaviour users saw was CSS all along. The
+  component, the context, the branches, `withPinnedKit` and the two unread
+  `*_PINNED` exports were deleted rather than wired up, because wiring them would
+  have changed nothing on screen and added a second, weaker mechanism to
+  maintain.
+
+  The command palette is *not* part of this: `palette` is a real slot
+  (`registry.ts`), so under `kit === "pi"` the pi palette renders and no
+  `.cds-palette-*` node exists. That is correct behaviour, not a leak.
 - Heavyweight slot contracts are *derived* from the pi component
   (`ComponentProps<typeof MessageView>` …) instead of re-declared, so the two
   implementations cannot drift.

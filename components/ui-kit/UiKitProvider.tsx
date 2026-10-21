@@ -1,13 +1,10 @@
 "use client";
 
 import {
-  createContext,
   useCallback,
-  useContext,
   useMemo,
   useSyncExternalStore,
   type ComponentType,
-  type ReactNode,
 } from "react";
 
 import {
@@ -136,39 +133,18 @@ function getServerSnapshot(): UiKitSettings {
   return DEFAULT_UI_KIT_SETTINGS;
 }
 
-// ─── Scope pinning (the settings page is always Claude) ─────────────────────
-
-interface KitScopeValue {
-  scope: ScopeId | null;
-  pinned: KitId | null;
-}
-
-const KitScopeContext = createContext<KitScopeValue>({ scope: null, pinned: null });
-
-export function KitScope({
-  scope,
-  pinned = null,
-  children,
-}: {
-  scope?: ScopeId;
-  pinned?: KitId | null;
-  children: ReactNode;
-}) {
-  const value = useMemo<KitScopeValue>(() => ({ scope: scope ?? null, pinned }), [scope, pinned]);
-  return (
-    <KitScopeContext.Provider value={value}>
-      <div data-kit={pinned ?? undefined} data-kit-scope={scope ?? undefined} className="contents">
-        {children}
-      </div>
-    </KitScopeContext.Provider>
-  );
-}
-
 // ─── Hooks ──────────────────────────────────────────────────────────────────
+//
+// The settings page is fixed to the Claude design in the CSS layer, not here.
+// The `KitScope` component that used to sit in this section had no render site
+// anywhere in the repo, so its `pinned` context was always `null` and every
+// `pinned ?? …` branch below was dead code. `SETTINGS_PINNED_KIT` and the CSS
+// contract test `components/ui-kit/settings-page-pinned.test.mjs` are now the
+// honest statement of that pin.
 
 export interface UiKitApi {
   settings: UiKitSettings;
-  /** Global kit, unless a pinned subtree overrides it. */
+  /** The global kit. Scope/slot overrides are read through the resolvers. */
   kit: KitId;
   layout: LayoutPreset;
   sidebarToggle: SidebarTogglePlacement;
@@ -184,7 +160,6 @@ export interface UiKitApi {
 
 export function useUiKit(): UiKitApi {
   const settings = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const { pinned } = useContext(KitScopeContext);
 
   const setKit = useCallback((kit: KitId) => writeSettings(withKit(readSettings(), kit)), []);
   const setScope = useCallback(
@@ -202,18 +177,12 @@ export function useUiKit(): UiKitApi {
   );
   const reset = useCallback(() => writeSettings(DEFAULT_UI_KIT_SETTINGS), []);
 
-  const resolveScope = useCallback(
-    (scope: ScopeId) => pinned ?? resolveScopeKit(settings, scope),
-    [pinned, settings],
-  );
-  const resolveSlot = useCallback(
-    (slot: SlotId) => pinned ?? resolveSlotKit(settings, slot),
-    [pinned, settings],
-  );
+  const resolveScope = useCallback((scope: ScopeId) => resolveScopeKit(settings, scope), [settings]);
+  const resolveSlot = useCallback((slot: SlotId) => resolveSlotKit(settings, slot), [settings]);
 
   return {
     settings,
-    kit: pinned ?? settings.kit,
+    kit: settings.kit,
     layout: settings.layout,
     sidebarToggle: settings.sidebarToggle,
     setKit,
@@ -227,11 +196,10 @@ export function useUiKit(): UiKitApi {
   };
 }
 
-/** The kit a single slot must render with, honoring any pinned subtree. */
+/** The kit a single slot must render with: slot override → scope → global kit. */
 export function useSlotKit(slot: SlotId): KitId {
   const settings = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const { pinned } = useContext(KitScopeContext);
-  return pinned ?? resolveSlotKit(settings, slot);
+  return resolveSlotKit(settings, slot);
 }
 
 /**

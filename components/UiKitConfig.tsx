@@ -25,9 +25,10 @@ import {
 /**
  * 「界面体系」— the only place the two kits are chosen.
  *
- * The settings page itself is rebuilt in the Claude design and pinned
- * (`SETTINGS_PINNED_KIT`), so this panel always renders with Claude primitives
- * while controlling what the *rest* of the app renders.
+ * The settings page itself is rebuilt in the Claude design and fixed to it in
+ * the CSS layer (`SETTINGS_PINNED_KIT` + the un-prefixed rules in
+ * `app/settings-claude.css`), so this panel always renders with Claude
+ * primitives while controlling what the *rest* of the app renders.
  *
  * The three levels are presented top-down: global → scope → individual slot,
  * because that is the resolution order. A level that would inherit the level
@@ -269,7 +270,14 @@ export function UiKitConfig() {
       </SettingCard>
 
       <div className="flex items-center justify-between" style={{ gap: 8, flexWrap: "wrap" }}>
-        <span className="text-xs text-text-dim">{t("uiKit.settingsPinned")}</span>
+        {/* The copy names the kit the page is fixed to, so the constant is what
+            drives the label — if SETTINGS_PINNED_KIT ever changes, the note
+            changes with it instead of quietly lying. */}
+        <span className="text-xs text-text-dim">
+          {t("uiKit.settingsPinned", {
+            kit: SETTINGS_PINNED_KIT === "claude" ? t("uiKit.kitClaude") : t("uiKit.kitPi"),
+          })}
+        </span>
         <Button variant="secondary" size="sm" onClick={handleReset}>
           {resetFlash ? t("uiKit.resetDone") : t("uiKit.reset")}
         </Button>
@@ -286,7 +294,6 @@ function cap(scope: ScopeId): string {
 export const UI_KIT_PANEL_SLOTS: readonly SlotId[] = SLOT_IDS;
 
 export const UI_KIT_PANEL_DEFAULTS = DEFAULT_UI_KIT_SETTINGS;
-export const UI_KIT_PANEL_PINNED = SETTINGS_PINNED_KIT;
 export const UI_KIT_PANEL_LAYOUTS = LAYOUT_PRESETS;
 export const UI_KIT_PANEL_IS_SLOT = isSlotId;
 export const UI_KIT_PANEL_RESOLVE = resolveSlotKit;

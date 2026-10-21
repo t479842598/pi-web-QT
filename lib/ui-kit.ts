@@ -117,9 +117,21 @@ export const SLOTS_BY_SCOPE: Record<ScopeId, readonly SlotId[]> = SCOPE_IDS.redu
 export const DEFAULT_KIT: KitId = "pi";
 
 /**
- * The settings page is rebuilt in the Claude design only; it is not part of the
- * switch matrix and stays Claude regardless of the global kit. `KitScope` pins
- * it, and the model exposes the constant so tests can assert the pin.
+ * The settings page is not part of the switch matrix: it always renders the
+ * Claude ladder, whatever the global kit is.
+ *
+ * The pin is implemented in the **CSS layer, not the React layer**: 422 rules
+ * in `app/settings-claude.css` are un-prefixed (only 178 are gated on
+ * `html[data-ui-kit="claude"]` / `.claude-surface-root`), and the density
+ * tokens those rules read (`--cds-gap-*`, `--cds-control-height`, `--cds-dur-*`)
+ * are declared at `:root` in `app/globals.css`, so `kit === "pi"` still gets the
+ * Claude settings look. The removed `KitScope`/`withPinnedKit` mechanism never
+ * had a render site, so nothing was lost by deleting it.
+ *
+ * This constant is the single declaration of that fact. The contract is locked
+ * by `components/ui-kit/settings-page-pinned.test.mjs`, which fails if anyone
+ * gates the core `.settings-row` / `.settings-panel` / `.settings-segmented`
+ * rules behind a kit prefix or moves the tokens into the kit-scoped block.
  */
 export const SETTINGS_PINNED_KIT: KitId = "claude";
 
@@ -314,20 +326,62 @@ export function resolveSlotKit(settings: UiKitSettings, slot: SlotId): KitId {
   return resolveScopeKit(settings, SLOT_SCOPES[slot]);
 }
 
-/**
- * Effective settings for a subtree pinned to one kit (the settings page).
- * Pinning wins over every override inside the subtree.
- */
-/**
- * Settings as they apply inside a pinned subtree (the settings page itself).
- *
- * Exported and covered by `ui-kit.test.mjs` because the pinning rule is a
- * contract, not an implementation detail: whatever the user's kit, scope and
- * slot overrides say, a pinned subtree resolves to one kit.
- */
-export function withPinnedKit(settings: UiKitSettings, kit: KitId): UiKitSettings {
-  return { kit, scopes: {}, slots: {}, layout: settings.layout, sidebarToggle: settings.sidebarToggle };
+// ─── Cross-global-switch impact (S4-A: visibility, not semantics) ───────────
+//
+// Switching the global kit absorbs the overrides that would then repeat what
+// they inherit, and `normalizeUiKitSettings` drops them. Which ones is fully
+// determined by the stored state, so it can be reported up front — see
+// `kitSwitchImpact`. The storage semantics themselves are unchanged: the S4
+// invariant in `ui-kit.test.mjs` #16-19 still holds (a slot override that
+// deviates from both its scope and the kit survives on purpose).
+
+/** One override that a global-kit switch would drop, by level and id. */
+export interface KitSwitchImpact {
+  /** The kit the user is switching to. */
+  nextKit: KitId;
+  /** Scope overrides whose value equals `nextKit`. */
+  absorbedScopes: ScopeId[];
+  /** Slot overrides that stop being a deviation once the switch lands. */
+  absorbedSlots: SlotId[];
+  scopeCount: number;
+  slotCount: number;
+  /** True when the switch would drop at least one stored override. */
+  hasImpact: boolean;
 }
+
+/**
+ * Which stored overrides `withKit(settings, nextKit)` is about to absorb.
+ *
+ * Pure: it reads a normalized snapshot of `settings` and predicts the diff, so
+ * it can be called before the write (the UI needs the numbers while the
+ * overrides still exist) and unit-tested without a DOM.
+ */
+export function kitSwitchImpact(settings: UiKitSettings, nextKit: KitId): KitSwitchImpact {
+  const current = normalizeUiKitSettings(settings);
+
+  const absorbedScopes = SCOPE_IDS.filter((scope) => current.scopes[scope] === nextKit);
+  const absorbedSet = new Set<ScopeId>(absorbedScopes);
+
+  const absorbedSlots = SLOT_IDS.filter((slot) => {
+    const value = current.slots[slot];
+    if (!isKitId(value)) return false;
+    const scope = SLOT_SCOPES[slot];
+    // A scope override that survives the switch keeps owning this slot's
+    // inheritance; one that is absorbed falls back to the new global kit.
+    const inherited = absorbedSet.has(scope) ? nextKit : current.scopes[scope] ?? nextKit;
+    return value === inherited;
+  });
+
+  return {
+    nextKit,
+    absorbedScopes,
+    absorbedSlots,
+    scopeCount: absorbedScopes.length,
+    slotCount: absorbedSlots.length,
+    hasImpact: absorbedScopes.length + absorbedSlots.length > 0,
+  };
+}
+
 
 // ─── html.dataset bridge ─────────────────────────────────────────────────────
 
