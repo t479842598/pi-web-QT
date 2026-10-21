@@ -11,7 +11,6 @@ export {
   useSlot,
   useSlotKit,
   useUiKit,
-  surfaceProps,
   type UiKitApi,
 } from "./UiKitProvider";
 
@@ -20,7 +19,6 @@ export { slotComponent, UI_KIT_REGISTRY, CLAUDE_PENDING, PI_PENDING, type SlotRe
 export type {
   ButtonSlotProps,
   FieldSlotProps,
-  ScrollFadeSlotProps,
   SegmentedItem,
   SegmentedSlotProps,
   SessionRowSlotProps,
@@ -32,4 +30,4 @@ export type {
 
 // Typed convenience wrappers for the primitives. Heavy slots are rendered via
 // `useSlot(slot)` because their props come from the pi component itself.
-export { Button, Field, ScrollFade, Segmented, Status, Toggle } from "./primitives";
+export { Button, Field, Segmented, Status, Toggle } from "./primitives";

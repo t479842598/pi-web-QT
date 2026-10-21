@@ -34,8 +34,10 @@ or freeze it mid-refactor, and there is no pixel-level safety net.
 - `components/claude/` is new and self-contained. Deleting the directory
   returns the app to a single kit with no dangling imports.
 - `components/ui-kit/` owns the switch: `types.ts` (slot prop contracts),
-  `registry.ts` (slot → implementation per kit), `coverage.ts` invariants,
-  `UiKitProvider.tsx` (store + hooks).
+  `registry.ts` (slot → implementation per kit), `UiKitProvider.tsx` (store +
+  hooks). The coverage invariants live in the tests beside them —
+  `registry.test.mjs`, `wiring.test.mjs`, `primitives.test.mjs` and
+  `session-row-fidelity.test.mjs`; there is no `coverage.ts`.
 - Resolution order is **slot → scope → global kit → `pi`**. Overrides that
   repeat what they would inherit are not stored, so switching the global kit
   cannot leave a stale override behind.
@@ -111,27 +113,47 @@ or freeze it mid-refactor, and there is no pixel-level safety net.
   the single place to change.
 
 
-## 已知限制：pi 侧栏内部仍未完全 Claude 化
+## 已知限制：侧栏会话行——已接线，深节点仍非 100%
 
-**现象**：切到 Claude 后，侧栏的**外壳**（rail、footer、search band、表面色、发丝边）是 Claude 的，
-但内部的会话树、分组标题、工具条仍是 pi 几何。
+**原现象**：切到 Claude 后，侧栏的**外壳**（rail、footer、search band、表面色、发丝边）是 Claude 的，
+但内部的会话行仍是 pi 几何。
 
-**根因**：`SessionSidebar` 用大量**内联 style** 渲染这些节点（审计 F2：80 个 tsx、2331 处内联样式）。
-内联声明无法被无 `!important` 的样式表覆盖，而项目门禁禁止新增 `!important`。
+**原根因**：`SessionSidebar` 用**内联 style** 渲染会话行，内联声明无法被无 `!important` 的样式表
+覆盖，而项目门禁禁止新增 `!important`。当时 `sessionRow` 槽位有两份实现却没有任何挂载点
+（`wiring.test.mjs` 用 `NOT_YET_WIRED` 自认未接线），`registry.ts` 的注释也仍停在「还需要 pi 适配器」。
 
-**已做**：给搜索区加了两个 class 钩子（`sidebar-search-band` / `sidebar-search-field`），
-Claude 层得以接管该区域。
+**已做（Q2）**：行的**盒（box）**成为 `sessionRow` 槽位的渲染单元，行内容仍留在 sidebar。
 
-**未做**：会话行、分组标题、工具条仍需逐个加 class 钩子。这是机械工作，
-每处都是「加 className + 写 CSS」，不涉及逻辑。
+- `components/ui-kit/pi/SessionRow.tsx` 逐条复刻原内联声明，`variant` 区分两个视图：`tree`
+  （列表/fork 树：固定 50px 高、radius 回退 0）与 `group`（分组手风琴：两行 column、radius 回退 6px）。
+  两者的 pi 几何本来就不同，所以 `variant` 是契约的一部分，而不是让调用方去记默认值。
+- `components/session-row-render-proxy.tsx` 挂载槽位；pi 分支直接返回 `PiSessionRow`，**不产生任何
+  wrapper 节点**；只有非 pi 实现才包一层 `display: contents` 的 `.claude-surface-root`——per-slot
+  override 下 `html[data-ui-kit]` 仍是 pi，没有这层标记 Claude 样式根本选不中。
+- `ClaudeSessionRow` 改为同一契约的 row shell：保留 `session-row` + 状态修饰类 + `data-fork-depth`
+  （kit 无关钩子），另加 `.claude-session-row` / `data-active`。
 
-**代价评估**：`SessionSidebar` 3647 行，会话行渲染函数约在 2345–2400 行区间，
-需要先把它抽成独立组件才能干净地加钩子。约 3–4 小时。
+**证据（pi 像素不变）**：
 
-**决定**：留作后续。当前切换已覆盖 26/27 槽位，观感差异真实存在（见
-`work/e2e/shell-pi.png` 与 `shell-claude.png` 对比），但侧栏深度未达 100%。
+1. 真实浏览器 A/B（`work/row-geometry-probe.mjs`，HEAD 工作树 vs 工作树，两个视图 × 前 4 行）：
+   class、`style` 属性原文、声明顺序、`data-*`、子节点标签、文本、boundingRect 以及 23 项
+   computed style —— 0 差异。
+2. `e2e/kit-parity.mjs --check`（sidebar-expanded / sidebar-collapsed × 3 viewport）：改动前捕获的
+   指纹与改动后捕获的指纹逐字节相同。
+3. 静态契约 `components/ui-kit/session-row-fidelity.test.mjs`：按顺序钉住两套声明，并钉住 50px
+   常量与 `confirmDelete || isSelected` 的原始配色条件（`armed` 与 `inert` 因此是两个 prop，不能合并）。
 
+**证据（claude 确实换了几何）**：同一探针在 `kit=claude` 下，列表行 `border-radius` 0px → 8px、
+`border-left-width` 2px → 0px（改为 inset 阴影黏土轨）、`min-height` 50px → 30px、实测行高
+50 → 46.5、`gap` 6px → 8px；分组行 47px → 30px、radius 6px → 8px。类名多出 `claude-session-row`，
+pi 侧永不输出该标记（`wiring.test.mjs` 钉住这一点）。
 
+**仍未做**：分组标题、工具条与文件树表头仍是内联样式，靠 class 钩子 + CSS 覆盖；它们不是行盒，
+接线不会带来新的用户可见差异。
+
+**同时摘除**：`scrollFade` 从槽位表移除（27 → 26）。两套实现都零消费者，真实渐隐是
+`ChatWindow.tsx` 手写的 `.chat-scroll-fade` + 内联 `--chat-fade-top/bottom`；切套件无人可察觉，
+属内部实现细节，不该占一个用户可见槽位。
 
 ## 既有 e2e 失效（非双套件引入）
 

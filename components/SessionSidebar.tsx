@@ -30,6 +30,7 @@ import {
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { samePath } from "@/lib/paths";
 import { sessionDisplayTitle } from "@/lib/session-display-title";
+import { SessionRowShell } from "./session-row-render-proxy";
 import { showBrowserNotification } from "@/lib/browser-notifications";
 
 function sessionListUrl(summary: boolean, force: boolean): string {
@@ -2837,51 +2838,24 @@ const SessionItem = memo(function SessionItem({
     setConfirmDelete(false);
   }, []);
 
-  // Fixed-height outer wrapper — content swaps in place so the list never reflows
-  const ITEM_HEIGHT = 50;
-
+  // The row box is the sessionRow slot: the pi implementation reproduces the
+  // inline declarations that used to sit here, declaration for declaration.
+  // Content still swaps in place, so the list never reflows.
   return (
-    <div
-      ref={rowRef}
-      // Same contract as `SessionCompactRow`: the list view is the default, so
-      // these hooks are what let the Claude layer restyle the rows a reader
-      // actually sees. State comes from props this component already had.
-      className={[
-        "session-row",
-        isSelected ? "is-selected" : "",
-        isRunning ? "is-running" : "",
-        isUnread ? "is-unread" : "",
-        depth > 0 ? "is-fork" : "",
-      ].filter(Boolean).join(" ")}
-      data-fork-depth={depth}
-      onClick={confirmDelete || renaming ? undefined : onClick}
+    <SessionRowShell
+      variant="tree"
+      depth={depth}
+      selected={isSelected}
+      running={isRunning}
+      unread={isUnread}
+      hovered={hovered}
+      armed={confirmDelete}
+      inert={confirmDelete || renaming}
+      deleting={deleting}
+      onSelect={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
-      style={{
-        // Height through a variable: a kit may want a roomier row, and an
-        // inline `height` would win over any stylesheet. `min-height` cannot
-        // do the job because the inline value is what actually applies.
-        height: "var(--session-row-height, " + ITEM_HEIGHT + "px)",
-        minHeight: "var(--session-row-height, " + ITEM_HEIGHT + "px)",
-        display: "flex",
-        alignItems: "center",
-        paddingLeft: depth > 0 ? depth * 12 + 14 : 14,
-        paddingRight: 8,
-        cursor: confirmDelete || renaming ? "default" : "pointer",
-        // Variables, not literals: an inline `background` would beat every
-        // selector, but an inline `var()` loses to whoever sets the variable.
-        background: confirmDelete || isSelected
-          ? "var(--session-row-bg-selected, var(--bg-selected))"
-          : hovered ? "var(--session-row-bg-hover, var(--bg-hover))" : "transparent",
-        borderLeft: confirmDelete || isSelected
-          ? "2px solid var(--session-row-accent, var(--accent))"
-          : "2px solid transparent",
-        borderRadius: "var(--session-row-radius, 0)",
-        transition: "background 0.1s",
-        opacity: deleting ? 0.5 : 1,
-        gap: 6,
-        overflow: "hidden",
-      }}
+      containerRef={rowRef}
     >
       {confirmDelete ? (
         /* ── Archive confirmation: same height, two flat buttons ── */
@@ -3321,7 +3295,7 @@ const SessionItem = memo(function SessionItem({
           </div>
         </>
       )}
-    </div>
+    </SessionRowShell>
   );
 });
 
@@ -3519,43 +3493,24 @@ function SessionCompactRow({
     setForkTooltip(true);
   };
 
+  // Same slot as the tree row, `variant="group"`: the pi implementation reproduces
+  // the inline declarations that used to sit here. The state the Claude layer
+  // needs travels as `session-row` + modifiers + `data-fork-depth`.
   return (
-    <div
-      ref={rowRef}
-      // Class hooks: pi draws this row with inline styles, so no kit could reach
-      // it. These names carry the state the Claude layer needs (selected fork
-      // depth) without touching a single declaration or handler.
-      className={[
-        "session-row",
-        isSelected ? "is-selected" : "",
-        isRunning ? "is-running" : "",
-        isUnread ? "is-unread" : "",
-        forkDepth > 0 ? "is-fork" : "",
-      ].filter(Boolean).join(" ")}
-      data-fork-depth={forkDepth}
-      onClick={confirmDelete || renaming ? undefined : onClick}
+    <SessionRowShell
+      variant="group"
+      depth={forkDepth}
+      selected={isSelected}
+      running={isRunning}
+      unread={isUnread}
+      hovered={hovered}
+      armed={confirmDelete}
+      inert={confirmDelete || renaming}
+      deleting={deleting}
+      onSelect={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); setForkTooltip(false); }}
-      style={{
-        display: "flex", flexDirection: "column", justifyContent: "center",
-        padding: "5px 8px 5px 10px",
-        paddingLeft: 10 + forkDepth * 14,
-        position: "relative",
-        cursor: confirmDelete || renaming ? "default" : "pointer",
-        // Read through variables so a kit can restate the row without an
-        // `!important`: an inline declaration of `background` would win over any
-        // stylesheet selector, but an inline `var()` reference loses to whoever
-        // sets the variable on an ancestor.
-        background: confirmDelete || isSelected
-          ? "var(--session-row-bg-selected, var(--bg-selected))"
-          : hovered ? "var(--session-row-bg-hover, var(--bg-hover))" : "transparent",
-        borderLeft: confirmDelete || isSelected
-          ? "2px solid var(--session-row-accent, var(--accent))"
-          : "2px solid transparent",
-        borderRadius: "var(--session-row-radius, 6px)",
-        transition: "background 0.1s",
-        opacity: deleting ? 0.5 : 1,
-      }}
+      containerRef={rowRef}
     >
       {/* Fork indent guide line — one vertical tick per depth level, aligned
           with the padding so forks read as children of the session above. */}
@@ -3692,6 +3647,6 @@ function SessionCompactRow({
           })()}
         </>
       )}
-    </div>
+    </SessionRowShell>
   );
 }

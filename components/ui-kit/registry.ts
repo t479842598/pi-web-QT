@@ -3,14 +3,17 @@
  *
  * The pi column holds the components that ship today, referenced in place: the
  * pi tree is never moved or rewritten, so `kit === "pi"` is by construction the
- * current UI. The claude column is filled wave by wave; `CLAUDE_PENDING`
- * records which wave is allowed to leave a slot unimplemented, and the coverage
- * test fails if a slot is neither implemented nor listed.
+ * current UI. The claude column is filled wave by wave.
  *
- * The primitives are bound in both columns (W1): the pi adapters in
- * `./pi/` reproduce today's markup, the CDS ones live in
- * `@/components/claude/primitives`. `sessionRow` still needs a pi adapter —
- * the row is inline markup in `SessionSidebar` today, not a component.
+ * Both columns are complete for all 26 slots, so `CLAUDE_PENDING` and
+ * `PI_PENDING` are empty and the tests assert they must stay empty — a slot
+ * that is neither implemented nor declared pending fails the coverage lock.
+ *
+ * `sessionRow` was the last gap. The row used to be inline markup inside
+ * `SessionSidebar`, which had no component for the slot to point at; it has one
+ * now (`./pi/SessionRow`, reproducing those inline declarations verbatim) and
+ * `components/session-row-render-proxy.tsx` mounts the slot at both sidebar row
+ * sites, so the pi adapter is what actually renders under `kit === "pi"`.
  */
 
 import type { ComponentType } from "react";
@@ -63,14 +66,12 @@ import { PiSegmented } from "@/components/ui-kit/pi/Segmented";
 import { PiToggle } from "@/components/ui-kit/pi/Toggle";
 import { PiStatus } from "@/components/ui-kit/pi/Status";
 import { PiField } from "@/components/ui-kit/pi/Field";
-import { PiScrollFade } from "@/components/ui-kit/pi/ScrollFade";
 
 import { CdsButton } from "@/components/claude/primitives/CdsButton";
 import { CdsSegmented } from "@/components/claude/primitives/SegmentedControl";
 import { CdsToggle } from "@/components/claude/primitives/CdsToggle";
 import { CdsStatus } from "@/components/claude/primitives/StatusIndicators";
 import { CdsField } from "@/components/claude/primitives/CdsField";
-import { CdsScrollFade } from "@/components/claude/primitives/ScrollFadeContainer";
 
 import type { KitId, SlotId } from "@/lib/ui-kit";
 import type { SlotPropsMap } from "./types";
@@ -90,7 +91,6 @@ export const UI_KIT_REGISTRY: Record<SlotId, SlotRegistryEntry> = {
   toggle: { pi: PiToggle, claude: CdsToggle },
   status: { pi: PiStatus, claude: CdsStatus },
   field: { pi: PiField, claude: CdsField },
-  scrollFade: { pi: PiScrollFade, claude: CdsScrollFade },
 
   dialogShell: { pi: ConfigPanelShell, claude: ClaudeDialogShell },
   approvalCard: { pi: ApprovalModal, claude: ClaudeApprovalCard },
@@ -124,15 +124,17 @@ export const UI_KIT_REGISTRY: Record<SlotId, SlotRegistryEntry> = {
 };
 
 /**
- * Slots whose pi adapter or Claude implementation is not written yet, keyed to
- * the wave that owes it. Must end up empty before release.
+ * Slots whose Claude implementation is not written yet, keyed to the wave that
+ * owes it. Empty: every slot ships both sides.
+ *
+ * The settings panel no longer reads this — a pending badge over an empty list
+ * was a branch that could never render. `registry.test.mjs` and
+ * `primitives.test.mjs` now assert the list stays empty, which is what keeps
+ * the export honest.
  */
-export const CLAUDE_PENDING: Partial<Record<SlotId, string>> = {
-  // overlay — wave 3
-  // shell — wave 4
-};
+export const CLAUDE_PENDING: Partial<Record<SlotId, string>> = {};
 
-/** Slots that still need a pi adapter (inline markup today). */
+/** Slots that still need a pi adapter. Empty — see the header note. */
 export const PI_PENDING: readonly SlotId[] = [];
 
 export function slotComponent<S extends SlotId>(slot: S, kit: KitId): ComponentType<SlotPropsMap[S]> | null {

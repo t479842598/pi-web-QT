@@ -60,6 +60,18 @@ test("a slot is never both implemented and pending", () => {
   assert.deepEqual(overlap, []);
 });
 
+test("both pending lists are empty and must stay empty", () => {
+  // Wave-by-wave, a slot could be declared "not written yet" instead of bound.
+  // Every slot is bound on both sides now, so the honest lock is the empty
+  // list: a new entry here means a switch can present a blank surface, and the
+  // settings panel no longer renders a pending badge to warn about it.
+  assert.deepEqual(pendingSlots, [], "no claude slot may be left unimplemented");
+  assert.deepEqual(piPending, [], "no pi slot may be left without an adapter");
+  assert.equal(claudeReady.length, uiKit.SLOT_IDS.length, "every slot binds a claude side");
+  assert.equal(piReady.length, uiKit.SLOT_IDS.length, "every slot binds a pi side");
+  assert.equal(declaredSlots.length, 26, "26 switchable surfaces");
+});
+
 test("the pi column never points at a claude implementation", () => {
   // The pi column must stay bound to today's components. W1 made the file
   // import from both trees (the claude column is real now), so the rule is per
@@ -71,7 +83,7 @@ test("the pi column never points at a claude implementation", () => {
     assert.doesNotMatch(ref, /^Cds/, `${ref} is a claude implementation bound to the pi column`);
   }
 
-  for (const file of ["Button", "Segmented", "Toggle", "Status", "Field", "ScrollFade"]) {
+  for (const file of ["Button", "Segmented", "Toggle", "Status", "Field"]) {
     const source = readFileSync(new URL(`./pi/${file}.tsx`, import.meta.url), "utf8");
     assert.doesNotMatch(source, /components\/claude/, `pi/${file}.tsx must not import the claude tree`);
   }

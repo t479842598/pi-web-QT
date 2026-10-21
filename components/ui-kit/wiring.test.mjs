@@ -5,7 +5,7 @@ import test from "node:test";
 /**
  * Slot wiring lock.
  *
- * The registry can list 27 implementations and still render none of them: a slot
+ * The registry can list 26 implementations and still render none of them: a slot
  * only exists once some component actually calls `useSlot` for it. That gap is
  * invisible in screenshots when the dev server requires a login, so it is
  * asserted from the source instead — every slot must have at least one live
@@ -21,18 +21,9 @@ function read(relative) {
 const consumers = [
   "components/conversation-render-proxy.tsx",
   "components/shell-render-proxy.tsx",
+  "components/session-row-render-proxy.tsx",
   "components/ui-kit/primitives.tsx",
 ].map(read).join("\n");
-
-/**
- * Slots with a live consumer. `sessionRow` is the one exception: the sidebar
- * renders its rows inline inside a 3.4k-line component, so a kit-aware row
- * would mean restructuring that loop. The slot and both implementations exist
- * (and `ClaudeSessionRow` is verified by `shell.test.mjs`), but nothing mounts
- * it yet — listing it here would be a lie, and the assertions below would stop
- * catching real regressions.
- */
-export const NOT_YET_WIRED = ["sessionRow"];
 
 /**
  * Slots whose Claude side is not a drop-in proxy.
@@ -46,18 +37,18 @@ export const NOT_YET_WIRED = ["sessionRow"];
  */
 export const CSS_ONLY = ["composer"];
 
-/** Slots that are wired through a proxy module. */
+/** Slots that are wired through a proxy module or the primitive facade. */
 const WIRED = [
   // conversation
   "messageList", "messageShell", "thinking", "toolCard", "subagentRow", "subagentPanel",
   // shell (composer is CSS-only, see CSS_ONLY)
-  "titleBar", "sidebar", "tabBar", "modelSwitcher", "fileViewer",
+  "titleBar", "sidebar", "sessionRow", "tabBar", "modelSwitcher", "fileViewer",
   // overlay
   "dialogShell", "palette", "approvalCard", "planReview", "trustDialog", "queueRecovery", "imageLightbox",
   // conversation (compaction lives with the transcript)
   "compaction",
   // primitives (through the facade)
-  "button", "segmented", "toggle", "status", "field", "scrollFade",
+  "button", "segmented", "toggle", "status", "field",
 ];
 
 for (const slot of WIRED) {
@@ -71,20 +62,23 @@ test("each proxy export is consumed by something outside the kit layer", () => {
   // The slot helper only proves *a proxy* mentions the slot. It cannot tell
   // whether any component renders that proxy, which is how `thinking` stayed
   // dead while every assertion passed: ThinkingRow existed and nothing imported
-  // it. This walks the proxy module's own exports instead.
+  // it. This walks the proxy modules' own exports instead.
   const proxy = read("components/conversation-render-proxy.tsx");
   const shell = read("components/shell-render-proxy.tsx");
+  const rowProxy = read("components/session-row-render-proxy.tsx");
   const exported = [
     ...proxy.matchAll(/export function (\w+)/g),
     ...shell.matchAll(/export const (\w+)/g),
+    ...rowProxy.matchAll(/export function (\w+)/g),
   ].map((match) => match[1]);
 
-  assert.ok(exported.length >= 12, `expected the proxies to export their rows, saw ${exported.length}`);
+  assert.ok(exported.length >= 13, `expected the proxies to export their rows, saw ${exported.length}`);
 
   const callers = [
     "components/AppShell.tsx",
     "components/ChatWindow.tsx",
     "components/MessageView.tsx",
+    "components/SessionSidebar.tsx",
     "components/AgentsConfig.tsx",
     "components/model-config/DefaultModelRow.tsx",
   ]
@@ -104,15 +98,16 @@ test("each proxy export is consumed by something outside the kit layer", () => {
 test("every registry slot is in the wired list", () => {
   const uiKit = read("lib/ui-kit.ts");
   const declared = [...uiKit.matchAll(/^\s{2}"([a-zA-Z]+)",\s*$/gm)].map((m) => m[1]);
-  assert.ok(declared.length >= 27, `expected 27 slots, saw ${declared.length}`);
+  assert.equal(declared.length, 26, "26 switchable surfaces");
   const missing = declared.filter(
-    (slot) => !WIRED.includes(slot) && !NOT_YET_WIRED.includes(slot) && !CSS_ONLY.includes(slot),
+    (slot) => !WIRED.includes(slot) && !CSS_ONLY.includes(slot),
   );
   assert.deepEqual(missing, [], "a slot exists in the model but no component renders it");
-  // The pending list must stay exactly what is documented above, so finishing a
-  // wiring job forces this line to change.
-  const pending = declared.filter((slot) => NOT_YET_WIRED.includes(slot));
-  assert.deepEqual(pending, ["sessionRow"]);
+  // No exemption list any more: `sessionRow` was the last slot without a mount
+  // point and is now rendered through session-row-render-proxy.tsx, so every
+  // declared slot must be in WIRED or CSS_ONLY. Deleting an entry from WIRED
+  // therefore has to fail here, not be excused.
+  assert.deepEqual(declared.filter((slot) => !WIRED.includes(slot)), ["composer"]);
 });
 
 test("the two kits are distinguishable in markup", () => {
@@ -123,10 +118,15 @@ test("the two kits are distinguishable in markup", () => {
     ["components/claude/shell/ClaudeSidebar.tsx", "claude-sidebar"],
     ["components/claude/overlay/ClaudeApprovalCard.tsx", "cds-approval"],
     ["components/claude/conversation/ClaudeMessageList.tsx", "data-index"],
+    ["components/claude/shell/ClaudeSessionRow.tsx", "claude-session-row"],
   ];
   for (const [file, marker] of markers) {
     assert.match(read(file), new RegExp(marker), `${file} must expose "${marker}"`);
   }
   const piTabBar = read("components/TabBar.tsx");
   assert.doesNotMatch(piTabBar, /claude-tab-bar/, "the pi tree must not emit the claude marker");
+  // The session row is the same rule: the pi adapter emits the shared
+  // `session-row` hooks and never the Claude marker.
+  const piRow = read("components/ui-kit/pi/SessionRow.tsx");
+  assert.doesNotMatch(piRow, /claude-session-row/, "the pi row must not emit the claude marker");
 });

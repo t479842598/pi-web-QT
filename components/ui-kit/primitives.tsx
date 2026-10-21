@@ -6,14 +6,13 @@ import { useSlot, useSlotKit } from "./UiKitProvider";
 import type {
   ButtonSlotProps,
   FieldSlotProps,
-  ScrollFadeSlotProps,
   SegmentedSlotProps,
   StatusSlotProps,
   ToggleSlotProps,
 } from "./types";
 
 /**
- * Thin wrappers so a caller never has to read the kit: each one resolves its
+ * The five atoms so a caller never has to read the kit: each one resolves its
  * slot and renders the winning implementation. When a slot has no
  * implementation yet (a wave still owes it) the wrapper renders nothing rather
  * than crashing — the coverage test is what keeps that window short.
@@ -51,9 +50,6 @@ export const Status: ComponentType<StatusSlotProps> = (props) =>
 
 export const Field: ComponentType<FieldSlotProps> = (props) =>
   renderPrimitive(usePrimitive<FieldSlotProps>("field"), props);
-
-export const ScrollFade: ComponentType<ScrollFadeSlotProps> = (props) =>
-  renderPrimitive(usePrimitive<ScrollFadeSlotProps>("scrollFade"), props);
 
 /** Exported for tests that need the resolved kit without rendering. */
 export { useSlotKit };

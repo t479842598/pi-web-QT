@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 
 import { SettingCard, SettingNote, SettingRow } from "@/components/SettingCard";
 import { Button, Segmented, Status, Toggle, useUiKit } from "@/components/ui-kit";
-import { CLAUDE_PENDING } from "@/components/ui-kit/registry";
 import { useI18n } from "@/hooks/useI18n";
 import {
   DEFAULT_UI_KIT_SETTINGS,
@@ -232,7 +231,6 @@ export function UiKitConfig() {
                       {t(`uiKit.scope${cap(scope)}`)}
                     </span>
                     {SLOTS_BY_SCOPE[scope].map((slot) => {
-                      const pendingWave = CLAUDE_PENDING[slot];
                       const resolved = resolveSlot(slot);
                       return (
                         <div
@@ -240,13 +238,15 @@ export function UiKitConfig() {
                           className="flex items-center justify-between"
                           style={{ gap: 8, flexWrap: "wrap" }}
                         >
+                          {/* No pending badge: CLAUDE_PENDING is empty for every
+                              slot, so the title and the " *" marker could never
+                              render. registry.test.mjs now guards that the list
+                              stays empty instead of shipping dead markup. */}
                           <code
                             className="text-xs text-text-muted"
-                            title={pendingWave ? t("uiKit.slotPending") : undefined}
                             style={{ fontFamily: "var(--font-mono)", minWidth: 0 }}
                           >
                             {slot}
-                            {pendingWave ? " *" : ""}
                           </code>
                           <Segmented
                             ariaLabel={slot}

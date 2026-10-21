@@ -5,7 +5,7 @@ import test from "node:test";
 /**
  * W1 primitive lock.
  *
- * The six atoms are the first surfaces that exist twice for real: a pi adapter
+ * The five atoms are the first surfaces that exist twice for real: a pi adapter
  * that must be pixel-identical to today's markup, and a CDS implementation that
  * must stay inside the token layer. This test pins the three things a later
  * wave could quietly break — the registry binding, the pi adapter debt, and the
@@ -14,7 +14,7 @@ import test from "node:test";
 
 const REGISTRY_SOURCE = readFileSync(new URL("./registry.ts", import.meta.url), "utf8");
 
-const PRIMITIVE_SLOTS = ["button", "segmented", "toggle", "status", "field", "scrollFade"];
+const PRIMITIVE_SLOTS = ["button", "segmented", "toggle", "status", "field"];
 
 function entry(slot) {
   const line = REGISTRY_SOURCE.split("\n").find((row) => row.startsWith(`  ${slot}: { pi:`));
@@ -49,7 +49,7 @@ test("the Claude primitives stay inside the token layer", () => {
   // why nothing was copied verbatim. Only shipped primitives are scanned.
   const dir = new URL("../claude/primitives/", import.meta.url);
   const files = readdirSync(dir).filter((name) => name.endsWith(".tsx"));
-  assert.ok(files.length >= 6, `six primitives shipped, found ${files.length}`);
+  assert.ok(files.length >= 5, `five primitives shipped, found ${files.length}`);
 
   for (const file of files) {
     const source = readFileSync(new URL(file, dir), "utf8");

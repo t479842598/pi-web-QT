@@ -15,7 +15,7 @@
  * from the emitted bundle.
  */
 
-import type { ButtonHTMLAttributes, ComponentProps, InputHTMLAttributes, MouseEvent, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ComponentProps, InputHTMLAttributes, ReactNode, Ref } from "react";
 
 import { AppTitleBar } from "@/components/AppTitleBar";
 import { SessionSidebar } from "@/components/SessionSidebar";
@@ -93,34 +93,45 @@ export interface FieldSlotProps extends Omit<InputHTMLAttributes<HTMLInputElemen
   invalid?: boolean;
 }
 
-export interface ScrollFadeSlotProps {
-  children: ReactNode;
-  className?: string;
-  edges?: "top" | "bottom" | "both" | "none";
-  /** Px of the fade gradient; defaults to the kit's own token. */
-  size?: number;
-}
-
 // ─── Shell ───────────────────────────────────────────────────────────────────
 
 /**
- * Session rows are rendered inline by `SessionSidebar` today, so there is no pi
- * component to derive from; the contract is declared here and the pi adapter
- * reproduces the current row markup.
+ * The session-row slot is a **row shell**, not a row's content.
+ *
+ * `SessionSidebar` owns the session tree, so everything that makes a row work
+ * (selection, rename, archive confirmation, hover actions, fork tooltips) stays
+ * there and arrives as `children`. What the kit owns is the *box*: height,
+ * indent, radius, the selected/hovered surface, and the class hooks the Claude
+ * layer reads. That split is what lets the row be switched without the two kits
+ * ever disagreeing about behaviour.
+ *
+ * `variant` names the sidebar view, because the two views have genuinely
+ * different pi geometry (the fork tree is a fixed-height single line with a
+ * 0px radius fallback; the accordion group is a two-line column with 6px).
  */
 export interface SessionRowSlotProps {
-  title: string;
-  subtitle?: string;
-  active: boolean;
+  /** Which sidebar view draws this row. */
+  variant: "tree" | "group";
+  /** Fork indent level — 0 for a root row. */
+  depth: number;
+  selected: boolean;
   running?: boolean;
   unread?: boolean;
-  depth?: number;
-  onClick: () => void;
-  onContextMenu?: (event: MouseEvent<HTMLElement>) => void;
-  /** Trailing controls (fork, delete, rename…). */
-  actions?: ReactNode;
-  meta?: ReactNode;
+  /** Pointer is over the row; drives the hovered surface. */
+  hovered?: boolean;
+  /** Archive confirmation is open: the row keeps the selected surface. */
+  armed?: boolean;
+  /** Archive confirmation or inline rename is open: the row stops being clickable. */
+  inert?: boolean;
+  /** Archive in flight — the row dims. */
+  deleting?: boolean;
+  onSelect: () => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  /** The sidebar anchors its fixed tooltips to this node. */
+  containerRef?: Ref<HTMLDivElement>;
   className?: string;
+  children: ReactNode;
 }
 
 export interface SlotPropsMap {
@@ -130,7 +141,6 @@ export interface SlotPropsMap {
   toggle: ToggleSlotProps;
   status: StatusSlotProps;
   field: FieldSlotProps;
-  scrollFade: ScrollFadeSlotProps;
 
   // overlay — dialogs and their contents
   dialogShell: ComponentProps<typeof ConfigPanelShell>;

@@ -212,9 +212,4 @@ export function useSlot<S extends SlotId>(slot: S): ComponentType<SlotPropsMap[S
   return useMemo(() => slotComponent(slot, kit), [slot, kit]);
 }
 
-/** Marks a rendered surface for the coverage assertions in tests/e2e. */
-export function surfaceProps(slot: SlotId, kit: KitId): { "data-surface": SlotId; "data-kit": KitId } {
-  return { "data-surface": slot, "data-kit": kit };
-}
-
 export { useSyncExternalStore as __useSyncExternalStoreForTests };

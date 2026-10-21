@@ -28,8 +28,6 @@ export type LayoutPreset = "compact" | "standard" | "comfortable";
 /** Where the sidebar collapse control lives. Both kits honour it. */
 export type SidebarTogglePlacement = "sidebar" | "titlebar";
 
-export const KIT_IDS: readonly KitId[] = ["pi", "claude"];
-
 export const SCOPE_IDS: readonly ScopeId[] = ["primitives", "overlay", "shell", "conversation"];
 
 /**
@@ -43,7 +41,6 @@ export const SLOT_IDS = [
   "toggle",
   "status",
   "field",
-  "scrollFade",
   // overlay — dialogs and their contents
   "dialogShell",
   "approvalCard",
@@ -78,7 +75,6 @@ export const SLOT_SCOPES: Record<SlotId, ScopeId> = {
   toggle: "primitives",
   status: "primitives",
   field: "primitives",
-  scrollFade: "primitives",
 
   dialogShell: "overlay",
   approvalCard: "overlay",
