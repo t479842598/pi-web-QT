@@ -282,6 +282,18 @@
   --cds-shadow-md: 0 2px 4px color-mix(in srgb, var(--bg) 90%, #000), 0 6px 16px color-mix(in srgb, var(--bg) 82%, #000);
   --cds-shadow-lg: 0 4px 8px color-mix(in srgb, var(--bg) 90%, #000), 0 12px 28px -2px color-mix(in srgb, var(--bg) 80%, #000);
   --cds-shadow-popover: 0 0 0 1px var(--cds-hairline-2), 0 8px 24px color-mix(in srgb, var(--bg) 78%, #000), 0 2px 6px color-mix(in srgb, var(--bg) 86%, #000);
+  /* Focus ring for fields that are not inside a kit-scoped subtree. Three rules
+     in the fixed-Claude settings page read this without a fallback and without
+     a kit prefix (.settings-modal-rail-top input, .cds-textarea,
+     .cds-palette-search), so with the global kit set to "pi" the token was
+     undefined and those focus rings disappeared entirely. Same expression as
+     app/ui-kit-claude.css:55-58; its own --cds-surface-1/--cds-clay inputs are
+     already declared on :root above, and the kit block still wins under Claude
+     (0,1,1 over 0,1,0). */
+  --cds-focus-shadow:
+    inset 0 0 0 1px var(--cds-surface-1),
+    0 0 0 1.5px var(--cds-clay),
+    0 0 6px 1px var(--cds-clay-soft);
   --cds-ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
   --cds-ease-expand: cubic-bezier(0.19, 1, 0.22, 1);
   --cds-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
