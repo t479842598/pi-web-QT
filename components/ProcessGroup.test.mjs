@@ -73,3 +73,46 @@ test("tool blocks get a referentially stable prop object so ToolCallBlock's memo
   // No inline object literal may reach ToolCallBlock directly anymore.
   assert.doesNotMatch(source, /<ToolCallBlock\s+block=\{\{/);
 });
+
+test("S5: the summary button names its disclosure region with aria-controls", () => {
+  // The region id and the button's aria-controls must come from the same
+  // useId() value, and the reference may only be emitted while the region is
+  // actually mounted (the collapsed branch is unmounted, so a permanent
+  // aria-controls would be a dangling IDREF).
+  assert.match(source, /const detailsId = useId\(\);/);
+  assert.match(source, /import \{[^}]*\buseId\b[^}]*\} from "react";/);
+  assert.match(source, /aria-controls=\{areaExpanded \? detailsId : undefined\}/);
+  assert.match(source, /\{areaExpanded && \(\s*<div id=\{detailsId\} className="overflow-hidden">/);
+  // Exactly one aria-controls, wired to detailsId; aria-expanded still carries
+  // the collapsed state so the announcement does not depend on the reference.
+  assert.equal((source.match(/aria-controls=/g) ?? []).length, 1);
+  assert.equal((source.match(/id=\{detailsId\}/g) ?? []).length, 1);
+  assert.match(source, /aria-expanded=\{areaExpanded\}/);
+});
+
+test("S5: keyboard focus reveals the affordances that hover alone used to reveal", () => {
+  // The display-mode toggle sat at opacity-0 + pointer-events-none and was only
+  // lifted by group-hover, so a keyboard user could Tab onto an invisible,
+  // unhittable control. Focus must reveal it the same way hover does.
+  // Grab the toggle's own className template literal (the one that carries the
+  // hover reveal) rather than any text before it.
+  const revealClass = source.match(/className=\{`([^`]*group-hover\/summary-row:opacity-100[^`]*)`\}/);
+  assert.ok(revealClass, "the display-mode toggle must carry a className with the hover reveal");
+  const classes = revealClass[1];
+  for (const required of [
+    "group-hover/summary-row:opacity-100",
+    "group-focus-within/summary-row:opacity-100",
+    "group-hover/summary-row:pointer-events-auto",
+    "group-focus-within/summary-row:pointer-events-auto",
+    "focus-visible:opacity-100",
+    "focus-visible:pointer-events-auto",
+  ]) {
+    assert.ok(classes.includes(required), "mode toggle must reveal on focus: " + required);
+  }
+  // The focus ring is drawn with Tailwind utilities only: no new CSS file, no
+  // !important, no new custom property.
+  assert.match(classes, /focus-visible:outline-2/);
+  assert.doesNotMatch(classes, /!/, "no !important utilities may be introduced");
+  // The caret inside the summary button follows the same rule via its own group.
+  assert.match(source, /group-hover\/summary:opacity-60 group-focus-visible\/summary:opacity-60/);
+});

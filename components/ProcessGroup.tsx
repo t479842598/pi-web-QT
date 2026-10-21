@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { MarkdownBody } from "./MarkdownBody";
 import { MessageView, ThinkingBlock, ToolCallBlock } from "./MessageView";
 import { useI18n } from "@/hooks/useI18n";
@@ -715,6 +715,10 @@ export function ProcessGroup({
   const ts: BuildLabelFn = useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const steps = useMemo(() => buildProcessSteps(blocks, ts, isStreaming), [blocks, ts, isStreaming]);
   const [areaExpanded, setAreaExpanded] = useState(isStreaming || defaultExpanded);
+  // Stable-per-instance id for the disclosure region so the summary button can
+  // name its target with aria-controls. useId is collision-free across the many
+  // process groups a transcript renders, and it never changes between renders.
+  const detailsId = useId();
   const [stepStates, setStepStates] = useState<Record<string, boolean>>({});
   const { displayMode, setDisplayMode } = useProcessDisplayMode();
   const [activeTab, setActiveTab] = useState(0);
@@ -908,6 +912,16 @@ export function ProcessGroup({
           })}
           className="group/summary flex min-w-0 items-center gap-1.5 text-left text-sm leading-relaxed text-text-muted transition-colors hover:text-text"
           aria-expanded={areaExpanded}
+          // aria-controls names the disclosure region, but only while that region
+          // is actually in the DOM: the collapsed branch is unmounted (the
+          // transcript is virtualised and the e2e suite asserts collapsed
+          // reasoning is absent from the DOM), and an IDREF pointing at a missing
+          // element is an invalid reference that axe reports as
+          // aria-valid-attr-value. Radix Collapsible can always point at its
+          // content because it keeps it mounted with hidden; we follow the
+          // "reference only what exists" convention instead, and aria-expanded
+          // keeps carrying the collapsed state.
+          aria-controls={areaExpanded ? detailsId : undefined}
           // The visible label is a generated summary ("bash 3s"), which makes a
           // poor accessible name: it changes with the run and never says what
           // the control does. The locale already carries a label for exactly
@@ -921,7 +935,9 @@ export function ProcessGroup({
               {t("desktop.tokensPerSecond", { count: tokenRate >= 10 ? String(Math.round(tokenRate)) : tokenRate.toFixed(1) })}
             </span>
           )}
-          <span className={`opacity-0 transition-opacity group-hover/summary:opacity-60 ${areaExpanded ? "rotate-90" : ""}`}>
+          {/* group-focus-visible mirrors the hover reveal for keyboard users: the
+              caret is the only affordance that says "this row expands". */}
+          <span className={`opacity-0 transition-opacity group-hover/summary:opacity-60 group-focus-visible/summary:opacity-60 ${areaExpanded ? "rotate-90" : ""}`}>
             <Caret expanded={false} />
           </span>
         </button>
@@ -933,7 +949,11 @@ export function ProcessGroup({
               setDisplayMode(nextMode);
               setAreaExpanded(true);
             }}
-            className={`shrink-0 p-1 text-text-dim transition-colors hover:text-text group-hover/summary-row:opacity-100 pointer-events-none group-hover/summary-row:pointer-events-auto ${
+            // Keyboard parity: the row is revealed on hover only, which left this
+            // control reachable by Tab but invisible (opacity-0) and unhittable
+            // (pointer-events-none). group-focus-within mirrors the hover reveal,
+            // and focus-visible keeps the ring even when the row is not revealed.
+            className={`shrink-0 p-1 text-text-dim transition-colors hover:text-text group-hover/summary-row:opacity-100 group-focus-within/summary-row:opacity-100 pointer-events-none group-hover/summary-row:pointer-events-auto group-focus-within/summary-row:pointer-events-auto focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
               displayMode === "timeline" ? "opacity-60" : "opacity-0"
             }`}
             title={displayMode === "timeline" ? t("desktop.processTabMode") : t("desktop.processTimelineMode")}
@@ -944,7 +964,7 @@ export function ProcessGroup({
       </div>
 
       {areaExpanded && (
-        <div className="overflow-hidden">
+        <div id={detailsId} className="overflow-hidden">
           {singleThinking ? (
             <div className="relative mt-2">
               <div ref={scrollRef} className="max-h-[280px] overflow-y-auto pr-2">

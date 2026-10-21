@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo, RefObject } from "react";
+import { useEffect, useId, useRef, useState, useCallback, useMemo, useContext, RefObject } from "react";
+import { I18nContext } from "@/hooks/useI18n";
+import { translateMessage } from "@/lib/i18n/format";
+import { getLocalePlugin } from "@/lib/i18n/registry";
+import type { TranslationParams } from "@/lib/i18n/types";
 import type { AgentMessage, AssistantMessage, TextContent } from "@/lib/types";
 
 interface Props {
@@ -139,6 +143,20 @@ interface NodeInfo {
 }
 
 export function ChatMinimap({ messages, streamingMessage, scrollContainer, messageRefs, onWidthChange, virtualizer }: Props) {
+  // The minimap renders inside I18nProvider in the app, but it is also mounted
+  // directly by tests that build no provider tree. Reading the context without
+  // asserting it keeps those renders working; the fallback is the English
+  // catalog, which is what translateMessage itself resolves to for an unknown
+  // locale.
+  const i18n = useContext(I18nContext);
+  const t = useCallback((key: string, params?: TranslationParams): string => {
+    if (i18n) return i18n.t(key, params);
+    const english = getLocalePlugin("en");
+    return translateMessage("en", key, { en: english?.messages ?? {} }, params);
+  }, [i18n]);
+  // Prefix for the marker ids used by aria-activedescendant. useId is unique per
+  // mounted instance, so two minimaps in one document can never collide.
+  const containerId = useId();
   const [scrollRatio, setScrollRatio] = useState(0);
   const [viewportRatio, setViewportRatio] = useState(1);
   const [visible, setVisible] = useState(false);
@@ -146,6 +164,10 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
   const [minimapHovered, setMinimapHovered] = useState(false);
   const [mouseYRatio, setMouseYRatio] = useState<number | null>(null);
   const [minimapHeightPx, setMinimapHeightPx] = useState(0);
+  // Keyboard parity with the mouse path: the container is focusable, one marker
+  // is the active descendant, and the preview follows it exactly like it follows
+  // the pointer.
+  const [activeNodeIndex, setActiveNodeIndex] = useState<number | null>(null);
   const draggingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -159,7 +181,8 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
   // --- 仅更新视口比例，不读取 DOM ---
   // React Compiler cannot infer ref.current dependencies for these stable DOM
   // callbacks; their ref objects are intentionally the dependency boundary.
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization
+  // `react-hooks/preserve-manual-memoization` is switched off in
+  // eslint.config.mjs for this fork, so no disable directive is needed here.
   const updateScroll = useCallback(() => {
     const scrollEl = scrollContainer.current;
     if (!scrollEl) return;
@@ -183,7 +206,6 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
   // stable regardless of prop identity (it changes when the minimap remounts).
   const virtualizerRef = useRef(virtualizer);
   virtualizerRef.current = virtualizer;
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const measureNodes = useCallback(() => {
     // 节流：150ms 内忽略重复调用
     if (measureThrottleRef.current) return;
@@ -308,7 +330,6 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
     return () => clearTimeout(t);
   }, [messages.length, measureNodes, updateScroll]);
 
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const scrollToMinimapRatio = useCallback((viewportTopRatio: number) => {
     const el = scrollContainer.current;
     if (!el) return;
@@ -345,6 +366,56 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
   }, [visible, viewportRatio, scrollRatio, scrollToMinimapRatio]);
 
 
+
+  // Keyboard path for the active marker: scroll the transcript so that node
+  // lands in the middle of the viewport. Same mapping the drag path uses, so a
+  // keyboard user and a mouse user end up at the same scroll offset.
+  const revealNode = useCallback((nodeIndex: number) => {
+    const node = nodesRef.current[nodeIndex];
+    if (!node) return;
+    scrollToMinimapRatio(node.topRatio - viewportRatio / 2);
+  }, [scrollToMinimapRatio, viewportRatio]);
+
+  const moveActiveNode = useCallback((nextIndex: number, list: NodeInfo[]) => {
+    if (list.length === 0) return;
+    const clamped = Math.max(0, Math.min(list.length - 1, nextIndex));
+    setActiveNodeIndex(clamped);
+    revealNode(clamped);
+  }, [revealNode]);
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const list = nodesRef.current;
+    if (list.length === 0) return;
+    const current = activeNodeIndex === null ? -1 : activeNodeIndex;
+    switch (event.key) {
+      case "ArrowDown":
+      case "ArrowRight":
+        event.preventDefault();
+        moveActiveNode(current + 1, list);
+        break;
+      case "ArrowUp":
+      case "ArrowLeft":
+        event.preventDefault();
+        moveActiveNode(current === -1 ? list.length - 1 : current - 1, list);
+        break;
+      case "Home":
+        event.preventDefault();
+        moveActiveNode(0, list);
+        break;
+      case "End":
+        event.preventDefault();
+        moveActiveNode(list.length - 1, list);
+        break;
+      case "Enter":
+      case " ":
+        if (current < 0) return;
+        event.preventDefault();
+        revealNode(current);
+        break;
+      default:
+        break;
+    }
+  }, [activeNodeIndex, moveActiveNode, revealNode]);
 
   // Keep collision calculations in screen pixels. Each message remains an
   // independent marker; dense markers move to another lane rather than merge.
@@ -384,6 +455,14 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
     });
   }, [nodes, minimapHeightPx]);
 
+  // Drop a keyboard selection that no longer addresses a node (messages were
+  // removed or the list shrank) so aria-activedescendant never dangles.
+  useEffect(() => {
+    setActiveNodeIndex((current) => (
+      current !== null && current >= nodes.length ? null : current
+    ));
+  }, [nodes]);
+
   const laneCount = useMemo(
     () => displayNodes.reduce((count, node) => Math.max(count, node.lane + 1), 1),
     [displayNodes],
@@ -415,9 +494,60 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
     ? null
     : displayNodes.find((node) => node.index === nearestNode) ?? null;
 
+  // Keyboard counterpart of the hover target. The active index is a position in
+  // `nodes`, which is the same list `displayNodes` is derived from, so the two
+  // stay in step; a stale index (messages changed under us) resolves to null and
+  // simply drops the highlight rather than pointing aria-activedescendant at a
+  // marker that no longer exists.
+  const activeNode = activeNodeIndex === null
+    ? null
+    : displayNodes.find((node) => node.index === activeNodeIndex) ?? null;
+  // The pointer path keeps its old gate exactly (hover state AND a nearest
+  // node), so nothing can linger when the cursor leaves the widget; the
+  // keyboard selection is a separate path and only speaks when the pointer is
+  // not over the minimap.
+  const previewNode = (minimapHovered ? hoveredNode : null) ?? activeNode;
+
+  const describeNode = (node: DisplayNode): string => {
+    // Reuses existing catalog keys only — no new strings in this change:
+    // roles come from desktop.transcriptRole{User,Assistant}, an empty message
+    // from desktop.noMessage, and the tool tally from chatMinimap.toolCalls.
+    const roleLabel = node.msg.role === "user"
+      ? t("desktop.transcriptRoleUser")
+      : t("desktop.transcriptRoleAssistant");
+    const preview = getMessagePreview(node.msg) || t("desktop.noMessage");
+    const toolCount = node.msg.role === "assistant"
+      ? ((node.msg as Partial<AssistantMessage>).content ?? []).filter((block) => block.type === "toolCall").length
+      : 0;
+    return toolCount > 0
+      ? `${roleLabel}: ${preview} · ${t("chatMinimap.toolCalls", { count: toolCount })}`
+      : `${roleLabel}: ${preview}`;
+  };
+
   return (
     <div
       ref={containerRef}
+      // e2e / a11y contract — the two data hooks below are load-bearing and
+      // must not be renamed:
+      //   * [data-minimap-node-index="<n>"]  — one per marker, n is the node's
+      //     index in `nodes`. Used by e2e/run.mjs to hover a specific message
+      //     (locator "[data-minimap-node-index='0']") and by
+      //     e2e/extension-dialog.mjs to prove the preview is gone at rest.
+      //   * [data-minimap-preview-box]       — the single preview tooltip.
+      // Keyboard: this container is the focusable widget; markers are options
+      // selected through aria-activedescendant, so focus never leaves the
+      // container and PageUp/PageDown-style scrolling stays cheap.
+      role="listbox"
+      tabIndex={0}
+      aria-label={t("session.messages")}
+      aria-activedescendant={activeNode ? `${containerId}-node-${activeNode.index}` : undefined}
+      onKeyDown={handleKeyDown}
+      onBlur={(e) => {
+        // Focus can only move to a descendant (markers are not focusable) or
+        // leave the widget; leaving drops the keyboard selection and preview.
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setActiveNodeIndex(null);
+      }}
       onMouseDown={handleMouseDown}
       onMouseEnter={() => setMinimapHovered(true)}
       onMouseLeave={() => { setMinimapHovered(false); setMouseYRatio(null); }}
@@ -433,10 +563,14 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
         userSelect: "none",
         background: "transparent",
         overflow: "visible",
+        // Keep the browser's focus ring visible: the container is transparent
+        // and 18px wide, so the default outline is the only focus indicator.
+        outlineOffset: "1px",
       }}
     >
-      {/* Viewport indicator */}
+      {/* Viewport indicator — decorative, so it stays out of the option list */}
       <div
+        aria-hidden="true"
         style={{
           position: "absolute",
           left: 1,
@@ -453,6 +587,7 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
       {displayNodes.map((node) => {
         const color = getNodeColor(node.msg);
         const isNearest = minimapHovered && hoveredNode?.index === node.index;
+        const isActive = activeNode?.index === node.index;
         const isUser = node.msg.role === "user";
         const markerHeight = Math.max(MIN_MARKER_HEIGHT, Math.min(46, node.heightRatio * minimapHeightPx));
         const left = LANE_PADDING + node.lane * (LANE_WIDTH + LANE_GAP);
@@ -463,8 +598,14 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
             // Stable hooks for the e2e suite: the markers used to be positioned
             // purely with inline styles and carried no identifier, so a test had
             // nothing to target and the old `data-minimap-node-index` selectors
-            // matched nothing at all.
+            // matched nothing at all. The attribute name is a contract — e2e/run.mjs
+            // and e2e/extension-dialog.mjs both select on it — so it stays exactly
+            // as it is; `id` is added alongside it for aria-activedescendant.
+            id={`${containerId}-node-${node.index}`}
             data-minimap-node-index={node.index}
+            role="option"
+            aria-selected={isActive}
+            aria-label={describeNode(node)}
             style={{
               position: "absolute",
               top: node.displayTopPx,
@@ -484,20 +625,22 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
                 height: "100%",
                 borderRadius: 1,
                 background: color,
-                opacity: isNearest ? 1 : isUser ? 0.92 : 0.72,
+                opacity: isNearest || isActive ? 1 : isUser ? 0.92 : 0.72,
                 transition: "opacity 0.1s, filter 0.1s",
-                filter: isNearest ? "brightness(1.2)" : "none",
+                filter: isNearest || isActive ? "brightness(1.2)" : "none",
               }}
             />
           </div>
         );
       })}
 
-      {/* A single nearby preview avoids tooltip collisions in dense sessions. */}
-      {minimapHovered && hoveredNode && (() => {
-        const preview = getMessagePreview(hoveredNode.msg);
+      {/* A single nearby preview avoids tooltip collisions in dense sessions.
+          The same tooltip serves both pointers: the hovered marker wins while the
+          mouse is over the minimap, otherwise the keyboard selection drives it. */}
+      {previewNode && (() => {
+        const preview = getMessagePreview(previewNode.msg);
         if (!preview) return null;
-        const previewBackground = getPreviewBackground(hoveredNode.msg);
+        const previewBackground = getPreviewBackground(previewNode.msg);
         // Taller minimaps can show more context without obscuring nearby nodes.
         const previewLines = Math.max(1, Math.min(MAX_PREVIEW_LINES, Math.floor(minimapHeightPx / 120)));
         const tooltipHeight = previewLines * PREVIEW_LINE_HEIGHT + PREVIEW_PADDING_Y;
@@ -506,14 +649,18 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
         // previews appear above the marker on tall minimaps.
         const tooltipCenter = Math.max(
           tooltipHeight / 2,
-          Math.min(minimapHeightPx - tooltipHeight / 2, hoveredNode.displayTopPx),
+          Math.min(minimapHeightPx - tooltipHeight / 2, previewNode.displayTopPx),
         );
         return (
           <div
             // Hook for the e2e suite. The preview is a read-only text tooltip, not
             // a list of buttons, so a test can assert its content but must not
-            // expect to click through it.
+            // expect to click through it. The attribute name is a contract shared
+            // with e2e/extension-dialog.mjs, which waits for it to be hidden.
             data-minimap-preview-box=""
+            // A listbox's only permitted children are options, and every string
+            // the tooltip shows is already carried by its marker's aria-label.
+            aria-hidden="true"
             style={{
               position: "absolute",
               top: tooltipCenter,

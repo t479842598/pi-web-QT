@@ -7,7 +7,8 @@ import { useSlot } from "@/components/ui-kit";
 import { AppTitleBar } from "@/components/AppTitleBar";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { TabBar } from "@/components/TabBar";
-import { ChatInput } from "@/components/ChatInput";
+// No `ChatInput` import here: the composer slot has no drop-in proxy (see the
+// comment above `ShellModelSwitcher`), so this module must not reference it.
 import { ModelSelector } from "@/components/ModelSelector";
 import { FileViewer } from "@/components/FileViewer";
 import { CompactionSummary } from "@/components/CompactionSummary";

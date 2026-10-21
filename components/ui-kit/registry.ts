@@ -53,7 +53,8 @@ import { ClaudeSidebar } from "@/components/claude/shell/ClaudeSidebar";
 import { ClaudeSessionRow } from "@/components/claude/shell/ClaudeSessionRow";
 import { PiSessionRow } from "@/components/ui-kit/pi/SessionRow";
 import { ClaudeTabBar } from "@/components/claude/shell/ClaudeTabBar";
-import { ClaudeComposerChrome } from "@/components/claude/shell/ClaudeComposerChrome";
+// No `ClaudeComposerChrome` import: the composer slot is CSS-only (see the
+// comment on `composer` below), so nothing here references the frame.
 import { ClaudeModelSwitcher } from "@/components/claude/shell/ClaudeModelSwitcher";
 import { ClaudeFileViewer } from "@/components/claude/shell/ClaudeFileViewer";
 
