@@ -2600,6 +2600,12 @@ export function AppShell() {
             <FileViewer
               filePath={activeFileTab.filePath}
               cwd={activeCwd ?? undefined}
+              // The panel is always mounted, so a hidden viewer would keep its
+              // watch stream open on a file nobody can see. That holds one of
+              // Chromium's six per-host HTTP/1.1 sockets permanently, and with the
+              // app's resident event streams it exhausts the pool: every later
+              // same-origin navigation queues behind it and never commits.
+              watchEnabled={rightPanelOpen}
               sourceSessionId={activeFileTab.sourceSessionId}
               initialDisplayMode={activeFileTab.initialDisplayMode}
               initialPage={activeFileTab.page}

@@ -517,7 +517,7 @@ function GitDiffView({ patch }: { patch: string }) {
   );
 }
 
-function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
+function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled }: Props) {
   const { t } = useI18n();
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
@@ -533,14 +533,12 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
     setNaturalSize(null);
     setError(null);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
+  }, [filePath, sourceSessionId]);
 
+  useEffect(() => {
+    if (watchEnabled === false) return;
     const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
     esRef.current = es;
-
     es.addEventListener("change", (e) => {
       try {
         const d = JSON.parse((e as MessageEvent).data) as { size?: number };
@@ -548,12 +546,11 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
       } catch { /* ignore */ }
       setBust((b) => b + 1);
     });
-
     return () => {
       es.close();
       esRef.current = null;
     };
-  }, [filePath, sourceSessionId]);
+  }, [filePath, sourceSessionId, watchEnabled]);
 
   const src = getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined);
 
@@ -638,7 +635,7 @@ function formatDuration(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
-function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
+function AudioViewer({ filePath, cwd, sourceSessionId, watchEnabled }: Props) {
   const { t } = useI18n();
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
@@ -654,14 +651,12 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
     setDuration(null);
     setError(null);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
+  }, [filePath, sourceSessionId]);
 
+  useEffect(() => {
+    if (watchEnabled === false) return;
     const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
     esRef.current = es;
-
     es.addEventListener("change", (e) => {
       try {
         const d = JSON.parse((e as MessageEvent).data) as { size?: number };
@@ -671,12 +666,11 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
       setError(null);
       setBust((b) => b + 1);
     });
-
     return () => {
       es.close();
       esRef.current = null;
     };
-  }, [filePath, sourceSessionId]);
+  }, [filePath, sourceSessionId, watchEnabled]);
 
   const src = getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined);
 
@@ -742,7 +736,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
-function DocumentViewer({ filePath, cwd, sourceSessionId, initialPage }: Props) {
+function DocumentViewer({ filePath, cwd, sourceSessionId, initialPage, watchEnabled }: Props) {
   const { t } = useI18n();
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
@@ -779,9 +773,12 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, initialPage }: Props) 
       })
       .catch((e) => setError(String(e)));
 
+  }, [filePath, isPdf, sourceSessionId, t]);
+
+  useEffect(() => {
+    if (watchEnabled === false) return;
     const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
     esRef.current = es;
-
     es.addEventListener("change", (e) => {
       try {
         const d = JSON.parse((e as MessageEvent).data) as { size?: number };
@@ -796,12 +793,11 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, initialPage }: Props) 
       setError(null);
       setBust((b) => b + 1);
     });
-
     return () => {
       es.close();
       esRef.current = null;
     };
-  }, [filePath, isPdf, sourceSessionId, t]);
+  }, [filePath, isPdf, sourceSessionId, t, watchEnabled]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -859,20 +855,21 @@ export function FileViewer({
   initialDisplayMode,
   initialPage,
   onFileSaved,
+  watchEnabled,
 }: Props) {
   if (isImagePath(filePath)) {
-    return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+    return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} watchEnabled={watchEnabled} />;
   }
   if (isAudioPath(filePath)) {
-    return <AudioViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+    return <AudioViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} watchEnabled={watchEnabled} />;
   }
   if (isDocumentPreviewPath(filePath)) {
-    return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} initialPage={initialPage} />;
+    return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} initialPage={initialPage} watchEnabled={watchEnabled} />;
   }
-  return <TextFileViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onAtMention={onAtMention} onMentionLines={onMentionLines} initialDisplayMode={initialDisplayMode} onFileSaved={onFileSaved} />;
+  return <TextFileViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onAtMention={onAtMention} onMentionLines={onMentionLines} initialDisplayMode={initialDisplayMode} onFileSaved={onFileSaved} watchEnabled={watchEnabled} />;
 }
 
-function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMention, onMentionLines, initialDisplayMode, onFileSaved }: Props) {
+function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMention, onMentionLines, initialDisplayMode, onFileSaved, watchEnabled }: Props) {
   const { t } = useI18n();
   const [data, setData] = useState<FileData | null>(null);
   const [prevContent, setPrevContent] = useState<string | null>(null);
@@ -980,10 +977,37 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
     }).finally(() => setLoading(false));
     void fetchGitDiff(filePath);
 
-    // Set up SSE watch
+  }, [filePath, fetchContent, fetchGitDiff, initialDisplayMode, sourceSessionId]);
+
+  // SSE watch lives in its own effect so hiding the panel can release the stream.
+  // The viewer stays mounted while the panel is closed, and an open watch stream
+  // holds one of Chromium's six per-host HTTP/1.1 sockets for a file nobody can
+  // see; together with the app's resident event streams that is the entire pool,
+  // and every later same-origin navigation queues behind it forever.
+  //
+  // A subscription gap is also a change gap — events fired while unsubscribed are
+  // not replayed — so reopening re-reads the file instead of showing whatever the
+  // hidden viewer last had. Only on the false -> true edge: an ordinary mount is
+  // already covered by the load effect above, and re-fetching there would double
+  // every open.
+  const watchWasDisabledRef = useRef(false);
+  useEffect(() => {
+    if (watchEnabled === false) {
+      watchWasDisabledRef.current = true;
+      esRef.current?.close();
+      esRef.current = null;
+      return;
+    }
+    if (watchWasDisabledRef.current) {
+      watchWasDisabledRef.current = false;
+      if (editModeRef.current) setExternalModified(true);
+      else {
+        void fetchContent(filePath, true);
+        void fetchGitDiff(filePath);
+      }
+    }
     const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
     esRef.current = es;
-
     es.addEventListener("change", () => {
       // 编辑态下绝不覆盖 textarea——只标记外部修改，由用户决定是否重载。
       if (editModeRef.current) {
@@ -993,12 +1017,11 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onAtMentio
       fetchContent(filePath, true);
       void fetchGitDiff(filePath);
     });
-
     return () => {
       es.close();
       esRef.current = null;
     };
-  }, [filePath, fetchContent, fetchGitDiff, initialDisplayMode, sourceSessionId]);
+  }, [filePath, fetchContent, fetchGitDiff, sourceSessionId, watchEnabled]);
 
   const enterEdit = useCallback(() => {
     if (!data || isBinary) return;
