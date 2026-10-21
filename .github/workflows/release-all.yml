@@ -210,7 +210,7 @@ jobs:
           # Runner image no longer ships libfuse2; without it the AppImage
           # toolchain (linuxdeploy) fails with "failed to run linuxdeploy".
           sudo apt-get install -y libfuse2
-      - name: AppImage: skip linuxdeploy strip (relr.dyn crash)
+      - name: "AppImage: skip linuxdeploy strip (relr.dyn crash)"
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           # linuxdeploy strips the bundled system libraries, and the host
