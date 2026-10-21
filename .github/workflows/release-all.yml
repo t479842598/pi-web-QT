@@ -13,6 +13,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "手动触发时必填的发布版本号（形如 0.19.2，可带前缀 v）"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -32,11 +37,30 @@ jobs:
         working-directory: mobile2
     steps:
       - uses: actions/checkout@v4
-      - name: Resolve version from tag
+      - name: Resolve release version
         id: version
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
         run: |
-          VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
+          # 统一版本推导：tag 触发沿用 GITHUB_REF_NAME（发布主路径，行为不变）。
+          # workflow_dispatch 时 GITHUB_REF_NAME 是分支名（main），必须改用显式输入，
+          # 否则会产出 version: main+NN / tauri.conf.json "main" / tagName vmain。
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            RAW="$DISPATCH_VERSION"
+            RAW="${RAW#v}"
+            VER="${RAW%%-*}"
+            if ! printf '%s' "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::workflow_dispatch 需要合法版本号（形如 0.19.2），收到: $DISPATCH_VERSION"
+              exit 1
+            fi
+            TAG="v${VER}"
+          else
+            VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
+            TAG="$GITHUB_REF_NAME"
+          fi
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           sed -i "s/^version: .*/version: ${VER}+${GITHUB_RUN_NUMBER}/" pubspec.yaml
       - uses: subosito/flutter-action@v2
         with:
@@ -65,8 +89,8 @@ jobs:
           cp build/app/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/dist/pi-web-qt-${VER}.aab"
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           generate_release_notes: true
           files: |
             dist/pi-web-qt-*.apk
@@ -82,11 +106,30 @@ jobs:
         working-directory: mobile2
     steps:
       - uses: actions/checkout@v4
-      - name: Resolve version from tag
+      - name: Resolve release version
         id: version
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
         run: |
-          VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
+          # 统一版本推导：tag 触发沿用 GITHUB_REF_NAME（发布主路径，行为不变）。
+          # workflow_dispatch 时 GITHUB_REF_NAME 是分支名（main），必须改用显式输入，
+          # 否则会产出 version: main+NN / tauri.conf.json "main" / tagName vmain。
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            RAW="$DISPATCH_VERSION"
+            RAW="${RAW#v}"
+            VER="${RAW%%-*}"
+            if ! printf '%s' "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::workflow_dispatch 需要合法版本号（形如 0.19.2），收到: $DISPATCH_VERSION"
+              exit 1
+            fi
+            TAG="v${VER}"
+          else
+            VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
+            TAG="$GITHUB_REF_NAME"
+          fi
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           sed -i.bak "s/^version: .*/version: ${VER}+${GITHUB_RUN_NUMBER}/" pubspec.yaml && rm -f pubspec.yaml.bak
       - uses: subosito/flutter-action@v2
         with:
@@ -102,8 +145,8 @@ jobs:
           cd build/ios/ipa && zip -qr "$GITHUB_WORKSPACE/dist/pi-web-qt-${VER}.ipa" Payload
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           generate_release_notes: true
           files: |
             dist/pi-web-qt-*.ipa
@@ -140,11 +183,36 @@ jobs:
       - name: Install desktop npm deps (tauri CLI)
         shell: bash
         run: cd desktop && npm ci
+      - name: Resolve release version
+        id: version
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          # 统一版本推导：tag 触发沿用 GITHUB_REF_NAME（发布主路径，行为不变）。
+          # workflow_dispatch 时 GITHUB_REF_NAME 是分支名（main），必须改用显式输入，
+          # 否则会产出 version: main+NN / tauri.conf.json "main" / tagName vmain。
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            RAW="$DISPATCH_VERSION"
+            RAW="${RAW#v}"
+            VER="${RAW%%-*}"
+            if ! printf '%s' "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::workflow_dispatch 需要合法版本号（形如 0.19.2），收到: $DISPATCH_VERSION"
+              exit 1
+            fi
+            TAG="v${VER}"
+          else
+            VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
+            TAG="$GITHUB_REF_NAME"
+          fi
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
       - name: Sync version (web -> desktop)
         shell: bash
+        env:
+          VER: ${{ steps.version.outputs.version }}
         run: |
           node scripts/sync-version.mjs
-          VER="${GITHUB_REF_NAME#v}"; VER="${VER%%-*}"
           node -e "const fs=require('fs');const p='desktop/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p));c.version='${VER}';fs.writeFileSync(p,JSON.stringify(c,null,2))"
           # Tauri 构建要求 Cargo.toml 与 tauri.conf.json 版本一致
           #（sed -i.bak：BSD/macOS sed 兼容写法，同 iOS job）

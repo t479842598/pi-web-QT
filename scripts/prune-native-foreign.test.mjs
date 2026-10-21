@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pruneForeignNativePackages } from "./prune-native-foreign.mjs";
+import {
+  parseImgPlatformPackage,
+  pruneForeignNativePackages,
+} from "./prune-native-foreign.mjs";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "prune-test-"));
@@ -22,6 +25,9 @@ function fixture() {
     "@img/sharp-linuxmusl-x64",
     "@img/sharp-libvips-linuxmusl-x64",
     "@img/sharp-darwin-arm64",
+    "@img/sharp-darwin-x64",
+    "@img/sharp-libvips-darwin-arm64",
+    "@img/sharp-libvips-darwin-x64",
     "@img/sharp-win32-x64",
   ]) mk(p);
   // next swc 平台包
@@ -48,6 +54,8 @@ test("linux-x64 glibc：保留 gnu 变体，删掉 musl/darwin/win32", () => {
     assert.ok(existsSync(join(nm, "@img/colour")), "colour 保留");
     assert.ok(existsSync(join(nm, "@img/sharp-wasm32")), "wasm32 保留");
     assert.ok(!existsSync(join(nm, "@img/sharp-linuxmusl-x64")), "musl 变体被删");
+    assert.ok(!existsSync(join(nm, "@img/sharp-libvips-linuxmusl-x64")), "libvips musl 变体被删（AppImage 回归保护）");
+    assert.ok(removed.some((p) => p.endsWith("sharp-libvips-linuxmusl-x64")), "removed 列表点名 libvips musl");
     assert.ok(!existsSync(join(nm, "@img/sharp-darwin-arm64")), "darwin 被删");
     assert.ok(!existsSync(join(nm, "@img/sharp-win32-x64")), "win32 被删");
     assert.ok(existsSync(join(nm, "@next/swc-linux-x64-gnu")), "swc gnu 保留");
@@ -84,7 +92,12 @@ test("darwin-arm64：保留本机 sharp/swc，删掉其余", () => {
     pruneForeignNativePackages({ backendDir: backend, platform: "darwin", arch: "arm64", isMusl: false });
     const nm = join(backend, "node_modules");
     assert.ok(existsSync(join(nm, "@img/sharp-darwin-arm64")), "sharp darwin-arm64 保留");
+    assert.ok(existsSync(join(nm, "@img/sharp-libvips-darwin-arm64")), "D5：libvips darwin-arm64 必须保留（本机要用的）");
+    assert.ok(existsSync(join(nm, "@img/sharp-libvips-darwin-x64")), "D5：libvips darwin-x64 同平台保留");
     assert.ok(!existsSync(join(nm, "@img/sharp-linux-x64")), "sharp linux 被删");
+    assert.ok(!existsSync(join(nm, "@img/sharp-linuxmusl-x64")), "sharp linuxmusl 被删");
+    assert.ok(!existsSync(join(nm, "@img/sharp-libvips-linux-x64")), "D5：libvips linux 异平台仍被删");
+    assert.ok(!existsSync(join(nm, "@img/sharp-libvips-linuxmusl-x64")), "D5：libvips linuxmusl 异平台仍被删");
     assert.ok(existsSync(join(nm, "@next/swc-darwin-arm64")), "swc darwin 保留");
     assert.ok(existsSync(join(nm, "@earendil-works/pi-tui/native/darwin/prebuilds/darwin-arm64")), "pi-tui darwin-arm64 保留");
     assert.ok(existsSync(join(nm, "@earendil-works/pi-tui/native/darwin/prebuilds/darwin-x64")), "跨架构：macOS runner 要同时带 x64 dmg，darwin 目录内 triple 不精删");
@@ -100,12 +113,28 @@ test("darwin-x64（arm runner 上打 x64 dmg）：同平台其它架构保留", 
     pruneForeignNativePackages({ backendDir: backend, platform: "darwin", arch: "x64", isMusl: false });
     const nm = join(backend, "node_modules");
     assert.ok(existsSync(join(nm, "@img/sharp-darwin-arm64")), "同平台其它架构不精删");
+    assert.ok(existsSync(join(nm, "@img/sharp-libvips-darwin-arm64")), "D5：libvips 同平台其它架构保留");
+    assert.ok(existsSync(join(nm, "@img/sharp-libvips-darwin-x64")), "D5：libvips darwin-x64（目标架构）保留");
     assert.ok(existsSync(join(nm, "@next/swc-darwin-arm64")), "swc 同平台其它架构保留");
     assert.ok(!existsSync(join(nm, "@img/sharp-linux-x64")), "异平台仍被删");
     assert.ok(!existsSync(join(nm, "@next/swc-linux-x64-gnu")), "异平台 swc 仍被删");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("解析器：两种命名都要结构化识别，认不出来返回 null", () => {
+  assert.deepEqual(parseImgPlatformPackage("sharp-darwin-arm64"), { variant: "sharp", platform: "darwin", arch: "arm64" });
+  assert.deepEqual(parseImgPlatformPackage("sharp-libvips-darwin-arm64"), { variant: "libvips", platform: "darwin", arch: "arm64" });
+  assert.deepEqual(parseImgPlatformPackage("sharp-linuxmusl-x64"), { variant: "sharp", platform: "linuxmusl", arch: "x64" });
+  assert.deepEqual(parseImgPlatformPackage("sharp-libvips-linux-x64"), { variant: "libvips", platform: "linux", arch: "x64" });
+  // linuxmusl 不能被前缀匹配成 linux
+  assert.equal(parseImgPlatformPackage("sharp-linuxmusl-x64").platform, "linuxmusl");
+  // 认不出来的形态保留（宁可冗余）
+  assert.equal(parseImgPlatformPackage("sharp-wasm32"), null);
+  assert.equal(parseImgPlatformPackage("colour"), null);
+  assert.equal(parseImgPlatformPackage("sharp-unknown-arch"), null);
+  assert.equal(parseImgPlatformPackage("sharp-darwin-"), null);
 });
 
 test("空后端目录不报错", () => {

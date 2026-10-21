@@ -24,6 +24,34 @@ export function detectMusl(platform = process.platform) {
   return !report?.header?.glibcVersionRuntime;
 }
 
+/** @img 下带平台名的包（sharp / sharp-libvips 共用）。 */
+const IMG_PLATFORMS = ["darwin", "linux", "linuxmusl", "win32", "freebsd"];
+
+/**
+ * 结构化解析 @img 平台包名，两种命名都要认：
+ *   sharp-<platform>-<arch>          （如 sharp-linuxmusl-x64）
+ *   sharp-libvips-<platform>-<arch>  （如 sharp-libvips-darwin-arm64）
+ * libvips 变体不以 "sharp-<platform>-" 开头，靠 startsWith 猜平台名会把它
+ * 当成异平台删掉（v0.19.1 之后的跨架构加固引入的缺陷 D5）。
+ *
+ * @returns {{variant: "sharp"|"libvips", platform: string, arch: string}|null}
+ *          认不出来返回 null（调用方按"宁可留冗余"保留）
+ */
+export function parseImgPlatformPackage(entry) {
+  if (!entry.startsWith("sharp-")) return null;
+  let rest = entry.slice("sharp-".length);
+  let variant = "sharp";
+  if (rest.startsWith("libvips-")) {
+    variant = "libvips";
+    rest = rest.slice("libvips-".length);
+  }
+  const platform = IMG_PLATFORMS.find((p) => rest.startsWith(p + "-"));
+  if (!platform) return null;
+  const arch = rest.slice(platform.length + 1);
+  if (!arch) return null;
+  return { variant, platform, arch };
+}
+
 /**
  * @param {object}  opts
  * @param {string}  opts.backendDir  随包后端根（含 node_modules）
@@ -65,8 +93,12 @@ export function pruneForeignNativePackages({
       if (!entry.startsWith("sharp-")) continue; // 认不出来的一律保留
       if (strictTriple) {
         if (!keepExact.has(entry)) rm(join(imgDir, entry));
-      } else if (!entry.startsWith(`sharp-${platform}-`)) {
-        rm(join(imgDir, entry));
+      } else {
+        // 非 Linux：只按"平台"裁剪，同平台全部架构一律保留（macOS 的 x64 dmg
+        // 在 arm64 runner 上构建）。平台名走结构化解析，覆盖
+        // sharp-<platform>-<arch> 与 sharp-libvips-<platform>-<arch> 两种命名。
+        const parsed = parseImgPlatformPackage(entry);
+        if (parsed && parsed.platform !== platform) rm(join(imgDir, entry));
       }
     }
   }
