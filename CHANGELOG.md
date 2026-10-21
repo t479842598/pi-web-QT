@@ -5,11 +5,20 @@
 ## v0.19.1 — 2026-10-21（Linux AppImage 打包修复 + 本地客户端同步到 0.19.1）
 
 ### 修复
-- **Linux AppImage 打包失败**：`linuxdeploy` 会对打包进来的系统库执行 `strip`，而宿主机的
-  `strip` 在遇到带 `.relr.dyn` 段的库时崩溃（`unknown type [0x13] section .relr.dyn`），
-  于是 deb/rpm 成功后 AppImage 步骤以 `failed to bundle project: failed to run linuxdeploy`
-  收尾。发布工作流的 Ubuntu job 改设 `NO_STRIP=true`（linuxdeploy 自身支持的开关，
-  见 `src/core/appdir.cpp`），代价是 AppImage 体积从几 MB 增至约 77 MB。
+- **Linux AppImage 打包失败**：deb/rpm 打包成功后，AppImage 步骤总以
+  `failed to bundle project: failed to run linuxdeploy` 收尾（v0.18.19 起持续复现，
+  因此历次发布都没有 AppImage 资产）。
+  - 根因：桌面端的 `@tauri-apps/cli` 停在 2.11.x，它用的 `tauri-bundler` 会去
+    下载 2021 年的老版 `linuxdeploy`，并从 `master` 分支现拉 `linuxdeploy-plugin-gtk.sh`
+    （上游 issue tauri-apps/tauri#16062，已在 2.12 修复）。
+  - 修复：`desktop/package.json` 的 `@tauri-apps/cli` 升到 `^2.12.4`，其 `tauri-bundler`
+    2.10.4 内置了 `linuxdeploy` 07333c6 并把 plugin 脚本内联进二进制。
+  - 诊断：发布工作流的 Ubuntu job 给 `tauri build` 补上 `-v`。不加 `-v` 时 bundler 用
+    `cmd.output()` 执行 linuxdeploy 并吞掉它的 stderr，日志只剩一句无信息量的
+    `failed to run linuxdeploy`；加上之后走 `output_ok()` 分支，linuxdeploy 的真实报错
+    会带进错误信息。
+  - 预防：仍保留 `NO_STRIP=true`（linuxdeploy 自身支持的开关，见 `src/core/appdir.cpp`），
+    避免 Ubuntu 22.04 的 binutils 2.38 在带 `.relr.dyn` 段的库上崩溃。
 
 ### 内部调整
 - `node scripts/sync-version.mjs` 把 `desktop/package.json`、`desktop/Cargo.toml`、

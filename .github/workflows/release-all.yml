@@ -126,7 +126,10 @@ jobs:
             args: ""
             node_dist: win-x64
           - platform: ubuntu-22.04
-            args: ""
+            # -v makes the bundler log at Info level. Without it tauri runs
+            # linuxdeploy with `cmd.output()` and swallows its stderr, so a
+            # failing AppImage step only says "failed to run linuxdeploy".
+            args: "-v"
             node_dist: linux-x64
     runs-on: ${{ matrix.platform }}
     steps:
@@ -210,18 +213,21 @@ jobs:
           # Runner image no longer ships libfuse2; without it the AppImage
           # toolchain (linuxdeploy) fails with "failed to run linuxdeploy".
           sudo apt-get install -y libfuse2
-      - name: "AppImage: skip linuxdeploy strip (relr.dyn crash)"
+      - name: "AppImage: keep linuxdeploy from stripping (Ubuntu binutils crash)"
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           # linuxdeploy strips the bundled system libraries, and the host
-          # `strip` crashes on libraries that carry a .relr.dyn section
-          # ("unknown type [0x13] section .relr.dyn"). That kills the whole
-          # AppImage step with "failed to bundle project: failed to run
-          # linuxdeploy" even though deb/rpm already succeeded.
+          # `strip` (binutils 2.38 on Ubuntu 22.04) crashes on libraries that
+          # carry a .relr.dyn section ("unknown type [0x13] section
+          # .relr.dyn"). That kills the whole AppImage step with "failed to
+          # bundle project: failed to run linuxdeploy" even though deb/rpm
+          # already succeeded.
           # NO_STRIP is the switch linuxdeploy itself supports
           # (src/core/appdir.cpp: "$NO_STRIP environment variable detected,
-          # not stripping binaries"). The only cost is that the AppImage grows
-          # from a few MB to roughly 77 MB.
+          # not stripping binaries"). It is kept as a precaution on top of the
+          # real fix: tauri CLI 2.12.x ships linuxdeploy 07333c6 with the
+          # plugin scripts inlined, instead of pulling them from a moving
+          # master branch the way 2.11.x does.
           echo "NO_STRIP=true" >> "$GITHUB_ENV"
       - name: Inject updater capability (release build)
         shell: bash
