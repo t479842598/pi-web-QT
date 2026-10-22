@@ -11,6 +11,34 @@
  */
 
 /**
+ * Put the sidebar in the row-list form.
+ *
+ * DEFAULT_SIDEBAR_MODE is "projects" (lib/sidebar-projects-view.ts:65, since
+ * 029159cd), so a fresh profile renders components/sidebar/ProjectsPanel.tsx —
+ * its PanelSessionRow box carries no `session-row` class and never reaches the
+ * sessionRow slot. The slot's two implementations (PiSessionRow /
+ * ClaudeSessionRow, both stamped with `session-row`) only exist in the
+ * dropdown forms, which the projects panel's own cycle button switches to
+ * (aria-label "desktop.sidebarModeCycle", ProjectsPanel.tsx:557 ->
+ * onCycleToList -> switchSidebarMode("dropdown") + list view).
+ *
+ * The suite seeds a fresh profile per context, so without this the kit-switch
+ * probe counts rows in a form the slot is not mounted in and reads "no session
+ * rows rendered" for both kits. Clicking the real control is the same contract
+ * flipToClaude follows — no storage seeding.
+ */
+export async function switchSidebarToRowList(page) {
+  if ((await page.locator(".session-row").count()) > 0) return true;
+  const cycle = page.getByRole("button", { name: "Cycle sidebar mode", exact: true });
+  if ((await cycle.count()) === 0) return false;
+  await cycle.first().click();
+  // The list form is the one that renders the slot rows; the cycle lands on
+  // "dropdown" mode with the list view style, per onCycleToList.
+  await page.locator(".session-row").first().waitFor({ state: "attached", timeout: 10000 }).catch(() => {});
+  return (await page.locator(".session-row").count()) > 0;
+}
+
+/**
  * Record the surfaces a kit switch is supposed to move.
  * @param {import("playwright").Page} page
  */

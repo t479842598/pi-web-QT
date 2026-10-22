@@ -944,16 +944,25 @@ async function openKitContext(browser, viewport = KIT_PARITY_VIEWPORTS.at(-1)) {
  */
 export async function checkKitParity(page, options = {}) {
   const baselinePath = resolve(options.baselinePath ?? join(repoRoot(), KIT_PARITY_BASELINE));
-  if (!existsSync(baselinePath)) {
+  // Capture mode re-seeds the baseline from *this* call site, so the recorded
+  // pixels come from the same server, the same seeded fixtures, the same
+  // sessions/files/fixtureSensitive and the same viewports a later check will
+  // use. A baseline captured through the CLI instead describes a different
+  // harness: the CLI drives its own fixture server (six sessions, its own
+  // project dir, dev build), so the virtualised message list windows a
+  // different slice of the transcript and every conversation rect lands a
+  // constant offset away from what this call would read.
+  const capturing = process.env.KIT_PARITY_CAPTURE === "1";
+  if (!capturing && !existsSync(baselinePath)) {
     console.log("SKIP: pi kit parity baseline missing (" + baselinePath + ")");
     return { skipped: true, reason: "missing-baseline" };
   }
-  const baseline = JSON.parse(readFileSync(baselinePath, "utf8"));
+  const baseline = capturing ? null : JSON.parse(readFileSync(baselinePath, "utf8"));
   const browser = page?.context?.().browser?.();
   if (!browser) throw new Error("checkKitParity needs a page from a real chromium browser");
 
   const baseUrl = options.baseUrl ?? new URL(page.url()).origin;
-  const viewports = (baseline.viewports ?? KIT_PARITY_VIEWPORTS).map((viewport) => ({
+  const viewports = (baseline?.viewports ?? KIT_PARITY_VIEWPORTS).map((viewport) => ({
     name: viewport.name,
     width: viewport.width,
     height: viewport.height,
@@ -971,6 +980,25 @@ export async function checkKitParity(page, options = {}) {
     });
   } finally {
     await context.close().catch(() => {});
+  }
+
+  if (capturing) {
+    current.capturedFrom = {
+      root: repoRoot(),
+      head: readHead(repoRoot()),
+      baseUrl,
+      capturedAt: new Date().toISOString(),
+    };
+    mkdirSync(dirname(baselinePath), { recursive: true });
+    writeFileSync(baselinePath, JSON.stringify(current, null, 1) + "\n");
+    console.log("CAPTURED: " + baselinePath);
+    return {
+      captured: true,
+      baselinePath,
+      surfaces: Object.keys(current.surfaces).length,
+      unavailable: Object.keys(current.unavailable).length,
+      head: current.capturedFrom.head,
+    };
   }
 
   const result = compareFingerprints(baseline, current, {

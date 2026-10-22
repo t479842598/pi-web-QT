@@ -13,7 +13,7 @@ import { checkFilePanel, filePanelFixture } from "./file-panel.mjs";
 import { checkExtensionDialogs, extensionSource } from "./extension-dialog.mjs";
 import { checkChatAppearance } from "./chat-appearance.mjs";
 import { checkKitParity } from "./kit-parity.mjs";
-import { flipToClaude, kitSwitchProblems, readKitSurface } from "./kit-switch.mjs";
+import { flipToClaude, kitSwitchProblems, readKitSurface, switchSidebarToRowList } from "./kit-switch.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.env.E2E_SERVER_MODE || "dev";
@@ -560,6 +560,11 @@ try {
       // Kit switch. Runs after the fidelity gate so the pi snapshot it just
       // compared is untouched; this flips to claude, asserts the surfaces a
       // flip must move, then flips back so the next viewport starts on pi.
+      // The sidebar has to be in the row-list form first: the default
+      // "projects" panel renders PanelSessionRow, which never reaches the
+      // sessionRow slot, so the slot's row box would read 0 rows for both kits.
+      const sidebarForm = await switchSidebarToRowList(page);
+      assert.ok(sidebarForm, "the projects panel must offer the cycle-to-list control");
       const kitBefore = await readKitSurface(page);
       const kitFlipped = await flipToClaude(page);
       await page.waitForTimeout(2500);

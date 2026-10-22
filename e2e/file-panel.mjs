@@ -46,6 +46,29 @@ export async function checkFilePanel(page, filePath) {
   const iframe = panel.locator("iframe");
   await iframe.waitFor();
   const frame = await (await iframe.elementHandle()).contentFrame();
+  // The panel animates open, so the iframe box is still growing for a few hundred
+  // milliseconds after it attaches. Scrolling inside a frame that is still resizing
+  // makes the fixture reflow (the two <label> rows wrap at narrow widths, which moves
+  // the paragraph below them) and Chromium scroll anchoring then compensates the
+  // offset - measured: 120 became 65 when the scroll landed on a 117px-wide frame,
+  // and stayed 120 when it landed on the settled 378px frame. Wait for the box to stop
+  // moving before establishing the scroll position the round trip below has to preserve.
+  const settledBox = async (target) => {
+    let previous = null;
+    let stable = 0;
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const box = await target.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return [Math.round(rect.width), Math.round(rect.height)];
+      });
+      stable = previous && previous[0] === box[0] && previous[1] === box[1] ? stable + 1 : 0;
+      previous = box;
+      if (stable >= 2) return box;
+      await page.waitForTimeout(50);
+    }
+    return previous;
+  };
+  await settledBox(iframe);
   await frame.locator("#notes").fill("Keep this note");
   await frame.locator("#filter").selectOption({ label: "Pending" });
   await frame.evaluate(() => scrollTo(0, 120));
