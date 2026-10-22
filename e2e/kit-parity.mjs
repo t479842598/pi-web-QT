@@ -449,7 +449,7 @@ async function stabilize(page, ctx) {
  * Text normaliser. Its source is serialised into the page so the browser and
  * Node apply byte-identical rules to text nodes and path-bearing attributes.
  */
-function normalizeTextInPage(value, rootPath) {
+export function normalizeTextInPage(value, rootPath) {
   let text = String(value ?? "");
   if (rootPath) text = text.split(rootPath).join("<ROOT>");
   text = text.replace(/(?:\/private)?\/var\/folders\/[^\s"'<>]+/g, "<TMPDIR>");
@@ -464,7 +464,7 @@ function normalizeTextInPage(value, rootPath) {
   // everywhere else, so a baseline captured on one OS would report every sidebar
   // as drift on the other. Nothing in the kit layer keys off the modifier, so
   // folding it here keeps the surfaces that DO matter comparable across runners.
-  text = text.replace(/[⌘⌥⇧⌃]\s?[A-Za-z]|[\b](?:Ctrl|Cmd|Alt|Shift|Meta)\+[A-Za-z]/g, "<SHORTCUT>");
+  text = text.replace(/[⌘⌥⇧⌃]\s?[A-Za-z]|\b(?:Ctrl|Cmd|Alt|Shift|Meta)\+[A-Za-z]/g, "<SHORTCUT>");
   return text.replace(/\s+/g, " ").trim();
 }
 
