@@ -460,6 +460,11 @@ function normalizeTextInPage(value, rootPath) {
   text = text.replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, "<CLOCK>");
   text = text.replace(/\b\d+(?:\.\d+)?\s?(?:ms|s|m|h|d)\b/g, "<DURATION>");
   text = text.replace(/\b(?:just now|a moment ago|yesterday|today|\d+\s+(?:second|minute|hour|day)s?\s+ago|in\s+\d+\s+(?:second|minute|hour|day)s?)\b/gi, "<RELATIVE>");
+  // Platform, not a regression: the same shortcut renders ⌘K on macOS and Ctrl+K
+  // everywhere else, so a baseline captured on one OS would report every sidebar
+  // as drift on the other. Nothing in the kit layer keys off the modifier, so
+  // folding it here keeps the surfaces that DO matter comparable across runners.
+  text = text.replace(/[⌘⌥⇧⌃]\s?[A-Za-z]|[\b](?:Ctrl|Cmd|Alt|Shift|Meta)\+[A-Za-z]/g, "<SHORTCUT>");
   return text.replace(/\s+/g, " ").trim();
 }
 
@@ -720,6 +725,17 @@ export async function captureFingerprints(page, options = {}) {
 
 // ─── Compare ─────────────────────────────────────────────────────────────────
 
+/**
+ * Parts whose box is sized by their own text rather than by the layout grid.
+ * Their width is the sum of glyph advances, which depends on the fonts the OS
+ * resolves, so a macOS-captured baseline and a Linux runner legitimately differ
+ * by a pixel or two. Listed by name; anything absent keeps the strict tolerance.
+ */
+const TEXT_METRIC_PARTS = new Set([
+  "processSummary", "toolTab", "tabBar", "sidebarActions", "composerSend",
+  "composerModel", "composerThinking", "composerTools", "queueBadge", "contextBadge",
+]);
+
 function pushDiff(diffs, entry, maxDiffs) {
   if (diffs.length >= maxDiffs) return;
   diffs.push(entry);
@@ -785,7 +801,15 @@ function comparePart(diffs, key, base, current, partName, settings) {
       }
     }
   }
-  compareRect(diffs, base, current, key, partName, settings.geometryTolerance, settings.maxDiffs);
+  // Text metrics differ per platform: the same string is a few tenths of a pixel
+  // wider under macOS system fonts than under the fonts a Linux runner resolves,
+  // so an intrinsically sized box (a chip, a tab, a summary button) lands a
+  // couple of pixels short there while its layout is identical. Widening the
+  // tolerance only where font metrics are the mechanism keeps a real geometry
+  // regression (which moves by layout units, not by glyph widths) visible.
+  compareRect(diffs, base, current, key, partName,
+    settings.textMetricParts?.has(partName) ? settings.textMetricTolerance : settings.geometryTolerance,
+    settings.maxDiffs);
   if (settings.compareHtml && (base.html || current.html)) {
     const expectedHash = base.html?.hash ?? null;
     const actualHash = current.html?.hash ?? null;
@@ -825,6 +849,11 @@ function comparePart(diffs, key, base, current, partName, settings) {
 export function compareFingerprints(baseline, current, options = {}) {
   const settings = {
     geometryTolerance: options.geometryTolerance ?? 1,
+    // Intrinsically sized, text-bearing parts get a looser box tolerance because
+    // glyph advance widths are a font property, not a layout one. Everything else
+    // stays at the strict tolerance.
+    textMetricTolerance: options.textMetricTolerance ?? 4,
+    textMetricParts: options.textMetricParts ?? TEXT_METRIC_PARTS,
     maxDiffs: options.maxDiffs ?? 300,
     skipFixtureSensitive: options.skipFixtureSensitive ?? false,
     compareHtml: true,
