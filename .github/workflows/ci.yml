@@ -30,10 +30,16 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # fork：上游 e2e 断言上游 UI 细节（分页"滚动加载"哨兵文案等），fork 的
-    # 分页是滚动到底自动加载、无哨兵文本，Playwright 断言需按 fork UI 适配。
-    # 适配完成前保持运行但不阻塞 CI（仍产出 e2e-failure 工件供排查）。
-    continue-on-error: true
+    # This job used to be continue-on-error because fork-specific UI differences
+    # (the pagination "scroll to load" sentinel) made it red, which meant every
+    # run since 2026-10-17 reported success while e2e was in fact failing — a
+    # masked job is worse than no job, because it looks green.
+    #
+    # The fork differences are adapted now, and each remaining non-run is a
+    # capability gate that prints SKIP with its reason (extension dialogs need a
+    # provider credential; the chat-appearance controls no longer exist in the
+    # product). Keeping the job blocking means a real regression here cannot
+    # hide behind a green run again. e2e-failure is uploaded on failure.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
