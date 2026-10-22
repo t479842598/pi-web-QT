@@ -2153,59 +2153,6 @@ html .cds-palette-search .cds-palette-input:focus-visible {
   color: var(--cds-text-primary, var(--text));
   box-shadow: inset 2px 0 0 var(--cds-clay, var(--accent));
 }
-:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-dot {
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-radius: 999px;
-  background: transparent;
-}
-:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-dot.is-running {
-  background: var(--cds-clay, var(--accent));
-  animation: claude-session-dot-pulse 1.6s var(--cds-ease-pulse, ease-in-out) infinite;
-}
-:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-dot.is-unread {
-  background: var(--cds-text-faint, var(--text-dim));
-}
-@keyframes claude-session-dot-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-body {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-row-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-subtitle {
-  color: var(--cds-text-muted, var(--text-dim));
-  font-size: var(--text-ui-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-meta {
-  flex-shrink: 0;
-  color: var(--cds-text-faint, var(--text-dim));
-  font-size: var(--text-ui-xs);
-  font-variant-numeric: tabular-nums;
-}
-:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity var(--cds-dur-fast, 120ms) var(--cds-ease-swift, ease);
-}
-:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-row:hover .claude-session-actions,
-:is(html[data-ui-kit="claude"], .claude-surface-root) .claude-session-row:focus-within .claude-session-actions { opacity: 1; }
 
 /* ── Tab strip ───────────────────────────────────────────────────────────── */
 :is(html[data-ui-kit="claude"], .claude-surface-root) .claude-tab-bar {

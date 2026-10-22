@@ -151,6 +151,14 @@ pi 侧永不输出该标记（`wiring.test.mjs` 钉住这一点）。
 **仍未做**：分组标题、工具条与文件树表头仍是内联样式，靠 class 钩子 + CSS 覆盖；它们不是行盒，
 接线不会带来新的用户可见差异。
 
+**同时删掉的死规则**：`app/settings-claude.css` 里 `.claude-session-dot`、`-dot.is-running`、
+`-dot.is-unread`、`@keyframes claude-session-dot-pulse`、`.claude-session-body`、`.claude-row-title`、
+`.claude-session-subtitle`、`.claude-session-meta`、`.claude-session-actions` 及其 hover/focus 规则，
+**从来就不可达**：它们由旧版 `ClaudeSessionRow` 发射，而该组件在 Q2 之前零挂载点，接线后行壳只渲染
+盒 + `children`（children 来自 `SessionSidebar`，是纯内联样式，不发射这些类名）。全仓 grep 这些类名
+只在上述 CSS 中有出现。留着会让人以为「Claude 行内样式在这里调」。真要做 Claude 专属行内样式，
+正确做法是让 sidebar 的 children 发射类名——那是新特性，不是修复。
+
 **同时摘除**：`scrollFade` 从槽位表移除（27 → 26）。两套实现都零消费者，真实渐隐是
 `ChatWindow.tsx` 手写的 `.chat-scroll-fade` + 内联 `--chat-fade-top/bottom`；切套件无人可察觉，
 属内部实现细节，不该占一个用户可见槽位。

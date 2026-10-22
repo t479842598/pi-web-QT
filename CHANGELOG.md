@@ -2,6 +2,67 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## v0.19.2 — 2026-10-22（全面代码审查修复：12 项确定缺陷 + 2 项新发现产品缺陷）
+
+### 修复（用户可见）
+- **Claude 套件下 minimap 整个消失**：`ClaudeMessageList` 声明了 `virtualizerRef` 却从不接收，
+  `ChatWindow` 的引用恒为 null → minimap 适配器报 `totalHeight() === 0` → 直接返回 null。
+  现在用 layout effect 把 virtualizer 交出去（提交期即可见，卸载即失效，且只清自己那一份，
+  避免切套件时新引用被旧卸载打回）。真浏览器实测：切到 Claude 后地标数量 3 → 3。
+- **Claude 套件下点击定位错位**：头部是滚动容器内的前置兄弟节点，claude 列表却把它计了两次
+  （容器 `paddingTop` + `translateY(start + headerHeight)`），且没告诉虚拟器（缺 `scrollMargin`），
+  导致 `scrollToIndex` / `getOffsetForIndex` 与真实滚动位置相差一个头部高度。现对齐 pi 的契约。
+- **上滚后弹回底部**：claude 列表没关掉虚拟器自身的滚动补偿。测量总在手势结束后落地，累积的
+  估算→实测差值会把阅读位置拽回底部。现与 pi 一致地禁用（必须写实例字段，作为 option 传无效）。
+- **全宽文件面板的按钮点不到**：面板头部被 48px 标题栏（`z-index: 600`）压住，点击实际落在
+  "Refresh session" 上。改为从标题栏下方开始布局（`inset-top` 用与标题栏相同的表达式），
+  `z-index` 保持原值 250 —— 重叠由几何消除，层叠关系零变化。CI 上 file-panel 场景由此转绿。
+- **隐藏文件面板后同域导航永久卡死**（新发现）：查看器在面板关闭时仍挂载，其 watch SSE 长期占用
+  Chromium 每主机 6 个 HTTP/1.1 socket 之一，加上常驻事件流正好占满 → 后续导航无限排队
+  （实测页内 `fetch("/")` 6003ms 挂死 vs node 7ms 返回 200）。现由 `watchEnabled` 随面板开合
+  释放/重建订阅，并在 false→true 边沿补一次读取（订阅空窗期的变更不会重放）。
+- **设置页密度预设点了没反应**：`--cds-gap-*` 与 `--cds-control-height(-lg)` 只在 Claude 套件的
+  作用域块里定义，固定 Claude 的设置页读的是 `var(--cds-gap-3, 10px)` 这类带兜底写法 → 全局套件
+  为 Pi 时永远落到兜底值。现给出与套件无关的 `:root` 默认与两档预设（数值逐字抄自既有阶梯）。
+- **焦点环消失**：`--cds-focus-shadow` 与 `--cds-shadow-tint` 同属「只在 Claude 套件定义、却被无
+  前缀规则读取」，`kit=pi` 时设置页搜索框、rail 输入框与命令面板搜索框的焦点指示整条失效
+  （键盘用户失去焦点可见性）。已补 `:root` 默认值。
+- **默认主题有两套真值**：「默认」卡片走 `removeItem`、刷新后由 bootstrap 又写回 claude，与
+  Claude 卡片殊途同归却来源不同。现由 `DEFAULT_THEME` + `normalizeThemeName()` 唯一决定，
+  并删掉该卡片（claude 本就在可选列表里，能力不减）。
+- **侧边栏会话行的套件差异此前只存在于纸面**：`sessionRow` 两套实现都零挂载点。现已接线
+  （列表视图与分组视图都走槽位）。pi 侧逐字不变由真浏览器 A/B 证明：HEAD 独立工作树 vs 当前树，
+  两视图 × 前 4 行的 class / style 原文 / 声明顺序 / `data-*` / boundingRect / 23 项 computed
+  style —— 0 差异；claude 侧实测 radius 0→8px、左边框 2px→0、min-height 50→30px、选中态变内描黏土轨。
+- **无障碍**：过程折叠区的展开按钮补上 `aria-controls`（收起时不发，因展开区是卸载的，悬空 IDREF
+  会被 axe 判非法）与键盘焦点可见样式；minimap 从纯鼠标控件变成可聚焦的 `listbox`——`↑↓←→` 走相邻
+  节点、`Home`/`End` 跳首尾、`Enter`/`Space` 重新居中，读屏播报复用既有文案键。
+
+### 内部调整
+- 槽位模型 27 → 26：摘掉 `scrollFade`（零消费者，切套件无人可察觉；真实渐隐是 ChatWindow 手写的）。
+- 删除从未生效的「React 层固定」机制（`KitScope`、`pinned` 分支、`withPinnedKit`、两个零消费者的
+  `*_PINNED` 常量）；设置页「永远 Claude」改由契约测试锁住（8 项，解析 CSS 断言核心规则不带套件前缀），
+  ADR-0006 与注释同步改为事实。切换套件会吸收当前作用域/槽位设置时，标题栏给一句 5 秒提示。
+- 清理死导出：`KIT_IDS`、`sessionRowTitle`、`surfaceProps`、`CLAUDE_PENDING` 永不渲染的分支。
+- 删掉 `settings-claude.css` 里九条**从来不可达**的会话行内样式规则（`.claude-session-dot` 系列、
+  `.claude-session-body`、`.claude-row-title`、`-subtitle`、`-meta`、`-actions` 与动画关键帧）：
+  它们由 Q2 之前零挂载点的 `ClaudeSessionRow` 发射，接线后行壳只渲染盒与 children。留着会误导
+  「Claude 行内样式在这里调」，ADR-0006 已写明真要做得让 sidebar 的 children 发射类名。
+- 发布脚本：`scripts/prune-native-foreign.mjs` 打包时剔除后端里非本机的原生二进制（sharp 的 musl
+  变体曾让 linuxdeploy 解析 ELF 失败，是 Linux AppImage 自 v0.18.19 起缺失的真正原因）；同平台其它
+  架构在 macOS/Windows 上保留。工作流 `workflow_dispatch` 现在必须传合法版本号（此前会产出 `vmain`）。
+
+### 测试与 CI
+- CI 的 e2e job 恢复为**会失败**的步骤。它此前挂着 `continue-on-error`，自 2026-10-17 起一直失败
+  却把 run 报成成功 —— 绿是假的。
+- 套件保真基线改为由消费它的 suite 上下文产出（此前 CLI 独立捕获与 suite 捕获差 33px，两个上下文
+  的 fixture 与虚拟列表窗口不同）；跨平台差异按性质处理：快捷键按平台渲染（`⌘K` / `Ctrl+K`）折成
+  占位符，内在宽度由字形决定的少数部件给 4px 容差，其余仍是严格 1px。
+- e2e 的两处诚实跳过（扩展对话框需要 provider 凭证；chat 外观控件的 4 个控件已随 `SettingsPanel`
+  的删除消失），把「做不到」写在报告里而不是伪造通过。
+- 新增契约测试：`scripts/kit-parity-normalize.test.mjs`（跨平台归一化）、`hooks/useTheme.test.mjs`、
+  `components/DisplayConfig.test.mjs`、`components/ui-kit/settings-page-pinned.test.mjs`、
+  `components/session-row-fidelity.test.mjs`。
 ## v0.19.1 — 2026-10-21（Linux AppImage 打包修复 + 本地客户端同步到 0.19.1）
 
 ### 修复
