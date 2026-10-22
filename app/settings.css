@@ -462,27 +462,6 @@
   gap: 10px;
 }
 
-.agents-concurrency-control {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--ds-text-secondary);
-  font-size: var(--text-ui-xs);
-  white-space: nowrap;
-}
-
-.agents-concurrency-control input {
-  width: 52px;
-  height: 28px;
-  padding: 0 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--ds-bg-primary);
-  color: var(--ds-text-primary);
-  font: inherit;
-  text-align: center;
-}
-
 .config-sidebar-message {
   padding: 10px 8px;
   color: var(--ds-text-secondary);

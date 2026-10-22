@@ -2,6 +2,24 @@
 
 > 版本号约定：`0.x.y`，最后一位 `y` 可从 0 递增到 **999**；到达 999 后进位到 `x+1.0`（见 `AGENTS.md`「版本发布规范」）。
 
+## 未发布
+
+### 修复（用户可见）
+- **文件图标本该跟随文字色板，实际画的是 Catppuccin 彩色图**：`app/globals.css` 里 `@supports` 的
+  去色块（用 SVG alpha 当 mask、底色取 `--text-dim`）后面还压着一份重复的彩色规则，
+  `background-image` 因同特异度取源序更晚的那条 → 彩色 SVG 叠在剪影上再被自身 alpha 遮罩。
+  删掉后置重复块，保留它前面的彩色兜底（浏览器不支持 mask 时的降级）。真浏览器实测：
+  浅色只剩 `#888888` 单色像素、暗色只剩 `#555555`，两份截图里都再无 Catppuccin 语言配色。
+
+### 内部调整
+- 删掉 `app/settings.css` 里逐字节重复的 `.agents-concurrency-control` 两块，
+  与 `app/settings-claude.css` 里四条被后块完全覆盖的 `order`（相对顺序两处一致，零视觉差）。
+- 新增 `app/css-cascade-contract.test.mjs`：锁住 catppuccin 的三条不变量（`@supports` 之外只有
+  兜底那两条、兜底必须在去色块之前、去色块的底色是 `var(--text-dim)` 且 mask 读每图标 URL），
+  以及「同一选择器的同一属性只声明一次」。把任一重复块塞回去，对应断言立刻红。
+- `eslint.config.mjs` 忽略 `work/`（本地探针与截图的临时目录，已 gitignore）：此前跑一次探查脚本
+  就会让 `npm run lint` 冒出不属于仓库的错误。
+
 ## v0.19.2 — 2026-10-22（全面代码审查修复：12 项确定缺陷 + 2 项新发现产品缺陷）
 
 ### 修复（用户可见）

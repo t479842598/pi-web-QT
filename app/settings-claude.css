@@ -2351,12 +2351,6 @@ html .cds-palette-search .cds-palette-input:focus-visible {
 :is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-left { order: 1; }
 :is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-spacer { order: 2; }
 :is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-controls { order: 3; }
-:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-model { order: 0; }
-:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-thinking { order: 1; }
-:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-toolbar-tools { order: 2; }
-:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-send,
-:is(html[data-ui-kit="claude"], .claude-surface-root) .chat-input-stop { order: 3; }
-
 @media (max-width: 639px) {
   /* Attach, mode, model, thinking, send. The tool preset is the one control
      that goes: it is the least-reached of the five and the row has no room.

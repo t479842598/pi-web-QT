@@ -3,7 +3,9 @@ import typescript from "eslint-config-next/typescript";
 
 const eslintConfig = [
   // Reference trees and packaged/generated output are not source to lint.
-  { ignores: ["ref-repos/**", "release/**", ".next/**", "desktop/target/**", "desktop/resources/backend/**", ".reasonix/**", "mobile2/**"] },
+  // work/ is gitignored scratch (probes, fixtures, screenshots); linting it only
+  // produces errors that do not exist in the repository.
+  { ignores: ["ref-repos/**", "release/**", ".next/**", "desktop/target/**", "desktop/resources/backend/**", ".reasonix/**", "mobile2/**", "work/**"] },
   ...coreWebVitals,
   ...typescript,
   {
